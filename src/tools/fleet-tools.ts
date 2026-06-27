@@ -1,0 +1,170 @@
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
+import type { FleetOrchestrator } from "../core/fleet-orchestrator.js";
+import type { Repositories } from "../persistence/repositories.js";
+import { isSafeGitRef } from "../core/git-ref.js";
+import { truncateBytes } from "../core/truncate.js";
+
+// Byte cap on transcript output that gets re-injected into the master context (symmetric with view_subagent_diff). Row count is capped by listWorkerEvents.
+const TRANSCRIPT_MAX_BYTES = 256 * 1024;
+
+export const FLEET_SERVER_NAME = "fleet";
+export const FLEET_TOOL_NAMES = [
+  "mcp__fleet__spawn_worker",
+  "mcp__fleet__send_worker",
+  "mcp__fleet__list_workers",
+  "mcp__fleet__get_worker_status",
+  "mcp__fleet__view_worker_transcript",
+  "mcp__fleet__view_worker_diff",
+  "mcp__fleet__stop_worker",
+  "mcp__fleet__discard_worker",
+] as const;
+
+function text(t: string) {
+  return { content: [{ type: "text" as const, text: t }] };
+}
+function errorText(t: string) {
+  return { content: [{ type: "text" as const, text: t }], isError: true };
+}
+
+export function createFleetToolsServer(
+  fleet: FleetOrchestrator,
+  repos: Repositories,
+  homeSessionId: string,
+): McpSdkServerConfigWithInstance {
+  const spawn = tool(
+    "spawn_worker",
+    "Spawn a worktree-isolated worker to work on a task in a REGISTERED repo (by name). It runs autonomously, then idles awaiting further instructions. Observe it (view_worker_transcript / get_worker_status / view_worker_diff), steer it (send_worker), and tell it to commit & open a PR itself when the work is ready. " +
+      "Leave `model` and `effort` UNSET so the worker uses the configured default — only pass them when the user has explicitly asked for a specific model or reasoning effort for this worker.",
+    {
+      repo: z.string().describe("Registered repo name (see list_repos)."),
+      task: z.string(),
+      base: z.string().optional(),
+      model: z.string().optional().describe("Override the worker model ONLY when the user explicitly requested a specific model; otherwise omit to use the default."),
+      effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max) ONLY when the user explicitly requested it; otherwise omit to use the default."),
+      notify: z.boolean().optional().describe("When true, you are notified once this worker finishes this dispatch (goes idle) or fails — your turn can end and you'll be woken with the result. One-shot: re-arm with send_worker notify:true."),
+    },
+    async (args) => {
+      const repo = repos.getRepoByName(args.repo);
+      if (!repo) return errorText(`unknown repo '${args.repo}'. Register it first or call list_repos.`);
+      const base = args.base ?? repo.base ?? undefined;
+      if (base !== undefined && !isSafeGitRef(base)) {
+        return errorText(`invalid base ref '${base}'. Use a plain branch name, tag, or commit SHA (no spaces or leading '-').`);
+      }
+      try {
+        // model/effort are only set when explicitly requested — otherwise undefined → fleet.spawn launches with the global defaults.
+        const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, effort: args.effort, notify: args.notify });
+        return text(`Spawned ${id} in '${repo.name}' (worktree branch rookery/${id}).${args.notify ? " You'll be notified when it finishes." : ""}`);
+      } catch (err) {
+        return errorText(`spawn failed: ${String(err)}`);
+      }
+    },
+  );
+
+  const send = tool(
+    "send_worker",
+    "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved). Use this to steer, correct, ask it to commit/push and open its own PR, or to continue after it has gone idle.",
+    { id: z.string(), text: z.string().describe("The instruction to send."), notify: z.boolean().optional().describe("When true, you are notified once the worker finishes this instruction (idle) or fails. One-shot.") },
+    async (args) => {
+      try {
+        fleet.send(args.id, args.text);
+        if (args.notify) fleet.armNotify(args.id);
+        return text(`Sent to ${args.id}.${args.notify ? " You'll be notified when it finishes." : ""}`);
+      } catch (err) {
+        return errorText(`send failed: ${String(err)}`);
+      }
+    },
+  );
+
+  const list = tool(
+    "list_workers",
+    "List all workers in the fleet (global).",
+    { status: z.string().optional(), repo: z.string().optional() },
+    async (args) => {
+      const repoPath = args.repo ? repos.getRepoByName(args.repo)?.path : undefined;
+      const items = fleet.list({ status: args.status, repoPath });
+      const body = items.length === 0 ? "No workers." : items.map((a) => `${a.id} [${a.status}] ${a.label} ${a.branch ?? ""}`.trim()).join("\n");
+      return text(body);
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const status = tool(
+    "get_worker_status",
+    "Status of one worker.",
+    { id: z.string() },
+    async (args) => {
+      try {
+        return text(`${args.id}: ${fleet.status(args.id)}`);
+      } catch (err) {
+        return errorText(String(err));
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const transcript = tool(
+    "view_worker_transcript",
+    "View a worker's transcript.",
+    { id: z.string(), sinceSeq: z.number().optional() },
+    async (args) => {
+      try {
+        const t = fleet.transcript(args.id, args.sinceSeq);
+        return text(t.length === 0 ? "No events." : truncateBytes(t.map((e) => `#${e.seq} ${e.type}: ${JSON.stringify(e.payload)}`).join("\n"), TRANSCRIPT_MAX_BYTES));
+      } catch (err) {
+        return errorText(String(err));
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const diff = tool(
+    "view_worker_diff",
+    "Show the git diff of a worker's worktree vs its base.",
+    { id: z.string() },
+    async (args) => {
+      try {
+        const d = await fleet.diff(args.id);
+        return text(d || "(no changes)");
+      } catch (err) {
+        return errorText(`diff failed: ${String(err)}`);
+      }
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const stop = tool(
+    "stop_worker",
+    "Stop a running worker (keeps its worktree).",
+    { id: z.string() },
+    async (args) => {
+      try {
+        await fleet.stop(args.id);
+        return text(`Stopped ${args.id}.`);
+      } catch (err) {
+        return errorText(String(err));
+      }
+    },
+  );
+
+  const discard = tool(
+    "discard_worker",
+    "Stop a worker and remove its worktree+branch (discards uncommitted work).",
+    { id: z.string() },
+    async (args) => {
+      try {
+        await fleet.discard(args.id);
+        return text(`Discarded ${args.id}.`);
+      } catch (err) {
+        return errorText(`discard failed: ${String(err)}`);
+      }
+    },
+  );
+
+  return createSdkMcpServer({
+    name: FLEET_SERVER_NAME,
+    version: "0.0.1",
+    tools: [spawn, send, list, status, transcript, diff, stop, discard],
+  });
+}

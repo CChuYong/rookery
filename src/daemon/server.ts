@@ -1,0 +1,326 @@
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { WebSocketServer, WebSocket } from "ws";
+import type { RawData } from "ws";
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import type { Config } from "../config.js";
+import { openDb } from "../persistence/db.js";
+import { Repositories } from "../persistence/repositories.js";
+import { EventBus } from "../core/events.js";
+import { SessionManager } from "../core/session-manager.js";
+import type { QueryFn } from "../core/worker.js";
+import { RealGitOps } from "../core/git-ops.js";
+import type { Locale } from "../core/i18n.js";
+import { FleetOrchestrator } from "../core/fleet-orchestrator.js";
+import type { WorkerLike } from "../core/fleet-orchestrator.js";
+import { Worker } from "../core/worker.js";
+import { makeLabeler } from "../core/labeler.js";
+import { CommandCatalog } from "../core/commands.js";
+import { fetchGitHubItem, searchGitHubItems, githubAuthStatus } from "../core/source-intake.js";
+import type { SourceProviderId } from "../core/source-intake.js";
+import { RealLinearClient } from "../core/linear-client.js";
+import { UsageCollector } from "../core/usage.js";
+import { makeOAuthUsageProvider } from "../core/oauth-usage.js";
+import { makeModelsProvider } from "../core/models-provider.js";
+import { Settings, applyApiKeyToEnv } from "../core/settings.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
+import { Connection } from "./connection.js";
+import { acquireSingleInstance } from "./lifecycle.js";
+import { loadOrCreateToken, checkUpgradeAuth } from "./auth.js";
+import { secureHome } from "./fs-hardening.js";
+import { startSlack } from "../slack/app.js";
+import { SlackInteractionBridge, makeSlackCanUseTool } from "../slack/interaction.js";
+import { makeSlackCapabilities } from "../slack/capabilities.js";
+import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
+import { InteractionRegistry } from "../core/interaction-registry.js";
+import { createScheduleToolsServer, SCHEDULE_SERVER_NAME, SCHEDULE_TOOL_NAMES } from "../tools/schedule-tools.js";
+import type { SlackHandle } from "../slack/app.js";
+import { SlackController } from "../slack/controller.js";
+import { DEFAULT_USAGE_REFRESH_MS } from "../core/settings.js";
+import { ALL_CHANNEL } from "../core/events.js";
+import { Scheduler } from "../core/scheduler.js";
+import { WorkerNotifier } from "../core/worker-notifier.js";
+import { AutomationDispatcher } from "../core/automation-dispatcher.js";
+import { makeSlackTriggerHandler } from "../slack/trigger-source.js";
+import type { AutomationProvider } from "./connection.js";
+import type { AutomationInput } from "../persistence/repositories.js";
+
+export interface DaemonHandle {
+  port: number;
+  token: string;
+  close(): Promise<void>;
+}
+
+export interface StartDaemonOptions {
+  config: Config;
+  queryFn?: QueryFn;
+  acquireLock?: boolean;
+  heartbeatMs?: number; // WS ping/pong interval (default 30s). For detecting/cleaning up half-open sockets.
+}
+
+export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandle> {
+  const { config } = opts;
+  const queryFn: QueryFn = opts.queryFn ?? sdkQuery;
+  // Non-loopback binds send the token in plaintext over ws:// → fail-closed reject unless explicitly opted in (G-ORIGIN-AUTH).
+  // Check before touching lock/DB so we fail fast without side effects.
+  const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(config.host);
+  const allowNonLoopback = ["1", "true", "yes"].includes((process.env.ROOKERY_ALLOW_NONLOOPBACK ?? "").trim().toLowerCase());
+  if (!isLoopback && !allowNonLoopback) {
+    throw new Error(
+      `refusing to bind non-loopback host '${config.host}': the WS token would travel in plaintext over ws://. ` +
+        `Set ROOKERY_ALLOW_NONLOOPBACK=1 to override (and prefer a trusted tunnel / wss).`,
+    );
+  }
+  if (!isLoopback) {
+    process.stderr.write(
+      `[rookery] WARNING: binding non-loopback host ${config.host} (ROOKERY_ALLOW_NONLOOPBACK set) — the WS token ` +
+        `travels in plaintext over ws://. Expose only behind a trusted tunnel.\n`,
+    );
+  }
+  secureHome(config); // tighten ~/.rookery to 0700 + sensitive files to 0600 (boot repair). best-effort, never throws.
+  const lock = opts.acquireLock === false ? null : acquireSingleInstance(config.pidPath);
+  const token = loadOrCreateToken(config.tokenPath); // per-daemon secret for WS authentication
+
+  let db;
+  try {
+    db = openDb(config.dbPath);
+  } catch (err) {
+    process.stderr.write(`[rookery] DB open failed: ${String(err)}\n`);
+    process.exit(1);
+  }
+  const repos = new Repositories(db);
+  const bus = new EventBus();
+  const git = new RealGitOps();
+  const settings = new Settings(repos, config);
+  applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
+  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number }): WorkerLike =>
+    new Worker({
+      id: o.id,
+      sessionId: o.sessionId,
+      repoPath: o.repoPath,
+      label: o.label,
+      // spawn override (UI) takes priority, otherwise fall back to the global default (Slack/master spawn).
+      // permissionMode: absent → the Worker defaults to "bypassPermissions".
+      deps: { repos, bus, queryFn, model: o.model ?? settings.workerModel(), effort: o.effort ?? settings.workerEffort(), permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns },
+      sdkSessionId: o.sdkSessionId ?? null,
+    });
+  // Auto-generate labels (Haiku): workers right after spawn, masters from the first message. best-effort.
+  const summarizeLabel = makeLabeler(queryFn);
+  const fleet = new FleetOrchestrator({ repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel });
+  // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
+  // clean up running/idle zombies to orphaned. (Live conversations can't be revived — the SDK session dies with the process.)
+  fleet.rehydrate();
+  // Also clean up master session zombies: sessions stuck in 'running' by a hard crash get reset to idle (sessions are lazy, so there's no live turn at boot → prevents a stale pulse on reconnect).
+  repos.resetRunningSessions();
+  // Likewise clear automation rows left 'running' by a mid-run crash → otherwise the Automation page shows a perpetual pulse.
+  repos.resetRunningAutomations();
+  // Slack interaction bridge (approval/AskUserQuestion buttons) — created/replaced in startSlack, referenced here as a holder.
+  // The master's canUseTool routes through this bridge when the session externalKey is a slack thread (otherwise auto-allow).
+  let slackBridge: SlackInteractionBridge | null = null;
+  // Slack thread reader (conversations.replies) — registered on connect in startSlack, referenced here as a holder (for the read_thread capability).
+  let slackThreadReader: SlackThreadReader | null = null;
+  // Slack reporter-ensure (session id + external_key) — registered on connect, null when disconnected. The dispatcher's beforeRun calls it just before firing.
+  let slackReporterEnsure: ((sessionId: string, externalKey: string) => void) | null = null;
+  // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
+  const interactionRegistry = new InteractionRegistry(bus);
+  const sessions = new SessionManager({ repos, bus, queryFn, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
+    makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => slackBridge) ?? interactionRegistry.canUseToolFor(sessionId),
+    // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
+    // additionally compose the read_thread tool/hint into slack thread sessions.
+    makeCapabilities: (externalKey, sessionId) => {
+      const slackCaps = makeSlackCapabilities(externalKey, () => slackThreadReader);
+      return () => {
+        const s = slackCaps?.() ?? {};
+        return {
+          ...s,
+          mcpServers: { ...s.mcpServers, [SCHEDULE_SERVER_NAME]: createScheduleToolsServer({ repos, reconcile: (id) => scheduler.reconcile(id), now: () => new Date() }, sessionId) },
+          allowedTools: [...(s.allowedTools ?? []), ...SCHEDULE_TOOL_NAMES],
+        };
+      };
+    } });
+  // Worker completion → wake the home master (notify mode). deliver routes to the live master or persists for a cold one.
+  new WorkerNotifier({ bus, repos, deliver: (sessionId, line) => sessions.deliverWorkerNotification(sessionId, line) }).start();
+  // For slash-command/skill candidates — a one-time probe per cwd, cached (model is irrelevant, just init with a cheap model).
+  const commandCatalog = new CommandCatalog(queryFn, { model: () => settings.workerModel() });
+  // Spawn from sources: list of base branches + GitHub issues/PRs (gh) + Linear tickets (GraphQL) + integration status. All best-effort.
+  // timeout+SIGKILL: keeps a stuck gh (network stall / non-tty auth prompt / proxy blackhole) from leaking the child and
+  // hanging source.* requests forever (same guard as the usage collector).
+  const execText = (cmd: string, args: string[], opts?: { cwd?: string }) =>
+    promisify(execFile)(cmd, args, { cwd: opts?.cwd, maxBuffer: 8 * 1024 * 1024, timeout: 30000, killSignal: "SIGKILL" }).then((r) => r.stdout.toString());
+  const linear = new RealLinearClient(() => settings.linearApiKey(), fetch);
+  const sourceProvider = {
+    listBranches: (repoPath: string) => git.listBranches(repoPath),
+    fetchSource: (url: string) => fetchGitHubItem(url, execText),
+    searchSource: (provider: SourceProviderId, query: string, repoPath?: string) =>
+      provider === "linear" ? linear.searchIssues(query) : searchGitHubItems(repoPath ?? "", query, execText),
+    integrationsStatus: async () => {
+      const [github, lv] = await Promise.all([githubAuthStatus(execText), linear.validate()]);
+      return { github, linear: { configured: !!settings.linearApiKey(), valid: lv.ok, user: lv.user } };
+    },
+  };
+
+  // ccusage (bunx) based usage collector. Polled periodically and cached, served via usage.get.
+  const pexec = promisify(execFile);
+  const cmd = config.usage.ccusageCmd;
+  // The refresh interval comes from settings (DB). Applied once at boot (changes take effect on daemon restart). Invalid values fall back to the default.
+  const parsedRefresh = Number.parseInt(settings.usageRefreshMs(), 10);
+  const usageRefreshMs = Number.isInteger(parsedRefresh) && parsedRefresh > 0 ? parsedRefresh : DEFAULT_USAGE_REFRESH_MS;
+  const usageCollector = new UsageCollector({
+    refreshMs: usageRefreshMs,
+    exec: {
+      run: async (args) => {
+        // timeout+SIGKILL so a stuck bunx/ccusage can't freeze the collector forever.
+        const { stdout } = await pexec(cmd[0]!, [...cmd.slice(1), ...args], { maxBuffer: 64 * 1024 * 1024, env: process.env, timeout: 30000, killSignal: "SIGKILL" });
+        return stdout.toString();
+      },
+    },
+    oauthUsage: makeOAuthUsageProvider(), // server-side % (queries /api/oauth/usage with the local OAuth token)
+  });
+  usageCollector.start();
+  const usageProvider = { snapshot: () => usageCollector.snapshot() };
+  // List of available models (for the settings picker): x-api-key if there's an API key, otherwise the Claude Code OAuth token (same token reader as usage). Static fallback on failure.
+  const modelsList = makeModelsProvider({ apiKey: settings.anthropicApiKey() });
+  const modelsProvider = { list: () => modelsList() };
+
+  // Slack runtime config is resolved per call from settings (DB, tokens fall back to env). Tokens at connect time, the rest per message.
+  const slackConfig = () => ({
+    botToken: settings.slackBotToken(),
+    appToken: settings.slackAppToken(),
+    cwd: settings.slackCwd(),
+    allowedUsers: settings.slackAllowedUsers().split(",").map((s) => s.trim()).filter(Boolean),
+    allowAll: ["1", "true", "yes"].includes(settings.slackAllowAll().trim().toLowerCase()),
+    refuseReply: ["1", "true", "yes"].includes(settings.slackRefuseReply().trim().toLowerCase()),
+    refusalMessage: settings.slackRefusalMessage(),
+    locale: settings.slackLocale() as Locale,
+  });
+  // Slack Bolt starts asynchronously (doesn't block boot). Status is broadcast to @all via slack.status.
+  const dispatcher = new AutomationDispatcher({
+    repos, bus, sessions, fleet,
+    // Just before firing: if the target is a slack-origin session, ensure its thread reporter (only when connected). Even headless turns (wakeup) are delivered to Slack.
+    beforeRun: (a) => {
+      if (a.action.kind !== "master" || !a.action.targetSessionId || !slackReporterEnsure) return;
+      const row = repos.getSession(a.action.targetSessionId);
+      if (row?.external_key) slackReporterEnsure(row.id, row.external_key);
+    },
+  });
+  const scheduler = new Scheduler({ repos, dispatcher });
+  const automationProvider: AutomationProvider = {
+    list: () => repos.listAutomations(),
+    create: (input: AutomationInput) => {
+      const a = repos.createAutomation(randomUUID(), input);
+      scheduler.reconcile(a.id);
+      return repos.getAutomation(a.id)!;
+    },
+    update: (id: string, patch: AutomationInput) => {
+      const a = repos.updateAutomation(id, patch);
+      if (a) scheduler.reconcile(id);
+      return repos.getAutomation(id);
+    },
+    delete: (id: string) => repos.deleteAutomation(id),
+    setEnabled: (id: string, enabled: boolean) => {
+      const a = repos.setAutomationEnabled(id, enabled);
+      if (a) scheduler.reconcile(id);
+      return repos.getAutomation(id);
+    },
+    runNow: (id, vars) => scheduler.runNow(id, vars), // forward vars as-is (the run-now dialog inputs) — dropping them substitutes {{var}} with an empty string
+  };
+  scheduler.start();
+  const slackTrigger = makeSlackTriggerHandler({ repos, dispatcher });
+
+  const slack = new SlackController({
+    configured: () => settings.slackConfigured(), // resolver, since tokens can change at runtime
+    enabled: () => repos.getSetting("slackEnabled") !== "0", // on by default
+    setEnabled: (b) => repos.setSetting("slackEnabled", b ? "1" : "0"),
+    start: () => startSlack({ sessions, bus, slackConfig, home: config.home, setBridge: (b) => { slackBridge = b; }, setThreadReader: (r) => { slackThreadReader = r; }, setReporterFor: (fn) => { slackReporterEnsure = fn; }, onMessage: slackTrigger }),
+    emit: (status) => bus.emit({ type: "slack.status", sessionId: ALL_CHANNEL, status }),
+  });
+  void slack.boot();
+
+  const httpServer = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
+      return;
+    }
+    // Future HTTP endpoints (e.g. Slack) will be added here.
+    res.writeHead(404).end();
+  });
+  // ws-halfopen-4: timeout so an idle TCP socket that never sends headers/a request doesn't hang around forever.
+  // (Half-open on an upgraded WS is handled by the heartbeat above.)
+  httpServer.headersTimeout = 20000;
+  httpServer.requestTimeout = 30000;
+
+  const wss = new WebSocketServer({ noServer: true, clientTracking: true });
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    const reqPath = (req.url ?? "").split("?")[0];
+    if (reqPath !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    // Auth: token match + reject external web Origins. On failure, 401 then close the socket.
+    if (!checkUpgradeAuth({ url: req.url, headers: { origin: req.headers.origin } }, token).ok) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  });
+
+  const MAX_BUFFERED = 8 * 1024 * 1024; // prevent unbounded buffering to slow/dead consumers (G-WS-LEAK backpressure)
+  wss.on("connection", (ws: WebSocket) => {
+    const live = ws as WebSocket & { isAlive?: boolean };
+    live.isAlive = true;
+    ws.on("pong", () => { live.isAlive = true; }); // client proves it's alive by responding to the ping
+    const send = (d: string) => {
+      if (ws.readyState !== WebSocket.OPEN) return; // don't send to closed/half-closed sockets
+      if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
+      ws.send(d);
+    };
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider);
+    ws.on("message", (raw: RawData) => {
+      void conn.handleRaw(raw.toString());
+    });
+    ws.on("close", () => conn.dispose());
+    ws.on("error", () => conn.dispose());
+  });
+
+  // Heartbeat: detect half-open sockets via ping/pong and terminate them (G-WS-LEAK). terminate → 'close' →
+  // conn.dispose() releases the EventBus subscription, preventing a permanent leak. unref so the timer doesn't keep the process alive.
+  const heartbeatMs = opts.heartbeatMs ?? 30000;
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      const live = ws as WebSocket & { isAlive?: boolean };
+      if (live.isAlive === false) { ws.terminate(); continue; } // no pong to the previous ping → dead socket
+      live.isAlive = false;
+      try { ws.ping(); } catch { /* best-effort */ }
+    }
+  }, heartbeatMs);
+  heartbeat.unref?.();
+
+  await new Promise<void>((resolve) => {
+    httpServer.listen(config.port, config.host, resolve);
+  });
+  const port = (httpServer.address() as AddressInfo).port;
+
+  const close = async (): Promise<void> => {
+    usageCollector.stop();
+    scheduler.stop();
+    clearInterval(heartbeat);
+    // Destroy sockets immediately instead of a graceful close (ensures the close() Promise doesn't wait forever).
+    for (const ws of wss.clients) ws.terminate();
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+    httpServer.closeAllConnections?.(); // Node 18.2+: forcibly close any remaining keep-alive connections
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    await slack.stop();
+    // Finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master turns.
+    // Otherwise writing to a closed DB raises a 'database is not open' unhandled rejection.
+    await fleet.close(5000);
+    await sessions.drain(5000);
+    db.close();
+    lock?.release();
+  };
+
+  return { port, token, close };
+}
