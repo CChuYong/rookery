@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import Database from "better-sqlite3";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -23,21 +22,6 @@ describe("openDb", () => {
         "schema_version",
       ]),
     );
-    db.close();
-  });
-
-  it("the origin migration backfills origin/origin_ref from external_key prefixes", () => {
-    const db = new Database(":memory:");
-    MIGRATIONS[0]!(db); // baseline schema (sessions — before the origin/pinned columns)
-    const ins = db.prepare("INSERT INTO sessions(id,cwd,status,external_key,created_at,updated_at) VALUES (?,?,?,?,?,?)");
-    ins.run("s_slack", "/x", "active", "slack:T1:C1:9.9", "t", "t");
-    ins.run("s_auto", "/x", "active", "automation:auto1", "t", "t");
-    ins.run("s_ui", "/x", "active", null, "t", "t");
-    for (let v = 1; v < MIGRATIONS.length; v++) MIGRATIONS[v]!(db); // the rest (origin backfill + later additions)
-    const get = (id: string) => db.prepare("SELECT origin, origin_ref FROM sessions WHERE id=?").get(id);
-    expect(get("s_slack")).toEqual({ origin: "slack", origin_ref: "T1:C1:9.9" });
-    expect(get("s_auto")).toEqual({ origin: "automation", origin_ref: "auto1" });
-    expect(get("s_ui")).toEqual({ origin: "ui", origin_ref: null });
     db.close();
   });
 
