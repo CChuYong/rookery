@@ -22,13 +22,17 @@ automation rules, and local state.
 - Trigger unattended master or worker runs from cron schedules and Slack events.
 - Spawn workers from GitHub issues or Linear tickets in the desktop app.
 
+## Install (macOS)
+
+**[⬇ Download for Apple Silicon (`.dmg`)](https://github.com/CChuYong/rookery/releases/latest/download/rookery-arm64.dmg)**
+
 ## Requirements
 - Node.js >= 22
 - `ANTHROPIC_API_KEY`
 
 > This machine defaults to Node 20, so before running you must activate Node 22 via `nvm use 22` (or a Node 22+ PATH) (the better-sqlite3 native module is built against the Node 22 ABI).
 
-## Installation
+## Build from source
 ```bash
 npm install
 npm run build

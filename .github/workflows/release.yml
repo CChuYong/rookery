@@ -1,18 +1,18 @@
 name: Release
 
-# 태그(v*) push 시 macOS(arm64)에서 빌드·서명·공증해 GitHub Release에 업로드한다.
-# electron-updater는 이 Release의 latest-mac.yml + zip을 읽어 자동업데이트한다.
+# On a tag (v*) push, build·sign·notarize on macOS (arm64) and upload to a GitHub Release.
+# electron-updater reads this Release's latest-mac.yml + zip to auto-update.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch: {}
 
 permissions:
-  contents: write # action-gh-release가 Release 생성/업로드 (GITHUB_TOKEN 사용)
+  contents: write # action-gh-release creates/uploads the Release (uses GITHUB_TOKEN)
 
 jobs:
   release-mac:
-    runs-on: macos-14 # Apple Silicon(arm64) 러너 — 단일 arm64 배포와 일치
+    runs-on: macos-14 # Apple Silicon (arm64) runner — matches the single arm64 distribution
     steps:
       - uses: actions/checkout@v4
 
@@ -21,8 +21,8 @@ jobs:
           node-version: 22 # better-sqlite3 ABI 127 + engines.node >=22
           cache: npm
 
-      # node-gyp(@electron/rebuild의 node-pty, better-sqlite3 소스 폴백)은 distutils가 필요한데
-      # macos-14 러너 기본 Python 3.12엔 없다(3.12에서 제거). 3.11로 고정해 로컬과 동일하게 맞춘다.
+      # node-gyp (@electron/rebuild's node-pty, better-sqlite3 source fallback) needs distutils,
+      # which the macos-14 runner's default Python 3.12 lacks (removed in 3.12). Pin 3.11 to match local.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -35,8 +35,8 @@ jobs:
           npm run typecheck && npm test
           npm -w apps/desktop run typecheck && npm -w apps/desktop run test
 
-      # 태그가 단일 소스: vX.Y.Z 태그에서 버전을 뽑아 root+desktop package.json에 찍는다(드리프트 차단).
-      # workflow_dispatch(태그 없음)면 스킵 → 그땐 package.json의 현재 버전을 그대로 사용.
+      # Tag is the single source of truth: derive the version from the vX.Y.Z tag and stamp it into
+      # root + desktop package.json (prevents drift). Skipped on workflow_dispatch (no tag) → uses current package.json.
       - name: Stamp version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -53,19 +53,24 @@ jobs:
           npm run build
           npm -w apps/desktop run build:mac
         env:
-          # 코드서명: Developer ID Application .p12를 base64로 넣은 시크릿. electron-builder가 임시 keychain에 자동 임포트.
+          # Code signing: secret holding the base64-encoded Developer ID Application .p12. electron-builder imports it into a temp keychain.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # 공증: App Store Connect API key (.p8는 위 스텝에서 파일로 기록).
+          # Notarization: App Store Connect API key (.p8 written to a file in the step above).
           APPLE_API_KEY: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
+      # Version-less stable filename copy → always fetch the latest via /releases/latest/download/rookery-arm64.dmg.
+      # cp the stapled dmg (the notarization ticket is embedded in the file, so the copy stays valid). The *.dmg glob uploads both.
+      - name: Stable-named dmg copy (constant download URL)
+        run: cp apps/desktop/dist/Rookery-*-arm64.dmg apps/desktop/dist/rookery-arm64.dmg
+
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # staple까지 끝난 산출물을 업로드(electron-builder --publish never라 여기서만 업로드).
-          # latest-mac.yml + zip이 electron-updater 채널. dmg는 사람 다운로드용.
+          # Upload the fully stapled artifacts (electron-builder --publish never, so upload happens only here).
+          # latest-mac.yml + zip are the electron-updater channel; the dmg is for human download.
           files: |
             apps/desktop/dist/*.dmg
             apps/desktop/dist/*.zip
