@@ -1,0 +1,181 @@
+import { describe, it, expect } from "vitest";
+import { openDb } from "../../src/persistence/db.js";
+import { Repositories } from "../../src/persistence/repositories.js";
+import { Settings, applyApiKeyToEnv } from "../../src/core/settings.js";
+import { loadConfig } from "../../src/config.js";
+
+const config = loadConfig({}); // defaults without env
+
+describe("Settings", () => {
+  it("returns config defaults when DB is empty (incl. effort)", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.all()).toEqual({
+      masterName: "rookery", // settings-only default (no config fallback)
+      masterModel: config.masterModel,
+      workerModel: config.workerModel,
+      masterEffort: config.masterEffort,
+      workerEffort: config.workerEffort,
+      slackCwd: process.cwd(),
+      slackAllowedUsers: "",
+      slackAllowAll: "0",
+      slackRefuseReply: "1",
+      slackRefusalMessage: "Sorry, you're not authorized to use this bot.",
+      usageRefreshMs: "120000",
+      hasAcceptedDataNotice: "0",
+      slackLocale: "ko",
+    });
+  });
+
+  it("slackLocale: defaults to ko, overridable, clears to default", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.slackLocale()).toBe("ko");
+    expect(s.all().slackLocale).toBe("ko");
+    s.apply({ slackLocale: "en" });
+    expect(s.slackLocale()).toBe("en");
+    s.apply({ slackLocale: "xx" }); // non-ko, non-empty → en
+    expect(s.slackLocale()).toBe("en");
+    s.apply({ slackLocale: null as unknown as string }); // clear → ko
+    expect(s.slackLocale()).toBe("ko");
+  });
+
+  it("slack refusal: default on with default message, overridable", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.slackRefuseReply()).toBe("1"); // auto-reply on by default
+    expect(s.slackRefusalMessage()).toBe("Sorry, you're not authorized to use this bot.");
+    s.apply({ slackRefuseReply: "0", slackRefusalMessage: "Not allowed." });
+    expect(s.slackRefuseReply()).toBe("0");
+    expect(s.slackRefusalMessage()).toBe("Not allowed.");
+    s.apply({ slackRefusalMessage: null as unknown as string }); // clearing reverts to default message
+    expect(s.slackRefusalMessage()).toBe("Sorry, you're not authorized to use this bot.");
+  });
+
+  it("slack/usage settings: defaults, overrides, and clears", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.slackCwd()).toBe(process.cwd());
+    expect(s.slackAllowedUsers()).toBe("");
+    expect(s.slackAllowAll()).toBe("0");
+    expect(s.usageRefreshMs()).toBe("120000");
+
+    const out = s.apply({ slackCwd: "/work", slackAllowedUsers: "U1,U2", slackAllowAll: "1", usageRefreshMs: "30000" });
+    expect(out.slackCwd).toBe("/work");
+    expect(out.slackAllowedUsers).toBe("U1,U2");
+    expect(out.slackAllowAll).toBe("1");
+    expect(out.usageRefreshMs).toBe("30000");
+
+    s.apply({ slackCwd: null as unknown as string }); // clearing reverts to default (cwd)
+    expect(s.slackCwd()).toBe(process.cwd());
+  });
+
+  it("slack tokens: write-only secrets, DB over env fallback, configured gate", () => {
+    const withEnv = new Settings(new Repositories(openDb(":memory:")), loadConfig({ SLACK_BOT_TOKEN: "env-bot", SLACK_APP_TOKEN: "env-app" }));
+    expect(withEnv.slackBotToken()).toBe("env-bot");
+    expect(withEnv.slackConfigured()).toBe(true);
+
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.slackConfigured()).toBe(false); // neither env nor DB has it
+    s.setSlackBotToken("db-bot");
+    expect(s.slackConfigured()).toBe(false); // app token not set yet
+    s.setSlackAppToken("db-app");
+    expect(s.slackConfigured()).toBe(true);
+    expect(s.slackBotToken()).toBe("db-bot");
+    expect(s.all()).not.toHaveProperty("slackBotToken"); // secrets are not echoed
+
+    s.setSlackBotToken(undefined); // clear
+    expect(s.slackBotToken()).toBeUndefined();
+  });
+
+  it("masterName: default rookery, persists override, trims + caps, clears to default", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.masterName()).toBe("rookery");
+
+    expect(s.apply({ masterName: "Jarvis" }).masterName).toBe("Jarvis");
+    expect(s.masterName()).toBe("Jarvis");
+
+    s.apply({ masterName: "  Friday  " }); // trimmed on read
+    expect(s.masterName()).toBe("Friday");
+
+    s.apply({ masterName: "x".repeat(100) }); // capped at 64 chars
+    expect(s.masterName()).toHaveLength(64);
+
+    s.apply({ masterName: "   " }); // whitespace-only -> falls back to default
+    expect(s.masterName()).toBe("rookery");
+
+    s.apply({ masterName: "Atlas" });
+    s.apply({ masterName: null as unknown as string }); // null -> key deleted -> reverts to default
+    expect(s.masterName()).toBe("rookery");
+  });
+
+  it("persists effort overrides (global defaults used by Slack and the default entry point)", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    const out = s.apply({ masterEffort: "xhigh", workerEffort: "medium" });
+    expect(out.masterEffort).toBe("xhigh");
+    expect(out.workerEffort).toBe("medium");
+  });
+
+  it("apply persists overrides; null reverts to default", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    const out = s.apply({ masterModel: "claude-sonnet-4-6" });
+    expect(out.masterModel).toBe("claude-sonnet-4-6");
+    expect(s.workerModel()).toBe(config.workerModel); // untouched key keeps its default
+
+    s.apply({ masterModel: null as unknown as string }); // null -> key deleted -> reverts to default
+    expect(s.masterModel()).toBe(config.masterModel);
+  });
+
+  it("linearApiKey: set, get, and clear", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.linearApiKey()).toBeUndefined();
+    s.setLinearApiKey("lin_abc");
+    expect(s.linearApiKey()).toBe("lin_abc");
+    s.setLinearApiKey(undefined);
+    expect(s.linearApiKey()).toBeUndefined();
+  });
+
+  it("linearApiKey falls back to config env value; DB overrides", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), loadConfig({ ROOKERY_LINEAR_API_KEY: "env_key" }));
+    expect(s.linearApiKey()).toBe("env_key");
+    s.setLinearApiKey("db_key");
+    expect(s.linearApiKey()).toBe("db_key");
+  });
+
+  it("anthropicApiKey: DB-first, env fallback, write-only (not echoed)", () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const cfg = config;
+    // Settings built with config.anthropicApiKey = "env-key" (env fallback)
+    const s = new Settings(repos, { ...cfg, anthropicApiKey: "env-key" } as any);
+    expect(s.anthropicApiKey()).toBe("env-key"); // env fallback
+    s.setAnthropicApiKey("db-key");
+    expect(s.anthropicApiKey()).toBe("db-key"); // DB-first
+    expect(Object.keys(s.all())).not.toContain("anthropicApiKey"); // write-only
+    s.setAnthropicApiKey(undefined);
+    expect(s.anthropicApiKey()).toBe("env-key"); // delete reverts to env
+  });
+
+  it("hasAcceptedDataNotice: default 0, echoed in all()", () => {
+    const cfg = config;
+    const s = new Settings(new Repositories(openDb(":memory:")), cfg);
+    expect(s.hasAcceptedDataNotice()).toBe("0");
+    s.apply({ hasAcceptedDataNotice: "1" });
+    expect(s.hasAcceptedDataNotice()).toBe("1");
+    expect(s.all().hasAcceptedDataNotice).toBe("1"); // echoed
+  });
+
+  it("applyApiKeyToEnv sets process.env when a key exists, leaves it otherwise", () => {
+    const cfg = config;
+    const prev = process.env.ANTHROPIC_API_KEY;
+    try {
+      delete process.env.ANTHROPIC_API_KEY;
+      const s = new Settings(new Repositories(openDb(":memory:")), cfg);
+      s.setAnthropicApiKey("db-key");
+      applyApiKeyToEnv(s);
+      expect(process.env.ANTHROPIC_API_KEY).toBe("db-key");
+      delete process.env.ANTHROPIC_API_KEY;
+      const s2 = new Settings(new Repositories(openDb(":memory:")), { ...cfg, anthropicApiKey: undefined } as any);
+      applyApiKeyToEnv(s2);
+      expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prev;
+    }
+  });
+});
