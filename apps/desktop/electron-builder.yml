@@ -4,6 +4,11 @@ productName: Rookery
 electronVersion: 32.3.3
 # After the build, notarize + staple the dmg (notarize:true only notarizes the .app) → a downloaded dmg opens cleanly even offline on first launch.
 afterAllArtifactBuild: build/notarize-dmg.cjs
+# Auto-update feed: baked into the app (app-update.yml) so electron-updater knows where to look, and makes electron-builder emit latest-mac.yml.
+publish:
+  provider: github
+  owner: CChuYong
+  repo: rookery
 directories:
   output: dist
 files:

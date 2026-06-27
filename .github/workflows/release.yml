@@ -1,0 +1,68 @@
+name: Release
+
+# 태그(v*) push 시 macOS(arm64)에서 빌드·서명·공증해 GitHub Release에 업로드한다.
+# electron-updater는 이 Release의 latest-mac.yml + zip을 읽어 자동업데이트한다.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # action-gh-release가 Release 생성/업로드 (GITHUB_TOKEN 사용)
+
+jobs:
+  release-mac:
+    runs-on: macos-14 # Apple Silicon(arm64) 러너 — 단일 arm64 배포와 일치
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # better-sqlite3 ABI 127 + engines.node >=22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Gate (typecheck + test)
+        run: |
+          npm run typecheck && npm test
+          npm -w apps/desktop run typecheck && npm -w apps/desktop run test
+
+      # 태그가 단일 소스: vX.Y.Z 태그에서 버전을 뽑아 root+desktop package.json에 찍는다(드리프트 차단).
+      # workflow_dispatch(태그 없음)면 스킵 → 그땐 package.json의 현재 버전을 그대로 사용.
+      - name: Stamp version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          echo "Stamping version $V from tag $GITHUB_REF_NAME"
+          npm version "$V" --no-git-tag-version --allow-same-version
+          npm version "$V" --no-git-tag-version --allow-same-version -w apps/desktop
+
+      - name: Prepare Apple API key (.p8)
+        run: echo "${{ secrets.APPLE_API_KEY_BASE64 }}" | base64 --decode > "${{ runner.temp }}/AuthKey.p8"
+
+      - name: Build · sign · notarize · staple
+        run: |
+          npm run build
+          npm -w apps/desktop run build:mac
+        env:
+          # 코드서명: Developer ID Application .p12를 base64로 넣은 시크릿. electron-builder가 임시 keychain에 자동 임포트.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # 공증: App Store Connect API key (.p8는 위 스텝에서 파일로 기록).
+          APPLE_API_KEY: ${{ runner.temp }}/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # staple까지 끝난 산출물을 업로드(electron-builder --publish never라 여기서만 업로드).
+          # latest-mac.yml + zip이 electron-updater 채널. dmg는 사람 다운로드용.
+          files: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest-mac.yml
+          fail_on_unmatched_files: true

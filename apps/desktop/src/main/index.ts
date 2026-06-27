@@ -17,6 +17,7 @@ import type { PsRow, ProcessMetricLike } from "./resource-monitor.js";
 import { readFile as readFileP, writeFile as writeFileP, readdir as readdirP, stat as statP, mkdir as mkdirP, rename as renameP } from "node:fs/promises";
 import { watch as fsWatch } from "node:fs";
 import * as nodePty from "node-pty";
+import * as electronUpdater from "electron-updater";
 import { setMainLocale } from "./i18n.js";
 import { secureHomeAndLog, secureHomeDir } from "./fs-hardening.js";
 
@@ -336,5 +337,12 @@ void app.whenReady().then(() => {
   });
   createWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  // Auto-update (packaged only): check GitHub Releases, download in the background, install on quit.
+  // No-op in dev. Reads the feed from app-update.yml baked from electron-builder's publish config.
+  if (app.isPackaged) {
+    void electronUpdater.autoUpdater
+      .checkForUpdatesAndNotify()
+      .catch((e) => console.warn("[updater] check failed:", e));
+  }
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
