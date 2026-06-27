@@ -21,6 +21,12 @@ jobs:
           node-version: 22 # better-sqlite3 ABI 127 + engines.node >=22
           cache: npm
 
+      # node-gyp(@electron/rebuild의 node-pty, better-sqlite3 소스 폴백)은 distutils가 필요한데
+      # macos-14 러너 기본 Python 3.12엔 없다(3.12에서 제거). 3.11로 고정해 로컬과 동일하게 맞춘다.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install deps
         run: npm ci
 
