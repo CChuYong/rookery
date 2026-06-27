@@ -1,0 +1,22 @@
+import type { Catalog } from "../../types.js";
+export default {
+  "gitChanges.actionFailed": "Failed",
+  "gitChanges.commitFailed": "Commit failed",
+  "gitChanges.revert": "Revert",
+  "gitChanges.unstage": "Unstage",
+  "gitChanges.stage": "Stage",
+  "gitChanges.push": "Push",
+  "gitChanges.noChanges": "No changes.",
+  "gitChanges.stagedSection": "Staged",
+  "gitChanges.unstageAll": "Unstage all",
+  "gitChanges.changedSection": "Changes",
+  "gitChanges.stageAll": "Stage all",
+  "gitChanges.commitPlaceholder": "Commit message  (⌘↵)",
+  "gitChanges.commitPlaceholderEmpty": "Commit staged changes…",
+  "gitChanges.commit": "Commit",
+  "gitChanges.revertTitle": "Revert changes",
+  "gitChanges.revertDescUntracked": "This will delete {name}. This can't be undone.",
+  "gitChanges.revertDescTracked": "This will revert {name} to HEAD. This can't be undone.",
+  "gitChanges.tabChanges": "Changes",
+  "gitChanges.tabHistory": "History",
+} satisfies Catalog;

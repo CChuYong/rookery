@@ -1,0 +1,21 @@
+import type { Catalog } from "../../types.js";
+export default {
+  "repoTree.unreadTitle": "New activity — not seen yet",
+  "repoTree.addWorker": "Add worker",
+  "repoTree.removeRepo": "Remove repo",
+  "repoTree.emptyState": "No repos registered yet — add ‘New repo’ below to start spawning agents there.",
+  "repoTree.uncategorized": "Other (unregistered)",
+  "repoTree.archive": "Archive",
+  "repoTree.newRepo": "New repo",
+  "repoTree.menuRename": "Rename",
+  "repoTree.menuStop": "Stop",
+  "repoTree.menuUnarchive": "Unarchive",
+  "repoTree.menuArchive": "Archive",
+  "repoTree.menuDelete": "Delete…",
+  "repoTree.deleteWorkerTitle": "Delete worker",
+  "repoTree.deleteWorkerConfirm": "? This removes its git worktree, branch, and any uncommitted work — it can’t be undone.",
+  "repoTree.filterPlaceholder": "Filter workers…",
+  "repoTree.onlyActive": "live",
+  "repoTree.onlyActiveTitle": "Show only running / idle / unread workers",
+  "repoTree.noMatches": "No matching workers.",
+} satisfies Catalog;

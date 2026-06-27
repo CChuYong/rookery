@@ -1,0 +1,22 @@
+import type { Catalog } from "../../types.js";
+export default {
+  "gitChanges.actionFailed": "실패",
+  "gitChanges.commitFailed": "커밋 실패",
+  "gitChanges.revert": "되돌리기",
+  "gitChanges.unstage": "언스테이지",
+  "gitChanges.stage": "스테이지",
+  "gitChanges.push": "푸시",
+  "gitChanges.noChanges": "변경 사항이 없어요.",
+  "gitChanges.stagedSection": "스테이지됨",
+  "gitChanges.unstageAll": "모두 언스테이지",
+  "gitChanges.changedSection": "변경됨",
+  "gitChanges.stageAll": "모두 스테이지",
+  "gitChanges.commitPlaceholder": "커밋 메시지  (⌘↵)",
+  "gitChanges.commitPlaceholderEmpty": "스테이지된 변경을 커밋…",
+  "gitChanges.commit": "커밋",
+  "gitChanges.revertTitle": "변경 되돌리기",
+  "gitChanges.revertDescUntracked": "{name}의 파일을 삭제합니다. 되돌릴 수 없어요.",
+  "gitChanges.revertDescTracked": "{name}의 변경을 HEAD로 되돌립니다. 되돌릴 수 없어요.",
+  "gitChanges.tabChanges": "변경",
+  "gitChanges.tabHistory": "기록",
+} satisfies Catalog;

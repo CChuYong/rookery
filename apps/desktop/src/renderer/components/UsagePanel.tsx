@@ -1,0 +1,73 @@
+import { memo } from "react";
+import type { UsageSnapshot } from "@daemon/core/usage.js";
+import { cn } from "../lib/cn.js";
+import { useT } from "../i18n/provider.js";
+
+function fmtTok(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+function usd(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+// Single-line % gauge (server-side OAuth utilization).
+function Meter({ label, pct, sub }: { label: string; pct: number; sub?: string }): JSX.Element {
+  const w = Math.max(0, Math.min(100, pct));
+  const near = w >= 90; // approaching limit → red pulse + text marker (for color-blind accessibility)
+  const tone = near ? "bg-fail" : w >= 70 ? "bg-run" : "bg-accent";
+  return (
+    <div className="px-2 py-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-[10.5px]">
+        <span className="truncate text-muted">{label}</span>
+        <span className="shrink-0 font-mono text-fg-dim">
+          {Math.round(pct)}%{sub ? <span className="text-muted"> · {sub}</span> : null}{near ? <span className="text-fail"> · limit</span> : null}
+        </span>
+      </div>
+      {/* When near, drop overflow-hidden so the led-live glow shows outside the track. text-fail sets the pulse color to red. */}
+      <div className={cn("mt-1 h-1 w-full rounded-full bg-line", !near && "overflow-hidden")}>
+        <div className={cn("usage-fill h-full rounded-full transition-[width,background-color] duration-500 ease-out", tone, near && "led-live text-fail")} style={{ width: `${w}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// Single-line number without a gauge (ccusage tokens/$).
+function Stat({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-2 px-2 py-1 text-[10.5px]">
+      <span className="truncate text-muted">{label}</span>
+      <span className="shrink-0 font-mono text-fg-dim">{value}</span>
+    </div>
+  );
+}
+
+function UsagePanelImpl({ usage }: { usage: UsageSnapshot | null }): JSX.Element | null {
+  const t = useT();
+  if (!usage) return null;
+  const p = usage.pct;
+  const wk = usage.weekly;
+  const hasAny = p || usage.session || wk || usage.today;
+  if (!hasAny) {
+    return <div className="border-t border-line px-2 py-2 text-[10.5px] text-muted">{t("usagePanel.loading")}</div>;
+  }
+  return (
+    <div className="border-t border-line pt-1">
+      {/* Server-side % (official, same source as /usage) */}
+      {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} pct={p.fiveHour} sub={usage.session ? `${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}` : undefined} />}
+      {p?.sevenDay != null && <Meter label={t("usagePanel.weekly")} pct={p.sevenDay} sub={wk ? `${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}` : undefined} />}
+      {p?.sevenDayOpus != null && <Meter label={t("usagePanel.weeklyOpus")} pct={p.sevenDayOpus} />}
+      {p?.sevenDaySonnet != null && <Meter label={t("usagePanel.weeklySonnet")} pct={p.sevenDaySonnet} />}
+
+      {/* ccusage tokens/$ (no gauge needed) */}
+      {!p && usage.session && <Stat label={t("usagePanel.session5h")} value={`${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}`} />}
+      {!p && wk && <Stat label={t("usagePanel.weekly")} value={`${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}`} />}
+      {usage.today && <Stat label={t("usagePanel.today")} value={`${fmtTok(usage.today.totalTokens)} · ${usd(usage.today.costUSD)}`} />}
+      {p?.extra && <Stat label={t("usagePanel.extraCredits")} value={`${usd(p.extra.usedCredits)} / ${usd(p.extra.monthlyLimit)}`} />}
+    </div>
+  );
+}
+
+export const UsagePanel = memo(UsagePanelImpl);
+UsagePanel.displayName = "UsagePanel";

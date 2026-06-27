@@ -1,0 +1,193 @@
+import { it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { AutomationPage } from "../src/renderer/components/AutomationPage.js";
+import type { Automation } from "@daemon/persistence/repositories.js";
+
+function mkMaster(id: string, prompt: string): Automation {
+  return {
+    id,
+    name: `job-${id}`,
+    enabled: true,
+    trigger: { kind: "cron", cron: "0 3 * * *", timezone: "UTC" },
+    action: { kind: "master", prompt, cwd: "/w", sessionMode: "reuse" },
+    model: null,
+    effort: null,
+    permissionMode: null,
+    maxTurns: null,
+    lastRunAt: null,
+    lastStatus: null,
+    lastError: null,
+    nextRunAt: null,
+    createdAt: "t",
+  };
+}
+
+const cronJob: Automation = {
+  id: "s1",
+  name: "nightly",
+  enabled: false,
+  trigger: { kind: "cron", cron: "0 3 * * *", timezone: "UTC" },
+  action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" },
+  model: null,
+  effort: null,
+  permissionMode: null,
+  maxTurns: null,
+  lastRunAt: null,
+  lastStatus: null,
+  lastError: null,
+  nextRunAt: null,
+  createdAt: "t",
+};
+
+const slackJob: Automation = {
+  id: "s2",
+  name: "watch",
+  enabled: true,
+  trigger: { kind: "slack", channels: ["C123"], keyword: "deploy" },
+  action: { kind: "worker", repo: "app-api", task: "do it" },
+  model: null,
+  effort: null,
+  permissionMode: null,
+  maxTurns: null,
+  lastRunAt: null,
+  lastStatus: null,
+  lastError: null,
+  nextRunAt: null,
+  createdAt: "t",
+};
+
+it("lists jobs and fires run-now", () => {
+  const onRun = vi.fn(() => Promise.resolve());
+  render(<AutomationPage automations={[cronJob]} onRun={onRun} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByText("nightly")).toBeInTheDocument();
+  // cron trigger badge shows the cron string
+  expect(screen.getByText(/0 3 \* \* \*/)).toBeInTheDocument();
+  fireEvent.click(screen.getByTitle("지금 실행"));
+  expect(onRun).toHaveBeenCalledWith("s1", undefined);
+});
+
+it("shows a slack trigger badge summarizing the filters", () => {
+  render(<AutomationPage automations={[slackJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByText(/slack:/)).toBeInTheDocument();
+  expect(screen.getByText(/#C123/)).toBeInTheDocument();
+  expect(screen.getByText(/"deploy"/)).toBeInTheDocument();
+});
+
+it("shows empty state with no jobs", () => {
+  render(<AutomationPage automations={[]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByText("예약된 작업이 없어요.")).toBeInTheDocument();
+});
+
+// ─── RunAutomationDialog tests ───────────────────────────────────────────────
+
+it("automation with {{message}} in prompt → click play → shows {{message}} field only, not {{channel}}; submit fires onRun(id, vars)", () => {
+  const onRun = vi.fn(() => Promise.resolve());
+  render(
+    <AutomationPage
+      automations={[mkMaster("a1", "리뷰 {{message}}")]}
+      onRun={onRun}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  // click play button
+  fireEvent.click(screen.getByTitle("지금 실행"));
+  // dialog shows the message field
+  expect(screen.getByText("{{message}}")).toBeInTheDocument();
+  // channel is not referenced → should NOT appear
+  expect(screen.queryByText("{{channel}}")).toBeNull();
+  // fill the textarea
+  const textarea = screen.getByRole("textbox");
+  fireEvent.change(textarea, { target: { value: "please review" } });
+  // click the "실행" button inside the dialog (runAutomationDialog.run = "실행" in ko)
+  // getAllByRole("button") returns all buttons; the dialog "실행" button text is exactly "실행" (not "지금 실행")
+  const runBtn = screen.getAllByRole("button").find((b) => b.textContent === "실행")!;
+  fireEvent.click(runBtn);
+  expect(onRun).toHaveBeenCalledWith("a1", { message: "please review" });
+});
+
+it("automation with no template vars → click play → no dialog, immediate onRun(id)", () => {
+  const onRun = vi.fn(() => Promise.resolve());
+  render(
+    <AutomationPage
+      automations={[mkMaster("a2", "check the build")]}
+      onRun={onRun}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByTitle("지금 실행"));
+  // No dialog heading
+  expect(screen.queryByText("임의 실행")).toBeNull();
+  expect(onRun).toHaveBeenCalledWith("a2", undefined);
+  expect(onRun).not.toHaveBeenCalledWith("a2", expect.anything());
+});
+
+// ─── corrupt badge tests ───────────────────────────────────────────────────────
+
+const corruptJob: Automation = {
+  id: "c1",
+  name: "broken-job",
+  enabled: false,
+  corrupt: true,
+  trigger: { kind: "cron", cron: "0 * * * *", timezone: "UTC" },
+  action: { kind: "master", prompt: "", cwd: "/w", sessionMode: "reuse" },
+  model: null,
+  effort: null,
+  permissionMode: null,
+  maxTurns: null,
+  lastRunAt: null,
+  lastStatus: null,
+  lastError: null,
+  nextRunAt: null,
+  createdAt: "t",
+};
+
+it("corrupt automation row shows corrupt badge (automationPage.corrupt fallback text)", () => {
+  render(
+    <AutomationPage
+      automations={[corruptJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  // ko fallback: "설정 손상 — 삭제/재저장"
+  expect(screen.getByText("설정 손상 — 삭제/재저장")).toBeInTheDocument();
+});
+
+it("normal (non-corrupt) automation row does NOT show corrupt badge", () => {
+  render(
+    <AutomationPage
+      automations={[cronJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  expect(screen.queryByText("설정 손상 — 삭제/재저장")).toBeNull();
+});
+
+it("corrupt row still has a delete button that fires onDelete", () => {
+  const onDelete = vi.fn();
+  render(
+    <AutomationPage
+      automations={[corruptJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={onDelete}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByTitle("삭제"));
+  expect(onDelete).toHaveBeenCalledWith("c1");
+});

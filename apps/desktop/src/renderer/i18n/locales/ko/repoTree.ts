@@ -1,0 +1,21 @@
+import type { Catalog } from "../../types.js";
+export default {
+  "repoTree.unreadTitle": "새 변화 — 아직 안 봄",
+  "repoTree.addWorker": "워커 추가",
+  "repoTree.removeRepo": "레포 삭제",
+  "repoTree.emptyState": "등록된 레포가 없어요 — 아래 ‘새 레포’를 추가하면 거기서 에이전트를 띄울 수 있어요.",
+  "repoTree.uncategorized": "기타 (미등록)",
+  "repoTree.archive": "보관함",
+  "repoTree.newRepo": "새 레포",
+  "repoTree.menuRename": "이름 변경",
+  "repoTree.menuStop": "중단",
+  "repoTree.menuUnarchive": "보관 해제",
+  "repoTree.menuArchive": "보관",
+  "repoTree.menuDelete": "삭제…",
+  "repoTree.deleteWorkerTitle": "워커 삭제",
+  "repoTree.deleteWorkerConfirm": " 를 삭제할까요? git worktree와 브랜치, 미커밋 작업까지 제거되고 되돌릴 수 없어요.",
+  "repoTree.filterPlaceholder": "워커 필터…",
+  "repoTree.onlyActive": "활성",
+  "repoTree.onlyActiveTitle": "실행·대기·안 본 워커만 보기",
+  "repoTree.noMatches": "일치하는 워커가 없어요.",
+} satisfies Catalog;

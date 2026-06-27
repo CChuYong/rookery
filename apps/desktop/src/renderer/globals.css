@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+/* rookery — fleet mission control. Deep ink deck, coral command accent, Geist + Geist Mono. */
+@theme {
+  --color-ink: #0b0d12;
+  --color-surface: #13161d;
+  --color-raised: #191d26;
+  --color-line: #232936;
+  --color-line-soft: #1b2027;
+  --color-fg: #e7e9ee;
+  --color-fg-dim: #aab1c0;
+  --color-muted: #79808f;
+  --color-accent: #f97362;
+  --color-accent-hi: #fb8472;
+  --color-accent-ink: #2a120e;
+
+  --color-run: #f5b544;
+  --color-pr: #46c073;
+  --color-fail: #ef5350;
+  --color-stop: #6b7280;
+  --color-nochg: #5b8def;
+
+  --font-sans: "Geist Variable", "Pretendard Variable", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, "Apple SD Gothic Neo", "Malgun Gothic", monospace;
+
+  --radius: 0.625rem;
+}
+
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--color-ink);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* native-feel scrollbars */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: #2a313d; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: #38414f; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* window drag regions (macOS hidden-inset titlebar) */
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* signature motion: a live agent pulses; a running strip gets a slow sheen */
+@keyframes led-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; } 50% { opacity: .55; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); } }
+.led-live { animation: led-pulse 1.5s ease-in-out infinite; }
+
+/* gentle "alive at rest" breathe (opacity only, slower than led-live) — for brand glyphs like the ✻ front door. */
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.breathe { animation: breathe 3s ease-in-out infinite; }
+
+/* composer inline file-attachment chip (shows only the filename, an uneditable atomic unit). */
+.mention-chip {
+  display: inline-flex; align-items: center; vertical-align: baseline;
+  margin: 0 1px; padding: 0 5px; border-radius: 5px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent-hi); font-size: 12px; line-height: 1.5;
+  white-space: nowrap; user-select: none; cursor: default;
+  animation: chip-in .16s ease-out; /* one-shot entrance when the attachment chip is inserted */
+}
+@keyframes chip-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+.mention-chip::before { content: "@"; opacity: 0.55; margin-right: 1px; }
+
+/* composer markdown shortcuts: line-leading bullet (• marker, an uneditable atomic unit) + inline `code`. **bold** is native <strong>. */
+.md-bullet { user-select: none; cursor: default; color: var(--color-muted); }
+.md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  padding: 0 4px; border-radius: 4px;
+  background: var(--color-raised); color: var(--color-fg-dim);
+}
+
+@keyframes strip-sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(220%); } }
+.sheen::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-run) 16%, transparent), transparent);
+  width: 45%; animation: strip-sheen 2.4s ease-in-out infinite;
+}
+
+/* signature: streaming caret — terminal-style crisp blink (replaces the stock fade pulse). */
+@keyframes caret-blink { 0%, 45% { opacity: 1; } 50%, 95% { opacity: .15; } }
+.caret-live { animation: caret-blink 1.05s steps(1, end) infinite; }
+
+/* markdown while streaming: render live, but append an inline blinking caret at the end of the last block. */
+.md-streaming > *:last-child::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--color-accent);
+  animation: caret-blink 1.05s steps(1, end) infinite;
+}
+
+/* only newly added words (.tok-new) gently rise and fade-in. Old words (.tok) stay put → no flicker even on remount. */
+@keyframes tok-fade { from { opacity: 0; transform: translateY(1.5px); } to { opacity: 1; transform: none; } }
+.md-streaming .tok-new { animation: tok-fade 0.26s ease-out both; }
+
+/* ───────────────────────── transition motion primitives (transition motion) ─────────────────────────
+   Extend the signature vocabulary (tok-fade's 'rise', led-pulse, sheen) beyond steady-state to transitions as well.
+   All transform/opacity/filter only (60fps), enter=ease-out / exit=ease-in, confirmation is single-shot (no looping).
+   ⚠️ Every new keyframe must be registered in the @media (prefers-reduced-motion) block below — it isn't covered automatically. */
+
+/* rise-in — the all-purpose enter (same direction as tok-fade). Pages/segments/list rows/popups unified into one gesture. */
+@keyframes rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.rise-in { animation: rise-in .18s ease-out both; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.fade-in { animation: fade-in .16s ease-out both; }
+
+/* status-confirm — make the in-progress→done beat readable on a persistent node (falling-edge 1-shot). Color only (no hue change). */
+@keyframes dot-settle { 0% { transform: scale(1); } 45% { transform: scale(1.3); } 100% { transform: scale(1); } }
+.dot-settle { animation: dot-settle .22s ease-out; }
+@keyframes status-flash { 0% { filter: brightness(1.7); } 100% { filter: brightness(1); } }
+.status-flash { animation: status-flash .2s ease-out both; }
+
+/* dot-pop / badge-pop — turn a quiet boolean flip (worker done·unread·dirty) into a peripheral-vision signal (1-shot, distinct from led-pulse). */
+@keyframes dot-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+.dot-pop { animation: dot-pop .14s ease-out both; }
+@keyframes badge-pop { 0% { opacity: 0; transform: scale(0); } 70% { transform: scale(1.15); } 100% { opacity: 1; transform: scale(1); } }
+.badge-pop { animation: badge-pop .22s ease-out both; }
+
+/* overlay-motion + dialog/menu — 'the surface floats forward then recedes'. Shared by Radix [data-state]/direct application (Phase 3). */
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlay-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(4px) scale(.97); } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.96) translateY(4px); } to { opacity: 1; transform: none; } }
+.pop-in { animation: pop-in .12s ease-out both; }
+@keyframes menu-pop { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: none; } }
+.menu-pop { animation: menu-pop .12s ease-out both; }
+
+/* Collapse (grid-rows 0fr↔1fr) — height-safe expand. Being a transition, it's transition:none under reduced-motion. */
+.collapse-anim { transition-property: grid-template-rows, opacity; }
+
+/* keyboard focus visibility (quality floor): a coral outline on raw interactive elements. Button(cva) uses focus-visible:outline-none
+   so it only shows its own ring, avoiding a double indicator. Using the signature color (coral) on focus reinforces identity too. */
+:where(button, a[href], [role="button"], select, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+/* i18n typography — Hangul has no letter-case and reads broken/loose under Latin letter-spacing. For Korean, neutralize
+   uppercase+tracking on the small mono "eyebrow" micro-labels (opt-in via .eyebrow). Latin locales keep the signature look.
+   Code badges (status tag, origin) are intentionally NOT marked, so their uppercase abbreviations stay. (<html lang> is set
+   from the active locale in i18n/provider.) Specificity 0,2,0 > the Tailwind utilities it overrides. */
+:lang(ko) .eyebrow { text-transform: none; letter-spacing: normal; }
+
+@media (prefers-reduced-motion: reduce) {
+  .led-live, .sheen::after, .caret-live, .md-streaming > *:last-child::after, .md-streaming .tok-new, .breathe { animation: none; }
+  .animate-bounce, .animate-pulse, .animate-spin { animation: none !important; }
+  /* transition motion primitives: degrade exactly to today's instant behavior (neutralize keyframes + transitions off). */
+  .rise-in, .fade-in, .dot-settle, .status-flash, .dot-pop, .badge-pop, .pop-in, .menu-pop, .mention-chip { animation: none; }
+  .collapse-anim, .usage-fill { transition: none; }
+}
