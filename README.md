@@ -1,6 +1,26 @@
 # rookery
 
-An orchestrator agent with memory. A resident daemon hosts master agent sessions built on the Claude Agent SDK; the master spawns, controls, and observes a **worker fleet isolated per git worktree** of registered repos. The **CLI, the Electron desktop app, and Slack are all thin clients** that attach to the daemon over WebSocket — the **daemon survives client disconnects** and does not kill sessions or workers.
+rookery is an **open-source agentic development environment** for running a
+resident AI development orchestrator with memory, repo awareness, and a
+worktree-isolated worker fleet.
+
+A long-lived daemon hosts master agent sessions built on the Claude Agent SDK.
+The master can register repositories, remember project context, spawn coding
+workers in isolated Git worktrees, inspect their diffs, and continue coordinating
+work even when clients disconnect. The CLI, Electron desktop app, and Slack bot
+are thin clients over WebSocket; the daemon owns the sessions, workers, memory,
+automation rules, and local state.
+
+## What you can do
+
+- Coordinate multiple coding workers from one master agent conversation.
+- Keep every worker isolated in its own Git worktree and branch.
+- Register multiple local repos with descriptions so the master can route tasks.
+- Review worker status, transcripts, diffs, checkpoints, and costs from the CLI
+  or desktop app.
+- Continue sessions from CLI, Electron, or Slack without killing background work.
+- Trigger unattended master or worker runs from cron schedules and Slack events.
+- Spawn workers from GitHub issues or Linear tickets in the desktop app.
 
 ## Requirements
 - Node.js >= 22
@@ -31,7 +51,7 @@ npm run typecheck  # tsc --noEmit
 ```
 
 ## Architecture
-- `src/core/` — transport-agnostic engine (SessionManager / MasterAgent / Orchestrator / Worker)
+- `src/core/` — transport-agnostic agentic development engine (SessionManager / MasterAgent / FleetOrchestrator / Worker)
 - `src/daemon/` — http+ws server, connection handler, single-instance lock
 - `src/protocol/` — transport-agnostic message schema (shared by the CLI, Electron app, and Slack adapter)
 - `src/persistence/` — SQLite connection/migrations/repository
@@ -49,7 +69,8 @@ Workers form a fleet that **codes in parallel, isolated per git worktree of a re
 
 ## Desktop app (macOS)
 
-An Electron mission control. The app auto-starts the daemon with an external Node and attaches over WS.
+An Electron mission control for the agentic development environment. The app
+auto-starts the daemon with an external Node and attaches over WS.
 
 **It must run with Node 22** (better-sqlite3 native ABI). The `dev` script passes the Node path it was launched with to the daemon spawn via `ROOKERY_NODE`, so you just need to run it from a Node 22 shell.
 
