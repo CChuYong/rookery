@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+apps/desktop/out
+apps/desktop/dist
+*.tsbuildinfo
+
+# Bundled resources (fetched at build time)
+apps/desktop/resources/node
+apps/desktop/resources/daemon-deps
+
+# Caches / coverage
+coverage/
+.vite/
+.eslintcache
+
+# Env (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# Local data / logs
+*.log
+*.sqlite
+*.sqlite-*
+
+# Agent / SDD scratch (regenerated per run)
+.superpowers/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*~

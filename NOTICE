@@ -1,0 +1,64 @@
+rookery
+Copyright (c) 2026 CChuYonng
+
+This project's own source code is licensed under the Apache License 2.0 (see LICENSE).
+The Apache-2.0 license applies ONLY to this project's code — not to the third-party
+software that rookery depends on or bundles, which is described below.
+
+================================================================================
+Anthropic Claude Agent SDK  (PROPRIETARY — not Apache-2.0)
+================================================================================
+rookery is built on the Anthropic Claude Agent SDK
+(`@anthropic-ai/claude-agent-sdk` and its platform binaries). It is:
+
+    © Anthropic PBC. All rights reserved.
+
+It is NOT open-source software. Your use of it is governed by Anthropic's legal
+agreements, NOT by this project's Apache-2.0 license:
+
+  - Commercial Terms:   https://www.anthropic.com/legal/commercial-terms
+  - Consumer Terms:     https://www.anthropic.com/legal/consumer-terms
+  - Usage Policy:       https://www.anthropic.com/legal/aup
+  - Claude Code legal:  https://code.claude.com/docs/en/legal-and-compliance
+
+Practical consequences for anyone running or distributing rookery:
+
+  1. Bring your own Anthropic credentials. Each user/operator supplies their
+     own authentication. For products and services built on the Agent SDK,
+     Anthropic directs developers to use API KEY authentication (Claude
+     Console, Amazon Bedrock, or Google Vertex) rather than subscription
+     (OAuth) login.
+
+  2. Do not broker or pool credentials. Anthropic does not permit third-party
+     developers to offer Claude.ai login, or to route requests through Free,
+     Pro, or Max plan credentials on behalf of their users. Running rookery as
+     a multi-tenant hosted service that does either is not permitted without
+     Anthropic's approval — contact Anthropic.
+
+  3. Subscription plans assume ordinary, individual usage. rookery's worker
+     fan-out and unattended automation can exceed that; metered API-key
+     authentication is recommended.
+
+  4. Reselling Anthropic's services, building a competing product, or
+     reverse-engineering the SDK is prohibited by Anthropic's terms.
+
+This notice is informational and is not legal advice. If you intend to
+distribute or host rookery for others, review the Anthropic terms above; where
+the boundaries are unclear (e.g. redistribution / SaaS specifics), contact
+Anthropic.
+
+================================================================================
+Other bundled third-party software
+================================================================================
+Binary distributions of the desktop app additionally bundle third-party
+software under its own licenses, including but not limited to:
+
+  - Electron / Chromium ...... MIT, BSD, LGPL, and others
+  - Node.js runtime .......... MIT (bundles OpenSSL and others)
+  - npm dependencies ......... MIT, ISC, BSD, Apache-2.0, 0BSD, (MIT OR WTFPL), …
+  - Geist / Geist Mono fonts . SIL Open Font License 1.1 (OFL-1.1)
+  - SQLite (via better-sqlite3) ... public domain
+
+Each remains under its own license, which applies to the corresponding
+component. A consolidated THIRD-PARTY-LICENSES manifest should accompany binary
+distributions of the desktop app.

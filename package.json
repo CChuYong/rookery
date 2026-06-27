@@ -1,0 +1,46 @@
+{
+  "name": "rookery",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "rookery": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.181",
+    "@slack/bolt": "^4.7.3",
+    "@slack/web-api": "^7.17.0",
+    "better-sqlite3": "^12.11.1",
+    "croner": "^10.0.1",
+    "ws": "^8.21.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.6.0",
+    "vitest": "^3"
+  }
+}
