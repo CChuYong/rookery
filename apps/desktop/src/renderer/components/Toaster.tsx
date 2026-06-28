@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import { useToastStore } from "../store/toasts.js";
 import type { Toast, ToastKind } from "../store/toasts.js";
@@ -19,7 +19,11 @@ const TTL: Record<ToastKind, number> = { error: 7000, success: 4500, info: 4500 
 function ToastRow({ toast }: { toast: Toast }): JSX.Element {
   const t = useT();
   const dismiss = useToastStore((s) => s.dismiss);
-  const { closing, dismiss: animateOut } = useDismissTransition(() => dismiss(toast.id), 140);
+  // Stable onClose (dismiss is a stable store fn, toast.id is fixed) → animateOut keeps a stable identity, so the
+  // auto-expire effect below doesn't re-run (clear+reset the TTL timer) on every unrelated re-render — e.g. when a
+  // sibling toast is pushed and the whole stack re-renders. Without this the timer never fires under activity.
+  const onClose = useCallback(() => dismiss(toast.id), [dismiss, toast.id]);
+  const { closing, dismiss: animateOut } = useDismissTransition(onClose, 140);
   const [hovering, setHovering] = useState(false);
   // Auto-expire, paused while hovered (the effect re-arms a fresh TTL whenever hover ends). No timer while hovering or closing.
   useEffect(() => {
