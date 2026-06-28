@@ -11,7 +11,7 @@ import { TerminalManager } from "./terminal-manager.js";
 import type { PtyLike } from "./terminal-manager.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { resolveWorkRoot } from "./resolve-root.js";
-import { createAppLauncher, icnsFileName } from "./app-launcher.js";
+import { createAppLauncher, createFileManagerLauncher, icnsFileName } from "./app-launcher.js";
 import { collectResources, parsePsRows } from "./resource-monitor.js";
 import type { PsRow, ProcessMetricLike } from "./resource-monitor.js";
 import { readFile as readFileP, writeFile as writeFileP, readdir as readdirP, stat as statP, mkdir as mkdirP, rename as renameP } from "node:fs/promises";
@@ -278,7 +278,11 @@ async function appIconDataUrl(appPath: string): Promise<string | null> {
 }
 
 // "Open the current cwd in another app" — detect installed IDEs/Finder/terminals, then open the directory via `open -a` (macOS).
-const appLauncher = createAppLauncher({
+// macOS: full IDE/Finder/terminal catalog. Other platforms: a safe "open in file manager" via shell.openPath
+// (the full Windows/Linux editor+terminal detection port is deferred — see docs/superpowers/plans).
+const appLauncher = process.platform !== "darwin"
+  ? createFileManagerLauncher((dir) => shell.openPath(dir))
+  : createAppLauncher({
   exists: fs.existsSync,
   // Spotlight fallback: if not at a standard path, find the actual install location by bundle ID (~/Applications, etc.).
   mdfind: (bundleId) => new Promise((res) => {

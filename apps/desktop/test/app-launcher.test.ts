@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createAppLauncher, resolveAppPath, icnsFileName, APP_CATALOG, type CatalogEntry } from "../src/main/app-launcher.js";
+import { createAppLauncher, createFileManagerLauncher, resolveAppPath, icnsFileName, APP_CATALOG, type CatalogEntry } from "../src/main/app-launcher.js";
 
 const catalog: CatalogEntry[] = [
   { id: "finder", name: "Finder", kind: "finder", paths: ["/System/Library/CoreServices/Finder.app"], bundleId: "com.apple.finder" },
@@ -71,6 +71,22 @@ describe("createAppLauncher.open", () => {
     const launcher = createAppLauncher({ exists: () => false, open }, catalog);
     expect((await launcher.open("cursor", "/x")).ok).toBe(false);
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe("createFileManagerLauncher", () => {
+  it("lists a single file-manager entry", async () => {
+    const launcher = createFileManagerLauncher(async () => "");
+    expect(await launcher.list()).toEqual([{ id: "files", name: "File manager", kind: "finder", icon: null }]);
+  });
+  it("maps shell.openPath success ('') and failure (error string)", async () => {
+    expect(await createFileManagerLauncher(async () => "").open("files", "/x")).toEqual({ ok: true });
+    expect(await createFileManagerLauncher(async () => "no such dir").open("files", "/x")).toEqual({ ok: false, error: "no such dir" });
+  });
+  it("forwards the dir to openPath", async () => {
+    const openPath = vi.fn(async () => "");
+    await createFileManagerLauncher(openPath).open("files", "/code/proj");
+    expect(openPath).toHaveBeenCalledWith("/code/proj");
   });
 });
 

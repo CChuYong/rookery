@@ -67,6 +67,24 @@ export async function resolveAppPath(
   return null;
 }
 
+// Cross-platform fallback launcher (non-macOS, where the .app/open-a/mdfind/sips catalog above doesn't apply):
+// a single "File manager" entry that reveals the directory via Electron shell.openPath (Explorer / file manager).
+// openPath resolves to "" on success, or an error string. The editor/terminal catalog port is intentionally deferred.
+export function createFileManagerLauncher(openPath: (dir: string) => Promise<string>): {
+  list(): Promise<DetectedApp[]>;
+  open(id: string, dir: string): Promise<{ ok: boolean; error?: string }>;
+} {
+  return {
+    async list() {
+      return [{ id: "files", name: "File manager", kind: "finder", icon: null }];
+    },
+    async open(_id, dir) {
+      const err = await openPath(dir);
+      return err ? { ok: false, error: err } : { ok: true };
+    },
+  };
+}
+
 export function createAppLauncher(deps: LauncherDeps, catalog: CatalogEntry[] = APP_CATALOG): {
   list(): Promise<DetectedApp[]>;
   open(id: string, dir: string): Promise<{ ok: boolean; error?: string }>;
