@@ -9,10 +9,22 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - run: npm ci
-      - name: after npm ci
-        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo "PRESENT" || echo "GONE"
-      - name: run stage-daemon-deps
-        run: node apps/desktop/scripts/stage-daemon-deps.mjs
-      - name: after stage-daemon-deps
-        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo "PRESENT" || echo "GONE"
+      - name: chk after npm ci
+        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo PRESENT || echo GONE
+      - name: prep (gen-licenses + fetch-node + stage-deps)
+        run: |
+          node scripts/gen-third-party-licenses.mjs
+          node apps/desktop/scripts/fetch-node.mjs
+          node apps/desktop/scripts/stage-daemon-deps.mjs
+      - name: chk after prep
+        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo PRESENT || echo GONE
+      - name: electron-vite build
+        run: npm run build && npm -w apps/desktop run build
+      - name: chk after vite build
+        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo PRESENT || echo GONE
+      - name: electron-builder
+        run: cd apps/desktop && npx electron-builder --linux --publish never
