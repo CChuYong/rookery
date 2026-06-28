@@ -53,7 +53,8 @@ if (got !== want) throw new Error(`[fetch-node] checksum mismatch for ${tarName}
 console.log(`[fetch-node] SHASUMS256 verified (${want.slice(0, 16)}…)`);
 
 // tar (bsdtar) extracts both .tar.gz and .zip; Windows 10+ ships it. Binary is at <dir>/node.exe (win) or <dir>/bin/node.
-execFileSync("tar", [isWin ? "-xf" : "-xzf", tarPath, "-C", work], { stdio: "inherit" });
+// Run with cwd=work and a relative filename so tar doesn't read "C:\…" as a remote host:path (bsdtar lacks --force-local).
+execFileSync("tar", [isWin ? "-xf" : "-xzf", tarName], { stdio: "inherit", cwd: work });
 const extracted = isWin ? join(work, dirName, "node.exe") : join(work, dirName, "bin", "node");
 if (!existsSync(extracted)) throw new Error(`[fetch-node] extracted binary missing at ${extracted}`);
 
