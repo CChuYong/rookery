@@ -22,9 +22,10 @@ automation rules, and local state.
 - Trigger unattended master or worker runs from cron schedules and Slack events.
 - Spawn workers from GitHub issues or Linear tickets in the desktop app.
 
-## Install (macOS)
+## Install
 
-**[⬇ Download for Apple Silicon (`.dmg`)](https://github.com/CChuYong/rookery/releases/latest/download/rookery-arm64.dmg)**
+- **macOS (Apple Silicon):** [⬇ `.dmg`](https://github.com/CChuYong/rookery/releases/latest/download/rookery-arm64.dmg)
+- **Linux (x86_64):** [⬇ `.AppImage`](https://github.com/CChuYong/rookery/releases/latest/download/rookery-x86_64.AppImage)
 
 ## Requirements
 - Node.js >= 22

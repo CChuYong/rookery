@@ -1,7 +1,8 @@
 name: Release
 
-# On a tag (v*) push, build·sign·notarize on macOS (arm64) and upload to a GitHub Release.
-# electron-updater reads this Release's latest-mac.yml + zip to auto-update.
+# On a tag (v*) push: build per-platform on native runners, then publish to a GitHub Release.
+# electron-updater reads the Release's latest-{mac,linux}.yml + artifacts to auto-update.
+# workflow_dispatch runs the builds only (no publish) — useful to validate a build without releasing.
 on:
   push:
     tags: ["v*"]
@@ -11,69 +12,103 @@ permissions:
   contents: write # action-gh-release creates/uploads the Release (uses GITHUB_TOKEN)
 
 jobs:
-  release-mac:
-    runs-on: macos-14 # Apple Silicon (arm64) runner — matches the single arm64 distribution
+  gate:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22 # better-sqlite3 ABI 127 + engines.node >=22
+          node-version: 22
           cache: npm
-
-      # node-gyp (@electron/rebuild's node-pty, better-sqlite3 source fallback) needs distutils,
-      # which the macos-14 runner's default Python 3.12 lacks (removed in 3.12). Pin 3.11 to match local.
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Gate (typecheck + test)
+      - run: npm ci
+      - name: typecheck + test
         run: |
           npm run typecheck && npm test
           npm -w apps/desktop run typecheck && npm -w apps/desktop run test
 
-      # Tag is the single source of truth: derive the version from the vX.Y.Z tag and stamp it into
-      # root + desktop package.json (prevents drift). Skipped on workflow_dispatch (no tag) → uses current package.json.
+  build-mac:
+    needs: gate
+    runs-on: macos-14 # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # node-gyp (@electron/rebuild node-pty, better-sqlite3 source fallback) needs distutils,
+      # absent from the runner's default Python 3.12 (removed in 3.12). Pin 3.11.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci
+      # Tag is the single source of truth for the version (skipped on workflow_dispatch).
       - name: Stamp version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           V="${GITHUB_REF_NAME#v}"
-          echo "Stamping version $V from tag $GITHUB_REF_NAME"
           npm version "$V" --no-git-tag-version --allow-same-version
           npm version "$V" --no-git-tag-version --allow-same-version -w apps/desktop
-
       - name: Prepare Apple API key (.p8)
         run: echo "${{ secrets.APPLE_API_KEY_BASE64 }}" | base64 --decode > "${{ runner.temp }}/AuthKey.p8"
-
       - name: Build · sign · notarize · staple
-        run: |
-          npm run build
-          npm -w apps/desktop run build:mac
+        run: npm run build && npm -w apps/desktop run build:mac
         env:
-          # Code signing: secret holding the base64-encoded Developer ID Application .p12. electron-builder imports it into a temp keychain.
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Notarization: App Store Connect API key (.p8 written to a file in the step above).
           APPLE_API_KEY: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-
-      # Version-less stable filename copy → always fetch the latest via /releases/latest/download/rookery-arm64.dmg.
-      # cp the stapled dmg (the notarization ticket is embedded in the file, so the copy stays valid). The *.dmg glob uploads both.
-      - name: Stable-named dmg copy (constant download URL)
+      - name: Stable-named dmg (constant download URL)
         run: cp apps/desktop/dist/Rookery-*-arm64.dmg apps/desktop/dist/rookery-arm64.dmg
-
-      - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
         with:
-          # Upload the fully stapled artifacts (electron-builder --publish never, so upload happens only here).
-          # latest-mac.yml + zip are the electron-updater channel; the dmg is for human download.
-          files: |
+          name: mac
+          path: |
             apps/desktop/dist/*.dmg
             apps/desktop/dist/*.zip
             apps/desktop/dist/*.blockmap
             apps/desktop/dist/latest-mac.yml
+
+  build-linux:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # node-gyp for @electron/rebuild (node-pty) + better-sqlite3 source fallback
+      - run: npm ci
+      - name: Stamp version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          npm version "$V" --no-git-tag-version --allow-same-version
+          npm version "$V" --no-git-tag-version --allow-same-version -w apps/desktop
+      - name: Build (AppImage)
+        run: npm run build && npm -w apps/desktop run build:linux
+      - name: Stable-named AppImage (constant download URL)
+        run: cp apps/desktop/dist/Rookery-*.AppImage apps/desktop/dist/rookery-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/latest-linux.yml
+
+  release:
+    needs: [build-mac, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v') # publish only on a tag, not on workflow_dispatch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts # → artifacts/mac/* and artifacts/linux/*
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
           fail_on_unmatched_files: true
