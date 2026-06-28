@@ -99,8 +99,42 @@ jobs:
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/latest-linux.yml
 
+  build-windows:
+    needs: gate
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash # bash for run steps (Git Bash); npm scripts still run in cmd internally
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # node-gyp for better-sqlite3 source fallback
+      - run: npm ci
+      - name: Stamp version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          npm version "$V" --no-git-tag-version --allow-same-version
+          npm version "$V" --no-git-tag-version --allow-same-version -w apps/desktop
+      - name: Build (NSIS, unsigned)
+        run: npm run build && npm -w apps/desktop run build:win
+      - name: Stable-named installer (constant download URL)
+        run: cp apps/desktop/dist/Rookery*Setup*.exe apps/desktop/dist/rookery-x64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest.yml
+
   release:
-    needs: [build-mac, build-linux]
+    needs: [build-mac, build-linux, build-windows]
     if: startsWith(github.ref, 'refs/tags/v') # publish only on a tag, not on workflow_dispatch
     runs-on: ubuntu-latest
     steps:
