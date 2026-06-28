@@ -42,7 +42,7 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
 }): JSX.Element {
   const t = useT();
   return (
-    <div className="wco-pad drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
+    <div className="drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
       <StatusBadge status={worker.status} />
       <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.workerEyebrow")}</span>
       <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" title={worker.label}>{worker.label}</span>
@@ -73,7 +73,7 @@ export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPag
 }): JSX.Element {
   const t = useT();
   return (
-    <div className="wco-pad drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
+    <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
       <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.sessionEyebrow")}</span>
       <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" title={name}>{name}</span>
       {readOnly && <span className="shrink-0 rounded border border-nochg/30 bg-nochg/12 px-1.5 py-0.5 font-mono text-[10px] uppercase text-nochg">{t("workspaceHeaders.slackReadOnly")}</span>}

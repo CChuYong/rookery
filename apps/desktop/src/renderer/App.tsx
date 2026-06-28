@@ -642,18 +642,19 @@ export function App(): JSX.Element {
         : `s:${s.activeSessionId ?? "none"}`;
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-ink text-fg">
+    <div className="app-top-inset relative flex h-screen overflow-hidden bg-ink text-fg">
       <WindowControls />
       <aside
         style={collapsed ? undefined : { width: leftPanel.width }}
         className={cn(
-          "relative flex shrink-0 flex-col border-r border-line bg-surface pt-10",
+          "sidebar-top relative flex shrink-0 flex-col border-r border-line bg-surface pt-10",
           leftPanel.resizing ? "" : "transition-all duration-200",
           collapsed ? "w-14 items-center gap-2" : "gap-3 px-3 pb-3",
         )}
       >
-        {/* the whole top traffic-light area (pt-10) is a window-move drag region. The traffic lights are native, so they stay clickable on top. */}
-        <div className="drag absolute inset-x-0 top-0 h-10" />
+        {/* the top traffic-light area (pt-10) is a window-move drag region (macOS). On Windows/Linux the dedicated
+            title bar handles this, so .win-chrome hides this strip + shrinks the pt (globals.css). */}
+        <div className="mac-drag-strip drag absolute inset-x-0 top-0 h-10" />
         {!collapsed && (
           <div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
             <button
