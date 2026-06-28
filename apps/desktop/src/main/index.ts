@@ -305,6 +305,7 @@ function createWindow(): void {
     title: "Rookery",
     backgroundColor: "#0f1115",
     titleBarStyle: "hiddenInset",
+    autoHideMenuBar: true, // hide the in-window File|Edit|View bar on Windows/Linux (Alt reveals it); no-op on macOS (global menu)
     webPreferences: { preload: resolve(__dirname, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false },
   });
   if (st.maximized) win.maximize();
