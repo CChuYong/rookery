@@ -17,6 +17,8 @@ const baseSettings: SettingsValues = {
   slackLocale: "ko",
   usageRefreshMs: "120000",
   hasAcceptedDataNotice: "0",
+  onboardingDone: "0",
+  defaultSessionCwd: "",
 };
 
 describe("DataConsentModal", () => {

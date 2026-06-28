@@ -24,6 +24,8 @@ export interface SettingsValues {
   slackLocale: string; // Slack output language ("ko"/"en", settings-only, default "ko")
   usageRefreshMs: string; // usage refresh interval (ms, settings-only). Applied at boot.
   hasAcceptedDataNotice: string; // first-run data-transmission consent flag ("1" accepted, default "0"). Not secret → echoed.
+  onboardingDone: string; // first-run onboarding completed flag ("1" done, default "0"). Not secret → echoed.
+  defaultSessionCwd: string; // default cwd for desktop sessions when none is picked (raw value, "" if unset; resolver falls back to process.cwd()). Not secret → echoed.
 }
 
 // null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey are outside SettingsValues (write-only secrets), so they're separate.
@@ -79,6 +81,21 @@ export class Settings {
   // First-run data-transmission consent flag ("1" accepted). Echoed (not secret).
   hasAcceptedDataNotice(): string {
     return this.repos.getSetting("hasAcceptedDataNotice") ?? "0";
+  }
+
+  // First-run onboarding completed flag ("1" done). Echoed (not secret).
+  onboardingDone(): string {
+    return this.repos.getSetting("onboardingDone") ?? "0";
+  }
+
+  // Default cwd for desktop-started sessions when none is picked. defaultSessionCwd() falls back to process.cwd()
+  // (used by the daemon when creating a session); defaultSessionCwdRaw() is the bare configured value ("" if unset)
+  // so the UI/onboarding can tell whether it has been set, and it's the value echoed via all().
+  defaultSessionCwdRaw(): string {
+    return this.repos.getSetting("defaultSessionCwd")?.trim() ?? "";
+  }
+  defaultSessionCwd(): string {
+    return this.defaultSessionCwdRaw() || process.cwd();
   }
 
   // Slack bot/app tokens (secret). DB first, falling back to env (config) if absent — headless/CI compatible. write-only (not echoed).
@@ -139,6 +156,8 @@ export class Settings {
       slackLocale: this.slackLocale(),
       usageRefreshMs: this.usageRefreshMs(),
       hasAcceptedDataNotice: this.hasAcceptedDataNotice(),
+      onboardingDone: this.onboardingDone(),
+      defaultSessionCwd: this.defaultSessionCwdRaw(),
     };
   }
 

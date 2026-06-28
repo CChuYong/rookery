@@ -124,7 +124,8 @@ export class Connection {
     try {
     switch (msg.type) {
       case "session.create": {
-        const session = this.sessions.create(msg.cwd ?? process.cwd());
+        // No explicit cwd (desktop "New Session" with no folder picked) → the configured default folder, else process.cwd().
+        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()));
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
@@ -378,7 +379,7 @@ export class Connection {
         if (commands.length === 0) {
           // cwd unspecified + not a worker (new session, no repo selected) → fall back to the daemon's default cwd. Since session.create
           // builds the session with process.cwd() when cwd is absent, show the same skills that session will actually have in the / autocomplete.
-          const cwd = msg.cwd ?? (msg.workerId ? this.repos.getWorker(msg.workerId)?.worktree_path ?? undefined : process.cwd());
+          const cwd = msg.cwd ?? (msg.workerId ? this.repos.getWorker(msg.workerId)?.worktree_path ?? undefined : (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()));
           if (cwd && this.commands) commands = await this.commands.forCwd(cwd);
         }
         this.reply({ type: "commands.result", reqId: msg.reqId, commands });

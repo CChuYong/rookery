@@ -21,6 +21,7 @@ export function NewSessionPage(p: {
   onDropFiles?: (files: File[]) => string[];
   authStatus?: AuthStatus | null; // first-run guard: when method === "none" the SDK can't run, so warn before the user sends
   onOpenSettings?: () => void;
+  defaultFolder?: string; // configured default session cwd (settings.defaultSessionCwd) — shown when no folder is picked
 }): JSX.Element {
   const t = useT();
   const [cwd, setCwd] = useState("");
@@ -39,11 +40,13 @@ export function NewSessionPage(p: {
   const start = (prompt: string): void => p.onStart({ cwd: cwd.trim() || undefined, prompt: prompt.trim() || undefined, model, effort });
   const pick = async (): Promise<void> => { const dir = await window.rookery.pickDirectory(); if (dir) setCwd(dir); };
   const browseDir = p.browseDir ? (dir: string) => p.browseDir!(dir, cwd || undefined) : undefined;
-  const folderName = cwd ? (cwd.split("/").filter(Boolean).pop() ?? cwd) : t("newSessionPage.defaultFolder");
+  // basename that handles both POSIX and Windows separators (the configured default may be a Windows path).
+  const baseName = (path: string): string => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  const folderName = cwd ? baseName(cwd) : (p.defaultFolder ? baseName(p.defaultFolder) : t("newSessionPage.defaultFolder"));
 
   // Working-folder picker inserted at the left of the composer's control row (on the same line as the model/effort and send button).
   const folderPicker = (
-    <button onClick={() => void pick()} title={cwd || t("newSessionPage.daemonDefaultFolder")} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors hover:bg-raised hover:text-fg">
+    <button onClick={() => void pick()} title={cwd || p.defaultFolder || t("newSessionPage.daemonDefaultFolder")} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors hover:bg-raised hover:text-fg">
       <Folder size={12} className="shrink-0" /> <span className="truncate">{folderName}</span>
     </button>
   );

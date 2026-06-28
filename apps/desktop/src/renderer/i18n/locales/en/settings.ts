@@ -78,4 +78,9 @@ export default {
   "settings.updRestart": "Restart to install",
   "settings.updError": "Update check failed",
   "settings.updDev": "Dev mode — auto-update disabled",
+  "settings.defaultFolder": "Default work folder",
+  "settings.defaultFolderDesc": "The folder used when you start a session without picking one in New Session.",
+  "settings.defaultFolderLabel": "Folder path",
+  "settings.defaultFolderHint": "Leave empty to use the daemon's run directory (process.cwd).",
+  "settings.defaultFolderPlaceholder": "e.g. ~/projects",
 } satisfies Catalog;

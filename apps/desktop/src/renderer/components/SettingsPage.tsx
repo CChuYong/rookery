@@ -47,6 +47,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     const dir = await window.rookery.pickDirectory();
     if (dir) setF((cur) => ({ ...cur, slackCwd: dir }));
   };
+  const pickDefaultCwd = async (): Promise<void> => {
+    const dir = await window.rookery.pickDirectory();
+    if (dir) setF((cur) => ({ ...cur, defaultSessionCwd: dir }));
+  };
 
   const tabs: Array<{ key: Tab; label: string }> = [
     { key: "general", label: t("settings.tabGeneral") },
@@ -106,6 +110,19 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.botNameDesc")}</p>
                   <div className="mt-3">
                     <Input value={f.masterName ?? ""} placeholder="rookery" maxLength={64} onChange={(e) => setF({ ...f, masterName: e.target.value })} />
+                  </div>
+                </section>
+
+                <section className="mt-8">
+                  <h2 className="text-[13px] font-semibold">{t("settings.defaultFolder")}</h2>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.defaultFolderDesc")}</p>
+                  <div className="mt-3">
+                    <Field label={t("settings.defaultFolderLabel")} hint={t("settings.defaultFolderHint")}>
+                      <div className="flex gap-2">
+                        <Input className="flex-1" value={f.defaultSessionCwd ?? ""} placeholder={t("settings.defaultFolderPlaceholder")} onChange={(e) => setF({ ...f, defaultSessionCwd: e.target.value })} />
+                        <Button variant="outline" size="sm" onClick={pickDefaultCwd}>{t("settings.browse")}</Button>
+                      </div>
+                    </Field>
                   </div>
                 </section>
 

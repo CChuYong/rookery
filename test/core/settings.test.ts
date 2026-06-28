@@ -22,6 +22,8 @@ describe("Settings", () => {
       slackRefusalMessage: "Sorry, you're not authorized to use this bot.",
       usageRefreshMs: "120000",
       hasAcceptedDataNotice: "0",
+      onboardingDone: "0",
+      defaultSessionCwd: "",
       slackLocale: "ko",
     });
   });
@@ -158,6 +160,23 @@ describe("Settings", () => {
     s.apply({ hasAcceptedDataNotice: "1" });
     expect(s.hasAcceptedDataNotice()).toBe("1");
     expect(s.all().hasAcceptedDataNotice).toBe("1"); // echoed
+  });
+
+  it("onboardingDone: default 0, echoed in all()", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.onboardingDone()).toBe("0");
+    s.apply({ onboardingDone: "1" });
+    expect(s.all().onboardingDone).toBe("1");
+  });
+
+  it("defaultSessionCwd: raw is '' when unset (resolver falls back to process.cwd()), echoes the raw set value", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.defaultSessionCwdRaw()).toBe(""); // unset → empty (so the UI can tell)
+    expect(s.defaultSessionCwd()).toBe(process.cwd()); // resolver fallback
+    expect(s.all().defaultSessionCwd).toBe(""); // all() echoes the raw value
+    s.apply({ defaultSessionCwd: "/work/proj" });
+    expect(s.defaultSessionCwd()).toBe("/work/proj");
+    expect(s.all().defaultSessionCwd).toBe("/work/proj");
   });
 
   it("applyApiKeyToEnv sets process.env when a key exists, leaves it otherwise", () => {

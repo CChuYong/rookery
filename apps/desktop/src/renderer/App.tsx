@@ -19,6 +19,9 @@ import { RepoTree } from "./views/RepoTree.js";
 import { RepoModal } from "./components/RepoModal.js";
 import { WorkerSpawnModal } from "./components/WorkerSpawnModal.js";
 import { DataConsentModal } from "./components/DataConsentModal.js";
+import { OnboardingModal } from "./components/OnboardingModal.js";
+import { GettingStartedChecklist } from "./components/GettingStartedChecklist.js";
+import { usePrefsStore } from "./store/prefs.js";
 import type { Checkpoint } from "./components/CheckpointMenu.js";
 import { NewSessionPage } from "./components/NewSessionPage.js";
 import type { SlashCommand } from "./views/Conversation.js";
@@ -161,6 +164,8 @@ export function App(): JSX.Element {
   // Location is a single store model — overlay/showRepos/activeSessionId/activeWorkerId together form one Location.
   // Transitions go through navigate; back/forward through goBack/goForward (browser-style history). A new page = add an Overlay member to the store.
   const { overlay, showRepos, navigate, goBack, goForward } = s;
+  const gsDismissed = usePrefsStore((st) => st.gettingStartedDismissed);
+  const setGsDismissed = usePrefsStore((st) => st.setGettingStartedDismissed);
   // i18n: closures like connect read the latest locale via tRef (same idiom as notifyRef).
   const t = useT();
   const tRef = useRef(t);
@@ -807,7 +812,7 @@ export function App(): JSX.Element {
             onSaveAnthropicKey={(key) => { void client?.request({ type: "settings.set", settings: { anthropicApiKey: key } }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} />
+          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -914,7 +919,7 @@ export function App(): JSX.Element {
           )
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} />
+          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} />
         ) : (
           <>
             <SessionHeader
@@ -990,6 +995,34 @@ export function App(): JSX.Element {
             .catch(() => {});
         }}
       />
+      {/* Onboarding (after consent, before all-set): welcome+concept modal, then a non-blocking Getting Started card. */}
+      {s.daemon === "up" && s.settings && s.settings.hasAcceptedDataNotice === "1" && s.settings.onboardingDone !== "1" && (
+        <OnboardingModal
+          onFinish={() => {
+            void client?.request({ type: "settings.set", settings: { onboardingDone: "1" } })
+              .then(() => useStore.getState().setSettings({ ...useStore.getState().settings!, onboardingDone: "1" }))
+              .catch(() => {});
+          }}
+        />
+      )}
+      {(() => {
+        if (s.daemon !== "up" || !s.settings || s.settings.onboardingDone !== "1" || gsDismissed) return null;
+        const authDone = !!s.authStatus && s.authStatus.method !== "none";
+        const folderDone = !!s.settings.defaultSessionCwd;
+        const sessionDone = s.sessions.length > 0;
+        if (authDone && folderDone && sessionDone) return null; // all set → no nag
+        return (
+          <GettingStartedChecklist
+            authDone={authDone}
+            folderDone={folderDone}
+            sessionDone={sessionDone}
+            onAuth={() => navigate({ overlay: "settings" })}
+            onFolder={() => { void window.rookery.pickDirectory().then((dir) => { if (dir) void client?.request({ type: "settings.set", settings: { defaultSessionCwd: dir } }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => {}); }); }}
+            onSession={() => create()}
+            onDismiss={() => setGsDismissed(true)}
+          />
+        );
+      })()}
     </div>
   );
 }

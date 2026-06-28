@@ -78,4 +78,9 @@ export default {
   "settings.updRestart": "재시작하여 설치",
   "settings.updError": "업데이트 확인 실패",
   "settings.updDev": "개발 모드 — 자동업데이트 비활성",
+  "settings.defaultFolder": "기본 작업 폴더",
+  "settings.defaultFolderDesc": "New Session에서 폴더를 고르지 않고 세션을 시작할 때 사용할 기본 폴더예요.",
+  "settings.defaultFolderLabel": "폴더 경로",
+  "settings.defaultFolderHint": "비워두면 데몬의 실행 경로(process.cwd)를 사용합니다.",
+  "settings.defaultFolderPlaceholder": "예: ~/projects",
 } satisfies Catalog;

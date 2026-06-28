@@ -1,0 +1,17 @@
+import type { Catalog } from "../../types.js";
+export default {
+  "onboarding.welcomeTitle": "rookery에 오신 걸 환영해요",
+  "onboarding.welcomeBody": "rookery는 기억하는 오케스트레이터 에이전트예요. 당신이 마스터와 대화하면, 마스터가 격리된 작업 공간에서 워커들을 부려 일을 처리합니다.",
+  "onboarding.conceptTitle": "어떻게 동작하나요",
+  "onboarding.conceptBody": "세 가지만 알면 충분해요.",
+  "onboarding.master": "마스터",
+  "onboarding.masterDesc": "당신이 대화하는 오케스트레이터. 작업을 계획하고 워커를 지휘해요.",
+  "onboarding.worker": "워커 fleet",
+  "onboarding.workerDesc": "마스터가 띄우는 일꾼들. 각자 격리된 worktree에서 독립적으로 작업해요.",
+  "onboarding.memory": "메모리",
+  "onboarding.memoryDesc": "대화와 결정을 기억해 다음 작업에 활용해요.",
+  "onboarding.skip": "건너뛰기",
+  "onboarding.back": "이전",
+  "onboarding.next": "다음",
+  "onboarding.getStarted": "시작하기",
+} satisfies Catalog;

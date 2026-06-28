@@ -5,6 +5,8 @@ import type { LocalePref } from "../i18n/types.js";
 interface PrefsState {
   localePref: LocalePref;
   setLocalePref: (p: LocalePref) => void;
+  gettingStartedDismissed: boolean; // renderer-local: the Getting Started card was manually closed
+  setGettingStartedDismissed: (v: boolean) => void;
 }
 
 export const usePrefsStore = create<PrefsState>()(
@@ -12,6 +14,8 @@ export const usePrefsStore = create<PrefsState>()(
     (set) => ({
       localePref: "system",
       setLocalePref: (p) => set({ localePref: p }),
+      gettingStartedDismissed: false,
+      setGettingStartedDismissed: (v) => set({ gettingStartedDismissed: v }),
     }),
     {
       name: "rookery.prefs",
@@ -19,7 +23,7 @@ export const usePrefsStore = create<PrefsState>()(
       // v1 single version — hook for future schema changes (currently a no-op).
       migrate: (persisted) => persisted as PrefsState,
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ localePref: s.localePref }) as PrefsState,
+      partialize: (s) => ({ localePref: s.localePref, gettingStartedDismissed: s.gettingStartedDismissed }) as PrefsState,
     },
   ),
 );
