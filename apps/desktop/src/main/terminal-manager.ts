@@ -50,7 +50,7 @@ export class TerminalManager {
     this.rookeryHome = deps.rookeryHome;
     this.exists = deps.exists ?? fs.existsSync;
     this.homeDir = deps.homeDir ?? homedir();
-    this.shell = deps.defaultShell ?? process.env.SHELL ?? "/bin/zsh";
+    this.shell = deps.defaultShell ?? process.env.SHELL ?? (process.platform === "win32" ? (process.env.ComSpec ?? "powershell.exe") : "/bin/sh");
     this.maxPerSession = deps.maxPerSession ?? 8;
     this.ringLimit = deps.ringLimit ?? 256 * 1024;
     this.idgen = deps.idgen ?? (() => randomUUID());

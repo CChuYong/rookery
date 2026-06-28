@@ -36,6 +36,12 @@ function resolveCcusageCmd(env: NodeJS.ProcessEnv): string[] {
     }
     return override.split(/\s+/);
   }
+  // Windows: bunx is a .cmd shim (not directly execFile-able without a shell); bun.exe is a real executable and
+  // `bun x` is the bunx equivalent → use it so the no-shell execFile in the usage collector resolves.
+  if (process.platform === "win32") {
+    const bunExe = path.join(os.homedir(), ".bun", "bin", "bun.exe");
+    return [fs.existsSync(bunExe) ? bunExe : "bun", "x", "ccusage@latest"];
+  }
   const bunx = path.join(os.homedir(), ".bun", "bin", "bunx");
   return [fs.existsSync(bunx) ? bunx : "bunx", "ccusage@latest"];
 }

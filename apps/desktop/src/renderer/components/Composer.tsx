@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
 import { Send, Paperclip, Square, Loader2 } from "lucide-react";
-import { basename } from "../lib/basename.js";
+import { baseName as basename } from "../lib/path.js";
 import { makeChip } from "../lib/mention-editor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";

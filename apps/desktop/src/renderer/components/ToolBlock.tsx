@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronRight, FileText, Boxes } from "lucide-react";
 import { cn } from "../lib/cn.js";
-import { basename } from "../lib/basename.js";
+import { baseName as basename } from "../lib/path.js";
 import { filePathOf } from "../lib/tool-file.js";
 import { spawnedWorkerId } from "../lib/tool-worker.js";
 import { useJustEnded } from "../lib/useJustEnded.js";

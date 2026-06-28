@@ -73,12 +73,13 @@ export class WorkspaceManager {
     if (!this.d.watchDir || this.treeWatchers.has(root)) return;
     const w = this.d.watchDir(root, (rel) => {
       if (rel === null) return; // Meaningless signal
-      if (/(^|\/)node_modules(\/|$)/.test(rel)) return; // Ignore node_modules
-      if (/(^|\/)\.git(\/|$)/.test(rel)) {
+      const r = rel.replace(/\\/g, "/"); // Windows fs.watch reports backslash-separated paths; normalize so the filters below match
+      if (/(^|\/)node_modules(\/|$)/.test(r)) return; // Ignore node_modules
+      if (/(^|\/)\.git(\/|$)/.test(r)) {
         // Most of .git is noise (objects/logs/lock), but commit/stage/checkout change git state
         // (index/HEAD/refs etc.) → let only these through so the Git panel auto-refreshes even after a commit.
-        const meta = /(^|\/)\.git\/(index|HEAD|ORIG_HEAD|MERGE_HEAD|FETCH_HEAD|packed-refs|refs\/)/.test(rel);
-        if (!meta || /\.lock$/.test(rel)) return;
+        const meta = /(^|\/)\.git\/(index|HEAD|ORIG_HEAD|MERGE_HEAD|FETCH_HEAD|packed-refs|refs\/)/.test(r);
+        if (!meta || /\.lock$/.test(r)) return;
       }
       const prev = this.treeTimers.get(root);
       if (prev) clearTimeout(prev);

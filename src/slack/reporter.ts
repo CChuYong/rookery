@@ -2,6 +2,7 @@ import type { CoreEvent } from "../core/events.js";
 import type { SlackClient, ChatStreamerLike, ThreadTarget, AppendPayload, PlanChunk } from "./types.js";
 import { truncateBytes } from "../core/truncate.js";
 import { t, KO, type Locale } from "../core/i18n.js";
+import { basename } from "node:path";
 
 type I18nKey = keyof typeof KO;
 
@@ -305,7 +306,7 @@ export class SlackThreadReporter {
       case "worker.spawned": {
         // Surface worker spawn as a plan card (UX-9) — show which worker started / in which repo. Doesn't touch status/title (setStatus/setTitle).
         await this.flushProse();
-        const repo = e.repoPath.split("/").filter(Boolean).pop() ?? e.repoPath;
+        const repo = basename(e.repoPath) || e.repoPath; // node:path basename handles the daemon host's separators (\\ on Windows)
         await this.append({ chunks: [this.taskChunk(`worker:${e.workerId}`, t(this.getLocale(), "slack.worker", { label: e.label || e.workerId }), "in_progress", t(this.getLocale(), "slack.workerRepo", { repo }))] });
         return;
       }

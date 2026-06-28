@@ -326,6 +326,8 @@ ipcMain.handle("git:showFileDiff", (_e, cwd: string, hash: string, path: string)
 const terminals = new TerminalManager({
   spawn: (shell, args, opts) => nodePty.spawn(shell, args, opts) as unknown as PtyLike,
   send: (channel, payload) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload); },
+  // Per-OS default shell (Windows has no $SHELL and no /bin/zsh → node-pty would ENOENT). ConPTY handles the rest on win32.
+  defaultShell: process.platform === "win32" ? (process.env.ComSpec ?? "powershell.exe") : (process.env.SHELL ?? "/bin/bash"),
   rookeryHome: HOME,
 });
 ipcMain.handle("term:create", (_e, opts) => terminals.create(opts));

@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { basename } from "../lib/basename.js";
+import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
 
 // Render "@/absolute-path" mentions in the message body as filename chips (everything else stays as-is). Paths are assumed to be absolute with no spaces

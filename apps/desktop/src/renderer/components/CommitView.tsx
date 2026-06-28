@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { MonacoDiff } from "./MonacoDiff.js";
-import { basename } from "../lib/basename.js";
+import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
 import { GIT_TONE } from "../lib/gitTone.js";
 import { useT } from "../i18n/provider.js";

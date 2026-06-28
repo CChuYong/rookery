@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { RefreshCw, Plus, Minus, RotateCcw, GitBranch, ArrowUp, ArrowDown, UploadCloud, Loader2 } from "lucide-react";
 import { useWsStore } from "../store/workspace.js";
-import { basename } from "../lib/basename.js";
+import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
 import { GIT_TONE } from "../lib/gitTone.js";
 import { GitHistory } from "./GitHistory.js";

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { basename } from "../lib/basename.js";
+import { baseName as basename } from "../lib/path.js";
 import { ancestorDirs } from "../lib/filetree-model.js";
 
 export type Tab =
