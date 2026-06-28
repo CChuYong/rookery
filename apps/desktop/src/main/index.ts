@@ -111,6 +111,10 @@ const pushUpdate = (status: string, extra: Record<string, unknown> = {}): void =
 // Guard so auto-update can never crash app startup (au should be defined with the default import — belt-and-suspenders).
 if (au) {
   au.logger = log;
+  // Install ONLY via the explicit "Restart to install" path (update:install), which stops the daemon first.
+  // The daemon runs the bundled Node from inside the .app, so a quit-time auto-install would leave it running
+  // → ShipIt aborts with "App Still Running" (SQRLInstallerErrorDomain -9).
+  au.autoInstallOnAppQuit = false;
   au.on("checking-for-update", () => pushUpdate("checking"));
   au.on("update-available", (i) => pushUpdate("available", { version: i?.version }));
   au.on("update-not-available", () => pushUpdate("up-to-date"));
@@ -125,7 +129,14 @@ ipcMain.handle("update:check", async () => {
   try { const r = await au.checkForUpdates(); return { ok: true, version: r?.updateInfo?.version }; }
   catch (e) { const m = String((e as Error)?.message ?? e); pushUpdate("error", { message: m }); return { ok: false, error: m }; }
 });
-ipcMain.on("update:install", () => { try { au?.quitAndInstall(); } catch (e) { log.error("[updater] quitAndInstall", e); } });
+ipcMain.on("update:install", () => {
+  void (async () => {
+    // Stop the daemon first: it runs the bundled Node from inside the .app, so a live daemon makes Squirrel/ShipIt
+    // abort the swap ("App Still Running", SQRLInstallerErrorDomain -9). The updated app respawns it on next launch.
+    try { await manager.stop(); } catch (e) { log.warn("[updater] daemon stop before install", e); }
+    try { au?.quitAndInstall(); } catch (e) { log.error("[updater] quitAndInstall", e); }
+  })();
+});
 
 // Query the system locale + sync the renderer's chosen locale (i18n for main-side error messages).
 setMainLocale(app.getLocale());

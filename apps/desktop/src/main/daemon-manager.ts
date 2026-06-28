@@ -54,6 +54,24 @@ export class DaemonManager {
     return this.ensure();
   }
 
+  // Stop the daemon WITHOUT respawning (SIGTERM → wait for /health down → SIGKILL fallback). Used before an app
+  // self-update: the daemon runs the bundled Node from *inside* the .app bundle, so a live daemon makes Squirrel/ShipIt
+  // abort the install with "App Still Running" (SQRLInstallerErrorDomain -9). The updated app respawns it on next launch.
+  async stop(): Promise<void> {
+    const { deps, host, port } = this.opts;
+    const pid = deps.readPid?.() ?? null;
+    if (pid == null) return;
+    try { deps.kill?.(pid, "SIGTERM"); } catch { /* already gone */ }
+    const deadline = this.opts.maxWaitMs ?? 5000;
+    const step = 100;
+    let down = false;
+    for (let waited = 0; waited < deadline; waited += step) {
+      if (!(await deps.ping(host, port))) { down = true; break; }
+      await deps.sleep(step);
+    }
+    if (!down) { try { deps.kill?.(pid, "SIGKILL"); } catch { /* */ } await deps.sleep(300); }
+  }
+
   private async runEnsure(): Promise<EnsureResult> {
     const { deps, host, port, nodePath, daemonEntry, requiredNodeAbi } = this.opts;
     if (await deps.ping(host, port)) return "already-up";

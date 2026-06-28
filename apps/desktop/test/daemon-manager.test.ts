@@ -123,4 +123,44 @@ describe("DaemonManager", () => {
     expect(kills).toEqual([]);
     expect(r).toBe("spawned");
   });
+
+  it("stop() SIGTERMs the running daemon and does NOT respawn", async () => {
+    const kills: Array<[number, string]> = [];
+    let spawned = 0;
+    let pings = [true, false]; // up, then down after SIGTERM
+    const mgr = new DaemonManager({
+      host: "127.0.0.1", port: 8787, nodePath: "node", daemonEntry: "/d.js",
+      deps: {
+        ping: async () => (pings.length > 1 ? pings.shift()! : pings[0]),
+        spawn: () => { spawned++; return { unref() {} }; },
+        sleep: async () => {},
+        readPid: () => 4242,
+        kill: (pid, sig) => { kills.push([pid, sig]); },
+      },
+    });
+    await mgr.stop();
+    expect(kills[0]).toEqual([4242, "SIGTERM"]);
+    expect(spawned).toBe(0); // never respawns (the updated app does that on next launch)
+  });
+
+  it("stop() force-kills (SIGKILL) if the daemon stays up past the deadline", async () => {
+    const kills: Array<[number, string]> = [];
+    const mgr = new DaemonManager({
+      host: "127.0.0.1", port: 8787, nodePath: "node", daemonEntry: "/d.js", maxWaitMs: 300,
+      deps: { ping: async () => true, spawn: () => ({ unref() {} }), sleep: async () => {}, readPid: () => 99, kill: (p, s) => kills.push([p, s]) },
+    });
+    await mgr.stop();
+    expect(kills.some(([, s]) => s === "SIGTERM")).toBe(true);
+    expect(kills.some(([, s]) => s === "SIGKILL")).toBe(true);
+  });
+
+  it("stop() with no running pid does nothing (no kill)", async () => {
+    const kills: string[] = [];
+    const mgr = new DaemonManager({
+      host: "127.0.0.1", port: 8787, nodePath: "node", daemonEntry: "/d.js",
+      deps: { ping: async () => false, spawn: () => ({ unref() {} }), sleep: async () => {}, readPid: () => null, kill: (_p, s) => kills.push(s) },
+    });
+    await mgr.stop();
+    expect(kills).toEqual([]);
+  });
 });
