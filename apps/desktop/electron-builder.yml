@@ -52,6 +52,10 @@ linux:
     - AppImage
 win:
   icon: build/icon.png # electron-builder generates the .ico from a 256+ px png
+  # No spaces in the filename: the default "Rookery Setup x.exe" becomes "Rookery.Setup.x.exe" on GitHub (spaces→dots),
+  # but latest.yml refers to "Rookery-Setup-x.exe" → 404 → auto-update silently fails. A space-free name keeps
+  # latest.yml, the local file, and the GitHub asset identical.
+  artifactName: ${productName}-Setup-${version}.${ext}
   # Unsigned (no CSC_* in CI) → SmartScreen "unknown publisher" warning users can bypass.
   # nsis = installer + latest.yml for electron-updater. (Code signing can be added later — see README.)
   target:
