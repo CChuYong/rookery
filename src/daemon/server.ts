@@ -28,7 +28,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { Connection } from "./connection.js";
 import { acquireSingleInstance } from "./lifecycle.js";
-import { loadOrCreateToken, checkUpgradeAuth } from "./auth.js";
+import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
 import { startSlack } from "../slack/app.js";
 import { SlackInteractionBridge, makeSlackCanUseTool } from "../slack/interaction.js";
@@ -58,6 +58,7 @@ export interface StartDaemonOptions {
   queryFn?: QueryFn;
   acquireLock?: boolean;
   heartbeatMs?: number; // WS ping/pong interval (default 30s). For detecting/cleaning up half-open sockets.
+  onShutdownRequest?: () => void; // invoked on an authenticated POST /shutdown (the desktop's graceful-stop path, esp. Windows where SIGTERM hard-kills)
 }
 
 export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandle> {
@@ -243,7 +244,14 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
       return;
     }
-    // Future HTTP endpoints (e.g. Slack) will be added here.
+    // Graceful shutdown trigger (token-authenticated). Lets the desktop stop the daemon cleanly on Windows, where
+    // process.kill(pid,'SIGTERM') is a hard TerminateProcess() that skips the SIGTERM handler / daemon.close().
+    if (req.method === "POST" && req.url === "/shutdown") {
+      if (!tokenMatches(token, req.headers["x-rookery-token"] as string | undefined)) { res.writeHead(401).end(); return; }
+      res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
+      opts.onShutdownRequest?.();
+      return;
+    }
     res.writeHead(404).end();
   });
   // ws-halfopen-4: timeout so an idle TCP socket that never sends headers/a request doesn't hang around forever.

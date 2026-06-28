@@ -101,7 +101,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
   if (command === "daemon") {
     process.stderr.write("[rookery] Prompts and repository contents are sent to Anthropic's API for processing.\n");
-    const daemon = await startDaemon({ config });
+    // shutdown is defined before startDaemon so it can be wired to the POST /shutdown endpoint (onShutdownRequest).
+    // daemon is assigned before any request can arrive (startDaemon resolves only after the server is listening).
+    let shuttingDown = false;
+    let daemon: Awaited<ReturnType<typeof startDaemon>>;
+    const shutdown = (): void => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      void daemon.close().then(() => process.exit(0));
+    };
+    daemon = await startDaemon({ config, onShutdownRequest: shutdown });
     // detectAuth runs AFTER startDaemon so an in-app (settings DB) key, which applyApiKeyToEnv injects into
     // process.env during startup, is reflected here — otherwise a DB-key-only user gets a false "no auth" warning.
     // Even without any key, OAuth (claude login) can still authenticate, so we don't hard-gate.
@@ -113,12 +122,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           "turns will fail until you set a key in Settings, set ANTHROPIC_API_KEY, or run `claude login`.\n",
       );
     }
-    let shuttingDown = false;
-    const shutdown = () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      void daemon.close().then(() => process.exit(0));
-    };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
     return;

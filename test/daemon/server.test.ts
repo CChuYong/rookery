@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { WebSocket } from "ws";
+import http from "node:http";
 import { startDaemon } from "../../src/daemon/server.js";
 import { loadConfig } from "../../src/config.js";
 import { fakeQuery } from "../helpers/fake-query.js";
@@ -77,6 +78,28 @@ describe("startDaemon (integration)", () => {
   it("refuses a non-loopback bind unless ROOKERY_ALLOW_NONLOOPBACK is set (G-ORIGIN-AUTH)", async () => {
     const config = loadConfig({ ROOKERY_HOST: "0.0.0.0", ROOKERY_PORT: "0", ROOKERY_HOME: "/tmp/rookery-nonloop" });
     await expect(startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) })).rejects.toThrow(/non-loopback|ROOKERY_ALLOW_NONLOOPBACK/i);
+  });
+
+  it("POST /shutdown requires the token and invokes onShutdownRequest", async () => {
+    const config = loadConfig({ ROOKERY_HOME: "/tmp/rookery-server-shutdown", ROOKERY_PORT: "0" });
+    let calls = 0;
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]), onShutdownRequest: () => { calls++; } });
+    const post = (token?: string): Promise<number> => new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port: daemon.port, path: "/shutdown", method: "POST", headers: token ? { "x-rookery-token": token } : {} },
+        (r) => { r.resume(); resolve(r.statusCode ?? 0); },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    try {
+      expect(await post("wrong-token")).toBe(401);
+      expect(calls).toBe(0); // bad token must not trigger shutdown
+      expect(await post(daemon.token)).toBe(200);
+      expect(calls).toBe(1);
+    } finally {
+      await daemon.close();
+    }
   });
 
   it("rejects upgrade on non-/ws paths", async () => {

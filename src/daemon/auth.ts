@@ -54,3 +54,8 @@ function timingSafeEq(a: string, b: string): boolean {
   if (ab.length !== bb.length) return false;
   return crypto.timingSafeEqual(ab, bb);
 }
+
+// Constant-time token check for HTTP control endpoints (e.g. POST /shutdown). `given` may be a missing header.
+export function tokenMatches(expected: string, given: string | null | undefined): boolean {
+  return typeof given === "string" && timingSafeEq(expected, given);
+}
