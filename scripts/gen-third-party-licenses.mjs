@@ -10,8 +10,10 @@
 //    subject to Anthropic's terms. Its LICENSE.md (all-rights-reserved) is included verbatim here, and noted separately in the header.
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+// fileURLToPath (not new URL().pathname) — the latter yields "/D:/…" on Windows and doubles the drive on resolve.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const check = args.includes("--check");
 const outPath = path.resolve(ROOT, args.find((a) => !a.startsWith("--")) ?? "THIRD-PARTY-LICENSES.txt");
