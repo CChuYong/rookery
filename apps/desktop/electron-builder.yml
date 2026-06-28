@@ -2,6 +2,10 @@ appId: com.rookery.desktop
 productName: Rookery
 # npm workspaces hoist electron to the root, so electron-builder fails to auto-detect the version → pin it explicitly.
 electronVersion: 32.3.3
+# Skip @electron/rebuild: node-pty 1.1 is an N-API prebuild (no Electron ABI rebuild needed) and the daemon's
+# better-sqlite3 is staged separately. The rebuild step also runs npm in the workspace, which prunes root devDeps
+# (app-builder-bin) and then electron-builder fails to spawn it (ENOENT). Disabling it avoids that + the node-gyp/distutils need.
+npmRebuild: false
 # After the build, notarize + staple the dmg (notarize:true only notarizes the .app) → a downloaded dmg opens cleanly even offline on first launch.
 afterAllArtifactBuild: build/notarize-dmg.cjs
 # Auto-update feed: baked into the app (app-update.yml) so electron-updater knows where to look, and makes electron-builder emit latest-mac.yml.
