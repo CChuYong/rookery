@@ -37,6 +37,14 @@ describe("parsePsRows", () => {
       { pid: 300, ppid: 100, pcpu: 1, rssKb: 1024 },
     ]);
   });
+
+  it("parses the Windows PowerShell format (pid ppid 0 rssKb) — same 4-column shape, CPU placeholder 0", () => {
+    const out = "1234 5678 0 120560\n9000 1234 0 4096\n";
+    expect(parsePsRows(out)).toEqual([
+      { pid: 1234, ppid: 5678, pcpu: 0, rssKb: 120560 },
+      { pid: 9000, ppid: 1234, pcpu: 0, rssKb: 4096 },
+    ]);
+  });
 });
 
 describe("sumTree", () => {

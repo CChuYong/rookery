@@ -182,6 +182,17 @@ function readDaemonPid(): number | null {
 
 // Full process snapshot (pid/ppid/pcpu/rss). On failure, reject → collectResources drops the daemon to null.
 function psSnapshot(): Promise<PsRow[]> {
+  if (process.platform === "win32") {
+    // Windows has no `ps`. Emit the same "pid ppid pcpu rss" 4-column shape via PowerShell. CPU% is left 0
+    // (Win32_Process exposes no instantaneous CPU); RSS = WorkingSetSize/1024 KB and the ppid tree are accurate.
+    const psScript = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) 0 $([math]::Round($_.WorkingSetSize/1024))\" }";
+    return new Promise((res, rej) => {
+      execFile("powershell", ["-NoProfile", "-NonInteractive", "-Command", psScript], { timeout: 5000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+        if (err) return rej(err);
+        res(parsePsRows(String(stdout)));
+      });
+    });
+  }
   return new Promise((res, rej) => {
     execFile("ps", ["-axo", "pid=,ppid=,pcpu=,rss="], { timeout: 3000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       if (err) return rej(err);
