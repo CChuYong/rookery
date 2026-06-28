@@ -94,3 +94,12 @@ export interface RookeryApps {
   list(): Promise<DetectedApp[]>;
   open(id: string, dir: string): Promise<{ ok: boolean; error?: string }>;
 }
+
+// Type of window.rookery.win — custom window controls for the frameless Windows/Linux builds.
+export interface RookeryWin {
+  minimize(): void;
+  maximize(): void; // toggles maximize/restore
+  close(): void;
+  isMaximized(): Promise<boolean>;
+  onMaximizeChange(cb: (maximized: boolean) => void): () => void;
+}

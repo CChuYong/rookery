@@ -5,6 +5,19 @@ contextBridge.exposeInMainWorld("rookery", {
     status: () => ipcRenderer.invoke("daemon:status") as Promise<string>,
     restart: () => ipcRenderer.invoke("daemon:restart") as Promise<string>,
   },
+  // Platform string + custom window controls (frameless Windows/Linux builds; macOS uses native traffic lights).
+  platform: process.platform,
+  win: {
+    minimize: () => ipcRenderer.send("win:minimize"),
+    maximize: () => ipcRenderer.send("win:maximize"),
+    close: () => ipcRenderer.send("win:close"),
+    isMaximized: () => ipcRenderer.invoke("win:isMaximized") as Promise<boolean>,
+    onMaximizeChange: (cb: (maximized: boolean) => void) => {
+      const h = (_e: unknown, v: boolean): void => cb(v);
+      ipcRenderer.on("win:maximized", h);
+      return () => { ipcRenderer.removeListener("win:maximized", h); };
+    },
+  },
   wsUrl: () => ipcRenderer.invoke("daemon:wsUrl") as Promise<string>,
   pickDirectory: () => ipcRenderer.invoke("dialog:pickDirectory") as Promise<string | null>,
   pickFile: () => ipcRenderer.invoke("dialog:pickFile") as Promise<string | null>,

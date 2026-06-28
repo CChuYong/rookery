@@ -90,6 +90,17 @@ ipcMain.handle("daemon:ensure", () => manager.ensure());
 ipcMain.handle("daemon:status", () => manager.status());
 ipcMain.handle("daemon:restart", () => manager.restart());
 
+// Custom window controls (frameless Windows/Linux builds). fromWebContents targets the sender's own window.
+ipcMain.on("win:minimize", (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
+ipcMain.on("win:maximize", (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w) return;
+  if (w.isMaximized()) w.unmaximize();
+  else w.maximize();
+});
+ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
+ipcMain.handle("win:isMaximized", (e) => BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false);
+
 // Query the system locale + sync the renderer's chosen locale (i18n for main-side error messages).
 setMainLocale(app.getLocale());
 ipcMain.handle("system:getLocale", () => app.getLocale());
@@ -304,11 +315,16 @@ function createWindow(): void {
     minHeight: 600,
     title: "Rookery",
     backgroundColor: "#0f1115",
-    titleBarStyle: "hiddenInset",
-    autoHideMenuBar: true, // hide the in-window File|Edit|View bar on Windows/Linux (Alt reveals it); no-op on macOS (global menu)
+    // macOS: hidden-inset title bar with native traffic lights. Windows/Linux: frameless → custom WindowControls in the renderer.
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const } : { frame: false }),
+    autoHideMenuBar: true, // also drop the in-window File|Edit|View bar on Windows/Linux (no-op on macOS)
     webPreferences: { preload: resolve(__dirname, "../preload/index.cjs"), contextIsolation: true, nodeIntegration: false },
   });
   if (st.maximized) win.maximize();
+  // Forward maximize state to the renderer so the custom WindowControls toggle their maximize/restore icon.
+  const sendMax = (): void => { try { win.webContents.send("win:maximized", win.isMaximized()); } catch { /* */ } };
+  win.on("maximize", sendMax);
+  win.on("unmaximize", sendMax);
   // On window close, save the normal bounds + maximized state (restored on next launch).
   win.on("close", () => {
     try {
