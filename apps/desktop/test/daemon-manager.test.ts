@@ -163,4 +163,32 @@ describe("DaemonManager", () => {
     await mgr.stop();
     expect(kills).toEqual([]);
   });
+
+  it("stop() prefers graceful shutdown and skips signals when it works", async () => {
+    let shutdownCalled = 0;
+    const kills: string[] = [];
+    const mgr = new DaemonManager({
+      host: "127.0.0.1", port: 8787, nodePath: "node", daemonEntry: "/d.js",
+      deps: { ping: async () => false, spawn: () => ({ unref() {} }), sleep: async () => {}, readPid: () => 4242, kill: (_p, s) => kills.push(s), shutdown: async () => { shutdownCalled++; return true; } },
+    });
+    await mgr.stop();
+    expect(shutdownCalled).toBe(1);
+    expect(kills).toEqual([]); // graceful HTTP shutdown worked → no SIGTERM/SIGKILL
+  });
+
+  it("restart() prefers graceful shutdown then respawns (no signals)", async () => {
+    let shutdownCalled = 0;
+    let spawned = 0;
+    const kills: string[] = [];
+    let pings = [false, false, true]; // down (graceful wait), down (ensure check), up (ensure poll → spawned)
+    const mgr = new DaemonManager({
+      host: "127.0.0.1", port: 8787, nodePath: "node", daemonEntry: "/d.js",
+      deps: { ping: async () => (pings.length > 1 ? pings.shift()! : pings[0]), spawn: () => { spawned++; return { unref() {} }; }, sleep: async () => {}, readPid: () => 4242, kill: (_p, s) => kills.push(s), shutdown: async () => { shutdownCalled++; return true; } },
+    });
+    const r = await mgr.restart();
+    expect(shutdownCalled).toBe(1);
+    expect(kills).toEqual([]);
+    expect(spawned).toBe(1);
+    expect(r).toBe("spawned");
+  });
 });

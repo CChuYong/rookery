@@ -67,6 +67,20 @@ function ping(host: string, port: number): Promise<boolean> {
   });
 }
 
+// Graceful daemon shutdown via the authenticated POST /shutdown (token read fresh from ~/.rookery/ws-token).
+// Preferred over signals — on Windows process.kill(pid,'SIGTERM') hard-kills and skips the daemon's clean close().
+function postShutdown(): Promise<boolean> {
+  let token = "";
+  try { token = fs.readFileSync(join(HOME, "ws-token"), "utf8").trim(); } catch { /* daemon not up yet */ }
+  if (!token) return Promise.resolve(false);
+  return new Promise((res) => {
+    const req = http.request({ host: HOST, port: PORT, path: "/shutdown", method: "POST", timeout: 2000, headers: { "x-rookery-token": token } }, (r) => { r.resume(); res(r.statusCode === 200); });
+    req.on("error", () => res(false));
+    req.on("timeout", () => { req.destroy(); res(false); });
+    req.end();
+  });
+}
+
 const manager = new DaemonManager({
   host: HOST, port: PORT, nodePath: NODE_PATH, daemonEntry: DAEMON_ENTRY,
   requiredNodeAbi: REQUIRED_NODE_ABI,
@@ -84,6 +98,7 @@ const manager = new DaemonManager({
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     readPid: readDaemonPid,
     kill: (pid: number, sig: NodeJS.Signals) => process.kill(pid, sig),
+    shutdown: postShutdown,
   },
 });
 
