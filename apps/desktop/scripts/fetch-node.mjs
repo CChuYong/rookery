@@ -2,7 +2,7 @@
 // At build time, download the official Node 22 binary for the host platform/arch and bundle it into the app.
 // The packaged daemon runs on this Node even if the user's machine has no Node or a mismatched ABI.
 // Supply-chain integrity is verified against SHASUMS256 (hash computed via node:crypto — no shasum/sha256sum dependency).
-// Idempotent: skip if the same version+arch is already bundled. Built per-platform on a native runner (macOS / Linux).
+// Idempotent: skip if the same version+arch is already bundled. Built per-platform on a native runner (macOS / Linux / Windows).
 import { execFileSync } from "node:child_process";
 import { mkdirSync, existsSync, rmSync, writeFileSync, readFileSync, copyFileSync, chmodSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -12,11 +12,15 @@ import { tmpdir } from "node:os";
 
 // Pin to the same version as dev/CI Node (every 22.x = ABI 127, so it's compatible with the better-sqlite3 prebuilt).
 const NODE_VERSION = process.env.ROOKERY_BUNDLE_NODE_VERSION ?? "22.23.0";
-const ARCH = `${process.platform}-${process.arch}`; // darwin-arm64 | linux-x64 | …
+const isWin = process.platform === "win32";
+const PLAT = isWin ? "win" : process.platform; // Node release naming: win | darwin | linux
+const ARCH = `${PLAT}-${process.arch}`; // darwin-arm64 | linux-x64 | win-x64
+const EXT = isWin ? "zip" : "tar.gz";
+const NODE_BIN = isWin ? "node.exe" : "node";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEST_DIR = join(__dirname, "..", "resources", "node");
-const DEST = join(DEST_DIR, "node");
+const DEST = join(DEST_DIR, NODE_BIN);
 const STAMP = join(DEST_DIR, ".version");
 const stampValue = `${NODE_VERSION} ${ARCH}`;
 
@@ -26,7 +30,8 @@ if (existsSync(DEST) && existsSync(join(DEST_DIR, "LICENSE")) && existsSync(STAM
 }
 
 const base = `https://nodejs.org/dist/v${NODE_VERSION}`;
-const tarName = `node-v${NODE_VERSION}-${ARCH}.tar.gz`;
+const dirName = `node-v${NODE_VERSION}-${ARCH}`;
+const tarName = `${dirName}.${EXT}`;
 const work = join(tmpdir(), `rookery-fetch-node-${NODE_VERSION}-${ARCH}`);
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
@@ -47,16 +52,17 @@ const got = createHash("sha256").update(readFileSync(tarPath)).digest("hex");
 if (got !== want) throw new Error(`[fetch-node] checksum mismatch for ${tarName}: got ${got}, want ${want}`);
 console.log(`[fetch-node] SHASUMS256 verified (${want.slice(0, 16)}…)`);
 
-execFileSync("tar", ["-xzf", tarPath, "-C", work], { stdio: "inherit" });
-const extracted = join(work, `node-v${NODE_VERSION}-${ARCH}`, "bin", "node");
+// tar (bsdtar) extracts both .tar.gz and .zip; Windows 10+ ships it. Binary is at <dir>/node.exe (win) or <dir>/bin/node.
+execFileSync("tar", [isWin ? "-xf" : "-xzf", tarPath, "-C", work], { stdio: "inherit" });
+const extracted = isWin ? join(work, dirName, "node.exe") : join(work, dirName, "bin", "node");
 if (!existsSync(extracted)) throw new Error(`[fetch-node] extracted binary missing at ${extracted}`);
 
 mkdirSync(DEST_DIR, { recursive: true });
 copyFileSync(extracted, DEST);
-chmodSync(DEST, 0o755);
+try { chmodSync(DEST, 0o755); } catch { /* no-op on Windows */ }
 // Ship Node's own license next to the bundled binary (Node core MIT + V8/OpenSSL/libuv/zlib/ICU notices).
 // electron-builder's `resources/node → node` entry then carries it to Contents/Resources/node/LICENSE.
-const licenseSrc = join(work, `node-v${NODE_VERSION}-${ARCH}`, "LICENSE");
+const licenseSrc = join(work, dirName, "LICENSE");
 if (!existsSync(licenseSrc)) throw new Error("[fetch-node] LICENSE missing in the Node tarball");
 copyFileSync(licenseSrc, join(DEST_DIR, "LICENSE"));
 writeFileSync(STAMP, stampValue + "\n");

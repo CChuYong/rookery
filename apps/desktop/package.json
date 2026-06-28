@@ -14,6 +14,7 @@
     "fetch-node": "node scripts/fetch-node.mjs",
     "build:mac": "node ../../scripts/gen-third-party-licenses.mjs && node scripts/fetch-node.mjs && node scripts/stage-daemon-deps.mjs && electron-vite build && electron-builder --mac --publish never",
     "build:linux": "node ../../scripts/gen-third-party-licenses.mjs && node scripts/fetch-node.mjs && node scripts/stage-daemon-deps.mjs && electron-vite build && electron-builder --linux --publish never",
+    "build:win": "node ../../scripts/gen-third-party-licenses.mjs && node scripts/fetch-node.mjs && node scripts/stage-daemon-deps.mjs && electron-vite build && electron-builder --win --publish never",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

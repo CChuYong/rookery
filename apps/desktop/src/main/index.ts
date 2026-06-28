@@ -43,7 +43,9 @@ const PORT = Number.parseInt(process.env.ROOKERY_PORT ?? "8787", 10) || 8787;
 // dev: the dev script fills ROOKERY_NODE with the current Node path.
 // packaged: uses the Node 22 (arm64) bundled via extraResources → the daemon comes up even if the user's machine
 // has no Node or a mismatched ABI (fetch-node.mjs prepares it at build time). If the bundle is absent (e.g. an unsigned dir build), falls back to "node" on PATH.
-const BUNDLED_NODE = app.isPackaged ? join(process.resourcesPath, "node", "node") : undefined;
+const BUNDLED_NODE = app.isPackaged
+  ? join(process.resourcesPath, "node", process.platform === "win32" ? "node.exe" : "node")
+  : undefined;
 const NODE_PATH =
   process.env.ROOKERY_NODE ?? (BUNDLED_NODE && fs.existsSync(BUNDLED_NODE) ? BUNDLED_NODE : "node");
 const HOME = process.env.ROOKERY_HOME?.trim() || join(homedir(), ".rookery");
