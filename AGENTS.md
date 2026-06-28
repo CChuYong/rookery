@@ -57,8 +57,11 @@ Commit trailer convention: `Co-Authored-By: Claude Opus 4.8 (1M context) <norepl
 - `src/slack/` — Slack adapter (embedded in the daemon)
 - `src/index.ts`, `src/entrypoints/cli.ts` — entrypoints (daemon vs CLI dispatch)
 - `apps/desktop/` — the Electron mission-control app (separate workspace)
+- `docs/` — **agent-facing reference docs** (evergreen, read on demand): `architecture/` flows, `reference/` catalogs (events/protocol/data-model/settings), `guides/` how-to recipes. Start at [`docs/README.md`](docs/README.md).
 
 ## Architecture (the big picture you only see by reading several files)
+
+This section is the always-loaded summary. For depth — turn lifecycles, the event/protocol/schema catalogs, and "how to add X" recipes — read the on-demand docs under [`docs/`](docs/README.md) (each cites its source files).
 
 ### Transport-agnostic core + a single composition root
 `src/core/` **never imports** WS/CLI/Slack/Electron. It is driven by domain commands and only emits `CoreEvent` through the `EventBus`. Every external boundary is an **injectable port + fake**: `QueryFn` (SDK `query()`), `GitOps` (`RealGitOps`/`FakeGitOps` — all git and gh shell-outs), `Repositories` (SQLite), `SlackClient`. **All wiring happens only in `startDaemon()` of `src/daemon/server.ts`.** Assemble new dependencies there; the core only receives them as interfaces.
