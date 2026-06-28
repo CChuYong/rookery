@@ -1,0 +1,20 @@
+name: Debug deps
+on: { workflow_dispatch: {} }
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Inspect app-builder-bin
+        run: |
+          echo "npm $(npm -v)  node $(node -v)"
+          du -sh node_modules/app-builder-bin 2>/dev/null || echo "MISSING app-builder-bin dir"
+          echo "--- binaries found ---"
+          find node_modules/app-builder-bin -name 'app-builder*' 2>/dev/null | head -20
+          echo "--- linux/x64 ---"
+          ls -la node_modules/app-builder-bin/linux/x64 2>/dev/null || echo "no linux/x64 dir"
