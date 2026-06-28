@@ -27,9 +27,12 @@ writeFileSync(
 );
 
 console.log("[stage-daemon-deps] npm install --omit=dev …");
+// shell:true so npm resolves to npm.cmd on Windows (execFileSync can't spawn npm directly there). Args are
+// static flags (no injection risk). cwd is a separate option, not parsed by the shell.
 execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", "--no-save", "--no-package-lock"], {
   cwd: STAGE,
   stdio: "inherit",
+  shell: true,
 });
 
 const nm = join(STAGE, "node_modules");
