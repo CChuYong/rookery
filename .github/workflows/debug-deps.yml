@@ -10,11 +10,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Inspect app-builder-bin
-        run: |
-          echo "npm $(npm -v)  node $(node -v)"
-          du -sh node_modules/app-builder-bin 2>/dev/null || echo "MISSING app-builder-bin dir"
-          echo "--- binaries found ---"
-          find node_modules/app-builder-bin -name 'app-builder*' 2>/dev/null | head -20
-          echo "--- linux/x64 ---"
-          ls -la node_modules/app-builder-bin/linux/x64 2>/dev/null || echo "no linux/x64 dir"
+      - name: after npm ci
+        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo "PRESENT" || echo "GONE"
+      - name: run stage-daemon-deps
+        run: node apps/desktop/scripts/stage-daemon-deps.mjs
+      - name: after stage-daemon-deps
+        run: ls node_modules/app-builder-bin/linux/x64/app-builder >/dev/null 2>&1 && echo "PRESENT" || echo "GONE"
