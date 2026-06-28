@@ -5,6 +5,7 @@ import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import { X } from "lucide-react";
 import { Button } from "../ui/button.js";
+import { UpdateSettings } from "./UpdateSettings.js";
 import { Input, Select } from "../ui/input.js";
 import { EFFORTS, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
@@ -149,6 +150,8 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     </Select>
                   </div>
                 </section>
+
+                <UpdateSettings />
               </>
             )}
 

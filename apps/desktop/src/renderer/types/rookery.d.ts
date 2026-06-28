@@ -103,3 +103,16 @@ export interface RookeryWin {
   isMaximized(): Promise<boolean>;
   onMaximizeChange(cb: (maximized: boolean) => void): () => void;
 }
+
+// Type of window.rookery.update — auto-update controls/status for the settings "About" section.
+export interface UpdateStatus {
+  status: "checking" | "available" | "up-to-date" | "downloading" | "ready" | "error" | "dev";
+  version?: string;
+  percent?: number;
+  message?: string;
+}
+export interface RookeryUpdate {
+  check(): Promise<{ ok: boolean; version?: string; dev?: boolean; error?: string }>;
+  install(): void;
+  onStatus(cb: (s: UpdateStatus) => void): () => void;
+}

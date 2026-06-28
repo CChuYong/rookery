@@ -36,7 +36,7 @@ import { Button } from "./ui/button.js";
 import { Toaster } from "./components/Toaster.js";
 import { toast } from "./store/toasts.js";
 import { cn } from "./lib/cn.js";
-import type { RookeryTerm, RookeryWs, RookeryFs, RookeryResources, RookeryApps, RookeryWin, ResourceSnapshot } from "./types/rookery.js";
+import type { RookeryTerm, RookeryWs, RookeryFs, RookeryResources, RookeryApps, RookeryWin, RookeryUpdate, ResourceSnapshot } from "./types/rookery.js";
 import { TerminalPanel } from "./components/TerminalPanel.js";
 import { useTermStore, pruneLayout } from "./store/terminals.js";
 import { RightSidebar } from "./components/RightSidebar.js";
@@ -48,7 +48,7 @@ import { TabBar } from "./components/TabBar.js";
 
 declare global {
   interface Window {
-    rookery: { daemon: { ensure(): Promise<string>; status(): Promise<string>; restart(): Promise<string> }; wsUrl(): Promise<string>; pickDirectory(): Promise<string | null>; pickFile(): Promise<string | null>; openExternal(url: string): Promise<void>; getPathForFile(file: File): string; system: { getLocale(): Promise<string>; setLocale(locale: string): void }; term: RookeryTerm; ws: RookeryWs; fs: RookeryFs; resources: RookeryResources; apps: RookeryApps; notify(p: { title: string; body: string; workerId: string }): Promise<void>; onNotifyClick(cb: (workerId: string) => void): () => void; platform: string; win: RookeryWin };
+    rookery: { daemon: { ensure(): Promise<string>; status(): Promise<string>; restart(): Promise<string> }; wsUrl(): Promise<string>; pickDirectory(): Promise<string | null>; pickFile(): Promise<string | null>; openExternal(url: string): Promise<void>; getPathForFile(file: File): string; system: { getLocale(): Promise<string>; setLocale(locale: string): void }; term: RookeryTerm; ws: RookeryWs; fs: RookeryFs; resources: RookeryResources; apps: RookeryApps; notify(p: { title: string; body: string; workerId: string }): Promise<void>; onNotifyClick(cb: (workerId: string) => void): () => void; platform: string; win: RookeryWin; getVersion(): Promise<string>; update: RookeryUpdate };
   }
 }
 

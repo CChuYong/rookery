@@ -18,6 +18,17 @@ contextBridge.exposeInMainWorld("rookery", {
       return () => { ipcRenderer.removeListener("win:maximized", h); };
     },
   },
+  // App version + auto-update controls (settings "About" section: show version, manual check, install).
+  getVersion: () => ipcRenderer.invoke("app:version") as Promise<string>,
+  update: {
+    check: () => ipcRenderer.invoke("update:check") as Promise<{ ok: boolean; version?: string; dev?: boolean; error?: string }>,
+    install: () => ipcRenderer.send("update:install"),
+    onStatus: (cb: (s: { status: string; version?: string; percent?: number; message?: string }) => void) => {
+      const h = (_e: unknown, s: { status: string; version?: string; percent?: number; message?: string }): void => cb(s);
+      ipcRenderer.on("update:status", h);
+      return () => { ipcRenderer.removeListener("update:status", h); };
+    },
+  },
   wsUrl: () => ipcRenderer.invoke("daemon:wsUrl") as Promise<string>,
   pickDirectory: () => ipcRenderer.invoke("dialog:pickDirectory") as Promise<string | null>,
   pickFile: () => ipcRenderer.invoke("dialog:pickFile") as Promise<string | null>,

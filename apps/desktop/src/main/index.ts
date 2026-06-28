@@ -18,6 +18,7 @@ import { readFile as readFileP, writeFile as writeFileP, readdir as readdirP, st
 import { watch as fsWatch } from "node:fs";
 import * as nodePty from "node-pty";
 import * as electronUpdater from "electron-updater";
+import log from "electron-log/main";
 import { setMainLocale } from "./i18n.js";
 import { secureHomeAndLog, secureHomeDir } from "./fs-hardening.js";
 
@@ -100,6 +101,28 @@ ipcMain.on("win:maximize", (e) => {
 });
 ipcMain.on("win:close", (e) => BrowserWindow.fromWebContents(e.sender)?.close());
 ipcMain.handle("win:isMaximized", (e) => BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false);
+
+// --- Auto-update: file logging (userData/logs/main.log) + lifecycle status pushed to the renderer + manual control. ---
+log.initialize();
+const au = electronUpdater.autoUpdater;
+au.logger = log;
+const pushUpdate = (status: string, extra: Record<string, unknown> = {}): void => {
+  for (const w of BrowserWindow.getAllWindows()) { try { w.webContents.send("update:status", { status, ...extra }); } catch { /* window gone */ } }
+};
+au.on("checking-for-update", () => pushUpdate("checking"));
+au.on("update-available", (i) => pushUpdate("available", { version: i?.version }));
+au.on("update-not-available", () => pushUpdate("up-to-date"));
+au.on("error", (e) => pushUpdate("error", { message: String((e as Error)?.message ?? e) }));
+au.on("download-progress", (p) => pushUpdate("downloading", { percent: Math.round(p?.percent ?? 0) }));
+au.on("update-downloaded", (i) => pushUpdate("ready", { version: i?.version }));
+
+ipcMain.handle("app:version", () => app.getVersion());
+ipcMain.handle("update:check", async () => {
+  if (!app.isPackaged) { pushUpdate("dev"); return { ok: false, dev: true }; }
+  try { const r = await au.checkForUpdates(); return { ok: true, version: r?.updateInfo?.version }; }
+  catch (e) { const m = String((e as Error)?.message ?? e); pushUpdate("error", { message: m }); return { ok: false, error: m }; }
+});
+ipcMain.on("update:install", () => { try { au.quitAndInstall(); } catch (e) { log.error("[updater] quitAndInstall", e); } });
 
 // Query the system locale + sync the renderer's chosen locale (i18n for main-side error messages).
 setMainLocale(app.getLocale());
