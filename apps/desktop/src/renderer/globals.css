@@ -49,6 +49,10 @@ body {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
+/* Frameless Windows/Linux (html.win-chrome, set by WindowControls): reserve top-right space so header
+   content doesn't slide under the custom min/maximize/close buttons (3 × 3rem ≈ 9rem + a small gap). */
+.win-chrome .wco-pad { padding-right: 9.5rem; }
+
 /* signature motion: a live agent pulses; a running strip gets a slow sheen */
 @keyframes led-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; } 50% { opacity: .55; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); } }
 .led-live { animation: led-pulse 1.5s ease-in-out infinite; }

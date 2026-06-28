@@ -57,7 +57,7 @@ export function AutomationPage(p: {
   };
   return (
     <>
-      <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
+      <div className="wco-pad drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
         <span className="shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">Automation</span>
         <span className="font-semibold tracking-[-0.01em]">{t("automationPage.title")}</span>
         <Button variant="outline" size="sm" className="no-drag ml-auto" onClick={p.onNew}><Plus size={14} /> {t("automationPage.newJob")}</Button>
