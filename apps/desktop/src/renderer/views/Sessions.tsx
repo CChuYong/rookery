@@ -6,6 +6,7 @@ import { Collapse } from "../components/Collapse.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { baseName } from "../lib/path.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
 import { useT } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -129,7 +130,7 @@ function groupByAutomation(sessions: Session[], automations: AutomationLite[], t
     .sort((a, b) => byActivityDesc(a.items[0]!, b.items[0]!));
 }
 
-const sessName = (s: Session): string => s.label || s.cwd.split("/").pop() || s.id;
+const sessName = (s: Session): string => s.label || baseName(s.cwd) || s.id;
 
 function SessionsImpl(p: {
   sessions: Session[];

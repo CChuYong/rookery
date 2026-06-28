@@ -4,6 +4,7 @@ import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import { useStore } from "./store/store.js";
+import { baseName } from "./lib/path.js";
 import { useShallow } from "zustand/react/shallow";
 import { WsClient } from "./ws/client.js";
 import type { SocketLike } from "./ws/client.js";
@@ -271,7 +272,7 @@ export function App(): JSX.Element {
   // Spawn one new shell in the page's working folder + register a tab (shared by restore and auto-open).
   const spawnTerminalForPage = useCallback(async (key: string, subId: string | null, cwd: string | undefined): Promise<void> => {
     const r = await window.rookery.term.create({ sessionId: key, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
-    if (r.id) useTermStore.getState().open_(key, { id: r.id, title: cwd ? cwd.split("/").pop() || "zsh" : "zsh", exited: false });
+    if (r.id) useTermStore.getState().open_(key, { id: r.id, title: cwd ? baseName(cwd) || "zsh" : "zsh", exited: false });
   }, []);
   // Terminal toggle: on closed→open with no tabs, immediately spawn one terminal (skip the empty-drawer + ＋ step).
   const onToggleTerm = (): void => {
@@ -618,7 +619,7 @@ export function App(): JSX.Element {
     [s.settings, s.activeSessionId, s.overrides],
   );
   const activeSess = s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId) : undefined;
-  const sessionName = activeSess ? activeSess.label || activeSess.cwd.split("/").pop() || "session" : t("app.selectSession");
+  const sessionName = activeSess ? activeSess.label || baseName(activeSess.cwd) || "session" : t("app.selectSession");
   const sessionReadOnly = (s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId)?.origin : undefined) === "slack";
 
   const navBtn = (label: string, active: boolean, onClick: () => void, badge = false) => (

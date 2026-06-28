@@ -6,6 +6,7 @@ import { useResizableHeight } from "../lib/useResizableHeight.js";
 import { toast } from "../store/toasts.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
+import { baseName } from "../lib/path.js";
 
 const EMPTY = { tabs: [], activeTabId: null, open: false }; // stable ref — avoids creating a new object every render when the page is empty
 
@@ -26,7 +27,7 @@ export function TerminalPanel({ sessionId, subId, cwd }: { sessionId: string; su
   const newTab = async (): Promise<void> => {
     const r = await window.rookery.term.create({ sessionId, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
     if (r.error || !r.id) { toast.error(t("terminalPanel.openFailed"), r.error || undefined); return; }
-    open_(sessionId, { id: r.id, title: cwd ? cwd.split("/").pop() || "zsh" : "zsh", exited: false });
+    open_(sessionId, { id: r.id, title: cwd ? baseName(cwd) || "zsh" : "zsh", exited: false });
   };
   const close = (id: string): void => { window.rookery.term.kill(id); close_(sessionId, id); };
   // Stable onExit — it goes into TerminalView's effect deps, so keep one per page (a new closure every render would recreate the xterm).

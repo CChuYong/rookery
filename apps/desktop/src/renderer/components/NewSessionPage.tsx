@@ -6,6 +6,7 @@ import type { SlashCommand } from "./Composer.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
+import { baseName } from "../lib/path.js";
 
 // New master session — full page (entire main area). The input field is identical to the chat composer (markdown, file attachments, @ prefill, / skills).
 // Start with it empty for an empty session. @ and / operate live against the repo/folder (cwd) picked below (if none selected, the daemon's default cwd).
@@ -40,8 +41,6 @@ export function NewSessionPage(p: {
   const start = (prompt: string): void => p.onStart({ cwd: cwd.trim() || undefined, prompt: prompt.trim() || undefined, model, effort });
   const pick = async (): Promise<void> => { const dir = await window.rookery.pickDirectory(); if (dir) setCwd(dir); };
   const browseDir = p.browseDir ? (dir: string) => p.browseDir!(dir, cwd || undefined) : undefined;
-  // basename that handles both POSIX and Windows separators (the configured default may be a Windows path).
-  const baseName = (path: string): string => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
   const folderName = cwd ? baseName(cwd) : (p.defaultFolder ? baseName(p.defaultFolder) : t("newSessionPage.defaultFolder"));
 
   // Working-folder picker inserted at the left of the composer's control row (on the same line as the model/effort and send button).

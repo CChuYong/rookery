@@ -1,5 +1,6 @@
 import { addCollection } from "@iconify/react";
 import { icons } from "@iconify-json/vscode-icons";
+import { baseName } from "./path.js";
 
 // Register the VSCode Material Icon Theme(=vscode-icons) collection offline — <Icon> renders instantly with no network call.
 // Once at module load (addCollection is idempotent). The file tree/finder import this module, so registration happens before render.
@@ -59,7 +60,7 @@ const BY_NAME: Record<string, string> = {
 };
 
 export function fileIcon(name: string): string {
-  const base = (name.split("/").pop() ?? name).toLowerCase();
+  const base = baseName(name).toLowerCase();
   if (BY_NAME[base]) return BY_NAME[base];
   if (base === ".env" || base.startsWith(".env.")) return I("file-type-dotenv");
   const dot = base.lastIndexOf(".");

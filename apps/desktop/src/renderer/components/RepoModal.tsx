@@ -6,6 +6,7 @@ import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
+import { baseName } from "../lib/path.js";
 
 export function RepoModal(p: {
   repos: { name: string; path: string }[];
@@ -47,7 +48,7 @@ export function RepoModal(p: {
               variant="outline"
               onClick={async () => {
                 const picked = await window.rookery.pickDirectory();
-                if (picked) setF((x) => ({ ...x, path: picked, name: x.name || picked.split("/").filter(Boolean).pop() || "" }));
+                if (picked) setF((x) => ({ ...x, path: picked, name: x.name || baseName(picked) }));
               }}
             >
               {t("repoModal.browse")}
