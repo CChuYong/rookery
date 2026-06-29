@@ -1,6 +1,6 @@
 import type { SessionManager } from "../core/session-manager.js";
 import type { EventBus } from "../core/events.js";
-import type { SlackClient, SlackFile } from "./types.js";
+import type { SlackClient, SlackFile, ThreadTarget } from "./types.js";
 import type { FileDownloader } from "./file-download.js";
 import type { SlackInteractionBridge } from "./interaction.js";
 import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
@@ -18,6 +18,8 @@ export interface SlackConfig {
   refuseReply: boolean; // whether to auto-reply to non-permitted users
   refusalMessage: string; // reply text
   locale: Locale; // Slack output language (resolved from settings.slackLocale())
+  workerRelayEnabled: boolean; // mirror Slack-origin masters' worker activity into workerRelayChannel
+  workerRelayChannel: string; // Slack channel ID for the worker relay ("" = off)
 }
 
 export interface SlackDeps {
@@ -35,6 +37,8 @@ export interface SlackDeps {
   // Slack message trigger source handler — routes app.message events to the automation dispatcher.
   // ts/threadTs/team are passed to the action as template variables ({{ts}}/{{threadTs}}/{{team}}).
   onMessage?: (e: { channel: string; userId?: string; text: string; ts?: string; threadTs?: string; team?: string }) => Promise<void>;
+  // Resolve a session's (master's) Slack thread, or null if the session isn't Slack-origin. For the worker→Slack relay.
+  resolveThread?: (sessionId: string) => ThreadTarget | null;
 }
 
 export interface IncomingCtx {

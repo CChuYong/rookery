@@ -8,6 +8,8 @@ import { makeFileDownloader } from "./file-download.js";
 import { SlackInteractionBridge, INTERACTION_ACTION_RE } from "./interaction.js";
 import { redactOnReaction } from "./redaction.js";
 import { makeSlackThreadReader } from "./thread-reader.js";
+import { WorkerSlackRelay } from "./worker-slack-relay.js";
+import { FLEET_CHANNEL } from "../core/events.js";
 import { isTriggerableMessage, extractSlackText, type RawSlackMessage } from "./message-text.js";
 import { t } from "../core/i18n.js";
 
@@ -169,6 +171,16 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
   // also get a subscribed reporter delivering to the thread without a human message (prevents lost firings before the first message after restart/reconnect).
   deps.setReporterFor?.((sessionId, externalKey) => ensureSlackReporter(registry, app.client as unknown as SlackClient, sessionId, externalKey, () => deps.slackConfig().locale));
 
+  // Worker → Slack relay: mirror each Slack-origin master's workers into the configured channel (subscribed to the fleet channel).
+  const workerRelay = new WorkerSlackRelay({
+    client: app.client as unknown as SlackClient,
+    enabled: () => deps.slackConfig().workerRelayEnabled,
+    channel: () => deps.slackConfig().workerRelayChannel,
+    resolveThread: (id) => deps.resolveThread?.(id) ?? null,
+    getLocale: () => deps.slackConfig().locale,
+  });
+  const unsubWorkerRelay = deps.bus.subscribe(FLEET_CHANNEL, (e) => workerRelay.onEvent(e));
+
   await app.start();
 
   return {
@@ -176,6 +188,8 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       deps.setBridge?.(null); // disconnected → release the holder (canUseTool falls back to auto-allow)
       deps.setThreadReader?.(null); // release the thread reader too (read_thread falls back to a "not connected" notice)
       deps.setReporterFor?.(null); // release reporter-ensure too (can't guarantee delivery without a connection)
+      unsubWorkerRelay();
+      void workerRelay.dispose();
       registry.disposeAll();
       await app.stop();
     },

@@ -31,7 +31,7 @@ import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
 import { startSlack } from "../slack/app.js";
-import { SlackInteractionBridge, makeSlackCanUseTool } from "../slack/interaction.js";
+import { SlackInteractionBridge, makeSlackCanUseTool, parseSlackThreadKey } from "../slack/interaction.js";
 import { makeSlackCapabilities } from "../slack/capabilities.js";
 import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
 import { InteractionRegistry } from "../core/interaction-registry.js";
@@ -195,6 +195,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     refuseReply: ["1", "true", "yes"].includes(settings.slackRefuseReply().trim().toLowerCase()),
     refusalMessage: settings.slackRefusalMessage(),
     locale: settings.slackLocale() as Locale,
+    workerRelayEnabled: settings.workerSlackRelayEnabled() === "1",
+    workerRelayChannel: settings.workerSlackRelayChannel(),
   });
   // Slack Bolt starts asynchronously (doesn't block boot). Status is broadcast to @all via slack.status.
   const dispatcher = new AutomationDispatcher({
@@ -234,7 +236,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     configured: () => settings.slackConfigured(), // resolver, since tokens can change at runtime
     enabled: () => repos.getSetting("slackEnabled") !== "0", // on by default
     setEnabled: (b) => repos.setSetting("slackEnabled", b ? "1" : "0"),
-    start: () => startSlack({ sessions, bus, slackConfig, home: config.home, setBridge: (b) => { slackBridge = b; }, setThreadReader: (r) => { slackThreadReader = r; }, setReporterFor: (fn) => { slackReporterEnsure = fn; }, onMessage: slackTrigger }),
+    start: () => startSlack({ sessions, bus, slackConfig, home: config.home, setBridge: (b) => { slackBridge = b; }, setThreadReader: (r) => { slackThreadReader = r; }, setReporterFor: (fn) => { slackReporterEnsure = fn; }, resolveThread: (id) => parseSlackThreadKey(repos.getSession(id)?.external_key ?? null), onMessage: slackTrigger }),
     emit: (status) => bus.emit({ type: "slack.status", sessionId: ALL_CHANNEL, status }),
   });
   void slack.boot();
