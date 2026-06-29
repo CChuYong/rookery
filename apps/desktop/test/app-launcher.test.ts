@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createAppLauncher, createFileManagerLauncher, resolveAppPath, icnsFileName, APP_CATALOG, type CatalogEntry } from "../src/main/app-launcher.js";
+import { createAppLauncher, createCliLauncher, resolveAppPath, icnsFileName, APP_CATALOG, type CatalogEntry, type CliEntry } from "../src/main/app-launcher.js";
 
 const catalog: CatalogEntry[] = [
   { id: "finder", name: "Finder", kind: "finder", paths: ["/System/Library/CoreServices/Finder.app"], bundleId: "com.apple.finder" },
@@ -74,19 +74,42 @@ describe("createAppLauncher.open", () => {
   });
 });
 
-describe("createFileManagerLauncher", () => {
-  it("lists a single file-manager entry", async () => {
-    const launcher = createFileManagerLauncher(async () => "");
-    expect(await launcher.list()).toEqual([{ id: "files", name: "File manager", kind: "finder", icon: null }]);
+describe("createCliLauncher", () => {
+  const catalog: CliEntry[] = [
+    { id: "vscode", name: "VS Code", kind: "editor", cli: "code" },
+    { id: "cursor", name: "Cursor", kind: "editor", cli: "cursor" },
+  ];
+
+  it("lists installed editors (which resolves) then a File-manager entry last", async () => {
+    const launcher = createCliLauncher({
+      which: async (c) => (c === "code" ? "/usr/bin/code" : null), // only VS Code installed
+      open: async () => ({ ok: true }),
+      openPath: async () => "",
+    }, catalog);
+    const apps = await launcher.list();
+    expect(apps.map((a) => a.id)).toEqual(["vscode", "files"]); // cursor absent; file manager always last
+    expect(apps[1]).toMatchObject({ name: "File manager", kind: "finder" });
   });
-  it("maps shell.openPath success ('') and failure (error string)", async () => {
-    expect(await createFileManagerLauncher(async () => "").open("files", "/x")).toEqual({ ok: true });
-    expect(await createFileManagerLauncher(async () => "no such dir").open("files", "/x")).toEqual({ ok: false, error: "no such dir" });
+
+  it("open('files') reveals via openPath and maps success/failure", async () => {
+    const openPath = vi.fn(async (dir: string) => (dir === "/bad" ? "no such dir" : ""));
+    const launcher = createCliLauncher({ which: async () => null, open: async () => ({ ok: true }), openPath }, catalog);
+    expect(await launcher.open("files", "/x")).toEqual({ ok: true });
+    expect(openPath).toHaveBeenCalledWith("/x");
+    expect(await launcher.open("files", "/bad")).toEqual({ ok: false, error: "no such dir" });
   });
-  it("forwards the dir to openPath", async () => {
-    const openPath = vi.fn(async () => "");
-    await createFileManagerLauncher(openPath).open("files", "/code/proj");
-    expect(openPath).toHaveBeenCalledWith("/code/proj");
+
+  it("open(editor) resolves the cli and launches with the dir", async () => {
+    const open = vi.fn(async () => ({ ok: true }));
+    const launcher = createCliLauncher({ which: async (c) => (c === "code" ? "/usr/bin/code" : null), open, openPath: async () => "" }, catalog);
+    expect((await launcher.open("vscode", "/code/proj")).ok).toBe(true);
+    expect(open).toHaveBeenCalledWith("/usr/bin/code", "/code/proj");
+  });
+
+  it("errors on an unknown id and on a not-installed editor", async () => {
+    const launcher = createCliLauncher({ which: async () => null, open: async () => ({ ok: true }), openPath: async () => "" }, catalog);
+    expect((await launcher.open("nope", "/x")).ok).toBe(false);
+    expect((await launcher.open("cursor", "/x")).ok).toBe(false); // which → null
   });
 });
 

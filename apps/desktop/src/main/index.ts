@@ -11,7 +11,7 @@ import { TerminalManager } from "./terminal-manager.js";
 import type { PtyLike } from "./terminal-manager.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { resolveWorkRoot } from "./resolve-root.js";
-import { createAppLauncher, createFileManagerLauncher, icnsFileName } from "./app-launcher.js";
+import { createAppLauncher, createCliLauncher, CLI_EDITORS, icnsFileName } from "./app-launcher.js";
 import { collectResources, parsePsRows } from "./resource-monitor.js";
 import type { PsRow, ProcessMetricLike } from "./resource-monitor.js";
 import { readFile as readFileP, writeFile as writeFileP, readdir as readdirP, stat as statP, mkdir as mkdirP, rename as renameP } from "node:fs/promises";
@@ -279,11 +279,36 @@ async function appIconDataUrl(appPath: string): Promise<string | null> {
   });
 }
 
-// "Open the current cwd in another app" — detect installed IDEs/Finder/terminals, then open the directory via `open -a` (macOS).
-// macOS: full IDE/Finder/terminal catalog. Other platforms: a safe "open in file manager" via shell.openPath
-// (the full Windows/Linux editor+terminal detection port is deferred — see docs/superpowers/plans).
+// Resolve a command on PATH (`where` on Windows, `which` elsewhere) → absolute path, or null if absent.
+function whichCmd(cmd: string): Promise<string | null> {
+  const finder = process.platform === "win32" ? "where" : "which";
+  return new Promise((res) => {
+    execFile(finder, [cmd], { timeout: 2000, windowsHide: true }, (err, stdout) => {
+      if (err) return res(null);
+      res(String(stdout).split(/\r?\n/).map((s) => s.trim()).find(Boolean) ?? null);
+    });
+  });
+}
+
+// Launch an editor on a directory. Windows CLIs are often .cmd shims → go through the shell with a quoted command
+// string (handles spaces). Elsewhere spawn the binary directly with an args array (no shell-injection surface).
+function launchEditor(exe: string, dir: string): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((res) => {
+    try {
+      const child = process.platform === "win32"
+        ? spawn(`"${exe}" "${dir}"`, { shell: true, detached: true, stdio: "ignore", windowsHide: true })
+        : spawn(exe, [dir], { detached: true, stdio: "ignore" });
+      child.once("spawn", () => res({ ok: true }));
+      child.once("error", (e) => res({ ok: false, error: e.message }));
+      child.unref();
+    } catch (e) { res({ ok: false, error: e instanceof Error ? e.message : String(e) }); }
+  });
+}
+
+// "Open the current cwd in another app". macOS: full IDE/Finder/terminal catalog (open -a / mdfind / sips).
+// Other platforms (Phase A): editors detected via CLI-on-PATH (where/which) + a File-manager entry (shell.openPath).
 const appLauncher = process.platform !== "darwin"
-  ? createFileManagerLauncher((dir) => shell.openPath(dir))
+  ? createCliLauncher({ which: whichCmd, open: launchEditor, openPath: (dir) => shell.openPath(dir) }, CLI_EDITORS)
   : createAppLauncher({
   exists: fs.existsSync,
   // Spotlight fallback: if not at a standard path, find the actual install location by bundle ID (~/Applications, etc.).

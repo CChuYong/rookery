@@ -67,20 +67,57 @@ export async function resolveAppPath(
   return null;
 }
 
-// Cross-platform fallback launcher (non-macOS, where the .app/open-a/mdfind/sips catalog above doesn't apply):
-// a single "File manager" entry that reveals the directory via Electron shell.openPath (Explorer / file manager).
-// openPath resolves to "" on success, or an error string. The editor/terminal catalog port is intentionally deferred.
-export function createFileManagerLauncher(openPath: (dir: string) => Promise<string>): {
+// CLI-on-PATH launcher for non-macOS (Phase A of the open-in-app port). Detects editors whose CLI launcher is on
+// PATH (code/cursor/subl/idea/…) via `which`/`where`, and always offers a File-manager entry (shell.openPath).
+// Editors launch by spawning their CLI with the directory. Per-app icons are deferred (the renderer shows a kind
+// glyph) — real exe icons need the registry/.desktop resolution of Phase B.
+export interface CliEntry { id: string; name: string; kind: AppKind; cli: string; }
+
+export interface CliLauncherDeps {
+  which: (cmd: string) => Promise<string | null>; // resolve a command on PATH → absolute path, or null if absent
+  open: (exePath: string, dir: string) => Promise<{ ok: boolean; error?: string }>; // launch the editor on dir
+  openPath: (dir: string) => Promise<string>; // shell.openPath for the File-manager entry ("" = success)
+}
+
+export const CLI_EDITORS: CliEntry[] = [
+  { id: "vscode", name: "VS Code", kind: "editor", cli: "code" },
+  { id: "cursor", name: "Cursor", kind: "editor", cli: "cursor" },
+  { id: "windsurf", name: "Windsurf", kind: "editor", cli: "windsurf" },
+  { id: "zed", name: "Zed", kind: "editor", cli: "zed" },
+  { id: "sublime", name: "Sublime Text", kind: "editor", cli: "subl" },
+  { id: "idea", name: "IntelliJ IDEA", kind: "editor", cli: "idea" },
+  { id: "webstorm", name: "WebStorm", kind: "editor", cli: "webstorm" },
+  { id: "pycharm", name: "PyCharm", kind: "editor", cli: "pycharm" },
+];
+
+const FILE_MANAGER_ID = "files";
+
+export function createCliLauncher(deps: CliLauncherDeps, catalog: CliEntry[] = CLI_EDITORS): {
   list(): Promise<DetectedApp[]>;
   open(id: string, dir: string): Promise<{ ok: boolean; error?: string }>;
 } {
   return {
     async list() {
-      return [{ id: "files", name: "File manager", kind: "finder", icon: null }];
+      const editors = await Promise.all(catalog.map(async (e): Promise<DetectedApp | null> => {
+        const path = await deps.which(e.cli);
+        return path ? { id: e.id, name: e.name, kind: e.kind, icon: null } : null;
+      }));
+      // Installed editors first (default = first editor), then the always-available File manager.
+      return [
+        ...editors.filter((x): x is DetectedApp => x !== null),
+        { id: FILE_MANAGER_ID, name: "File manager", kind: "finder", icon: null },
+      ];
     },
-    async open(_id, dir) {
-      const err = await openPath(dir);
-      return err ? { ok: false, error: err } : { ok: true };
+    async open(id, dir) {
+      if (id === FILE_MANAGER_ID) {
+        const err = await deps.openPath(dir);
+        return err ? { ok: false, error: err } : { ok: true };
+      }
+      const entry = catalog.find((e) => e.id === id);
+      if (!entry) return { ok: false, error: `unknown app: ${id}` };
+      const path = await deps.which(entry.cli);
+      if (!path) return { ok: false, error: `${entry.name} is not installed` };
+      return deps.open(path, dir);
     },
   };
 }
