@@ -52,6 +52,7 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
   const [sel, setSel] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const edRef = useRef<HTMLDivElement>(null);
+  const pendingCompositionNewline = useRef(false);
 
   useEffect(() => { if (p.autoFocus) edRef.current?.focus(); }, [p.autoFocus]);
   useEffect(() => {
@@ -101,11 +102,21 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
     if (txt && edRef.current) { insertNodesAtCaret(edRef.current, [document.createTextNode(txt)]); syncText(); }
   };
 
+  const onCompositionEnd = () => {
+    if (!pendingCompositionNewline.current) return;
+    pendingCompositionNewline.current = false;
+    window.setTimeout(newline, 0);
+  };
+
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Enter" && e.shiftKey && e.nativeEvent.isComposing) {
+      pendingCompositionNewline.current = true;
+      return;
+    }
     if (popupOpen) {
       if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => (s + 1) % matches.length); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => (s - 1 + matches.length) % matches.length); return; }
-      if ((e.key === "Enter" && !e.nativeEvent.isComposing) || e.key === "Tab") { e.preventDefault(); pickCommand(matches[sel] ?? matches[0]!); return; }
+      if ((e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) || e.key === "Tab") { e.preventDefault(); pickCommand(matches[sel] ?? matches[0]!); return; }
       if (e.key === "Escape") { e.preventDefault(); setDismissed(true); return; }
     }
     if (fm.onKeyDown(e)) return;
@@ -160,6 +171,7 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
           syncText(); setSel(0); setDismissed(false); fm.refresh();
         }}
         onPaste={onPaste}
+        onCompositionEnd={onCompositionEnd}
         onKeyDown={onKeyDown}
       />
     </div>

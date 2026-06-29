@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { PromptEditor, slashQueryOf, matchCommands } from "../src/renderer/components/PromptEditor.js";
 import type { PromptEditorHandle } from "../src/renderer/components/PromptEditor.js";
@@ -64,11 +64,35 @@ describe("PromptEditor", () => {
   });
   it("Shift+Enter never submits", () => {
     const onSubmit = vi.fn();
-    const { getByRole } = render(<PromptEditor onSubmit={onSubmit} />);
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} onSubmit={onSubmit} />);
     const ed = getByRole("textbox");
     ed.textContent = "msg"; fireEvent.input(ed);
     fireEvent.keyDown(ed, { key: "Enter", shiftKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(ref.current!.getText()).toBe("msg\n");
+  });
+  it("Shift+Enter inserts a newline instead of picking a slash command", () => {
+    const onSubmit = vi.fn();
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} commands={CMDS} onSubmit={onSubmit} />);
+    const ed = getByRole("textbox");
+    ed.textContent = "/rev"; fireEvent.input(ed);
+    fireEvent.keyDown(ed, { key: "Enter", shiftKey: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(ref.current!.getText()).toBe("/rev\n");
+  });
+  it("Shift+Enter during IME composition inserts a newline after composition commits", async () => {
+    const onSubmit = vi.fn();
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} onSubmit={onSubmit} />);
+    const ed = getByRole("textbox");
+    ed.textContent = "~/Desktop/wt.png"; fireEvent.input(ed);
+    fireEvent.keyDown(ed, { key: "Enter", shiftKey: true, isComposing: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(ref.current!.getText()).toBe("~/Desktop/wt.png");
+    fireEvent.compositionEnd(ed);
+    await waitFor(() => expect(ref.current!.getText()).toBe("~/Desktop/wt.png\n"));
   });
   it("handle.clear empties the editor", () => {
     const ref = createRef<PromptEditorHandle>();

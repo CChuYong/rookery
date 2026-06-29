@@ -90,7 +90,7 @@ export function useFileMention(opts: {
     if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => (s + 1) % entries.length); return true; }
     if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => (s - 1 + entries.length) % entries.length); return true; }
     // Don't intercept the IME composition-commit Enter (Korean folder names — same guard as slash popup BUG-4).
-    if ((e.key === "Enter" && !e.nativeEvent.isComposing) || e.key === "Tab") { e.preventDefault(); pick(entries[sel] ?? entries[0]!); return true; }
+    if ((e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) || e.key === "Tab") { e.preventDefault(); pick(entries[sel] ?? entries[0]!); return true; }
     if (e.key === "Escape") { e.preventDefault(); setDismissed(true); return true; }
     return false;
   }, [open, entries, sel, pick]);
