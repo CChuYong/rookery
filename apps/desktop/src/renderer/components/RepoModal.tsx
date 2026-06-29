@@ -28,7 +28,6 @@ export function RepoModal(p: {
   return (
     <div
       className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
-      onClick={dismiss}
     >
       <div
         ref={panelRef}
@@ -36,7 +35,6 @@ export function RepoModal(p: {
         aria-modal="true"
         aria-label={t("repoModal.title")}
         className={cn("w-[480px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 text-[14px] font-semibold">{t("repoModal.title")}</div>
         <div className="flex flex-col gap-2">

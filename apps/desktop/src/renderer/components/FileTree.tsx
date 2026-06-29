@@ -230,8 +230,8 @@ function NameDialog({ title, initial, onSubmit, onCancel }: { title: string; ini
   useModalKeys(dismiss, submit);
   useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")} onClick={dismiss}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-4", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")} onClick={(e) => e.stopPropagation()}>
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-4", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
         <div className="text-[13px] font-semibold">{title}</div>
         <Input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <div className="flex justify-end gap-2">
@@ -252,8 +252,8 @@ function TrashConfirm({ name, onConfirm, onCancel }: { name: string; onConfirm: 
   useModalKeys(dismiss, confirmAndClose);
   useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")} onClick={dismiss}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("common.delete")} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")} onClick={(e) => e.stopPropagation()}>
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("common.delete")} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
         <p className="text-[12.5px] leading-relaxed text-muted">{t("fileTree.confirmTrash", { name })}</p>
         <div className="flex justify-end gap-2">
           <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>

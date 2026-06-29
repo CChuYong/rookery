@@ -87,7 +87,6 @@ export function WorkerSpawnModal(p: {
   return (
     <div
       className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
-      onClick={dismiss}
     >
       <div
         ref={panelRef}
@@ -95,7 +94,6 @@ export function WorkerSpawnModal(p: {
         aria-modal="true"
         aria-label={t("workerSpawnModal.title")}
         className={cn("w-[520px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-1 text-[14px] font-semibold">{t("workerSpawnModal.title")}</div>
         <div className="mb-3 font-mono text-[11px] text-muted">repo · {p.repo}</div>

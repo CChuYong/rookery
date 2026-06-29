@@ -34,7 +34,6 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
   return (
     <div
       className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
-      onClick={dismiss}
     >
       <div
         ref={panelRef}
@@ -42,7 +41,6 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
         aria-modal="true"
         aria-label={t("runAutomationDialog.title")}
         className={cn("flex w-full max-w-md flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="text-[14px] font-semibold">{t("runAutomationDialog.title")} · {automation.name}</div>
         <p className="text-[12px] text-muted">{t("runAutomationDialog.desc")}</p>

@@ -38,16 +38,12 @@ describe("RestartDaemonDialog", () => {
     expect(onConfirm).toHaveBeenCalledOnce();
   });
 
-  it("backdrop click → onClose called (after exit transition)", () => {
-    vi.useFakeTimers();
+  it("backdrop click does not close the dialog", () => {
     const onClose = vi.fn();
     render(<RestartDaemonDialog onConfirm={vi.fn()} onClose={onClose} />);
-    // Click the backdrop (the outermost fixed div) → dismiss plays the exit, then calls onClose.
     const backdrop = screen.getByRole("button", { name: "취소" }).closest(".fixed")!;
     fireEvent.click(backdrop);
-    vi.advanceTimersByTime(200);
-    expect(onClose).toHaveBeenCalled();
-    vi.useRealTimers();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("[Cancel] click → onClose called (after exit transition)", () => {

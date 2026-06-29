@@ -227,7 +227,7 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
 }
 
 // Destructive revert confirm. Extracted so it mounts/unmounts with `confirm` → useDismissTransition resets per open and plays a
-// symmetric enter/exit; Escape/backdrop cancel; Cancel autofocused (safe default). Stays absolute within the panel (z-10).
+// symmetric enter/exit; Escape/cancel button cancel; Cancel autofocused (safe default). Stays absolute within the panel (z-10).
 function RevertConfirm({ name, untracked, onCancel, onConfirm }: { name: string; untracked: boolean; onCancel: () => void; onConfirm: () => void }): JSX.Element {
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -236,8 +236,8 @@ function RevertConfirm({ name, untracked, onCancel, onConfirm }: { name: string;
   useModalKeys(dismiss, confirmAndClose);
   useFocusTrap(panelRef);
   return (
-    <div className={cn("absolute inset-0 z-10 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")} onClick={dismiss}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("gitChanges.revertTitle")} className={cn("w-full rounded-xl border border-line bg-surface p-4", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")} onClick={(e) => e.stopPropagation()}>
+    <div className={cn("absolute inset-0 z-10 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("gitChanges.revertTitle")} className={cn("w-full rounded-xl border border-line bg-surface p-4", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
         <div className="mb-1 text-[13px] font-semibold">{t("gitChanges.revertTitle")}</div>
         <p className="text-[12px] leading-relaxed text-muted">
           {(untracked ? t("gitChanges.revertDescUntracked") : t("gitChanges.revertDescTracked"))

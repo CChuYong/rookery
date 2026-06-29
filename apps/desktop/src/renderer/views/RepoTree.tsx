@@ -206,7 +206,7 @@ export const RepoTree = memo(RepoTreeImpl);
 RepoTree.displayName = "RepoTree";
 
 // Destructive worker-delete confirm (removes the worktree + branch). Extracted so it mounts/unmounts with `confirm` →
-// useDismissTransition resets per open and plays a symmetric enter/exit; Escape/backdrop cancel; Cancel autofocused (safe default).
+// useDismissTransition resets per open and plays a symmetric enter/exit; Escape/cancel button cancel; Cancel autofocused (safe default).
 function WorkerDeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }): JSX.Element {
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -215,8 +215,8 @@ function WorkerDeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCa
   useModalKeys(dismiss, confirmAndClose);
   useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")} onClick={dismiss}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("repoTree.deleteWorkerTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")} onClick={(e) => e.stopPropagation()}>
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("repoTree.deleteWorkerTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
         <div className="mb-1.5 text-[14px] font-semibold">{t("repoTree.deleteWorkerTitle")}</div>
         <p className="text-[12.5px] leading-relaxed text-muted">
           <span className="text-fg-dim">{name}</span>{t("repoTree.deleteWorkerConfirm")}
