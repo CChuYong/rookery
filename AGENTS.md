@@ -88,7 +88,7 @@ Worker state union: `running | idle | stopped | done | error` + the orchestrator
 `src/tools/`. Each file returns `create*ToolsServer()` → `createSdkMcpServer()`. The base set injected every master turn is **memory / repos / fleet**; `schedule` and per-source servers (e.g. `slack-thread`) are layered on via the turn's `capabilities()` overlay.
 - **memory** (`memory-tools.ts`): `remember`, `recall`
 - **repos** (`repo-tools.ts`): `register_repo`, `list_repos`, `update_repo`, `remove_repo`
-- **fleet** (`fleet-tools.ts`): `spawn_worker`, `send_worker`, `list_workers`, `get_worker_status`, `view_worker_transcript`, `view_worker_diff`, `stop_worker`, `discard_worker` (the master is purely async — `spawn_worker`/`send_worker` take `notify:true` to be woken on completion/failure; there is no blocking `await_worker`)
+- **fleet** (`fleet-tools.ts`): `spawn_worker`, `send_worker`, `interrupt_worker`, `list_workers`, `get_worker_status`, `view_worker_transcript`, `view_worker_diff`, `stop_worker`, `discard_worker` (the master is purely async — `spawn_worker`/`send_worker` take `notify:true` to be woken on completion/failure; there is no blocking `await_worker`. `send_worker` does **not** interrupt a mid-turn worker — it queues to the next turn boundary; `interrupt_worker` aborts the current turn but keeps the session/worktree, so a redirect = `interrupt_worker` → `send_worker`, vs `stop_worker`/`discard_worker` which are terminal)
 - **schedule** (`schedule-tools.ts`): `schedule_wakeup`, `schedule_list`, `schedule_cancel` — the master scheduling its own future wake-ups (the `once` automation kind)
 - **slack-thread** (`slack-thread-tools.ts`): `read_thread` — injected only for Slack-origin sessions, lets the master read the current thread transcript
 

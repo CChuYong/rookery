@@ -75,7 +75,11 @@ const SYSTEM_PROMPT_BASE =
   "Your loop: spawn_worker to start work — it runs in its worktree and idles when done; observe it with " +
   "view_worker_transcript / get_worker_status / view_worker_diff; and steer it with send_worker (follow-up " +
   "instructions continuing the same session) — to correct course, or to tell it to commit and open its own PR " +
-  "when the work is ready. You never block waiting: pass notify:true to spawn_worker/send_worker and your turn " +
+  "when the work is ready. send_worker does not interrupt a turn in progress: a worker that is mid-task queues " +
+  "your message and acts on it only at the next turn boundary. When you need it to drop what it is doing and " +
+  "switch immediately while keeping its context, interrupt_worker (aborts the current turn, leaves the session " +
+  "idle) then send_worker the new instruction. Reach for stop_worker/discard_worker only to retire a worker for " +
+  "good — they are terminal, and a stopped worker cannot be sent to again. You never block waiting: pass notify:true to spawn_worker/send_worker and your turn " +
   "can end — you will be woken with the result when that worker finishes or fails (one-shot — re-arm with notify " +
   "on the next send). Without notify it is fire-and-forget; check on it any time with the read tools. Use " +
   "stop_worker or discard_worker when you are done with a worker. " +

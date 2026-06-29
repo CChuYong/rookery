@@ -13,6 +13,7 @@ export const FLEET_SERVER_NAME = "fleet";
 export const FLEET_TOOL_NAMES = [
   "mcp__fleet__spawn_worker",
   "mcp__fleet__send_worker",
+  "mcp__fleet__interrupt_worker",
   "mcp__fleet__list_workers",
   "mcp__fleet__get_worker_status",
   "mcp__fleet__view_worker_transcript",
@@ -64,7 +65,8 @@ export function createFleetToolsServer(
 
   const send = tool(
     "send_worker",
-    "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved). Use this to steer, correct, ask it to commit/push and open its own PR, or to continue after it has gone idle.",
+    "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved). Use this to steer, correct, ask it to commit/push and open its own PR, or to continue after it has gone idle. " +
+      "Does NOT interrupt: if the worker is mid-turn, the instruction is queued and runs at the next turn boundary (it does not abort the work in progress). To make it drop what it is doing and act on your new instruction immediately, call interrupt_worker first, then send_worker.",
     { id: z.string(), text: z.string().describe("The instruction to send."), notify: z.boolean().optional().describe("When true, you are notified once the worker finishes this instruction (idle) or fails. One-shot.") },
     async (args) => {
       try {
@@ -73,6 +75,21 @@ export function createFleetToolsServer(
         return text(`Sent to ${args.id}.${args.notify ? " You'll be notified when it finishes." : ""}`);
       } catch (err) {
         return errorText(`send failed: ${String(err)}`);
+      }
+    },
+  );
+
+  const interrupt = tool(
+    "interrupt_worker",
+    "Abort a running worker's CURRENT turn while keeping its session alive (worktree and full context preserved). Use this to stop work already in progress so you can redirect it — typically followed by send_worker with the new instruction. " +
+      "Unlike stop_worker (terminal — the worker can't be sent to again) this leaves the worker idle and ready for follow-ups. A no-op if the worker is already idle.",
+    { id: z.string() },
+    async (args) => {
+      try {
+        await fleet.interrupt(args.id);
+        return text(`Interrupted ${args.id}. Its current turn was aborted; the session is idle — send_worker to give it a new instruction.`);
+      } catch (err) {
+        return errorText(`interrupt failed: ${String(err)}`);
       }
     },
   );
@@ -165,6 +182,6 @@ export function createFleetToolsServer(
   return createSdkMcpServer({
     name: FLEET_SERVER_NAME,
     version: "0.0.1",
-    tools: [spawn, send, list, status, transcript, diff, stop, discard],
+    tools: [spawn, send, interrupt, list, status, transcript, diff, stop, discard],
   });
 }
