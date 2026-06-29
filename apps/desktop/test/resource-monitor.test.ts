@@ -38,10 +38,11 @@ describe("parsePsRows", () => {
     ]);
   });
 
-  it("parses the Windows PowerShell format (pid ppid 0 rssKb) — same 4-column shape, CPU placeholder 0", () => {
-    const out = "1234 5678 0 120560\n9000 1234 0 4096\n";
+  it("parses the Windows PowerShell PerfProc format (pid ppid pcpu rssKb) — same 4-column shape", () => {
+    // Win32_PerfFormattedData_PerfProc_Process: IDProcess CreatingProcessID PercentProcessorTime WorkingSet/1024
+    const out = "1234 5678 12 120560\n9000 1234 0 4096\n";
     expect(parsePsRows(out)).toEqual([
-      { pid: 1234, ppid: 5678, pcpu: 0, rssKb: 120560 },
+      { pid: 1234, ppid: 5678, pcpu: 12, rssKb: 120560 },
       { pid: 9000, ppid: 1234, pcpu: 0, rssKb: 4096 },
     ]);
   });
