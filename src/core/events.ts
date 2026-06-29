@@ -39,7 +39,7 @@ export type CoreEvent =
   | { type: "session.label"; sessionId: string; label: string }
   // status: the worker's initial state — "provisioning" while its worktree is still being created (emitted up-front so the UI
   // shows the row immediately), reconciled to running/idle once the agent boots. Omitted (back-compat) ⇒ treated as "running".
-  | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; branch?: string; status?: string; ticketKey?: string | null; ticketUrl?: string | null }
+  | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; task?: string; branch?: string; status?: string; ticketKey?: string | null; ticketUrl?: string | null }
   // clientMsgId: a live-only correlation key carried only on the user echo — used to reconcile the desktop pending bubble (absent from the persisted payload).
   | { type: "worker.event"; sessionId: string; workerId: string; seq: number; data: WorkerEventData; clientMsgId?: string }
   // Native nested subagent (SDK subagent spawned by a worker via Task) activity — live only (not persisted), grouped by parentToolUseId.

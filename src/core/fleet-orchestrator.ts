@@ -201,7 +201,7 @@ export class FleetOrchestrator {
     // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
     // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
     // The agent's boot below reconciles it to running/idle; a failed worktree-create flips it to failed via the catch.
-    bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, branch, status: "provisioning", ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
+    bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
     try {
       // launch: resolve base → addWorktree → factory(cwd=worktree) → start → reconcile status.
       // base resolution: explicit choice > remote default branch (refreshed via best-effort fetch) > current HEAD (fallback).

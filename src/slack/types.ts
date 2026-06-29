@@ -22,7 +22,9 @@ export interface ChatStreamArgs {
 export interface SlackClient {
   chatStream(args: ChatStreamArgs): ChatStreamerLike;
   chat: {
-    postMessage(args: { channel: string; thread_ts: string; text: string }): Promise<unknown>;
+    // thread_ts optional → omit it to post a top-level (root) message; the returned ts threads replies + builds a permalink.
+    postMessage(args: { channel: string; thread_ts?: string; text: string }): Promise<{ ts?: string }>;
+    getPermalink(args: { channel: string; message_ts: string }): Promise<{ permalink?: string }>;
   };
 }
 
