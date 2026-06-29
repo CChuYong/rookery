@@ -83,4 +83,8 @@ export default {
   "settings.defaultFolderLabel": "Folder path",
   "settings.defaultFolderHint": "Leave empty to use the daemon's run directory (process.cwd).",
   "settings.defaultFolderPlaceholder": "e.g. ~/projects",
+  "settings.workerRelay": "Relay worker activity to Slack",
+  "settings.workerRelayDesc": "When a worker spawns from a Slack-started conversation, post a thread to the chosen channel mirroring the worker's messages/actions, and drop a link to it in the master's thread.",
+  "settings.workerRelayChannel": "Relay channel ID",
+  "settings.workerRelayChannelHint": "e.g. C0123456789. Invite the bot to that channel.",
 } satisfies Catalog;

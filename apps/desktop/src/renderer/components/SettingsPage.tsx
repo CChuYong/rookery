@@ -233,6 +233,14 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       <option value="en">English</option>
                     </Select>
                   </Field>
+                  <label className="flex items-center gap-2 select-none">
+                    <input type="checkbox" className="accent-accent" checked={f.workerSlackRelayEnabled === "1"} onChange={(e) => setF({ ...f, workerSlackRelayEnabled: e.target.checked ? "1" : "0" })} />
+                    <span className="text-[12px] text-fg-dim">{t("settings.workerRelay")}</span>
+                  </label>
+                  <p className="-mt-1 text-[11px] leading-relaxed text-muted">{t("settings.workerRelayDesc")}</p>
+                  <Field label={t("settings.workerRelayChannel")} hint={t("settings.workerRelayChannelHint")}>
+                    <Input value={f.workerSlackRelayChannel ?? ""} placeholder="C0123456789" disabled={f.workerSlackRelayEnabled !== "1"} onChange={(e) => setF({ ...f, workerSlackRelayChannel: e.target.value })} />
+                  </Field>
                 </div>
 
                 {/* Master default model/effort lives here because the live default only governs non-UI entry points —

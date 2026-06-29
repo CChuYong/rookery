@@ -83,4 +83,8 @@ export default {
   "settings.defaultFolderLabel": "폴더 경로",
   "settings.defaultFolderHint": "비워두면 데몬의 실행 경로(process.cwd)를 사용합니다.",
   "settings.defaultFolderPlaceholder": "예: ~/projects",
+  "settings.workerRelay": "워커 활동 Slack 중계",
+  "settings.workerRelayDesc": "Slack에서 시작한 대화의 워커가 스폰되면 지정 채널에 스레드를 만들어 워커의 말·액션을 중계하고, 마스터 스레드에 그 링크를 남깁니다.",
+  "settings.workerRelayChannel": "중계 채널 ID",
+  "settings.workerRelayChannelHint": "예: C0123456789. 봇을 해당 채널에 초대해야 합니다.",
 } satisfies Catalog;

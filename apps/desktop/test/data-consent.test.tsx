@@ -19,6 +19,8 @@ const baseSettings: SettingsValues = {
   hasAcceptedDataNotice: "0",
   onboardingDone: "0",
   defaultSessionCwd: "",
+  workerSlackRelayEnabled: "0",
+  workerSlackRelayChannel: "",
 };
 
 describe("DataConsentModal", () => {
