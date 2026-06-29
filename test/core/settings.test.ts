@@ -24,6 +24,8 @@ describe("Settings", () => {
       hasAcceptedDataNotice: "0",
       onboardingDone: "0",
       defaultSessionCwd: "",
+      workerSlackRelayEnabled: "0",
+      workerSlackRelayChannel: "",
       slackLocale: "ko",
     });
   });
@@ -167,6 +169,15 @@ describe("Settings", () => {
     expect(s.onboardingDone()).toBe("0");
     s.apply({ onboardingDone: "1" });
     expect(s.all().onboardingDone).toBe("1");
+  });
+
+  it("workerSlackRelay settings: defaults off/empty, echoed in all()", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.workerSlackRelayEnabled()).toBe("0");
+    expect(s.workerSlackRelayChannel()).toBe("");
+    s.apply({ workerSlackRelayEnabled: "1", workerSlackRelayChannel: "C0123" });
+    expect(s.all().workerSlackRelayEnabled).toBe("1");
+    expect(s.all().workerSlackRelayChannel).toBe("C0123");
   });
 
   it("defaultSessionCwd: raw is '' when unset (resolver falls back to process.cwd()), echoes the raw set value", () => {

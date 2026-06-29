@@ -117,6 +117,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       hasAcceptedDataNotice: z.string().optional(), // first-run data-transmission consent flag ("1"/"0"). Echoed.
       onboardingDone: z.string().optional(), // first-run onboarding completed flag ("1"/"0"). Echoed.
       defaultSessionCwd: z.string().nullable().optional(), // default cwd for desktop sessions when none is picked. Echoed.
+      workerSlackRelayEnabled: z.string().optional(), // mirror worker activity to a Slack channel ("1"/"0"). Echoed.
+      workerSlackRelayChannel: z.string().nullable().optional(), // Slack channel ID for the worker relay. Echoed.
       slackBotToken: z.string().nullable().optional(), // write-only secret. Not echoed.
       slackAppToken: z.string().nullable().optional(), // write-only secret. Not echoed.
     }),

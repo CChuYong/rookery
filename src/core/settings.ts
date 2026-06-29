@@ -26,6 +26,8 @@ export interface SettingsValues {
   hasAcceptedDataNotice: string; // first-run data-transmission consent flag ("1" accepted, default "0"). Not secret → echoed.
   onboardingDone: string; // first-run onboarding completed flag ("1" done, default "0"). Not secret → echoed.
   defaultSessionCwd: string; // default cwd for desktop sessions when none is picked (raw value, "" if unset; resolver falls back to process.cwd()). Not secret → echoed.
+  workerSlackRelayEnabled: string; // mirror Slack-origin masters' worker activity to a channel ("1"/"0", default "0"). Echoed.
+  workerSlackRelayChannel: string; // Slack channel ID for the worker relay ("" = off even if enabled). Echoed.
 }
 
 // null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey are outside SettingsValues (write-only secrets), so they're separate.
@@ -98,6 +100,14 @@ export class Settings {
     return this.defaultSessionCwdRaw() || process.cwd();
   }
 
+  // Worker → Slack relay: when enabled with a channel set, each Slack-origin master's workers are mirrored to that channel.
+  workerSlackRelayEnabled(): string {
+    return this.repos.getSetting("workerSlackRelayEnabled") ?? "0";
+  }
+  workerSlackRelayChannel(): string {
+    return this.repos.getSetting("workerSlackRelayChannel")?.trim() ?? "";
+  }
+
   // Slack bot/app tokens (secret). DB first, falling back to env (config) if absent — headless/CI compatible. write-only (not echoed).
   slackBotToken(): string | undefined {
     return this.repos.getSetting("slackBotToken") ?? this.config.slack.botToken;
@@ -158,6 +168,8 @@ export class Settings {
       hasAcceptedDataNotice: this.hasAcceptedDataNotice(),
       onboardingDone: this.onboardingDone(),
       defaultSessionCwd: this.defaultSessionCwdRaw(),
+      workerSlackRelayEnabled: this.workerSlackRelayEnabled(),
+      workerSlackRelayChannel: this.workerSlackRelayChannel(),
     };
   }
 
