@@ -23,6 +23,19 @@ describe("Repositories", () => {
     expect(repos.getSession("sp")!.pinned_at).toBeNull();
   });
 
+  it("copySessionEvents duplicates a session's transcript to another, leaving the source intact", () => {
+    repos.createSession({ id: "src", cwd: "/x" });
+    repos.createSession({ id: "dst", cwd: "/x" });
+    repos.addSessionEvent({ sessionId: "src", seq: 0, type: "message", payloadJson: '{"role":"user"}' });
+    repos.addSessionEvent({ sessionId: "src", seq: 1, type: "tool", payloadJson: '{"name":"Bash"}' });
+    repos.copySessionEvents("src", "dst");
+    expect(repos.listSessionEvents("dst").map((e) => [e.seq, e.type, e.payload_json])).toEqual([
+      [0, "message", '{"role":"user"}'],
+      [1, "tool", '{"name":"Bash"}'],
+    ]);
+    expect(repos.listSessionEvents("src")).toHaveLength(2); // source untouched
+  });
+
   it("createWorker stores ticketKey/ticketUrl", () => {
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "t", ticketKey: "ENG-1", ticketUrl: "https://l/ENG-1" });

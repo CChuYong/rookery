@@ -237,6 +237,13 @@ export class Repositories {
       .all(sessionId, limit) as Array<{ seq: number; type: string; payload_json: string; created_at: string }>;
   }
 
+  // Copy all transcript events from one session to another (session fork) — preserves seq/type/payload/created_at.
+  copySessionEvents(fromId: string, toId: string): void {
+    this.db
+      .prepare("INSERT INTO session_events(session_id, seq, type, payload_json, created_at) SELECT ?, seq, type, payload_json, created_at FROM session_events WHERE session_id = ? ORDER BY seq")
+      .run(toId, fromId);
+  }
+
   createWorker(input: {
     id: string;
     sessionId: string;
