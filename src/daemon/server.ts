@@ -109,7 +109,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     });
   // Auto-generate labels (Haiku): workers right after spawn, masters from the first message. best-effort.
   const summarizeLabel = makeLabeler(queryFn);
-  const fleet = new FleetOrchestrator({ repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel });
+  const fleet = new FleetOrchestrator({ repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel, forkSession: (id, opts) => sdkForkSession(id, opts) });
   // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
   // clean up running/idle zombies to orphaned. (Live conversations can't be revived — the SDK session dies with the process.)
   fleet.rehydrate();

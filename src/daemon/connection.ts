@@ -351,6 +351,16 @@ export class Connection {
         this.reply({ type: "worker.history.result", reqId: msg.reqId, id: msg.id, events: this.fleet.transcript(msg.id) });
         return;
       }
+      case "worker.fork": {
+        // Fork a worker → a new worker carrying the source's SDK context + full worktree state + transcript. Replies like fleet.spawn so the client navigates to it.
+        try {
+          const { id } = await this.fleet.fork(msg.id);
+          this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
+        } catch (err) {
+          this.reply({ type: "error", message: err instanceof Error ? err.message : String(err), reqId: msg.reqId });
+        }
+        return;
+      }
       case "worker.send": {
         // Deliver a follow-up message to a running worker (streaming input). Throws if the agent is terminated/unknown,
         // and the outer try/catch responds with error+reqId (previously this was silently swallowed, so typo/detached instructions vanished without a trace).

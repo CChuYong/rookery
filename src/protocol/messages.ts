@@ -88,6 +88,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.interrupt"), id: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("worker.checkpoints"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("worker.restore"), reqId: z.string(), id: z.string(), seq: z.number() }),
+  z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional() }),
   // Slash command/skill candidates. If workerId is given, probe within that live session; otherwise probe by cwd.
   z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional() }),
@@ -203,6 +204,7 @@ export interface RequestResultMap {
   "worker.archive": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.delete": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.restore": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "worker.fork": Extract<ServerMessage, { type: "fleet.spawn.result" }>;
   "session.list": Extract<ServerMessage, { type: "session.list.result" }>;
   "worker.list": Extract<ServerMessage, { type: "worker.list.result" }>;
   "fleet.list": Extract<ServerMessage, { type: "fleet.list.result" }>;
