@@ -47,6 +47,8 @@ export interface FleetDeps {
   // automatic label generation (usually Haiku). If present, asynchronously upgrades the placeholder label to a better one right after spawn.
   // best-effort: on null/throw, keeps the placeholder. If absent, does not update the label.
   summarizeLabel?: (task: string) => Promise<string | null>;
+  // Forks a worker's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
+  forkSession?: (sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
 }
 
 interface Entry {
@@ -174,6 +176,43 @@ export class FleetOrchestrator {
     this.flows.add(flow); // synchronous registration — so shutdown drain (waitAllSettled) waits even for in-flight spawns
     void flow.finally(() => this.flows.delete(flow));
     return ready.then(() => ({ id })); // {id} after worktree provisioning completes
+  }
+
+  // Fork a worker: copy its SDK conversation into a new branch + duplicate its full worktree state (committed history via a
+  // branch off the source's HEAD, plus uncommitted/untracked via checkpoint→restore) + copy its transcript. The fork is
+  // registered as a lazy-resumable entry (resumes the forked SDK session in its own worktree on first send). Source untouched.
+  async fork(id: string): Promise<{ id: string }> {
+    const src = this.deps.repos.getWorker(id);
+    if (!src) throw new Error(`Unknown worker: ${id}`);
+    if (!src.sdk_session_id) throw new Error("this worker has no SDK session yet — nothing to fork");
+    if (!src.worktree_path || !this.exists(src.worktree_path)) throw new Error("this worker's worktree is gone — cannot fork");
+    if (!this.deps.forkSession) throw new Error("worker forking is not available");
+    const newId = this.idgen();
+    const branch = `rookery/${newId}`;
+    const worktreePath = path.join(this.deps.worktreesDir, newId);
+    const label = `${src.label} (fork)`;
+    const { sessionId: forkedUuid } = await this.deps.forkSession(src.sdk_session_id, { title: label });
+    // Snapshot the source worktree's full state (tracked + untracked) → overlay it onto the fork so uncommitted work carries over.
+    let snapSha: string | null = null;
+    try { snapSha = await this.deps.git.checkpoint(src.worktree_path, `refs/rookery/fork/${newId}`); } catch { snapSha = null; }
+    // New worktree branched from the source's branch HEAD (carries its committed history), then overlay the snapshot.
+    await this.deps.git.addWorktree(src.repo_path, worktreePath, branch, src.branch ?? src.base ?? "HEAD");
+    if (snapSha) { try { await this.deps.git.restoreCheckpoint(worktreePath, snapSha); } catch { /* best-effort: committed state still present */ } }
+    // Persist the new worker (diff base = the source's base, so the fork's diff shows the same body of work).
+    this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined });
+    this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
+    if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
+    if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
+    this.deps.repos.copyWorkerEvents(id, newId);
+    // Register a lazy-resumable entry (like rehydrate) → idle; materializes (resumes the forked SDK session) on first send.
+    this.deps.repos.setWorkerStatus(newId, "idle", true);
+    this.entries.set(newId, {
+      homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
+      status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
+      resumeSessionId: forkedUuid,
+    });
+    this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
+    return { id: newId };
   }
 
   private async run(
