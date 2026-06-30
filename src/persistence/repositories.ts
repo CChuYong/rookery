@@ -244,6 +244,13 @@ export class Repositories {
       .run(toId, fromId);
   }
 
+  // Copy all transcript events from one worker to another (worker fork) — preserves seq/type/payload/created_at.
+  copyWorkerEvents(fromId: string, toId: string): void {
+    this.db
+      .prepare("INSERT INTO worker_events(worker_id, seq, type, payload_json, created_at) SELECT ?, seq, type, payload_json, created_at FROM worker_events WHERE worker_id = ? ORDER BY seq")
+      .run(toId, fromId);
+  }
+
   createWorker(input: {
     id: string;
     sessionId: string;
