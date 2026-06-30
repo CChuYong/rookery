@@ -8,6 +8,7 @@ export default {
   "repoTree.archive": "보관함",
   "repoTree.newRepo": "새 레포",
   "repoTree.menuRename": "이름 변경",
+  "repoTree.menuFork": "포크",
   "repoTree.menuStop": "중단",
   "repoTree.menuUnarchive": "보관 해제",
   "repoTree.menuArchive": "보관",

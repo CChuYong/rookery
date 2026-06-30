@@ -8,6 +8,7 @@ export default {
   "repoTree.archive": "Archive",
   "repoTree.newRepo": "New repo",
   "repoTree.menuRename": "Rename",
+  "repoTree.menuFork": "Fork",
   "repoTree.menuStop": "Stop",
   "repoTree.menuUnarchive": "Unarchive",
   "repoTree.menuArchive": "Archive",

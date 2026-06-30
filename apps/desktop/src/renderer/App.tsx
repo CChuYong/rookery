@@ -533,6 +533,7 @@ export function App(): JSX.Element {
     useStore.getState().navigate({ overlay: null, showRepos: true, subId: id });
     void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => {});
   }, []);
+  const forkSub = useCallback((id: string) => { void client?.request({ type: "worker.fork", id }).then((r) => { refetchFleet(); selectSub(r.id); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchFleet, selectSub]);
   const subSend = useCallback((id: string, text: string) => {
     const clientMsgId = crypto.randomUUID();
     // Show a queued bubble immediately → after the worker finishes its current turn (boundary echo) it switches to committed and settles into place.
@@ -753,7 +754,7 @@ export function App(): JSX.Element {
               </div>
             )}
             {showRepos ? (
-              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
+              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
             ) : (
               <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}

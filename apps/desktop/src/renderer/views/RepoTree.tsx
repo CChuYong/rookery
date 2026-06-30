@@ -25,6 +25,7 @@ function RepoTreeImpl(p: {
   attention?: Record<string, boolean>; // workers that settled without being viewed → unread dot on the right of the row
   onStopSub?: (id: string) => void;
   onRenameSub?: (id: string, label: string) => void;
+  onForkSub?: (id: string) => void; // right-click → fork this worker (duplicate context + worktree into a new worker)
   onArchiveSub?: (id: string, archived: boolean) => void;
   onDeleteSub?: (id: string) => void;
 }): JSX.Element {
@@ -183,6 +184,7 @@ function RepoTreeImpl(p: {
           onClose={() => setMenu(null)}
           items={[
             { label: t("repoTree.menuRename"), onClick: () => setRenaming({ id: menu.id, value: menuSub.label }) },
+            { label: t("repoTree.menuFork"), onClick: () => p.onForkSub?.(menu.id) },
             // stop: only when in progress (running/idle) — keeps the worktree and pauses (resumable).
             ...(menuSub.status === "running" || menuSub.status === "idle" ? [{ label: t("repoTree.menuStop"), onClick: () => p.onStopSub?.(menu.id) }] : []),
             { label: menuSub.archived ? t("repoTree.menuUnarchive") : t("repoTree.menuArchive"), onClick: () => p.onArchiveSub?.(menu.id, !menuSub.archived) },
