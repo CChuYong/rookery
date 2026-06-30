@@ -3,6 +3,7 @@ export default {
   "toast.actionFailed": "작업에 실패했어요",
   "toast.saveFailed": "저장에 실패했어요",
   "toast.deleteFailed": "삭제에 실패했어요",
+  "toast.forkFailed": "포크에 실패했어요",
   "toast.spawnFailed": "워커 생성에 실패했어요",
   "toast.registerFailed": "레포 등록에 실패했어요",
   "toast.automationFailed": "자동화 실행에 실패했어요",

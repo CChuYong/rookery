@@ -7,6 +7,7 @@ export default {
   "sessions.unreadDot": "새 응답 — 아직 안 봄",
   "sessions.empty": "아직 대화가 없어요 — 위 ‘새 세션’으로 마스터에게 일을 맡겨보세요.",
   "sessions.rename": "이름 변경",
+  "sessions.fork": "포크",
   "sessions.unarchive": "보관 해제",
   "sessions.archive": "보관",
   "sessions.deleteEllipsis": "삭제…",

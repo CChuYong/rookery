@@ -140,6 +140,7 @@ function SessionsImpl(p: {
   running?: Record<string, boolean>; // sessions with a master turn in progress → live pulse dot
   attention?: Record<string, boolean>; // sessions whose turn finished while unseen → right-side unread dot
   onRename?: (id: string, label: string) => void;
+  onFork?: (id: string) => void; // right-click → fork this session (duplicate context into a new session)
   onArchive?: (id: string, archived: boolean) => void;
   onDelete?: (id: string) => void;
   onPin?: (id: string, pinned: boolean) => void; // pin toggle (hover button)
@@ -307,6 +308,7 @@ function SessionsImpl(p: {
           onClose={() => setMenu(null)}
           items={[
             { label: t("sessions.rename"), onClick: () => setRenaming({ id: menu.id, value: sessName(menuSession) }) },
+            { label: t("sessions.fork"), onClick: () => p.onFork?.(menu.id) },
             { label: menuSession.archived ? t("sessions.unarchive") : t("sessions.archive"), onClick: () => p.onArchive?.(menu.id, !menuSession.archived) },
             { label: t("sessions.deleteEllipsis"), danger: true, onClick: () => setConfirm({ id: menu.id, name: sessName(menuSession) }) },
           ]}

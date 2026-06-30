@@ -7,6 +7,7 @@ export default {
   "sessions.unreadDot": "New reply — not seen yet",
   "sessions.empty": "No conversations yet — use ‘New session’ above to hand work to the master.",
   "sessions.rename": "Rename",
+  "sessions.fork": "Fork",
   "sessions.unarchive": "Unarchive",
   "sessions.archive": "Archive",
   "sessions.deleteEllipsis": "Delete…",

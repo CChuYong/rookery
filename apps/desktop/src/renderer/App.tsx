@@ -462,6 +462,7 @@ export function App(): JSX.Element {
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   const archiveSession = useCallback((id: string, archived: boolean) => { void client?.request({ type: "session.archive", sessionId: id, archived }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
   const pinSession = useCallback((id: string, pinned: boolean) => { void client?.request({ type: "session.pin", sessionId: id, pinned }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
+  const forkSession = useCallback((id: string) => { void client?.request({ type: "session.fork", sessionId: id }).then((r) => { refetchSessions(); useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: r.sessionId }); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchSessions]);
   // Use getState to remove the dependency on render state and stabilize with useCallback [] (as an event handler, getState() at call time = the existing closure value).
   const deleteSession = useCallback((id: string) => {
     // Optimistic removal — the row vanishes immediately (the refetch reconciles; restored on failure). Otherwise it lingers
@@ -754,7 +755,7 @@ export function App(): JSX.Element {
             {showRepos ? (
               <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
             ) : (
-              <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
+              <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
             <UsagePanel usage={s.usage} />
             {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
