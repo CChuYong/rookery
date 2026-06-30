@@ -155,6 +155,15 @@ describe("message ts stamping (hover relative time)", () => {
     const item = log[0];
     expect(item.kind === "message" ? item.ts : undefined).toBe(Date.parse(iso));
   });
+
+  it("seedSessionLog routes copied events to sid even when the payload carries a different (original) sessionId — fork case", () => {
+    const log = seedSessionLog(undefined, "fork-id", [
+      { payload: { type: "master.message", sessionId: "orig-id", role: "assistant", content: "hi from original" } },
+    ]);
+    expect(log).toHaveLength(1);
+    const item = log[0];
+    expect(item.kind === "message" ? item.content : undefined).toBe("hi from original");
+  });
 });
 
 describe("worker message ts stamping (hover relative time)", () => {

@@ -51,7 +51,9 @@ function isEchoUser(log: LogItem[] | undefined, role: string, content: string): 
 export function seedSessionLog(prev: LogItem[] | undefined, sid: string, events: Array<{ payload: unknown; createdAt?: string }>): LogItem[] {
   let st = emptyState();
   // Inject the persisted event's created_at as the message ts → restored old messages also carry their actual arrival time.
-  for (const ev of events) st = reduceEvent(st, ev.payload as CoreEvent, ev.createdAt ? Date.parse(ev.createdAt) : undefined);
+  // Force each event's sessionId to sid: a forked session's copied events carry the ORIGINAL session's id, which would
+  // otherwise route them (via reduceEvent) into the wrong session's log → the fork would render empty. No-op for normal sessions.
+  for (const ev of events) st = reduceEvent(st, { ...(ev.payload as CoreEvent), sessionId: sid } as CoreEvent, ev.createdAt ? Date.parse(ev.createdAt) : undefined);
   const committed = st.logsBySession[sid] ?? [];
   if (!prev || prev.length === 0) return committed; // restart, etc. → the replay is everything
   if (events.length === 0) return prev; // nothing persisted → keep local (uncommitted)
