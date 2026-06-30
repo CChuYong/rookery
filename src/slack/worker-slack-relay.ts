@@ -65,8 +65,18 @@ export class WorkerSlackRelay {
     if (!master) return; // not a Slack-origin master → out of scope
     if (this.workers.has(e.workerId)) return; // double-emit safety
     const repo = basename(e.repoPath) || e.repoPath;
-    const task = e.task ? ` · task: ${e.task}` : "";
-    const root = await this.deps.client.chat.postMessage({ channel, text: `Worker \`${e.label || e.workerId}\` · repo \`${repo}\`${task}` });
+    const rows: Array<[string, string]> = [["Worker", e.label || e.workerId], ["Repo", repo]];
+    if (e.task) rows.push(["Task", e.task]);
+    // Quoted bullet list with bold labels (rich_text, border:1). text is the mrkdwn fallback for notifications/search.
+    const blocks = [{
+      type: "rich_text",
+      elements: [{
+        type: "rich_text_list", style: "bullet", indent: 0, border: 1,
+        elements: rows.map(([k, v]) => ({ type: "rich_text_section", elements: [{ type: "text", text: k, style: { bold: true } }, { type: "text", text: `: ${v}` }] })),
+      }],
+    }];
+    const fallback = rows.map(([k, v]) => `> • *${k}*: ${v}`).join("\n");
+    const root = await this.deps.client.chat.postMessage({ channel, text: fallback, blocks });
     const rootTs = root.ts;
     if (!rootTs) return; // can't thread/permalink without a ts
     // Link the worker thread back into the master's Slack thread so the user can follow it.
