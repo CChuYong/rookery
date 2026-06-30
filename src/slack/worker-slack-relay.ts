@@ -74,7 +74,8 @@ export class WorkerSlackRelay {
     if (permalink) {
       await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: `🧵 Worker \`${e.label || e.workerId}\` started — follow: ${permalink}` });
     }
-    this.workers.set(e.workerId, new SlackThreadReporter(this.deps.client, { channel, threadTs: rootTs, team: master.team }, this.deps.getLocale));
+    // master.userId → recipient_user_id, required for chat.startStream to stream in a regular (non-assistant) channel.
+    this.workers.set(e.workerId, new SlackThreadReporter(this.deps.client, { channel, threadTs: rootTs, team: master.team, userId: master.userId }, this.deps.getLocale));
   }
 
   private async onTerminal(workerId: string): Promise<void> {

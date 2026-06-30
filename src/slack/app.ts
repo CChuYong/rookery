@@ -46,6 +46,10 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
   });
 
   const registry = new ThreadRegistry(deps.bus);
+  // Last human user id per Slack thread → used as recipient_user_id when streaming the worker relay's cards into a
+  // regular channel (chat.startStream needs it outside assistant threads, where the recipient is implicit). Key: team:channel:threadTs.
+  const recipientByThread = new Map<string, string>();
+  const threadKeyOf = (t: { team: string; channel: string; threadTs: string }): string => `${t.team}:${t.channel}:${t.threadTs}`;
   // Attachment downloader (Bearer bot token → ~/.rookery/slack-files/). Requires the files:read scope.
   const download = makeFileDownloader({ token: cfg.botToken, dir: path.join(deps.home, "slack-files") });
 
@@ -111,6 +115,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
           await setStatus(s);
         },
       };
+      if (ctx.userId) recipientByThread.set(threadKeyOf(ctx), ctx.userId);
       if (ctx.text || ctx.files?.length) await handleIncoming(ctx, deps, registry, download);
     },
   });
@@ -145,6 +150,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       },
     };
     // Let empty mentions (just @rookery) through too, so handleIncoming prompts the user to add a message (prevents a silent drop).
+    if (ctx.userId) recipientByThread.set(threadKeyOf(ctx), ctx.userId);
     await handleIncoming(ctx, deps, registry, download);
   });
 
@@ -176,7 +182,10 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
     client: app.client as unknown as SlackClient,
     enabled: () => deps.slackConfig().workerRelayEnabled,
     channel: () => deps.slackConfig().workerRelayChannel,
-    resolveThread: (id) => deps.resolveThread?.(id) ?? null,
+    resolveThread: (id) => {
+      const t = deps.resolveThread?.(id) ?? null;
+      return t ? { ...t, userId: recipientByThread.get(threadKeyOf(t)) } : null; // attach recipient_user_id so the relay can stream in a regular channel
+    },
     getLocale: () => deps.slackConfig().locale,
   });
   const unsubWorkerRelay = deps.bus.subscribe(FLEET_CHANNEL, (e) => workerRelay.onEvent(e));
