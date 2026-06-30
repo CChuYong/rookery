@@ -97,6 +97,8 @@ export class SlackThreadReporter {
       await this.streamer.append(payload);
     } catch (err) {
       const code = slackErrorCode(err) ?? "";
+      // Diagnostic: stream append failures were previously silent → the reason for a plain-post fallback was invisible.
+      process.stderr.write(`[rookery] slack stream append fell back to post (code=${code || String(err)})\n`);
       this.streamer = null;
       // msg_too_long: retrying the same payload fails again (infinite retry + eventual silent loss).
       // Don't retry — truncate the text to the byte budget and send it as a regular post.
