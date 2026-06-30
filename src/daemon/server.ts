@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, WebSocket } from "ws";
 import type { RawData } from "ws";
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, forkSession as sdkForkSession } from "@anthropic-ai/claude-agent-sdk";
 import type { Config } from "../config.js";
 import { openDb } from "../persistence/db.js";
 import { Repositories } from "../persistence/repositories.js";
@@ -127,6 +127,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
   const sessions = new SessionManager({ repos, bus, queryFn, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
+    forkSession: (id, opts) => sdkForkSession(id, opts), // SDK session fork (eager) for SessionManager.fork
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => slackBridge) ?? interactionRegistry.canUseToolFor(sessionId),
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.

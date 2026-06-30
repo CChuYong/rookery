@@ -39,6 +39,7 @@ const automationInputSchema = z.object({
 
 export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.create"), cwd: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
@@ -192,6 +193,7 @@ export type ServerMessage =
 export interface RequestResultMap {
   "session.create": Extract<ServerMessage, { type: "session.created" }>;
   "session.open": Extract<ServerMessage, { type: "session.created" }>;
+  "session.fork": Extract<ServerMessage, { type: "session.created" }>;
   "session.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.rename": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.archive": Extract<ServerMessage, { type: "fleet.ack" }>;

@@ -137,6 +137,17 @@ export class Connection {
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
       }
+      case "session.fork": {
+        // Fork a master session → a new session with the original's SDK context + copied transcript. Replies like session.create so the client navigates to it.
+        try {
+          const session = await this.sessions.fork(msg.sessionId);
+          this.subscribe(session.id);
+          this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
+        } catch (err) {
+          this.reply({ type: "error", message: err instanceof Error ? err.message : String(err), ...(msg.reqId ? { reqId: msg.reqId } : {}) });
+        }
+        return;
+      }
       case "session.attach": {
         const session = this.sessions.get(msg.sessionId);
         if (!session) {
