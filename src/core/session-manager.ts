@@ -20,6 +20,9 @@ export function deriveOrigin(externalKey: string | null): { origin: string; orig
   return { origin: "ui", originRef: null };
 }
 
+// Forks an SDK session into a new branch and returns the new session id (default = the SDK's forkSession). Injected at the composition root.
+export type ForkFn = (sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
+
 export interface SessionManagerDeps {
   repos: Repositories;
   bus: EventBus;
@@ -33,6 +36,8 @@ export interface SessionManagerDeps {
   makeCanUseTool?: (externalKey: string | null, sessionId: string) => CanUseTool | undefined;
   // Builds a per-source dynamic capability resolver from the session's externalKey (slack: etc.) (assembled by the daemon). base only if not injected/undefined.
   makeCapabilities?: (externalKey: string | null, sessionId: string) => (() => TurnCapabilities) | undefined;
+  // Forks a session's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
+  forkSession?: ForkFn;
 }
 
 export interface Session {
@@ -88,6 +93,25 @@ export class SessionManager {
     const existing = this.deps.repos.getSessionByExternalKey(externalKey);
     if (existing) return this.get(existing.id)!;
     return this.create(cwd, { externalKey }); // origin is derived from the key prefix (slack/automation)
+  }
+
+  // Fork a master session: copy its SDK conversation into a new branch + duplicate its transcript, so the fork carries
+  // full context and shows the same history, then diverges from the next turn. The original is untouched.
+  async fork(sessionId: string): Promise<Session> {
+    const row = this.deps.repos.getSession(sessionId);
+    if (!row) throw new Error(`unknown session: ${sessionId}`);
+    if (!row.sdk_session_id) throw new Error("this session has no completed turn yet — nothing to fork");
+    if (!this.deps.forkSession) throw new Error("session forking is not available");
+    const label = row.label?.trim() || row.cwd.split(/[\\/]/).filter(Boolean).pop() || sessionId;
+    const forkLabel = `${label} (fork)`;
+    const { sessionId: forkedUuid } = await this.deps.forkSession(row.sdk_session_id, { title: forkLabel });
+    const id = this.idgen();
+    this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null }); // a fork is always a plain ui session
+    this.deps.repos.setSdkSessionId(id, forkedUuid);
+    this.deps.repos.copySessionEvents(sessionId, id);
+    this.deps.repos.setSessionLabel(id, forkLabel);
+    this.deps.bus.emit({ type: "session.label", sessionId: id, label: forkLabel }); // live UI label
+    return this.build(id, row.cwd, forkedUuid, null);
   }
 
   get(id: string): Session | undefined {

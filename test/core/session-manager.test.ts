@@ -124,6 +124,43 @@ describe("SessionManager", () => {
     expect(repos.getSession(s.id)).toBeUndefined(); // session removed
   });
 
+  it("fork() copies the SDK session + transcript into a new ui session labelled (fork), leaving the original intact", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const forkCalls: Array<{ id: string; title?: string }> = [];
+    const forkSession = async (sdkSessionId: string, opts?: { title?: string }) => { forkCalls.push({ id: sdkSessionId, title: opts?.title }); return { sessionId: "forked-uuid" }; };
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const orig = sm.create("/work/repo"); // s0
+    repos.setSdkSessionId(orig.id, "orig-sdk");
+    repos.setSessionLabel(orig.id, "My session");
+    repos.addSessionEvent({ sessionId: orig.id, seq: 0, type: "message", payloadJson: '{"role":"user"}' });
+
+    const forked = await sm.fork(orig.id); // s1
+
+    expect(forkCalls).toEqual([{ id: "orig-sdk", title: "My session (fork)" }]); // forked from the orig SDK session
+    expect(forked.id).toBe("s1");
+    const row = repos.getSession(forked.id)!;
+    expect(row.sdk_session_id).toBe("forked-uuid");
+    expect(row.label).toBe("My session (fork)");
+    expect(row.origin).toBe("ui");
+    expect(repos.listSessionEvents(forked.id)).toHaveLength(1); // transcript copied
+    expect(repos.getSession(orig.id)!.sdk_session_id).toBe("orig-sdk"); // original untouched
+    expect(repos.getSession(orig.id)!.label).toBe("My session");
+  });
+
+  it("fork() throws when the source session never ran a turn (no sdk_session_id)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet, forkSession: async () => ({ sessionId: "x" }) }, () => "s0");
+    const orig = sm.create("/work");
+    await expect(sm.fork(orig.id)).rejects.toThrow(/nothing to fork/);
+  });
+
   it("injects a session-bound canUseTool from makeCanUseTool(externalKey) into the master query (UX-13 wiring)", async () => {
     let captured: unknown = "UNSET";
     const sentinel = (() => {}) as never;
