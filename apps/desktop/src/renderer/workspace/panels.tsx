@@ -1,4 +1,4 @@
-import type { FunctionComponent } from "react";
+import type { FunctionComponent, ReactNode } from "react";
 import type { IDockviewPanelProps } from "dockview-react";
 import { useStore } from "../store/store.js";
 import { NestedAgents } from "../views/NestedAgents.js";
@@ -31,14 +31,21 @@ export function NestedPanelBody({ subId }: { subId: string | null }): JSX.Elemen
   return <NestedAgents panels={panels} />;
 }
 
+// dockview's panel content host has a definite height but is not a flex column,
+// so components that rely on flex-1 (conversation → scrolling list + pinned
+// composer, Monaco) collapse unless we give them a full-height flex context.
+// Fill = flex column that pins its own footer; Scroll = plain scroll region.
+const Fill = ({ children }: { children: ReactNode }): JSX.Element => <div className="flex h-full min-h-0 flex-col">{children}</div>;
+const Scroll = ({ children }: { children: ReactNode }): JSX.Element => <div className="h-full min-h-0 overflow-y-auto">{children}</div>;
+
 // dockview component map: each panel simply renders the current page's delegate.
 // Editor panels read their tab id from serializable params; everything else is a
 // page-level singleton whose content comes from the WorkspaceRender context.
 export const dockComponents: Record<string, FunctionComponent<IDockviewPanelProps>> = {
-  conversation: () => <>{useWorkspaceRender().conversation()}</>,
-  editor: (props) => <>{useWorkspaceRender().editor((props.params as PanelParams & { kind: "editor" }).tabId)}</>,
-  terminal: () => <>{useWorkspaceRender().terminal()}</>,
-  files: () => <>{useWorkspaceRender().files()}</>,
-  git: () => <>{useWorkspaceRender().git()}</>,
-  nested: () => <>{useWorkspaceRender().nested()}</>,
+  conversation: () => <Fill>{useWorkspaceRender().conversation()}</Fill>,
+  editor: (props) => <Fill>{useWorkspaceRender().editor((props.params as PanelParams & { kind: "editor" }).tabId)}</Fill>,
+  terminal: () => <Fill>{useWorkspaceRender().terminal()}</Fill>,
+  files: () => <Scroll>{useWorkspaceRender().files()}</Scroll>,
+  git: () => <Scroll>{useWorkspaceRender().git()}</Scroll>,
+  nested: () => <Scroll>{useWorkspaceRender().nested()}</Scroll>,
 };

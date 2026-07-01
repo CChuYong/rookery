@@ -679,7 +679,7 @@ export function App(): JSX.Element {
           />
         ),
         editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} />,
-        terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} />,
+        terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} dock />,
         files: () => (wsRoot && wsRoot.endsWith(activeSub.id) ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : findingWorkDir),
         git: () => (wsRoot && wsRoot.endsWith(activeSub.id) ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : findingWorkDir),
         nested: () => <NestedPanelBody subId={activeSub.id} />,
@@ -707,7 +707,7 @@ export function App(): JSX.Element {
           />
         ),
         editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={s.activeSessionId!} root={wsRoot} />,
-        terminal: () => <TerminalPanel sessionId={s.activeSessionId!} subId={null} cwd={activeSess?.cwd} />,
+        terminal: () => <TerminalPanel sessionId={s.activeSessionId!} subId={null} cwd={activeSess?.cwd} dock />,
         files: () => (wsRoot ? <FileTree root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} activeTabPath={activeTabPath} /> : findingWorkDir),
         git: () => (wsRoot ? <GitChanges root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} /> : findingWorkDir),
         nested: () => <NestedPanelBody subId={null} />,

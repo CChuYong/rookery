@@ -11,7 +11,7 @@ import { baseName } from "../lib/path.js";
 const EMPTY = { tabs: [], activeTabId: null, open: false }; // stable ref — avoids creating a new object every render when the page is empty
 
 // Bottom terminal drawer. Tab bar for one agent page (sessionId = page key) + the active tab's xterm + a top-edge resize handle.
-export function TerminalPanel({ sessionId, subId, cwd }: { sessionId: string; subId: string | null; cwd?: string }): JSX.Element {
+export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: string; subId: string | null; cwd?: string; dock?: boolean }): JSX.Element {
   const t = useT();
   // Subscribe via narrow selectors to only this page's slice + stable actions → don't re-render on other pages' changes, avoiding xterm recreation (thrash).
   const group = useTermStore((t) => t.byPage[sessionId]) ?? EMPTY;
@@ -33,9 +33,12 @@ export function TerminalPanel({ sessionId, subId, cwd }: { sessionId: string; su
   // Stable onExit — it goes into TerminalView's effect deps, so keep one per page (a new closure every render would recreate the xterm).
   const onExit = useCallback((id: string) => markExit_(sessionId, id), [markExit_, sessionId]);
 
+  // In dockable mode the dockview group owns the panel's height + sashes, so fill
+  // it (no fixed height / top resize handle / drawer border); otherwise it's the
+  // classic bottom drawer sized by the store with a top-edge resize handle.
   return (
-    <div className="flex shrink-0 flex-col border-t border-line bg-ink" style={{ height }}>
-      <div onPointerDown={startDrag} className={cn("h-1.5 shrink-0 cursor-row-resize hover:bg-accent/30", resizing && "bg-accent/40")} />
+    <div className={cn("flex flex-col bg-ink", dock ? "h-full" : "shrink-0 border-t border-line")} style={dock ? undefined : { height }}>
+      {!dock && <div onPointerDown={startDrag} className={cn("h-1.5 shrink-0 cursor-row-resize hover:bg-accent/30", resizing && "bg-accent/40")} />}
       <div role="tablist" className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
         {group.tabs.map((tab) => (
           <div key={tab.id} className={cn("group flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11px]", tab.id === group.activeTabId ? "bg-raised text-fg" : "text-muted hover:bg-raised/60")}>
