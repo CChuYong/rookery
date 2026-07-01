@@ -16,10 +16,11 @@
 - ✅ **Tasks 3–5** — panel-ids, per-page layout store, default-template (TDD, committed).
 - ✅ **Tasks 2/6/7/8/9 (PoC)** — `WorkspaceRender` context, panel adapters, `WorkspaceDock`, worker **and** master pages wired behind the flag; old TabBar/RightSidebar/Terminal gated off when on. typecheck + `electron-vite build` + 594 tests green (committed). The throwaway `Spike.tsx` was skipped — the PoC wires the real panels directly.
 - ✅ **Task 11** — layout prune/clear on page death (committed).
-- ⏳ **GATE — manual R1 validation (Phase 0 Step 5 / Phase 1 Step 2):** enable the flag, drag/split panels, confirm Monaco (unsaved edits) + xterm (scrollback) survive moves. **Blocks Phase 3.**
-- ⬜ **Phase 2 remainder** — theming polish, page-switch refinements (need visual feedback).
-- ⬜ **Phase 3** — migrate (delete old layout, flip flag default). **Irreversible — do not start before the R1 gate passes.**
-- ⬜ **Phase 4** — floating groups (stretch).
+- ✅ **Phase 2** — dock-mode header/checkpoint parity (WorkerHeader/SessionHeader kept above the dock, term/right toggles hidden), initial panel sizing, primary-panel (conversation) re-add guard, disposable cleanup, base theming (committed).
+- ✅ **Phase 3a — flag default flipped ON** (committed): the dockview workspace is now the default; the legacy layout is retained as a `rookery.dockable="0"` fallback. All code compiles, builds, and 594 tests pass.
+- ⏳ **GATE — manual R1 + visual check:** run the app (dockable is now default), drag/split panels, confirm Monaco (unsaved edits) + xterm (scrollback) survive moves and the theme/sizing look right. Escape hatch if anything is off: `localStorage.setItem("rookery.dockable","0")` + reload.
+- ⬜ **Phase 3b — code deletion (after visual confirmation):** remove the legacy `TabBar`/`RightSidebar`/right+bottom `ResizeHandle` paths + the `right`/tab persistence in `store/workspace.ts`; drop the `!dockable` fallback branches. **Held until the visual check passes** — deleting the fallback before confirming the replacement renders would be irreversible-in-spirit.
+- ⬜ **Phase 4 — floating groups (stretch):** wire `api.addFloatingGroup` to a group header action; needs visual iteration.
 
 ## Global Constraints
 
