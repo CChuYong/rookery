@@ -3,15 +3,17 @@ import { isDockableEnabled } from "../../src/renderer/lib/flags.js";
 
 describe("isDockableEnabled", () => {
   beforeEach(() => localStorage.clear());
-  it("defaults to false", () => {
-    expect(isDockableEnabled()).toBe(false);
-  });
-  it("is true when the flag is exactly '1'", () => {
-    localStorage.setItem("rookery.dockable", "1");
+  it("defaults to true (dockable is the default layout)", () => {
     expect(isDockableEnabled()).toBe(true);
   });
-  it("is false for any other value", () => {
-    localStorage.setItem("rookery.dockable", "yes");
+  it("is false only when explicitly opted out with '0'", () => {
+    localStorage.setItem("rookery.dockable", "0");
     expect(isDockableEnabled()).toBe(false);
+  });
+  it("stays true for '1' or any other value", () => {
+    localStorage.setItem("rookery.dockable", "1");
+    expect(isDockableEnabled()).toBe(true);
+    localStorage.setItem("rookery.dockable", "yes");
+    expect(isDockableEnabled()).toBe(true);
   });
 });
