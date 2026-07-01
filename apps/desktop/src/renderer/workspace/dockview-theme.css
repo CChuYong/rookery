@@ -6,15 +6,53 @@
   --dv-background-color: var(--color-ink);
   --dv-group-view-background-color: var(--color-ink);
   --dv-tabs-and-actions-container-background-color: var(--color-surface);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-raised);
+  --dv-tabs-and-actions-container-height: 34px;
+  --dv-tab-border-radius: 6px;
   --dv-activegroup-visiblepanel-tab-color: var(--color-fg);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface);
   --dv-inactivegroup-visiblepanel-tab-color: var(--color-fg-dim);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--color-muted);
-  --dv-tab-divider-color: var(--color-line);
+  --dv-tab-divider-color: transparent;
   --dv-separator-border: var(--color-line);
   --dv-paneview-active-outline-color: var(--color-accent);
   --dv-active-sash-color: var(--color-accent);
-  --dv-drag-over-background-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --dv-drag-over-background-color: color-mix(in srgb, var(--color-accent) 16%, transparent);
   --dv-drag-over-border-color: var(--color-accent);
+}
+
+/* Pill tabs with the signature coral underline (mirrors the app's TabBar). The
+   custom RookeryTab paints icon/title/close; these rules own the tab shell. */
+.dockview-theme-rookery .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--color-line);
+  padding: 0 6px;
+  align-items: center;
+}
+.dockview-theme-rookery .dv-tabs-container > .dv-tab {
+  position: relative;
+  height: 26px;
+  margin: 0 1px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  background-color: var(--color-raised);
+  color: var(--color-fg);
+}
+.dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-inactive-tab {
+  background-color: transparent;
+  color: var(--color-fg-dim);
+}
+.dockview-theme-rookery .dv-tab.dv-inactive-tab:hover {
+  background-color: color-mix(in srgb, var(--color-raised) 60%, transparent);
+  color: var(--color-fg);
+}
+/* the coral underline under the active tab (the strip's signature) */
+.dockview-theme-rookery .dv-tabs-container > .dv-tab.dv-active-tab::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -4px;
+  height: 2px;
+  border-radius: 9999px;
+  background: var(--color-accent);
 }

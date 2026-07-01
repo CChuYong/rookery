@@ -7,6 +7,7 @@ import { useLayoutStore } from "../store/layout.js";
 import { defaultPanels } from "./default-template.js";
 import { fixedPanelId, editorPanelId, type FixedKind } from "./panel-ids.js";
 import { dockComponents } from "./panels.js";
+import { RookeryTab } from "./RookeryTab.js";
 import "./dockview-theme.css";
 import "dockview-react/dist/styles/dockview.css";
 
@@ -125,7 +126,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
 
   return (
     <div className="dockview-theme-dark dockview-theme-rookery min-h-0 w-full flex-1">
-      <DockviewReact components={dockComponents} onReady={onReady} />
+      <DockviewReact components={dockComponents} defaultTabComponent={RookeryTab} onReady={onReady} />
     </div>
   );
 }
