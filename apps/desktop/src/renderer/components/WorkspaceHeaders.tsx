@@ -19,26 +19,27 @@ function WorkerMetrics({ workerId }: { workerId: string }): JSX.Element | null {
 }
 
 // Shared right-side toggles for the worker/session header (open in other app + terminal bottom panel + right panel). The right toggle only shows when a page exists.
-function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd }: {
+function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd, dock }: {
   termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void;
-  subId?: string | null; cwd?: string;
+  subId?: string | null; cwd?: string; dock?: boolean;
 }): JSX.Element {
   const t = useT();
   const btn = (active: boolean): string => cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", active ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim");
   return (
     <>
       <OpenInAppMenu subId={subId} cwd={cwd} />
-      <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>
-      {termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
+      {/* In dockable mode the terminal + right panel are dockview panels, so their toggles are hidden here (their visibility is managed by the dock). */}
+      {!dock && <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>}
+      {!dock && termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
     </>
   );
 }
 
 // Worker (sub) view header: status badge + label + branch + (checkpoints/toggles).
-export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, onFetchCheckpoints, onRestore }: {
+export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, onFetchCheckpoints, onRestore, dock }: {
   worker: FleetRow; termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean;
   onToggleTerm: () => void; onToggleRight: () => void;
-  onFetchCheckpoints: () => Promise<Checkpoint[]>; onRestore: (seq: number) => void;
+  onFetchCheckpoints: () => Promise<Checkpoint[]>; onRestore: (seq: number) => void; dock?: boolean;
 }): JSX.Element {
   const t = useT();
   return (
@@ -60,16 +61,16 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
       <div className="no-drag ml-auto flex shrink-0 items-center gap-1">
         <WorkerMetrics workerId={worker.id} />
         <CheckpointMenu fetchCheckpoints={onFetchCheckpoints} onRestore={onRestore} />
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} />
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} dock={dock} />
       </div>
     </div>
   );
 }
 
 // Master (session) view header: session name + slack badge + #id + running chip + (toggles/stats).
-export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight }: {
+export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, dock }: {
   name: string; sessionId: string | null; cwd?: string; readOnly: boolean; running: boolean;
-  termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void;
+  termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void; dock?: boolean;
 }): JSX.Element {
   const t = useT();
   return (
@@ -85,7 +86,7 @@ export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPag
         </span>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2.5">
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} />
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} />
         {sessionId && <SessionMetrics sessionId={sessionId} />}
       </div>
     </div>

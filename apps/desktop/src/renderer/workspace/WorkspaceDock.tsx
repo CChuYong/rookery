@@ -12,6 +12,8 @@ import "dockview-react/dist/styles/dockview.css";
 
 const EDITOR_PREFIX = "panel:editor:";
 
+type Disposable = { dispose(): void }; // dockview event subscriptions return one
+
 // One dockview workspace for one page (keyed by pageKey → remounts on page
 // switch). Seeds from the default template or restores the saved layout,
 // persists per-page on change, and keeps editor panels in sync with the page's
@@ -20,6 +22,8 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   const t = useT();
   const apiRef = useRef<DockviewApi | null>(null);
   const reconcilingRef = useRef(false); // suppress closeTab_ while WE add/remove editor panels
+  const disposedRef = useRef(false); // ignore dockview events fired during teardown
+  const disposablesRef = useRef<Disposable[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const titleFor = (kind: FixedKind): string => {
@@ -27,23 +31,35 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       case "conversation": return agentKind === "worker" ? t("app.worker") : t("app.master");
       case "files": return t("rightSidebar.segmentFiles");
       case "git": return "Git";
-      case "terminal": return "Terminal";
+      case "terminal": return t("workspaceHeaders.terminalTitle");
       case "nested": return t("rightSidebar.segmentWorker");
     }
   };
 
+  // Initial size for the panel that CREATES a group: the right sidebar group is
+  // narrow, the terminal group is short; the conversation keeps the rest.
+  const seedSize = (kind: FixedKind): { initialWidth?: number; initialHeight?: number } =>
+    kind === "files" ? { initialWidth: 320 } : kind === "terminal" ? { initialHeight: 220 } : {};
+
+  const addFixed = (api: DockviewApi, kind: FixedKind, anchor?: FixedKind, direction?: Direction): void => {
+    api.addPanel({
+      id: fixedPanelId(kind),
+      component: kind,
+      title: titleFor(kind),
+      params: { pageKey, kind },
+      ...seedSize(kind),
+      ...(anchor ? { position: { referencePanel: fixedPanelId(anchor), direction } } : {}),
+    });
+  };
+
   const seed = (api: DockviewApi): void => {
-    for (const sp of defaultPanels(agentKind)) {
-      const id = fixedPanelId(sp.kind);
-      const position = sp.anchor ? { referencePanel: fixedPanelId(sp.anchor), direction: sp.direction as Direction } : undefined;
-      api.addPanel({ id, component: sp.kind, title: titleFor(sp.kind), params: { pageKey, kind: sp.kind }, ...(position ? { position } : {}) });
-    }
+    for (const sp of defaultPanels(agentKind)) addFixed(api, sp.kind, sp.anchor, sp.direction as Direction | undefined);
   };
 
   // Reconcile editor panels against the page's non-agent workspace tabs: add
   // missing (as tabs in the conversation group), remove stale.
   const syncEditors = (api: DockviewApi | null): void => {
-    if (!api) return;
+    if (!api || disposedRef.current) return;
     reconcilingRef.current = true;
     try {
       const tabs = (useWsStore.getState().byPage[pageKey]?.tabs ?? []).filter(
@@ -69,7 +85,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
 
   const persist = (api: DockviewApi): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { useLayoutStore.getState().save_(pageKey, api.toJSON()); }, 400);
+    saveTimer.current = setTimeout(() => { if (!disposedRef.current) useLayoutStore.getState().save_(pageKey, api.toJSON()); }, 400);
   };
 
   const onReady = (event: DockviewReadyEvent): void => {
@@ -78,20 +94,32 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     const saved = useLayoutStore.getState().byPage[pageKey] as SerializedDockview | undefined;
     if (saved) { try { api.fromJSON(saved); } catch { api.clear(); seed(api); } }
     else seed(api);
+    // The conversation is the primary panel — if a restored layout dropped it, re-seed it.
+    if (!api.getPanel(fixedPanelId("conversation"))) addFixed(api, "conversation");
     syncEditors(api);
 
-    // User-closing an editor tab → reflect in the workspace store (so it isn't re-added). Programmatic reconcile is suppressed.
-    api.onDidRemovePanel((e) => {
-      if (reconcilingRef.current) return;
+    const disposables: Disposable[] = [];
+    // User-closing a panel: editors → reflect in the workspace store; conversation → re-add (it must always exist).
+    disposables.push(api.onDidRemovePanel((e) => {
+      if (reconcilingRef.current || disposedRef.current) return;
+      if (e.id === fixedPanelId("conversation")) { addFixed(api, "conversation"); return; }
       if (e.id.startsWith(EDITOR_PREFIX)) useWsStore.getState().closeTab_(pageKey, e.id.slice(EDITOR_PREFIX.length));
-    });
-    api.onDidLayoutChange(() => persist(api));
+    }));
+    disposables.push(api.onDidLayoutChange(() => persist(api)));
+    disposablesRef.current = disposables;
   };
 
   // Keep editor panels in sync when tabs change elsewhere (file click, tool chip).
   useEffect(() => {
+    disposedRef.current = false;
     const unsub = useWsStore.subscribe(() => syncEditors(apiRef.current));
-    return () => { unsub(); if (saveTimer.current) clearTimeout(saveTimer.current); };
+    return () => {
+      disposedRef.current = true;
+      unsub();
+      for (const d of disposablesRef.current) d.dispose();
+      disposablesRef.current = [];
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageKey]);
 

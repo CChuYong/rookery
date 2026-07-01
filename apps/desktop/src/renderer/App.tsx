@@ -952,9 +952,22 @@ export function App(): JSX.Element {
         ) : showRepos ? (
           activeSub ? (
             dockable && workerRender ? (
-              <WorkspaceRenderProvider value={workerRender}>
-                <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
-              </WorkspaceRenderProvider>
+              <div className="flex min-h-0 flex-1 flex-col">
+                <WorkerHeader
+                  worker={activeSub}
+                  termPageKey={termPageKey}
+                  termPageOpen={false}
+                  rightOpen={false}
+                  onToggleTerm={() => {}}
+                  onToggleRight={() => {}}
+                  onFetchCheckpoints={() => fetchCheckpoints(activeSub.id)}
+                  onRestore={(seq) => onRestore(activeSub.id, seq)}
+                  dock
+                />
+                <WorkspaceRenderProvider value={workerRender}>
+                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
+                </WorkspaceRenderProvider>
+              </div>
             ) : (
             <>
               <WorkerHeader
@@ -1020,9 +1033,24 @@ export function App(): JSX.Element {
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
           <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} />
         ) : dockable && masterRender ? (
-          <WorkspaceRenderProvider value={masterRender}>
-            <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
-          </WorkspaceRenderProvider>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <SessionHeader
+              name={sessionName}
+              sessionId={s.activeSessionId}
+              cwd={activeSess?.cwd}
+              readOnly={sessionReadOnly}
+              running={!!(s.activeSessionId && s.running[s.activeSessionId])}
+              termPageKey={termPageKey}
+              termPageOpen={false}
+              rightOpen={false}
+              onToggleTerm={() => {}}
+              onToggleRight={() => {}}
+              dock
+            />
+            <WorkspaceRenderProvider value={masterRender}>
+              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
+            </WorkspaceRenderProvider>
+          </div>
         ) : (
           <>
             <SessionHeader
