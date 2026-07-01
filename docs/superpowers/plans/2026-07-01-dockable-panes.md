@@ -8,6 +8,8 @@
 
 **Tech Stack:** React 18.3, zustand 5, dockview (React), electron-vite, vitest + jsdom.
 
+> **dockview v7.0.2 API note (verified against installed types):** v7 splits packages — install **both** `dockview-react` (React bindings) and `dockview` (meta, re-exports `dockview-core` types); `dockview-core` comes transitively. Import `DockviewReact` and `IDockviewPanelProps` from **`dockview-react`**; import `DockviewReadyEvent` / `SerializedDockview` / `DockviewApi` from **`dockview`**. `DockviewApi` has `addPanel({id,component,params,position:{referencePanel,direction}})`, `toJSON()`, `fromJSON()`, `clear()`, `getPanel(id)`, `removePanel()`, `onDidLayoutChange`. Theming is CSS-class based (no JS theme object): the CSS at `dockview-react/dist/styles/dockview.css` defines full `.dockview-theme-dark` (etc.) var sets; a custom theme must **layer on a base** — put `className="dockview-theme-dark dockview-theme-rookery"` on an ancestor `<div>` (DockviewReact itself is wrapped, not given the class), and `.dockview-theme-rookery` overrides only accent/bg `--dv-*` vars. Wherever the tasks below import `DockviewReact`/`IDockviewPanelProps` from `"dockview"`, read it as `"dockview-react"`.
+
 ## Global Constraints
 
 - ESM NodeNext: relative imports MUST use `.js` extension; type-only uses MUST use `import type` (`verbatimModuleSyntax`).
