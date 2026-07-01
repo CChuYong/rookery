@@ -138,14 +138,16 @@ export class Worker {
   send(text: string, clientMsgId?: string): void {
     // additional instructions are only allowed while running (turn in progress) or idle (waiting). Not allowed for a terminated agent.
     if (this.state !== "running" && this.state !== "idle") throw new Error(`Worker ${this.opts.id} is not running`);
-    this.queue.push(text); // the SDK only pops from the queue once the current turn ends (message-queue buffering).
     if (this.state === "idle") {
-      // no in-flight turn → start a new turn immediately. echo/checkpoint right away.
+      // no in-flight turn → enqueue + start a new turn immediately. echo/checkpoint right away.
+      this.queue.push(text);
       this.opts.deps.onTurnStart?.();
       this.record({ kind: "message", role: "user", content: text }, clientMsgId);
       this.transition("running");
     } else {
-      // while running: defer the echo — flush it at the next result (turn boundary) to avoid wedging it into the middle of the previous turn's output.
+      // while running: DON'T enqueue yet — hold in `deferred` and release (enqueue + echo) at the next result boundary.
+      // Enqueuing mid-turn lets the SDK read-ahead and COALESCE this message into the in-flight turn (answering it in the
+      // same turn). Then the deferred echo has no following turn, so the worker never leaves "running" → stuck "thinking".
       this.deferred.push({ text, clientMsgId });
     }
   }
@@ -364,6 +366,7 @@ export class Worker {
           const next = this.deferred.shift();
           if (next) {
             this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
+            this.queue.push(next.text); // release the held instruction to the SDK NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
             this.record({ kind: "message", role: "user", content: next.text }, next.clientMsgId);
           } else if (this.state === "running") {
             // nothing deferred → wait (idle). The streaming session is alive and can receive further instructions.
