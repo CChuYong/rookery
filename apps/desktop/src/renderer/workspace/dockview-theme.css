@@ -1,0 +1,20 @@
+/* Rookery dockview theme: layer on the built-in `.dockview-theme-dark` (which
+   supplies the full --dv-* var set) and override only the accent/surface vars
+   to the rookery @theme tokens. Apply BOTH classes on an ancestor of the
+   DockviewReact root: `className="dockview-theme-dark dockview-theme-rookery"`. */
+.dockview-theme-rookery {
+  --dv-background-color: var(--color-ink);
+  --dv-group-view-background-color: var(--color-ink);
+  --dv-tabs-and-actions-container-background-color: var(--color-surface);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-raised);
+  --dv-activegroup-visiblepanel-tab-color: var(--color-fg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-fg-dim);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-muted);
+  --dv-tab-divider-color: var(--color-line);
+  --dv-separator-border: var(--color-line);
+  --dv-paneview-active-outline-color: var(--color-accent);
+  --dv-active-sash-color: var(--color-accent);
+  --dv-drag-over-background-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --dv-drag-over-border-color: var(--color-accent);
+}

@@ -49,6 +49,13 @@ import { useDraftStore, pruneDrafts } from "./store/drafts.js";
 import { readViewState, writeViewState } from "./lib/view-state.js";
 import { WorkspaceTab } from "./components/WorkspaceTab.js";
 import { TabBar } from "./components/TabBar.js";
+import { isDockableEnabled } from "./lib/flags.js";
+import { WorkspaceDock } from "./workspace/WorkspaceDock.js";
+import { WorkspaceRenderProvider, type WorkspaceRender } from "./workspace/WorkspaceRender.js";
+import { NestedPanelBody } from "./workspace/panels.js";
+import { FileTree } from "./components/FileTree.js";
+import { GitChanges } from "./components/GitChanges.js";
+import { useTreeVersion } from "./lib/useTreeVersion.js";
 
 declare global {
   interface Window {
@@ -221,6 +228,7 @@ export function App(): JSX.Element {
   const rightVisible = rightOpen && !!termPageKey && !overlay;
   const rightMounted = useMountTransition(rightVisible, 180);
   const [wsRoot, setWsRoot] = useState<string>("");
+  const treeVersion = useTreeVersion(wsRoot); // fs-watch bump for the dockable files/git panels (parity with RightSidebar)
   // cwd must be in deps so that even when session.list arrives late (initially undefined→home), the root is re-resolved once cwd is filled in.
   const wsSessionCwd = s.sessions.find((x) => x.id === s.activeSessionId)?.cwd;
   useEffect(() => {
@@ -624,6 +632,84 @@ export function App(): JSX.Element {
   const sessionName = activeSess ? activeSess.label || baseName(activeSess.cwd) || "session" : t("app.selectSession");
   const sessionReadOnly = (s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId)?.origin : undefined) === "slack";
 
+  // Dockable-panes workspace (feature-flagged: rookery.dockable). The render
+  // delegates reuse the exact per-page wiring from the static layout below, so
+  // behavior is preserved; the dockview panels pull them via WorkspaceRender context.
+  const dockable = isDockableEnabled();
+  const activeTabPath = activeTab.startsWith("file:") ? activeTab.slice("file:".length) : null;
+  const findingWorkDir = <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.findingWorkDir")}</div>;
+  const workerRender: WorkspaceRender | null = activeSub
+    ? {
+        conversation: () => (
+          <ConversationPane
+            key={activeSub.id}
+            kind="worker"
+            id={activeSub.id}
+            onSend={(text) => subSend(activeSub.id, text)}
+            onStop={() => subInterrupt(activeSub.id)}
+            onOpenFile={openFileInPage}
+            onAttachFile={onAttachFile}
+            onDropFiles={onDropFiles}
+            browseDir={browseDir}
+            commands={s.commands}
+            controls={{
+              model: activeSub.model ?? s.settings?.workerModel ?? "claude-opus-4-8",
+              editable: activeSub.status === "running" || activeSub.status === "idle",
+              onModel: (m) => subSetModel(activeSub.id, m),
+              permissionMode: activeSub.permissionMode ?? "bypassPermissions",
+              onPermissionMode: (m) => subSetPermissionMode(activeSub.id, m),
+              permissionModes: ["bypassPermissions", "plan"] as const,
+            }}
+            disabled={activeSub.status !== "running" && activeSub.status !== "idle"}
+            placeholder={
+              activeSub.status === "provisioning"
+                ? t("app.creatingWorktree")
+                : activeSub.status === "running"
+                  ? t("app.busyAddable")
+                  : activeSub.status === "idle"
+                    ? t("app.instructWorker")
+                    : activeSub.status === "orphaned"
+                      ? t("app.sessionEndedRestart")
+                      : t("app.agentEndedReadonly")
+            }
+          />
+        ),
+        editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} />,
+        terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} />,
+        files: () => (wsRoot && wsRoot.endsWith(activeSub.id) ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : findingWorkDir),
+        git: () => (wsRoot && wsRoot.endsWith(activeSub.id) ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : findingWorkDir),
+        nested: () => <NestedPanelBody subId={activeSub.id} />,
+      }
+    : null;
+  const masterRender: WorkspaceRender | null = s.activeSessionId
+    ? {
+        conversation: () => (
+          <ConversationPane
+            key={s.activeSessionId ?? "none"}
+            kind="master"
+            id={s.activeSessionId!}
+            onSend={send}
+            onOpenFile={openFileInPage}
+            onSelectWorker={selectSub}
+            onRespond={respondInteraction}
+            disabled={sessionReadOnly}
+            onStop={stopMaster}
+            placeholder={sessionReadOnly ? t("app.slackReadOnly") : t("app.composerPlaceholder")}
+            onAttachFile={onAttachFile}
+            onDropFiles={onDropFiles}
+            browseDir={browseDir}
+            commands={s.commands}
+            controls={masterControls}
+          />
+        ),
+        editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={s.activeSessionId!} root={wsRoot} />,
+        terminal: () => <TerminalPanel sessionId={s.activeSessionId!} subId={null} cwd={activeSess?.cwd} />,
+        files: () => (wsRoot ? <FileTree root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} activeTabPath={activeTabPath} /> : findingWorkDir),
+        git: () => (wsRoot ? <GitChanges root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} /> : findingWorkDir),
+        nested: () => <NestedPanelBody subId={null} />,
+      }
+    : null;
+
   const navBtn = (label: string, active: boolean, onClick: () => void, badge = false) => (
     <button
       onClick={onClick}
@@ -861,6 +947,11 @@ export function App(): JSX.Element {
           <DaemonDownBanner note={s.daemonNote} onRetry={() => void connect()} />
         ) : showRepos ? (
           activeSub ? (
+            dockable && workerRender ? (
+              <WorkspaceRenderProvider value={workerRender}>
+                <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
+              </WorkspaceRenderProvider>
+            ) : (
             <>
               <WorkerHeader
                 worker={activeSub}
@@ -915,6 +1006,7 @@ export function App(): JSX.Element {
                 </div>
               </div>
             </>
+            )
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-muted">
               {t("app.emptyRepoHint")}
@@ -923,6 +1015,10 @@ export function App(): JSX.Element {
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
           <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} />
+        ) : dockable && masterRender ? (
+          <WorkspaceRenderProvider value={masterRender}>
+            <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
+          </WorkspaceRenderProvider>
         ) : (
           <>
             <SessionHeader
@@ -962,7 +1058,7 @@ export function App(): JSX.Element {
           </>
         )}
         </div>
-        {termPageKey && termPageOpen && !overlay && (
+        {termPageKey && termPageOpen && !overlay && !dockable && (
           <TerminalPanel
             sessionId={termPageKey}
             subId={showRepos ? s.activeWorkerId : null}
@@ -970,7 +1066,7 @@ export function App(): JSX.Element {
           />
         )}
       </main>
-      {rightMounted && termPageKey && (
+      {rightMounted && termPageKey && !dockable && (
         <RightSidebar open={rightVisible} pageKey={termPageKey} subId={showRepos ? s.activeWorkerId : null} cwd={showRepos ? undefined : activeSess?.cwd} activeTabPath={activeTab.startsWith("file:") ? activeTab.slice("file:".length) : null} />
       )}
 
