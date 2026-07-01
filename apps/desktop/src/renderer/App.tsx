@@ -45,6 +45,7 @@ import { TerminalPanel } from "./components/TerminalPanel.js";
 import { useTermStore, pruneLayout } from "./store/terminals.js";
 import { RightSidebar } from "./components/RightSidebar.js";
 import { useWsStore, pruneWsPages } from "./store/workspace.js";
+import { useLayoutStore } from "./store/layout.js";
 import { useDraftStore, pruneDrafts } from "./store/drafts.js";
 import { readViewState, writeViewState } from "./lib/view-state.js";
 import { WorkspaceTab } from "./components/WorkspaceTab.js";
@@ -313,6 +314,7 @@ export function App(): JSX.Element {
     useWsStore.setState((w) => pruneWsPages(w, known));
     useTermStore.setState((t) => pruneLayout(t, known));
     useDraftStore.setState((d) => pruneDrafts(d, known));
+    useLayoutStore.getState().prune_(known); // dockable-panes: drop layouts for dead pages
     // Restore the viewing location — only what still exists. Restore only sets the location, so we must also seed that conversation's transcript
     // (otherwise on first run the restored worker/session conversation pane looks empty until you click it again (selectSub)).
     const v = readViewState();
@@ -477,6 +479,7 @@ export function App(): JSX.Element {
     // until session.list returns and the delete reads as if it didn't register.
     if (useStore.getState().activeSessionId === id) useStore.setState({ activeSessionId: null });
     useStore.setState((st) => ({ sessions: st.sessions.filter((x) => x.id !== id) }));
+    useLayoutStore.getState().clear_(id); // dockable-panes: forget this page's saved layout
     void client?.request({ type: "session.delete", sessionId: id }).then(refetchSessions).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
   }, [refetchSessions]);
   const refetchFleet = useCallback(() => { void client?.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {}); }, []);
@@ -487,6 +490,7 @@ export function App(): JSX.Element {
     // Optimistic removal — mirrors deleteSession (refetch reconciles; restored on failure).
     if (useStore.getState().activeWorkerId === id) useStore.getState().navigate({ subId: null });
     useStore.setState((st) => { const f = { ...st.fleet }; delete f[id]; return { fleet: f }; });
+    useLayoutStore.getState().clear_(id); // dockable-panes: forget this page's saved layout
     void client?.request({ type: "worker.delete", id }).then(refetchFleet).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchFleet(); });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
