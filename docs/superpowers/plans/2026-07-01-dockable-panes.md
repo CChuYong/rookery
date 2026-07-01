@@ -10,6 +10,17 @@
 
 > **dockview v7.0.2 API note (verified against installed types):** v7 splits packages — install **both** `dockview-react` (React bindings) and `dockview` (meta, re-exports `dockview-core` types); `dockview-core` comes transitively. Import `DockviewReact` and `IDockviewPanelProps` from **`dockview-react`**; import `DockviewReadyEvent` / `SerializedDockview` / `DockviewApi` from **`dockview`**. `DockviewApi` has `addPanel({id,component,params,position:{referencePanel,direction}})`, `toJSON()`, `fromJSON()`, `clear()`, `getPanel(id)`, `removePanel()`, `onDidLayoutChange`. Theming is CSS-class based (no JS theme object): the CSS at `dockview-react/dist/styles/dockview.css` defines full `.dockview-theme-dark` (etc.) var sets; a custom theme must **layer on a base** — put `className="dockview-theme-dark dockview-theme-rookery"` on an ancestor `<div>` (DockviewReact itself is wrapped, not given the class), and `.dockview-theme-rookery` overrides only accent/bg `--dv-*` vars. Wherever the tasks below import `DockviewReact`/`IDockviewPanelProps` from `"dockview"`, read it as `"dockview-react"`.
 
+## Status (2026-07-01)
+
+- ✅ **Task 1** — dockview deps + `rookery.dockable` flag (committed).
+- ✅ **Tasks 3–5** — panel-ids, per-page layout store, default-template (TDD, committed).
+- ✅ **Tasks 2/6/7/8/9 (PoC)** — `WorkspaceRender` context, panel adapters, `WorkspaceDock`, worker **and** master pages wired behind the flag; old TabBar/RightSidebar/Terminal gated off when on. typecheck + `electron-vite build` + 594 tests green (committed). The throwaway `Spike.tsx` was skipped — the PoC wires the real panels directly.
+- ✅ **Task 11** — layout prune/clear on page death (committed).
+- ⏳ **GATE — manual R1 validation (Phase 0 Step 5 / Phase 1 Step 2):** enable the flag, drag/split panels, confirm Monaco (unsaved edits) + xterm (scrollback) survive moves. **Blocks Phase 3.**
+- ⬜ **Phase 2 remainder** — theming polish, page-switch refinements (need visual feedback).
+- ⬜ **Phase 3** — migrate (delete old layout, flip flag default). **Irreversible — do not start before the R1 gate passes.**
+- ⬜ **Phase 4** — floating groups (stretch).
+
 ## Global Constraints
 
 - ESM NodeNext: relative imports MUST use `.js` extension; type-only uses MUST use `import type` (`verbatimModuleSyntax`).
