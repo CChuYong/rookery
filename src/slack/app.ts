@@ -171,11 +171,14 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
   });
 
   // Register the thread-context reader (conversations.replies) on the daemon holder → used by the master's read_thread capability.
-  deps.setThreadReader?.(makeSlackThreadReader(app.client as unknown as Parameters<typeof makeSlackThreadReader>[0]));
+  const threadReader = makeSlackThreadReader(app.client as unknown as Parameters<typeof makeSlackThreadReader>[0]);
+  deps.setThreadReader?.(threadReader);
 
   // Register reporter-ensure on the daemon holder → the dispatcher calls it right before firing, so that headless turns of a Slack session (wakeup, etc.)
   // also get a subscribed reporter delivering to the thread without a human message (prevents lost firings before the first message after restart/reconnect).
-  deps.setReporterFor?.((sessionId, externalKey) => ensureSlackReporter(registry, app.client as unknown as SlackClient, sessionId, externalKey, () => deps.slackConfig().locale));
+  const reporterFor = (sessionId: string, externalKey: string) =>
+    ensureSlackReporter(registry, app.client as unknown as SlackClient, sessionId, externalKey, () => deps.slackConfig().locale);
+  deps.setReporterFor?.(reporterFor);
 
   // Worker → Slack relay: mirror each Slack-origin master's workers into the configured channel (subscribed to the fleet channel).
   const workerRelay = new WorkerSlackRelay({
@@ -194,9 +197,11 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
 
   return {
     stop: async () => {
-      deps.setBridge?.(null); // disconnected → release the holder (canUseTool falls back to auto-allow)
-      deps.setThreadReader?.(null); // release the thread reader too (read_thread falls back to a "not connected" notice)
-      deps.setReporterFor?.(null); // release reporter-ensure too (can't guarantee delivery without a connection)
+      // Owner-scoped release: a late stop() from a superseded connection must not null holders a newer
+      // connection re-installed. Fall back to unconditional set*(null) only when clear* isn't wired (tests).
+      if (deps.clearBridge) deps.clearBridge(bridge); else deps.setBridge?.(null);
+      if (deps.clearThreadReader) deps.clearThreadReader(threadReader); else deps.setThreadReader?.(null);
+      if (deps.clearReporterFor) deps.clearReporterFor(reporterFor); else deps.setReporterFor?.(null);
       unsubWorkerRelay();
       void workerRelay.dispose();
       registry.disposeAll();

@@ -34,6 +34,12 @@ export interface SlackDeps {
   // Register reporter-ensure (sessionId+external_key → guarantee that thread's reporter) into the daemon holder at connection time (null when disconnected).
   // Called by the dispatcher right before firing → headless turns (wakeup, etc.) of Slack sessions are also delivered to the thread without a human message.
   setReporterFor?: (fn: ((sessionId: string, externalKey: string) => void) | null) => void;
+  // Owner-scoped release counterparts of the set* holders above: stop() passes ITS OWN instance, and the daemon
+  // clears the holder only if it still points at that instance. Without this, a late stop() from a superseded
+  // connection (start-timeout → retry succeeded → stale start resolves late) nulls the LIVE connection's holders.
+  clearBridge?: (b: SlackInteractionBridge) => void;
+  clearThreadReader?: (r: SlackThreadReader) => void;
+  clearReporterFor?: (fn: (sessionId: string, externalKey: string) => void) => void;
   // Slack message trigger source handler — routes app.message events to the automation dispatcher.
   // ts/threadTs/team are passed to the action as template variables ({{ts}}/{{threadTs}}/{{team}}).
   onMessage?: (e: { channel: string; userId?: string; text: string; ts?: string; threadTs?: string; team?: string }) => Promise<void>;

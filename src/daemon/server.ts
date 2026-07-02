@@ -33,6 +33,7 @@ import { secureHome } from "./fs-hardening.js";
 import { startSlack } from "../slack/app.js";
 import { SlackInteractionBridge, makeSlackCanUseTool, parseSlackThreadKey } from "../slack/interaction.js";
 import { makeSlackCapabilities } from "../slack/capabilities.js";
+import { makeHolder } from "../slack/holder.js";
 import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
 import { InteractionRegistry } from "../core/interaction-registry.js";
 import { createScheduleToolsServer, SCHEDULE_SERVER_NAME, SCHEDULE_TOOL_NAMES } from "../tools/schedule-tools.js";
@@ -117,22 +118,20 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   repos.resetRunningSessions();
   // Likewise clear automation rows left 'running' by a mid-run crash → otherwise the Automation page shows a perpetual pulse.
   repos.resetRunningAutomations();
-  // Slack interaction bridge (approval/AskUserQuestion buttons) — created/replaced in startSlack, referenced here as a holder.
-  // The master's canUseTool routes through this bridge when the session externalKey is a slack thread (otherwise auto-allow).
-  let slackBridge: SlackInteractionBridge | null = null;
-  // Slack thread reader (conversations.replies) — registered on connect in startSlack, referenced here as a holder (for the read_thread capability).
-  let slackThreadReader: SlackThreadReader | null = null;
-  // Slack reporter-ensure (session id + external_key) — registered on connect, null when disconnected. The dispatcher's beforeRun calls it just before firing.
-  let slackReporterEnsure: ((sessionId: string, externalKey: string) => void) | null = null;
+  // Slack holders (bridge / thread reader / reporter-ensure) — installed by startSlack on connect, released
+  // owner-scoped on stop (clearIf) so a stale connection's late stop can't clobber the live one's holders.
+  const bridgeHolder = makeHolder<SlackInteractionBridge>();
+  const threadReaderHolder = makeHolder<SlackThreadReader>();
+  const reporterHolder = makeHolder<(sessionId: string, externalKey: string) => void>();
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
   const sessions = new SessionManager({ repos, bus, queryFn, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
     forkSession: (id, opts) => sdkForkSession(id, opts), // SDK session fork (eager) for SessionManager.fork
-    makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => slackBridge) ?? interactionRegistry.canUseToolFor(sessionId),
+    makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.
     makeCapabilities: (externalKey, sessionId) => {
-      const slackCaps = makeSlackCapabilities(externalKey, () => slackThreadReader);
+      const slackCaps = makeSlackCapabilities(externalKey, () => threadReaderHolder.get());
       return () => {
         const s = slackCaps?.() ?? {};
         return {
@@ -204,9 +203,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     repos, bus, sessions, fleet,
     // Just before firing: if the target is a slack-origin session, ensure its thread reporter (only when connected). Even headless turns (wakeup) are delivered to Slack.
     beforeRun: (a) => {
-      if (a.action.kind !== "master" || !a.action.targetSessionId || !slackReporterEnsure) return;
+      const ensure = reporterHolder.get();
+      if (a.action.kind !== "master" || !a.action.targetSessionId || !ensure) return;
       const row = repos.getSession(a.action.targetSessionId);
-      if (row?.external_key) slackReporterEnsure(row.id, row.external_key);
+      if (row?.external_key) ensure(row.id, row.external_key);
     },
   });
   const scheduler = new Scheduler({ repos, dispatcher });
@@ -237,7 +237,14 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     configured: () => settings.slackConfigured(), // resolver, since tokens can change at runtime
     enabled: () => repos.getSetting("slackEnabled") !== "0", // on by default
     setEnabled: (b) => repos.setSetting("slackEnabled", b ? "1" : "0"),
-    start: () => startSlack({ sessions, bus, slackConfig, home: config.home, setBridge: (b) => { slackBridge = b; }, setThreadReader: (r) => { slackThreadReader = r; }, setReporterFor: (fn) => { slackReporterEnsure = fn; }, resolveThread: (id) => parseSlackThreadKey(repos.getSession(id)?.external_key ?? null), onMessage: slackTrigger }),
+    start: () => startSlack({ sessions, bus, slackConfig, home: config.home,
+      setBridge: (b) => { if (b) bridgeHolder.set(b); },
+      clearBridge: (b) => bridgeHolder.clearIf(b),
+      setThreadReader: (r) => { if (r) threadReaderHolder.set(r); },
+      clearThreadReader: (r) => threadReaderHolder.clearIf(r),
+      setReporterFor: (fn) => { if (fn) reporterHolder.set(fn); },
+      clearReporterFor: (fn) => reporterHolder.clearIf(fn),
+      resolveThread: (id) => parseSlackThreadKey(repos.getSession(id)?.external_key ?? null), onMessage: slackTrigger }),
     emit: (status) => bus.emit({ type: "slack.status", sessionId: ALL_CHANNEL, status }),
   });
   void slack.boot();
