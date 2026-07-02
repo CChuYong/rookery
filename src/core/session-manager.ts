@@ -63,7 +63,11 @@ export class SessionManager {
     const model = typeof masterModel === "function" ? masterModel : () => masterModel;
     const effort = typeof masterEffort === "function" ? masterEffort : () => masterEffort ?? "high";
     const name = typeof masterName === "function" ? masterName : () => masterName ?? "rookery";
-    const canUseTool = makeCanUseTool?.(externalKey, id); // session-bound approval/question callback (slack thread etc.). auto-allow if absent.
+    // Automation (unattended) sessions must never get a blocking approval/AskUserQuestion handler — a headless turn that
+    // asks would hang forever (no client to answer), permanently wedging the cron in-flight guard. origin is persisted at
+    // creation; fresh automation sessions are keyless so deriveOrigin(externalKey) alone would miss them → read the row.
+    const origin = repos.getSession(id)?.origin || deriveOrigin(externalKey).origin;
+    const canUseTool = origin === "automation" ? undefined : makeCanUseTool?.(externalKey, id); // session-bound approval/question callback (slack thread etc.). auto-allow if absent.
     const capabilities = makeCapabilities?.(externalKey, id); // session-bound per-source capability resolver (slack thread tools etc.). base only if absent.
     const master = new MasterAgent({
       sessionId: id,

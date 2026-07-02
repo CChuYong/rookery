@@ -179,6 +179,30 @@ describe("SessionManager", () => {
     expect(captured).toBe(sentinel); // slack session → canUseTool injected
   });
 
+  it("does NOT wire a blocking canUseTool for automation (unattended) sessions, even when makeCanUseTool returns one", async () => {
+    // A headless automation master that hits AskUserQuestion would hang forever (no client to answer), permanently
+    // wedging the cron in-flight guard. Automation sessions must get NO blocking approval handler (auto-allow).
+    let captured: unknown = "UNSET";
+    const sentinel = (() => {}) as never;
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const base = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk" }]);
+    const queryFn = ((input: { options?: { canUseTool?: unknown } }) => { captured = input.options?.canUseTool; return (base as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
+    const makeCanUseTool = () => sentinel; // the registry returns a BLOCKING handler for ANY session
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, queryFn, masterModel: "m", fleet, makeCanUseTool }, () => `s${n++}`);
+    // fresh automation session: keyless but origin-tagged (deriveOrigin(externalKey) alone would miss it → must key on stored origin)
+    const auto = sm.create("/au", { origin: "automation", originRef: "a1" });
+    await auto.master.runTurn("do it");
+    expect(captured).toBeUndefined(); // automation → auto-allow, never blocked
+    // a normal ui session still gets the handler (general path unchanged)
+    const ui = sm.create("/ui");
+    await ui.master.runTurn("hi");
+    expect(captured).toBe(sentinel);
+  });
+
   it("getOrCreateByKey returns the same session for a repeated key, new for a new key", () => {
     const { sm } = manager();
     const first = sm.getOrCreateByKey("thread-1", "/work");
