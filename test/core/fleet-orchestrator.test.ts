@@ -712,6 +712,18 @@ describe("FleetOrchestrator rehydrate (restart recovery)", () => {
     expect(s.fleet.status("old1")).toBe("stopped");
   });
 
+  it("send to a STOPPED lazy-resumable worker does not resurrect it (no DB↔runtime split-brain)", async () => {
+    // A user-stopped worker must stay stopped. Without the terminal guard, requireLive would materialize (resume)
+    // the still-set resumeSessionId, silently running it under bypassPermissions while fleet.list/DB show 'stopped'.
+    const s = resumable({ exists: true });
+    s.fleet.rehydrate();
+    await s.fleet.stop("old1");
+    await s.fleet.waitAllSettled();
+    expect(() => s.fleet.send("old1", "keep working")).toThrow(/not running/i); // rejected, not resurrected
+    expect(s.agents.has("old1")).toBe(false); // never materialized
+    expect(s.fleet.status("old1")).toBe("stopped"); // status unchanged (no split-brain)
+  });
+
   // A2: during terminal drain, don't materialize a lazy-resumable worker — prevents a resume→consume write racing against a closed DB.
   it("does not materialize a lazy-resumable agent once closing (shutdown guard)", async () => {
     const s = resumable({ exists: true });

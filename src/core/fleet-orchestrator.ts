@@ -363,7 +363,9 @@ export class FleetOrchestrator {
   private requireLive(id: string): Entry & { agent: WorkerLike } {
     const e = this.require(id);
     // don't materialize during a shutdown drain — prevents a race where resume→consume writes to a closed DB (A2).
-    if (!e.agent && e.resumeSessionId && !this.closing) this.materialize(id, e);
+    // don't materialize a TERMINAL entry (e.g. a user-stopped lazy/rehydrated worker still holding resumeSessionId) —
+    // otherwise send would silently resurrect it under bypassPermissions while the DB/list still show it stopped (split-brain).
+    if (!e.agent && e.resumeSessionId && !this.closing && !FleetOrchestrator.isTerminal(e.status)) this.materialize(id, e);
     if (!e.agent) throw new Error(`Worker ${id} is not running (its session ended, likely a daemon restart).`);
     return e as Entry & { agent: WorkerLike };
   }
@@ -476,6 +478,7 @@ export class FleetOrchestrator {
   async stop(id: string): Promise<void> {
     const e = this.require(id);
     if (e.agent) await e.agent.stop(); // if detached/pending there's no process to kill — just clean up the status.
+    e.resumeSessionId = undefined; // a user stop is final: drop the lazy-resume ticket so a later send can't resurrect it
     this.setStatus(id, "stopped", true); // user termination — takes precedence over automatic settle (FL-4)
   }
 
@@ -506,6 +509,7 @@ export class FleetOrchestrator {
         /* ignore */
       }
     }
+    e.resumeSessionId = undefined; // discard is final: drop the lazy-resume ticket (the worktree is gone anyway)
     // clean up checkpoint hidden refs (prevents ref/dangling-object buildup in the parent .git) — best-effort, independent of worktree removal.
     try { await this.deps.git.removeCheckpointRefs(e.repoPath, id); } catch { /* best-effort */ }
     try {
