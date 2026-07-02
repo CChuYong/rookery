@@ -868,6 +868,23 @@ describe("Worker", () => {
     expect(repos.getWorker("a1")?.status).toBe("error");
   });
 
+  it("captures sdk_session_id from the init system message (so an interrupt before the first result still resumes)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // A turn that emits the init system message (carrying session_id) and ends WITHOUT a result — mimics stop before the first result.
+    const initOnly = (() => {
+      async function* gen(): AsyncGenerator<unknown> {
+        yield { type: "system", subtype: "init", session_id: "wsdk-init-1", parent_tool_use_id: null };
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: initOnly } });
+    agent.start("go");
+    await agent.waitUntilSettled();
+    expect(repos.getWorker("a1")?.sdk_session_id).toBe("wsdk-init-1"); // captured for resume even without a result
+  });
+
   // Regression guard: a mid-turn send() is held in `deferred` (NOT eagerly enqueued — see commit 2e70867),
   // so interruptTurn(), which splices `deferred` before the boundary, can never leak it to the SDK as a ghost turn.
   it("interruptTurn() never runs a deferred mid-turn instruction as a ghost turn", async () => {

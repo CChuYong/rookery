@@ -313,6 +313,13 @@ export class MasterAgent {
             this.recordEvent({ type: "master.tool", sessionId, toolId: tr.toolUseId, name: "", phase: "end", ok: !tr.isError, result: truncate(tr.content, 2000) });
           }
         } else if (type === "system") {
+          // Capture sdk_session_id from the init system message too (not only from `result`) — otherwise a Stop/interrupt
+          // before the very first result leaves it null, and the next turn starts a brand-new SDK session with no context.
+          const sysSessionId = (msg as { session_id?: string }).session_id;
+          if (sysSessionId && sysSessionId !== this.sdkSessionId) {
+            this.sdkSessionId = sysSessionId;
+            repos.setSdkSessionId(sessionId, sysSessionId);
+          }
           // Classify SDK informational push: commands_changed → refresh the / list, compaction/retry/fallback → notice.
           const push = classifySystemPush(msg);
           if (push?.kind === "commands") {

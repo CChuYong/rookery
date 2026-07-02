@@ -312,6 +312,13 @@ export class Worker {
           for (const tr of extractToolResults(msg)) this.record({ kind: "tool_result", id: tr.toolUseId, isError: tr.isError, content: truncate(tr.content, 4000) });
         } else if (type === "system") {
           if (parentId) continue; // ignore the native nested subagent's system messages
+          // Capture sdk_session_id from the init system message too (not only from `result`) — parity with the master:
+          // an interrupt/stream-end before the first result would otherwise leave it null and break resume after restart.
+          const sysSessionId = (msg as { session_id?: string }).session_id;
+          if (sysSessionId && sysSessionId !== this.sdkSessionId) {
+            this.sdkSessionId = sysSessionId;
+            this.opts.deps.repos.setWorkerSdkSessionId(this.opts.id, sysSessionId);
+          }
           // classify the SDK's informational push: commands_changed → refresh the / list, compaction/retry/fallback → notice.
           const push = classifySystemPush(msg);
           if (push?.kind === "commands") {

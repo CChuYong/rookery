@@ -684,4 +684,21 @@ describe("MasterAgent", () => {
     const notices = events.filter((e) => e.type === "master.notice" && (e as { text?: string }).text?.includes("maxTurns"));
     expect(notices.length).toBe(0);
   });
+
+  it("captures sdk_session_id from the init system message (so a first-turn interrupt before any result still resumes)", async () => {
+    const d = deps(fakeQuery([])); // queryFn replaced below
+    // A turn that emits the init system message (carrying session_id) and then ends WITHOUT a result — mimics Stop
+    // before the very first result. The next turn must resume this session, so the id has to be captured here.
+    const queryFn = (() => {
+      async function* gen(): AsyncGenerator<unknown> {
+        yield { type: "system", subtype: "init", session_id: "sdk-init-1" };
+        // no result — the turn ends here (interrupted / stream closed before result)
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {}, setPermissionMode: async () => {} });
+    }) as ReturnType<typeof fakeQuery>;
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...d, queryFn } });
+    await master.runTurn("first message");
+    expect(master.getSdkSessionId()).toBe("sdk-init-1");
+    expect(d.repos.getSession("s1")?.sdk_session_id).toBe("sdk-init-1"); // persisted for resume after restart
+  });
 });
