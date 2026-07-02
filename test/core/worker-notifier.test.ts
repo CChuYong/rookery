@@ -1,4 +1,4 @@
-import { it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
@@ -45,4 +45,38 @@ it("fires on a failure settle too (so the master never hangs)", () => {
   x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "failed" });
   expect(x.deliver).toHaveBeenCalledTimes(1);
   expect(x.deliver.mock.calls[0]![1]).toContain("failed");
+});
+
+describe("WorkerNotifier.sweepSettled (boot-time stranded arms)", () => {
+  // Local helper: the boot-sweep tests use a delivered-array collector (not vi.fn) and hold the notifier instance
+  // so sweepSettled() can be called directly, so it is scoped here rather than reusing the module-level h().
+  function h() {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w", worktreePath: "/wt/w1", branch: "b" });
+    const delivered: Array<{ sessionId: string; line: string }> = [];
+    const bus = new EventBus();
+    const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, line) => delivered.push({ sessionId, line }) });
+    return { repos, bus, notifier, delivered };
+  }
+
+  it("delivers an arm whose worker settled without a bus event (restart/rehydrate path)", () => {
+    const { repos, notifier, delivered } = h();
+    repos.setWorkerNotifyArmed("w1", true);
+    repos.setWorkerStatus("w1", "stopped"); // settled directly in the DB — no worker.status event ever fired
+    notifier.sweepSettled();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.sessionId).toBe("s1");
+    expect(repos.getWorker("w1")!.notify_armed).toBe(0); // one-shot consumed
+    notifier.sweepSettled();
+    expect(delivered).toHaveLength(1); // idempotent
+  });
+
+  it("does not consume arms of workers still running", () => {
+    const { repos, notifier, delivered } = h();
+    repos.setWorkerNotifyArmed("w1", true); // status is still the initial non-settled one (provisioning)
+    notifier.sweepSettled();
+    expect(delivered).toHaveLength(0);
+    expect(repos.getWorker("w1")!.notify_armed).toBe(1);
+  });
 });

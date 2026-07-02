@@ -26,6 +26,20 @@ export class WorkerNotifier {
     });
   }
 
+  // Boot-time sweep: rehydrate() force-writes idle/orphaned straight to the DB (no worker.status bus event),
+  // so an arm set before a restart would otherwise never fire and the master would wait forever. Called once
+  // after start() at boot; consumes arms of already-settled workers and delivers (a cold session gets a
+  // pending_notifications row via SessionManager.deliverWorkerNotification and is drained on next build).
+  sweepSettled(): void {
+    for (const w of this.d.repos.listAllWorkers()) {
+      if (!SETTLED.has(w.status)) continue;
+      const arm = this.d.repos.consumeWorkerNotifyArmed(w.id);
+      if (!arm || !arm.armed) continue;
+      const line = this.buildLine(w.id, w.status);
+      if (line) this.d.deliver(arm.sessionId, line);
+    }
+  }
+
   private buildLine(workerId: string, status: string): string | null {
     const w = this.d.repos.getWorker(workerId);
     if (!w) return null;
