@@ -88,9 +88,17 @@ export class InteractionRegistry {
   }
 
   // Turn cancellation (AbortSignal) → if still pending, close it out with deny (prevents a permanent hang).
+  // Also emit interaction.resolved: the desktop retires a card ONLY on that event, so without it an aborted
+  // turn leaves a dead-but-clickable card on every connected client (clicks are silent no-ops).
   private armAbort(requestId: string, signal: AbortSignal | undefined, resolve: (r: PermissionResult) => void): void {
     if (!signal) return;
-    const onAbort = () => { if (this.pending.delete(requestId)) resolve({ behavior: "deny", message: t(DEFAULT_LOCALE, "interaction.cancelled") }); };
+    const onAbort = () => {
+      const p = this.pending.get(requestId);
+      if (!p) return;
+      this.pending.delete(requestId);
+      resolve({ behavior: "deny", message: t(DEFAULT_LOCALE, "interaction.cancelled") });
+      this.bus.emit({ type: "interaction.resolved", sessionId: p.sessionId, requestId, summary: t(DEFAULT_LOCALE, "interaction.cancelled") });
+    };
     if (signal.aborted) { onAbort(); return; }
     signal.addEventListener("abort", onAbort, { once: true });
   }

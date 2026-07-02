@@ -52,6 +52,19 @@ describe("InteractionRegistry", () => {
     await expect(p).resolves.toMatchObject({ behavior: "deny" });
   });
 
+  it("abort: resolves deny AND emits interaction.resolved so live cards are retired", async () => {
+    const { events, reg } = setup("s3");
+    const ac = new AbortController();
+    const p = reg.request("s3", "x", {}, { toolUseID: "R3", signal: ac.signal });
+    await Promise.resolve();
+    ac.abort();
+    await expect(p).resolves.toMatchObject({ behavior: "deny" });
+    expect(events.find((e) => e.type === "interaction.resolved")).toMatchObject({
+      type: "interaction.resolved", sessionId: "s3", requestId: "R3",
+    });
+    expect(reg.pendingEvents()).toEqual([]); // pending entry cleaned up
+  });
+
   it("respond for an unknown/resolved requestId is a no-op", () => {
     const { reg } = setup("s4");
     expect(reg.respond("nope", { decision: "allow" })).toEqual({ ok: false });
