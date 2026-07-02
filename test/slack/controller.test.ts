@@ -90,6 +90,20 @@ describe("SlackController", () => {
     expect(ctrl.status()).toBe("unconfigured");
   });
 
+  it("reconcile: token SWAP while up → tears down and reconnects (not stuck reporting up)", async () => {
+    // configured stays true (a token changed, not removed). reconcile must reconnect with the new token.
+    const h1 = handleFor(), h2 = handleFor();
+    let n = 0;
+    const start = vi.fn(async () => (n++ === 0 ? h1 : h2));
+    const ctrl = new SlackController({ configured: () => true, enabled: () => true, setEnabled: () => {}, start, emit: () => {} });
+    await ctrl.boot();
+    expect(ctrl.status()).toBe("up");
+    await ctrl.reconcile();
+    expect(h1.stop).toHaveBeenCalledOnce(); // old connection torn down
+    expect(start).toHaveBeenCalledTimes(2); // reconnected (bug: startBolt guard early-returns on stale "up" → only 1)
+    expect(ctrl.status()).toBe("up");
+  });
+
   // B-3: if start() never resolves, transition to error via timeout instead of getting stuck on 'connecting' (retryable).
   it("startBolt times out to error (not stuck on connecting) when start() never resolves", async () => {
     vi.useFakeTimers();

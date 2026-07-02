@@ -106,6 +106,10 @@ export class SlackController {
     this.epoch++; // Invalidate any in-flight start (so it can't flip to up even if it resolves late)
     this.clearRetry(); // Cancel the scheduled auto retry
     this.retryAttempt = 0;
+    // Reset the internal status so a following startBolt() (reconcile/setEnabled) passes the connecting/up dedup guard.
+    // Not via setStatus (no emit): reconcile/setEnabled set the true final status right after; a bare stop() on shutdown
+    // doesn't need to broadcast. Without this, a token swap while connecting/up left the guard blocking the reconnect (stuck).
+    this._status = "off";
     const h = this.handle;
     this.handle = null;
     if (h) { try { await h.stop(); } catch { /* best-effort */ } }
