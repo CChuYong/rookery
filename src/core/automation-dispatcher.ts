@@ -24,13 +24,13 @@ export class AutomationDispatcher {
     // Event triggers (slack) must process every message, so concurrent runs are allowed (no drop).
     const guard = a.trigger.kind === "cron";
     if (guard && this.inflight.has(a.id)) {
-      this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: "skipped", lastError: null, nextRunAt: a.nextRunAt });
+      this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: "skipped", lastError: null });
       this.emit(); return;
     }
     if (guard) this.inflight.add(a.id);
     // Surface that the run is in flight (transient 'running') so the UI shows a live pulse even for cron/slack-triggered runs
-    // (no manual click to indicate it) — reconciled to ok/error in finally. lastRunAt = the start; nextRunAt is preserved.
-    this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: "running", lastError: null, nextRunAt: a.nextRunAt });
+    // (no manual click to indicate it) — reconciled to ok/error in finally. lastRunAt = the start; next_run_at is owned by the Scheduler.
+    this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: "running", lastError: null });
     this.emit();
     // Just before firing: ensure the reporter (best-effort) — isolated in a try so a failure doesn't block the turn. Since it's before runTurn, early events aren't missed either.
     try { await this.d.beforeRun?.(a); } catch { /* best-effort: a failed guarantee doesn't turn the automation into an error */ }
@@ -39,7 +39,7 @@ export class AutomationDispatcher {
     catch (e) { status = "error"; error = String(e); }
     finally {
       if (guard) this.inflight.delete(a.id);
-      this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: status, lastError: error, nextRunAt: a.nextRunAt });
+      this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: status, lastError: error });
       this.emit();
     }
   }

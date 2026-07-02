@@ -258,7 +258,8 @@ describe("automations", () => {
     r.createAutomation("a1", cronMaster);
     expect(r.updateAutomation("a1", { name: "renamed", enabled: true })?.name).toBe("renamed");
     expect(r.setAutomationEnabled("a1", false)?.enabled).toBe(false);
-    r.setAutomationRun("a1", { lastRunAt: "2026-06-22T03:00:00.000Z", lastStatus: "ok", lastError: null, nextRunAt: "2026-06-23T03:00:00.000Z" });
+    r.setAutomationRun("a1", { lastRunAt: "2026-06-22T03:00:00.000Z", lastStatus: "ok", lastError: null });
+    r.setAutomationNextRun("a1", "2026-06-23T03:00:00.000Z"); // next_run_at is owned by the Scheduler, not setAutomationRun
     const a = r.getAutomation("a1")!;
     expect(a.lastStatus).toBe("ok"); expect(a.nextRunAt).toBe("2026-06-23T03:00:00.000Z");
     r.setAutomationNextRun("a1", null); expect(r.getAutomation("a1")!.nextRunAt).toBeNull();

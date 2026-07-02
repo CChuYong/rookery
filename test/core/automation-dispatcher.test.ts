@@ -39,10 +39,31 @@ it("run() marks the row 'running' while the action is in flight, then reconciles
   expect(repos.getAutomation("a1")!.lastStatus).toBe("ok"); // reconciled when it ends
 });
 
+it("a long run does not rewind next_run_at advanced by the scheduler mid-run (no back-to-back refire)", async () => {
+  const repos = new Repositories(openDb(":memory:"), () => "t");
+  const bus = new EventBus();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const runTurn = vi.fn(async () => { await gate; });
+  const sessions = { create: () => ({ id: "s1", master: { runTurn } }), getOrCreateByKey: () => ({ id: "s1", master: { runTurn } }) };
+  const disp = new AutomationDispatcher({ repos, bus, sessions, fleet: { spawn: vi.fn(async () => ({ id: "w" })) } });
+  repos.createAutomation("a1", { name: "n", trigger: { kind: "cron", cron: "*/5 * * * *", timezone: "UTC" }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" }, enabled: true });
+  repos.setAutomationNextRun("a1", "2026-01-01T00:05:00.000Z"); // fire-time snapshot the dispatcher sees
+  const a = repos.getAutomation("a1")!;
+  const p = disp.run(a, {});
+  await Promise.resolve();
+  // Scheduler advances next_run_at while the run is in flight (what fireCron does on every overlapped tick).
+  repos.setAutomationNextRun("a1", "2026-01-01T00:15:00.000Z");
+  release();
+  await p;
+  expect(repos.getAutomation("a1")!.nextRunAt).toBe("2026-01-01T00:15:00.000Z"); // NOT rewound to 00:05
+  expect(repos.getAutomation("a1")!.lastStatus).toBe("ok");
+});
+
 it("resetRunningAutomations clears a row left 'running' by a mid-run crash", () => {
   const repos = new Repositories(openDb(":memory:"), () => "t");
   repos.createAutomation("a1", { name: "n", trigger: { kind: "slack" }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" }, enabled: true });
-  repos.setAutomationRun("a1", { lastRunAt: "t", lastStatus: "running", lastError: null, nextRunAt: null });
+  repos.setAutomationRun("a1", { lastRunAt: "t", lastStatus: "running", lastError: null });
   repos.resetRunningAutomations();
   expect(repos.getAutomation("a1")!.lastStatus).toBe("error");
 });

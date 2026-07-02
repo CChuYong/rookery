@@ -567,9 +567,12 @@ export class Repositories {
     this.db.prepare("UPDATE automations SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
     return this.getAutomation(id);
   }
-  setAutomationRun(id: string, run: { lastRunAt: string|null; lastStatus: "ok"|"error"|"skipped"|"running"|null; lastError: string|null; nextRunAt: string|null }): void {
-    this.db.prepare("UPDATE automations SET last_run_at=?, last_status=?, last_error=?, next_run_at=? WHERE id=?")
-      .run(run.lastRunAt, run.lastStatus, run.lastError, run.nextRunAt, id);
+  setAutomationRun(id: string, run: { lastRunAt: string|null; lastStatus: "ok"|"error"|"skipped"|"running"|null; lastError: string|null }): void {
+    // Deliberately does NOT touch next_run_at — the Scheduler owns it (fireCron advances it BEFORE dispatch;
+    // reconcile rewrites it on edit). Writing a fire-time snapshot back here rewound in-flight advances,
+    // making long cron runs refire back-to-back forever and reverting mid-run schedule edits.
+    this.db.prepare("UPDATE automations SET last_run_at=?, last_status=?, last_error=? WHERE id=?")
+      .run(run.lastRunAt, run.lastStatus, run.lastError, id);
   }
 
   // Boot cleanup: a 'running' row means the daemon died mid-run (the transient running state never reconciled) → clear it so the
