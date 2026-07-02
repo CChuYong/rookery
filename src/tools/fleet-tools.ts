@@ -4,7 +4,6 @@ import { z } from "zod";
 import type { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { isSafeGitRef } from "../core/git-ref.js";
-import { truncateBytes } from "../core/truncate.js";
 
 // Byte cap on transcript output that gets re-injected into the master context (symmetric with view_subagent_diff). Row count is capped by listWorkerEvents.
 const TRANSCRIPT_MAX_BYTES = 256 * 1024;
@@ -27,6 +26,25 @@ function text(t: string) {
 }
 function errorText(t: string) {
   return { content: [{ type: "text" as const, text: t }], isError: true };
+}
+
+// Format a worker transcript for re-injection into the master's context. CRITICAL: fill the byte budget from the NEWEST
+// event backward (then restore chronological order) so an overflowing transcript surfaces the worker's CURRENT state,
+// not ancient history — the reverse of a leading byte-truncation, and matching the newest-first fill in slack-thread-tools.
+export function formatTranscript(events: Array<{ seq: number; type: string; payload: unknown }>, maxBytes: number): string {
+  if (events.length === 0) return "No events.";
+  const lines = events.map((e) => `#${e.seq} ${e.type}: ${JSON.stringify(e.payload)}`);
+  const kept: string[] = [];
+  let bytes = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const b = Buffer.byteLength(lines[i]!, "utf8") + 1; // +1 ≈ newline
+    if (kept.length > 0 && bytes + b > maxBytes) break; // always keep at least the newest event
+    kept.push(lines[i]!);
+    bytes += b;
+  }
+  kept.reverse();
+  const dropped = lines.length - kept.length;
+  return (dropped > 0 ? `…(${dropped} older event${dropped === 1 ? "" : "s"} truncated)\n` : "") + kept.join("\n");
 }
 
 export function createFleetToolsServer(
@@ -128,7 +146,7 @@ export function createFleetToolsServer(
     async (args) => {
       try {
         const t = fleet.transcript(args.id, args.sinceSeq);
-        return text(t.length === 0 ? "No events." : truncateBytes(t.map((e) => `#${e.seq} ${e.type}: ${JSON.stringify(e.payload)}`).join("\n"), TRANSCRIPT_MAX_BYTES));
+        return text(formatTranscript(t, TRANSCRIPT_MAX_BYTES));
       } catch (err) {
         return errorText(String(err));
       }
