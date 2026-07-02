@@ -383,7 +383,9 @@ export class Worker {
       if (this.abort.signal.aborted) return;
       this.flushThinking(); // also persist the thinking summary up to right before the error (so it shows on restore)
       this.record({ kind: "error", message: String(err) });
-      if (this.state === "running") this.transition("error");
+      // A non-abort throw can arrive while the worker is running OR idle (turn ended, stream then dies). Both must go
+      // terminal — otherwise an idle worker is left a zombie (stuck 'idle', agent never cleared) and a follow-up send wedges it.
+      if (this.state === "running" || this.state === "idle") this.transition("error");
     }
   }
 }

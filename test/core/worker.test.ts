@@ -842,6 +842,70 @@ describe("Worker", () => {
     expect(stoppedIdx).toBeGreaterThanOrEqual(0);
     expect(firstDroppedIdx).toBeGreaterThan(stoppedIdx);
   });
+
+  it("transitions to error (not stuck idle) when the stream dies after a turn ended (non-abort throw while idle)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // A live query that completes one turn (worker drops to idle) then the stream dies (throws) — NOT via abort.
+    const dyingQuery = ((input: { prompt?: AsyncIterable<{ message?: { content?: unknown } }> }) => {
+      const prompt = input.prompt!;
+      async function* gen(): AsyncGenerator<unknown> {
+        for await (const _um of prompt) {
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: "done turn" }] } };
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+          break; // one turn → worker idle, then fall through and throw
+        }
+        throw new Error("transport died"); // subprocess/transport dies while the worker sits idle
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: dyingQuery } });
+    agent.start("go");
+    await agent.waitUntilSettled();
+    // Must be a terminal 'error' — otherwise the entry is a zombie (stuck idle, agent never cleared) and a follow-up send wedges it.
+    expect(agent.status()).toBe("error");
+    expect(repos.getWorker("a1")?.status).toBe("error");
+  });
+
+  // Regression guard: a mid-turn send() is held in `deferred` (NOT eagerly enqueued — see commit 2e70867),
+  // so interruptTurn(), which splices `deferred` before the boundary, can never leak it to the SDK as a ghost turn.
+  it("interruptTurn() never runs a deferred mid-turn instruction as a ghost turn", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((r) => { releaseGate = r; });
+    const pulled: string[] = []; // every user message the SDK actually consumes from the queue
+    const gatedQuery = ((input: { prompt?: AsyncIterable<{ message?: { content?: unknown } }> }) => {
+      const prompt = input.prompt!;
+      async function* gen(): AsyncGenerator<unknown> {
+        let turn = 0;
+        for await (const um of prompt) {
+          const c = um?.message?.content; const text = typeof c === "string" ? c : "";
+          pulled.push(text);
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${text}` }] } };
+          if (turn === 0) await gate; // hold turn0 open (worker running) so a mid-turn send() is deferred
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+          turn++;
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => { releaseGate(); }, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: gatedQuery } });
+    agent.start("task");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
+    // mid-turn send → echo deferred + message buffered in the MessageQueue (the gen is parked at the gate, not pulling input)
+    agent.send("ghost instruction");
+    expect(agent.status()).toBe("running");
+    // interrupt releases the gate (turn0's result flows). The deferred instruction must NOT run.
+    await agent.interruptTurn();
+    await until(() => agent.status() === "idle");
+    await new Promise((r) => setTimeout(r, 10)); // allow a ghost turn to occur if the deferred message leaked to the SDK
+    expect(pulled).toEqual(["task"]); // the deferred instruction was never enqueued/consumed by the SDK
+    expect(repos.listWorkerEvents("a1").some((e) => (JSON.parse(e.payload_json) as { content?: string }).content === "reply:ghost instruction")).toBe(false);
+    await agent.stop();
+  });
 });
 
 describe("extractToolUses / extractToolResults", () => {
