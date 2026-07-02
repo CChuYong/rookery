@@ -79,6 +79,31 @@ describe("FleetOrchestrator checkpoints (race/shutdown/restore/cleanup)", () => 
     await expect(fleet.restore(id, 0)).rejects.toThrow(/running/i);
   });
 
+  // TOCTOU gate: a send landing while git checkout is rewriting the worktree must be rejected, and allowed again after.
+  it("send() during an in-flight restore is rejected (TOCTOU gate)", async () => {
+    let releaseRestore!: () => void;
+    const restoreGate = new Promise<void>((r) => { releaseRestore = r; });
+    class RestoreGatedGit extends FakeGitOps {
+      async restoreCheckpoint(wt: string, sha: string): Promise<void> {
+        await restoreGate;
+        return super.restoreCheckpoint(wt, sha);
+      }
+    }
+    const git = new RestoreGatedGit({ headValue: "base0", checkpointSha: "ck" });
+    // idle so restore() passes the running guard; settle pending so the worker stays live.
+    const factory = ckptFactory({ status: () => "idle", settle: () => new Promise<void>(() => {}) });
+    const { fleet } = build(git, factory);
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
+    await tick(); // let the spawn-time checkpoint (seq 0) persist
+
+    const restoring = fleet.restore(id, 0); // enters git checkout and parks on restoreGate
+    await Promise.resolve();
+    expect(() => fleet.send(id, "new instruction")).toThrow(/mid-restore/);
+    releaseRestore();
+    await restoring;
+    expect(() => fleet.send(id, "after restore")).not.toThrow(); // gate released after the checkout completes
+  });
+
   // 1c: discard must clean up not only the worktree+branch but also the checkpoint hidden refs in the parent .git.
   it("discard() removes the worker's checkpoint refs from the parent repo", async () => {
     const git = new FakeGitOps({ headValue: "base0", checkpointSha: "ck" });

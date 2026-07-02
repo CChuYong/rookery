@@ -85,6 +85,9 @@ export class FleetOrchestrator {
   private readonly ckptChains = new Map<string, Promise<void>>();
   private readonly checkpointWrites = new Set<Promise<void>>();
   private readonly ckptWarned = new Set<string>(); // workers we've already warned about a checkpoint failure (one notice, not per-turn spam)
+  // Workers with a checkpoint restore in flight — send() must not start a turn while git checkout is rewriting
+  // the worktree (the running-guard in restore() is only valid at the tick it runs; this closes the TOCTOU).
+  private readonly restoring = new Set<string>();
 
   constructor(private readonly deps: FleetDeps) {
     this.idgen = deps.idgen ?? (() => randomUUID());
@@ -371,6 +374,9 @@ export class FleetOrchestrator {
   }
 
   send(id: string, message: string, clientMsgId?: string): void {
+    // A restore is rewriting this worktree (git checkout). Starting a turn now would interleave SDK edits with
+    // the checkout AND take a checkpoint of the half-rewritten tree. Reject; the caller retries after it ends.
+    if (this.restoring.has(id)) throw new Error(`worker ${id} is mid-restore; retry when the restore finishes`);
     const entry = this.requireLive(id);
     if (entry.pendingLabel) {
       entry.pendingLabel = false;
@@ -429,7 +435,14 @@ export class FleetOrchestrator {
     }
     const ck = this.deps.repos.listCheckpoints(id).find((c) => c.seq === seq);
     if (!ck) throw new Error(`No checkpoint seq ${seq} for ${id}`);
-    await this.deps.git.restoreCheckpoint(e.worktreePath, ck.sha);
+    // Hold the send-gate for the whole checkout: the running-check above is a point-in-time check, and a send
+    // landing during the await would start a turn against a half-rewritten worktree (TOCTOU).
+    this.restoring.add(id);
+    try {
+      await this.deps.git.restoreCheckpoint(e.worktreePath, ck.sha);
+    } finally {
+      this.restoring.delete(id);
+    }
   }
 
   // change a running worker's model live. If alive, query.setModel; otherwise just persist the model (applied on next resume).
