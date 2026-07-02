@@ -209,8 +209,12 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: [...log, { kind: "notice", text: e.text, code: e.code, params: e.params }] } };
     }
     case "interaction.request": {
+      const cur = state.logsBySession[e.sessionId] ?? [];
+      // Idempotent by requestId: the daemon replays every pending card on each events.subscribe (i.e. on every
+      // WS reconnect), so the same unresolved card can arrive again — re-appending would duplicate it.
+      if (cur.some((i) => i.kind === "interaction" && i.requestId === e.requestId)) return state;
       // Master canUseTool → inline approve/question card. Finalize the streaming bubble, then add the card.
-      const log = finalizeStreamingMsg(state.logsBySession[e.sessionId] ?? []);
+      const log = finalizeStreamingMsg(cur);
       const item: LogItem = { kind: "interaction", requestId: e.requestId, mode: e.kind, toolName: e.toolName, inputText: e.inputText, questions: e.questions, resolved: false };
       return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: [...log, item] } };
     }

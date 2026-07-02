@@ -533,6 +533,12 @@ describe("interaction (approve/AskUserQuestion inline card)", () => {
     expect(log.filter((i) => i.kind === "interaction")).toHaveLength(1); // not a new item
     expect(log.at(-1)).toMatchObject({ kind: "interaction", requestId: "R3", resolved: true, summary: "✅ 승인됨" });
   });
+  it("interaction.request is idempotent by requestId (reconnect replay does not duplicate the card)", () => {
+    const ev = { type: "interaction.request", sessionId: SID, requestId: "R1", kind: "approve", toolName: "t", inputText: "{}" } as never;
+    const st1 = reduceEvent(emptyState(), ev);
+    const st2 = reduceEvent(st1, ev); // daemon replays pending cards on every events.subscribe
+    expect(st2.logsBySession[SID].filter((i) => i.kind === "interaction")).toHaveLength(1);
+  });
 });
 
 describe("worker result telemetry → metrics LogItem", () => {
