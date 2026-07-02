@@ -310,11 +310,6 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   }, heartbeatMs);
   heartbeat.unref?.();
 
-  await new Promise<void>((resolve) => {
-    httpServer.listen(config.port, config.host, resolve);
-  });
-  const port = (httpServer.address() as AddressInfo).port;
-
   const close = async (): Promise<void> => {
     usageCollector.stop();
     scheduler.stop();
@@ -332,6 +327,23 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     db.close();
     lock?.release();
   };
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once("error", reject);
+      httpServer.listen(config.port, config.host, () => {
+        httpServer.removeListener("error", reject);
+        resolve();
+      });
+    });
+  } catch (err) {
+    // Bind failed (EADDRINUSE etc.). Without this handler the 'error' event is swallowed by the process-level
+    // uncaughtException guard and startDaemon never settles — a zombie holding the PID lock forever.
+    // Tear down everything already started so the lock/DB are released, then surface the failure to the caller.
+    await close().catch(() => {});
+    throw err;
+  }
+  const port = (httpServer.address() as AddressInfo).port;
 
   return { port, token, close };
 }

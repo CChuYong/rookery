@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { WebSocket } from "ws";
 import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { startDaemon } from "../../src/daemon/server.js";
 import { loadConfig } from "../../src/config.js";
 import { fakeQuery } from "../helpers/fake-query.js";
@@ -57,6 +58,24 @@ describe("startDaemon (integration)", () => {
     } finally {
       await daemon.close();
     }
+  });
+
+  it("rejects on port bind failure and releases the PID lock (no zombie)", { timeout: 10000 }, async () => {
+    // Occupy a port first.
+    const blocker = http.createServer(() => {});
+    await new Promise<void>((r) => blocker.listen(0, "127.0.0.1", r));
+    const busyPort = (blocker.address() as AddressInfo).port;
+
+    const home = "/tmp/rookery-server-test-bindfail";
+    const busyConfig = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: String(busyPort) });
+    // acquireLock defaults ON — the whole point: the lock must be released when listen fails.
+    await expect(startDaemon({ config: busyConfig, queryFn: fakeQuery([]) })).rejects.toThrow(/EADDRINUSE/);
+
+    // The lock must have been released: a retry with the SAME home/pidPath on a free port must succeed.
+    const freeConfig = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config: freeConfig, queryFn: fakeQuery([]) });
+    await daemon.close();
+    await new Promise<void>((r) => blocker.close(() => r()));
   });
 
   it("rejects a ws client without a valid token", async () => {

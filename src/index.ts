@@ -110,7 +110,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       shuttingDown = true;
       void daemon.close().then(() => process.exit(0));
     };
-    daemon = await startDaemon({ config, onShutdownRequest: shutdown });
+    try {
+      daemon = await startDaemon({ config, onShutdownRequest: shutdown });
+    } catch (err) {
+      // Bind/boot failure: exit non-zero instead of surviving as a half-started process (the lock and DB were
+      // already released by startDaemon's own cleanup). ensureDaemon/desktop read this from daemon.log.
+      process.stderr.write(`[rookery] daemon failed to start: ${String(err)}\n`);
+      process.exit(1);
+    }
     // detectAuth runs AFTER startDaemon so an in-app (settings DB) key, which applyApiKeyToEnv injects into
     // process.env during startup, is reflected here — otherwise a DB-key-only user gets a false "no auth" warning.
     // Even without any key, OAuth (claude login) can still authenticate, so we don't hard-gate.
