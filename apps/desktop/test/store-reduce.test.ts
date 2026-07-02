@@ -235,6 +235,41 @@ describe("seedSessionLog (restore by replaying master events)", () => {
     expect(merged.filter((i) => i.kind === "metrics")).toHaveLength(1);
     expect(merged[6]).toMatchObject({ kind: "tool", status: "complete" }); // dangling in_progress → healed
   });
+
+  it("full reload: an unresolved interaction card replayed before the history seed survives the seed", () => {
+    // Reconnect flow: events.subscribe replays the pending card into an EMPTY log, THEN session.history seeds.
+    const withCard = reduceEvent(emptyState(), { type: "interaction.request", sessionId: SID, requestId: "R9", kind: "approve", toolName: "t", inputText: "{}" } as never);
+    const prev = withCard.logsBySession[SID]; // [interaction] — zero message items, so the anchor can never match
+    const turn = [
+      { payload: { type: "master.message", sessionId: SID, role: "user", content: "hi" } },
+      { payload: { type: "master.message", sessionId: SID, role: "assistant", content: "hello" } },
+    ];
+    const log = seedSessionLog(prev, SID, turn);
+    expect(log.filter((i) => i.kind === "message")).toHaveLength(2);
+    expect(log.at(-1)).toMatchObject({ kind: "interaction", requestId: "R9", resolved: false });
+  });
+
+  it("seed does not duplicate a card that already survived in the preserved tail", () => {
+    // prev = committed message + the card (normal reconnect where the anchor DOES match).
+    let st = reduceEvent(emptyState(), { type: "master.message", sessionId: SID, role: "user", content: "hi" } as never);
+    st = reduceEvent(st, { type: "interaction.request", sessionId: SID, requestId: "R9", kind: "approve", toolName: "t", inputText: "{}" } as never);
+    const prev = st.logsBySession[SID];
+    const turn = [{ payload: { type: "master.message", sessionId: SID, role: "user", content: "hi" } }];
+    const log = seedSessionLog(prev, SID, turn);
+    expect(log.filter((i) => i.kind === "interaction")).toHaveLength(1);
+  });
+
+  it("resolved interaction summaries are NOT resurrected by the seed", () => {
+    let st = reduceEvent(emptyState(), { type: "interaction.request", sessionId: SID, requestId: "R9", kind: "approve", toolName: "t", inputText: "{}" } as never);
+    st = reduceEvent(st, { type: "interaction.resolved", sessionId: SID, requestId: "R9", summary: "done" } as never);
+    const prev = st.logsBySession[SID]; // [resolved interaction]
+    const turn = [
+      { payload: { type: "master.message", sessionId: SID, role: "user", content: "hi" } },
+      { payload: { type: "master.message", sessionId: SID, role: "assistant", content: "hello" } },
+    ];
+    const log = seedSessionLog(prev, SID, turn);
+    expect(log.filter((i) => i.kind === "interaction")).toHaveLength(0);
+  });
 });
 
 describe("reduceEvent", () => {

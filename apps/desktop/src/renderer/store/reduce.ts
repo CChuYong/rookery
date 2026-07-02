@@ -49,6 +49,21 @@ function isEchoUser(log: LogItem[] | undefined, role: string, content: string): 
 // We restore not just text but tool/thinking/metrics/notice too (replacing the earlier text-only model). The replay reuses the master's own
 // reduceEvent as-is (same logic as live → consistent). Non-persisted worker.* inline markers are not restored.
 export function seedSessionLog(prev: LogItem[] | undefined, sid: string, events: Array<{ payload: unknown; createdAt?: string }>): LogItem[] {
+  const merged = seedCore(prev, sid, events);
+  // interaction cards are live-only (never persisted to session_events), so the replay can never contain them.
+  // A full reload replays the pending card into an EMPTY log; the message-count anchor then can't match and
+  // seedCore returns `committed` — dropping the card and re-hanging the blocked approval turn invisibly.
+  // Re-append any UNRESOLVED card from prev that the merge lost (resolved summaries are cosmetic; let them go).
+  const have = new Set(
+    merged.filter((i): i is Extract<LogItem, { kind: "interaction" }> => i.kind === "interaction").map((i) => i.requestId),
+  );
+  const dropped = (prev ?? []).filter(
+    (i): i is Extract<LogItem, { kind: "interaction" }> => i.kind === "interaction" && !i.resolved && !have.has(i.requestId),
+  );
+  return dropped.length ? [...merged, ...dropped] : merged;
+}
+
+function seedCore(prev: LogItem[] | undefined, sid: string, events: Array<{ payload: unknown; createdAt?: string }>): LogItem[] {
   let st = emptyState();
   // Inject the persisted event's created_at as the message ts → restored old messages also carry their actual arrival time.
   // Force each event's sessionId to sid: a forked session's copied events carry the ORIGINAL session's id, which would
