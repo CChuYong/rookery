@@ -104,6 +104,39 @@ describe("FleetOrchestrator checkpoints (race/shutdown/restore/cleanup)", () => 
     expect(() => fleet.send(id, "after restore")).not.toThrow(); // gate released after the checkout completes
   });
 
+  // The mid-restore gate must also cover restore() and fork() (not just send()): two concurrent restores would
+  // interleave checkouts, and a fork mid-restore would snapshot a half-rewritten source worktree (silent corruption).
+  it("restore() and fork() during an in-flight restore are rejected (mid-restore gate)", async () => {
+    let releaseRestore!: () => void;
+    const restoreGate = new Promise<void>((r) => { releaseRestore = r; });
+    class RestoreGatedGit extends FakeGitOps {
+      async restoreCheckpoint(wt: string, sha: string): Promise<void> {
+        await restoreGate;
+        return super.restoreCheckpoint(wt, sha);
+      }
+    }
+    const git = new RestoreGatedGit({ headValue: "base0", checkpointSha: "ck" });
+    // idle so restore() passes the running guard; settle pending so the worker stays live.
+    const factory = ckptFactory({ status: () => "idle", settle: () => new Promise<void>(() => {}) });
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const fleet = new FleetOrchestrator({
+      repos, bus, git, factory, worktreesDir: "/wt", idgen: () => "a0",
+      forkSession: async () => ({ sessionId: "forked" }), // fork() needs a forkSession injected
+    });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
+    await tick(); // let the spawn-time checkpoint (seq 0) persist
+    repos.setWorkerSdkSessionId(id, "sdk-x"); // fork() needs an sdk_session_id on the source row
+
+    const restoring = fleet.restore(id, 0); // enters git checkout and parks on restoreGate
+    await Promise.resolve();
+    await expect(fleet.restore(id, 0)).rejects.toThrow(/mid-restore/); // (a) a second restore is refused
+    await expect(fleet.fork(id)).rejects.toThrow(/mid-restore/);       // (b) fork is refused before any git work
+    releaseRestore();
+    await expect(restoring).resolves.toBeUndefined(); // the original restore completes after release
+  });
+
   // 1c: discard must clean up not only the worktree+branch but also the checkpoint hidden refs in the parent .git.
   it("discard() removes the worker's checkpoint refs from the parent repo", async () => {
     const git = new FakeGitOps({ headValue: "base0", checkpointSha: "ck" });

@@ -42,12 +42,16 @@ export class InteractionRegistry {
     const inputText = isAsk ? undefined : safeJson(input); // computed once → reused for both the pending record and the emitted event
     return new Promise<PermissionResult>((resolve) => {
       this.pending.set(requestId, { sessionId, kind: isAsk ? "ask" : "approve", questions, toolName, inputText, resolve });
-      this.armAbort(requestId, opts.signal, resolve);
+      // Ordering is load-bearing: EMIT interaction.request BEFORE arming the abort. If opts.signal is ALREADY aborted,
+      // armAbort resolves deny + emits interaction.resolved SYNCHRONOUSLY; emitting the request first means a client
+      // sees request→resolved (card created then immediately retired) instead of a request emitted for an already-retired
+      // entry — which (with seed-preservation on the renderer) would leave a never-resolvable orphan card across reconnects.
       this.bus.emit(
         isAsk
           ? { type: "interaction.request", sessionId, requestId, kind: "ask", questions }
           : { type: "interaction.request", sessionId, requestId, kind: "approve", toolName, inputText },
       );
+      this.armAbort(requestId, opts.signal, resolve);
     });
   }
 

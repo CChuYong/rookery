@@ -187,6 +187,9 @@ export class FleetOrchestrator {
   async fork(id: string): Promise<{ id: string }> {
     const src = this.deps.repos.getWorker(id);
     if (!src) throw new Error(`Unknown worker: ${id}`);
+    // A restore in flight is mid-checkout on the source worktree — checkpointing it now would snapshot a half-rewritten
+    // tree into the fork (silent corruption). Reject before any git work; retry once the restore finishes.
+    if (this.restoring.has(id)) throw new Error(`worker ${id} is mid-restore; retry when the restore finishes`);
     if (!src.sdk_session_id) throw new Error("this worker has no SDK session yet — nothing to fork");
     if (!src.worktree_path || !this.exists(src.worktree_path)) throw new Error("this worker's worktree is gone — cannot fork");
     if (!this.deps.forkSession) throw new Error("worker forking is not available");
@@ -427,6 +430,8 @@ export class FleetOrchestrator {
 
   // restore the worktree's tracked files to that checkpoint (seq). Ignore a nonexistent seq.
   async restore(id: string, seq: number): Promise<void> {
+    // Another restore is already rewriting this worktree — two concurrent checkouts would interleave. Reject; retry after it finishes.
+    if (this.restoring.has(id)) throw new Error(`worker ${id} is mid-restore; retry when the restore finishes`);
     const e = this.entries.get(id);
     if (!e) throw new Error(`Unknown worker: ${id}`);
     // if running, the worker's SDK is concurrently editing the same worktree → restore collides and produces a half-overwritten state.

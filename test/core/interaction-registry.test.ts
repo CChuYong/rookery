@@ -65,6 +65,20 @@ describe("InteractionRegistry", () => {
     expect(reg.pendingEvents()).toEqual([]); // pending entry cleaned up
   });
 
+  it("pre-aborted signal: emits interaction.request BEFORE interaction.resolved (card retired, no orphan)", async () => {
+    const { events, reg } = setup("s7");
+    const ac = new AbortController();
+    ac.abort(); // already aborted at request time
+    const p = reg.request("s7", "x", {}, { toolUseID: "R7", signal: ac.signal });
+    await expect(p).resolves.toMatchObject({ behavior: "deny" });
+    const reqIdx = events.findIndex((e) => e.type === "interaction.request" && e.requestId === "R7");
+    const resIdx = events.findIndex((e) => e.type === "interaction.resolved" && e.requestId === "R7");
+    expect(reqIdx).toBeGreaterThanOrEqual(0); // the card was created
+    expect(resIdx).toBeGreaterThanOrEqual(0); // and immediately retired
+    expect(reqIdx).toBeLessThan(resIdx); // request FIRST → a client that seeds the card also gets the retirement
+    expect(reg.pendingEvents()).toEqual([]); // nothing left pending
+  });
+
   it("respond for an unknown/resolved requestId is a no-op", () => {
     const { reg } = setup("s4");
     expect(reg.respond("nope", { decision: "allow" })).toEqual({ ok: false });
