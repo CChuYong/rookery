@@ -701,4 +701,47 @@ describe("MasterAgent", () => {
     expect(master.getSdkSessionId()).toBe("sdk-init-1");
     expect(d.repos.getSession("s1")?.sdk_session_id).toBe("sdk-init-1"); // persisted for resume after restart
   });
+
+  describe("stranded pending_notifications re-drain", () => {
+    it("a failed flush is retried (older lines first) on the next worker notification", async () => {
+      let call = 0;
+      const prompts: string[] = [];
+      const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]));
+      const wrapped = ((input: { prompt?: string }) => {
+        call++;
+        if (typeof input?.prompt === "string") prompts.push(input.prompt);
+        if (call === 1) throw new Error("api down"); // first flush turn dies before streaming
+        return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
+      }) as typeof base.queryFn;
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+
+      master.notifyWorker("worker A settled");
+      await master.idle();
+      expect(base.repos.pendingNotifications("s1").map((r) => r.text)).toEqual(["worker A settled"]); // persisted by the catch
+
+      master.notifyWorker("worker B settled");
+      await master.idle();
+      const flush = prompts.find((p) => p.includes("worker B settled"))!;
+      expect(flush).toContain("worker A settled"); // stranded line drained into the same flush
+      expect(flush.indexOf("worker A settled")).toBeLessThan(flush.indexOf("worker B settled")); // older first
+      expect(base.repos.pendingNotifications("s1")).toEqual([]); // rows consumed
+    });
+
+    it("user activity (runTurn) re-flushes stranded rows after the user turn", async () => {
+      const prompts: string[] = [];
+      const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]));
+      const wrapped = ((input: { prompt?: string }) => {
+        if (typeof input?.prompt === "string") prompts.push(input.prompt);
+        return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
+      }) as typeof base.queryFn;
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+      base.repos.addPendingNotification("s1", "worker A settled"); // stranded by a previous failed flush
+
+      await master.runTurn("hello");
+      await master.idle(); // let the chained notice flush run
+      expect(prompts[0]).toBe("hello"); // user turn first — stranded lines must not delay the user's answer
+      expect(prompts[1]).toContain("worker A settled"); // then the retry flush
+      expect(base.repos.pendingNotifications("s1")).toEqual([]);
+    });
+  });
 });

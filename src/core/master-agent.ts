@@ -190,7 +190,21 @@ export class MasterAgent {
   async runTurn(userText: string, override?: TurnOverride): Promise<void> {
     const result = this.turnChain.then(() => this.doTurn(userText, override));
     this.turnChain = result.catch(() => {});
+    // User activity is a natural retry point for stranded notification rows: re-inject them through
+    // notifyWorker so they flush as one coalesced notice turn AFTER this user turn.
+    for (const line of this.drainPersistedNotifications()) this.notifyWorker(line);
     return result;
+  }
+
+  // Drain stranded retry rows (a failed notification flush persisted its lines). build() drains them only once
+  // per process, so a live session must re-drain on its own activity — otherwise a notify:true wake-up that
+  // failed once is parked until the next daemon restart. Synchronous read+delete (better-sqlite3): no race.
+  private drainPersistedNotifications(): string[] {
+    const { repos } = this.opts.deps;
+    const rows = repos.pendingNotifications(this.opts.sessionId);
+    if (rows.length === 0) return [];
+    repos.deletePendingNotifications(this.opts.sessionId);
+    return rows.map((r) => r.text);
   }
 
   // Inject a worker-completion notification. Coalesces onto turnChain: if the master is mid-turn, buffered lines are flushed as
@@ -201,7 +215,8 @@ export class MasterAgent {
     this.notifyFlushScheduled = true;
     this.turnChain = this.turnChain.then(() => {
       this.notifyFlushScheduled = false;
-      const lines = this.pendingNotifications.splice(0);
+      // Prepend any stranded rows from a previously-failed flush (older first) so ordering is preserved and they retry.
+      const lines = [...this.drainPersistedNotifications(), ...this.pendingNotifications.splice(0)];
       if (lines.length === 0) return;
       const prompt = `<worker-notification>\n${lines.join("\n")}\n\nUse view_worker_transcript / view_worker_diff for detail, send_worker to continue, or report to the user.\n</worker-notification>`;
       return this.doTurn(prompt, undefined, { asNotice: true }).catch(() => {
