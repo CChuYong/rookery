@@ -122,3 +122,22 @@ describe("SlackInteractionBridge", () => {
     await pq;
   });
 });
+
+describe("post failure (card never reached Slack)", () => {
+  const target = { channel: "C1", threadTs: "111.222", team: "T1" };
+
+  it("approve: a rejected post resolves pass-through allow instead of hanging the turn", { timeout: 3000 }, async () => {
+    const bridge = new SlackInteractionBridge(async () => { throw new Error("channel_not_found"); });
+    const r = await bridge.prompt(target, "Bash", { command: "ls" }, { toolUseID: "TF1" });
+    expect(r).toEqual({ behavior: "allow" });
+    // pending entry cleaned up: a later (impossible) click is an ignored no-op, not a double-resolve
+    expect(bridge.handleAction(JSON.stringify({ t: "TF1", d: "allow" }))).toBeUndefined();
+  });
+
+  it("ask: a rejected post resolves deny with a delivery-failure message (no invented empty answer)", { timeout: 3000 }, async () => {
+    const bridge = new SlackInteractionBridge(async () => { throw new Error("msg_too_long"); });
+    const r = await bridge.prompt(target, "AskUserQuestion", { questions: [{ question: "Q?", options: [{ label: "A" }] }] }, { toolUseID: "TF2" });
+    expect(r).toMatchObject({ behavior: "deny" });
+    expect(bridge.handleAction(JSON.stringify({ t: "TF2", q: 0, a: "A" }))).toBeUndefined();
+  });
+});

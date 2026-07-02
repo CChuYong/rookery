@@ -64,13 +64,13 @@ export class SlackInteractionBridge {
       return new Promise<PermissionResult>((resolve) => {
         this.pending.set(id, { kind: "ask", questions, answers: {}, resolve });
         this.armAbort(id, opts.signal, resolve);
-        void this.post(target, { text: t(this.getLocale(), "slack.askQuestion"), blocks: this.askBlocks(id, questions) });
+        void this.post(target, { text: t(this.getLocale(), "slack.askQuestion"), blocks: this.askBlocks(id, questions) }).catch((err) => this.failPending(id, err));
       });
     }
     return new Promise<PermissionResult>((resolve) => {
       this.pending.set(id, { kind: "approve", resolve });
       this.armAbort(id, opts.signal, resolve);
-      void this.post(target, { text: t(this.getLocale(), "slack.approveNeeded", { tool: toolName }), blocks: this.approveBlocks(id, toolName, input) });
+      void this.post(target, { text: t(this.getLocale(), "slack.approveNeeded", { tool: toolName }), blocks: this.approveBlocks(id, toolName, input) }).catch((err) => this.failPending(id, err));
     });
   }
 
@@ -102,6 +102,19 @@ export class SlackInteractionBridge {
       return { done: false, summary: "" };
     }
     return undefined;
+  }
+
+  // The card never reached Slack (rejected post: archived channel, invalid blocks, msg_too_long, network) —
+  // resolve NOW instead of wedging the master turn forever waiting for a click that can never come.
+  // approve falls back to allow (the same pass-through makeSlackCanUseTool uses when the bridge is down);
+  // ask denies with a delivery-failure reason (an invented empty answer would silently corrupt the turn).
+  private failPending(id: string, err: unknown): void {
+    const p = this.pending.get(id);
+    if (!p) return; // already resolved (click raced the failure, or the turn aborted)
+    this.pending.delete(id);
+    process.stderr.write(`[rookery][slack] interaction post failed (${p.kind}): ${String(err)}\n`);
+    if (p.kind === "approve") p.resolve({ behavior: "allow" });
+    else p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.postFailed") });
   }
 
   // Turn cancellation (AbortSignal) → if still pending, close it out with deny.
