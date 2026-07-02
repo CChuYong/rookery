@@ -9,6 +9,7 @@ import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { Connection } from "../../src/daemon/connection.js";
 import type { ClientSocket, AutomationProvider } from "../../src/daemon/connection.js";
+import { InteractionRegistry } from "../../src/core/interaction-registry.js";
 import { Settings } from "../../src/core/settings.js";
 import { loadConfig } from "../../src/config.js";
 import { fakeQuery } from "../helpers/fake-query.js";
@@ -105,6 +106,29 @@ function parsed(sent: string[]): Array<Record<string, unknown>> {
 }
 
 describe("Connection", () => {
+  it("replays a pending interaction card on events.subscribe (survives a full client reload → turn not left hung)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet }, () => "s1");
+    const reg = new InteractionRegistry(bus);
+    const sent: string[] = [];
+    const socket: ClientSocket = { send: (d) => sent.push(d) };
+    const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, undefined, reg);
+
+    // A master turn hits AskUserQuestion → a pending interaction is registered (the promise is intentionally not awaited).
+    void reg.request("s1", "AskUserQuestion", { questions: [{ question: "pick", header: "h", options: [{ label: "a" }] }] }, { toolUseID: "R1" });
+    sent.length = 0; // ignore the live emit (this socket isn't subscribed yet)
+
+    // Full desktop reload: the fresh WS connection subscribes → the pending card MUST be replayed or the held turn hangs forever.
+    await conn.handleRaw(JSON.stringify({ type: "events.subscribe" }));
+
+    const replayed = parsed(sent).filter((m) => m.type === "event" && (m.event as { type?: string }).type === "interaction.request");
+    expect(replayed).toHaveLength(1);
+    expect((replayed[0]!.event as { requestId?: string }).requestId).toBe("R1");
+  });
+
   it("creates a session and replies session.created", async () => {
     const { conn, sent } = setup();
     await conn.handleRaw(JSON.stringify({ type: "session.create", cwd: "/work" }));

@@ -55,6 +55,9 @@ export interface SourceProvider {
 // Router for master canUseTool (approval/AskUserQuestion) responses (= InteractionRegistry). Resolves WS interaction.respond.
 export interface InteractionResponder {
   respond(requestId: string, res: { decision?: "allow" | "deny"; answers?: Record<string, string | string[]> }): { ok: boolean };
+  // Live pending interactions (optionally for one session) as replayable events — so a (re)subscribing client rehydrates
+  // any open approval/AskUserQuestion card instead of leaving the held master turn hung after a full reload.
+  pendingEvents(sessionId?: string): CoreEvent[];
 }
 
 export interface AutomationProvider {
@@ -155,6 +158,7 @@ export class Connection {
           return;
         }
         this.subscribe(session.id);
+        for (const event of this.interactions?.pendingEvents(session.id) ?? []) this.reply({ type: "event", event }); // rehydrate any open card for this session
         return;
       }
       case "session.send": {
@@ -265,6 +269,7 @@ export class Connection {
         if (this.slack) {
           this.reply({ type: "event", event: { type: "slack.status", sessionId: ALL_CHANNEL, status: this.slack.status() } });
         }
+        for (const event of this.interactions?.pendingEvents() ?? []) this.reply({ type: "event", event }); // rehydrate any open interaction cards (survives full reload)
         return;
       }
       case "slack.set": {

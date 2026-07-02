@@ -1,11 +1,13 @@
 import type { PermissionResult, CanUseTool } from "@anthropic-ai/claude-agent-sdk";
-import type { EventBus, InteractionQuestion } from "./events.js";
+import type { EventBus, InteractionQuestion, CoreEvent } from "./events.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 
 interface Pending {
   sessionId: string;
   kind: "approve" | "ask";
   questions?: InteractionQuestion[];
+  toolName?: string; // approve only — retained so the card can be replayed on (re)subscribe
+  inputText?: string; // approve only — serialized tool input, for replay
   resolve: (r: PermissionResult) => void;
 }
 
@@ -37,13 +39,14 @@ export class InteractionRegistry {
     const requestId = opts.toolUseID;
     const isAsk = toolName === "AskUserQuestion" && Array.isArray((input as { questions?: unknown }).questions);
     const questions = isAsk ? (input as { questions: InteractionQuestion[] }).questions : undefined;
+    const inputText = isAsk ? undefined : safeJson(input); // computed once → reused for both the pending record and the emitted event
     return new Promise<PermissionResult>((resolve) => {
-      this.pending.set(requestId, { sessionId, kind: isAsk ? "ask" : "approve", questions, resolve });
+      this.pending.set(requestId, { sessionId, kind: isAsk ? "ask" : "approve", questions, toolName, inputText, resolve });
       this.armAbort(requestId, opts.signal, resolve);
       this.bus.emit(
         isAsk
           ? { type: "interaction.request", sessionId, requestId, kind: "ask", questions }
-          : { type: "interaction.request", sessionId, requestId, kind: "approve", toolName, inputText: safeJson(input) },
+          : { type: "interaction.request", sessionId, requestId, kind: "approve", toolName, inputText },
       );
     });
   }
@@ -66,6 +69,22 @@ export class InteractionRegistry {
     }
     this.bus.emit({ type: "interaction.resolved", sessionId: p.sessionId, requestId, summary });
     return { ok: true };
+  }
+
+  // Live pending interactions rebuilt as interaction.request events — replayed by the daemon to a (re)subscribing client
+  // so a full desktop reload doesn't lose the approval/AskUserQuestion card (which would otherwise leave the held turn
+  // hung forever, since interaction.request is emit-only and never persisted to session_events).
+  pendingEvents(sessionId?: string): CoreEvent[] {
+    const out: CoreEvent[] = [];
+    for (const [requestId, p] of this.pending) {
+      if (sessionId && p.sessionId !== sessionId) continue;
+      out.push(
+        p.kind === "ask"
+          ? { type: "interaction.request", sessionId: p.sessionId, requestId, kind: "ask", questions: p.questions }
+          : { type: "interaction.request", sessionId: p.sessionId, requestId, kind: "approve", toolName: p.toolName, inputText: p.inputText },
+      );
+    }
+    return out;
   }
 
   // Turn cancellation (AbortSignal) → if still pending, close it out with deny (prevents a permanent hang).
