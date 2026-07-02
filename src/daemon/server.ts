@@ -329,6 +329,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     httpServer.closeAllConnections?.(); // Node 18.2+: forcibly close any remaining keep-alive connections
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     await slack.stop();
+    // Park worker-notify BEFORE stopping the fleet: fleet.close's stop() synchronously emits worker.status
+    // 'stopped' for every live worker, and a still-subscribed notifier would consume the arms and launch ghost
+    // master turns during shutdown (racing db.close; the failed re-persist then loses the notification forever).
+    // Parked, the arms stay notify_armed=1 in the DB and the next boot's sweepSettled() delivers them.
+    stopNotifier();
     // Finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master turns.
     // Otherwise writing to a closed DB raises a 'database is not open' unhandled rejection.
     await fleet.close(5000);

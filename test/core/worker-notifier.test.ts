@@ -80,3 +80,30 @@ describe("WorkerNotifier.sweepSettled (boot-time stranded arms)", () => {
     expect(repos.getWorker("w1")!.notify_armed).toBe(1);
   });
 });
+
+describe("shutdown parking (arm survives to the next boot)", () => {
+  // Same delivered-array collector + held notifier instance as the boot-sweep helper: here we start()
+  // then unsubscribe to model daemon shutdown, so the notifier must not be pre-started.
+  function h() {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w", worktreePath: "/wt/w1", branch: "b" });
+    const delivered: Array<{ sessionId: string; line: string }> = [];
+    const bus = new EventBus();
+    const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, line) => delivered.push({ sessionId, line }) });
+    return { repos, bus, notifier, delivered };
+  }
+
+  it("after unsubscribe, a settle event does not consume the arm; the boot sweep delivers it later", () => {
+    const { repos, bus, notifier, delivered } = h();
+    repos.setWorkerNotifyArmed("w1", true);
+    const off = notifier.start();
+    off(); // shutdown: park the notifier BEFORE the fleet stops workers
+    repos.setWorkerStatus("w1", "stopped", true);
+    bus.emit({ type: "worker.status", sessionId: "s1", workerId: "w1", status: "stopped" }); // what fleet.close's stops emit
+    expect(delivered).toHaveLength(0); // no ghost delivery during shutdown
+    expect(repos.getWorker("w1")!.notify_armed).toBe(1); // arm preserved in the DB
+    notifier.sweepSettled(); // next boot
+    expect(delivered).toHaveLength(1);
+  });
+});
