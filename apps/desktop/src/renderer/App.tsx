@@ -856,7 +856,8 @@ export function App(): JSX.Element {
                 </button>
               </div>
             </div>
-            {/* Sessions view only: quick entry right below the tabs — new session + automation. (replaces the bottom buttons) */}
+            {/* Sessions view only: quick entry right below the tabs — new session. (Automation moved to the always-rendered
+                bottom cluster below, audit #22 — it's a top-level feature and shouldn't disappear on the Repos tab.) */}
             {!showRepos && (
               <div className="flex flex-col">
                 <button
@@ -864,12 +865,6 @@ export function App(): JSX.Element {
                   className={cn("no-drag flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors", overlay === "newSession" ? "bg-accent/15 text-accent" : "text-fg-dim hover:bg-raised hover:text-fg")}
                 >
                   <Plus size={15} className="shrink-0" /> {t("app.newSession")}
-                </button>
-                <button
-                  onClick={() => { navigate({ overlay: "automation" }); }}
-                  className={cn("no-drag flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-fg-dim hover:bg-raised hover:text-fg")}
-                >
-                  <Clock size={15} className="shrink-0" /> {t("app.automation")}
                 </button>
               </div>
             )}
@@ -889,8 +884,15 @@ export function App(): JSX.Element {
                 <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.slack === "up" ? "bg-pr led-live" : s.slack === "connecting" ? "bg-run led-live" : s.slack === "error" ? "bg-fail" : "bg-stop", slackJustUp && "status-flash")} />
                 <span>slack{s.slack !== "up" && <span className="text-fg-dim"> · {s.slack}</span>}</span>
               </span>
+              {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
+                  shouldn't require switching to the Sessions tab first. */}
+              <Tooltip label={t("app.automation")} side="top">
+                <button onClick={() => { navigate({ overlay: "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                  <Clock size={14} />
+                </button>
+              </Tooltip>
               <Tooltip label={t("app.restartDaemon")} side="top">
-                <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
+                <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
                   <RotateCcw size={13} className={cn(restarting && "animate-spin")} />
                 </button>
               </Tooltip>
@@ -954,6 +956,7 @@ export function App(): JSX.Element {
                   setEditJob(null);
                 } catch (e) {
                   toast.error(tRef.current("toast.automationFailed"), String(e));
+                  throw e; // rethrow → AutomationForm's own catch surfaces the inline submitError
                 }
               }}
             />

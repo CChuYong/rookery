@@ -159,6 +159,20 @@ describe("AutomationForm", () => {
     );
   });
 
+  // ── audit #4: inline error surfaces when onSubmit rejects ──
+
+  it("a rejecting onSubmit surfaces the inline submitError message", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("invalid cron expression"));
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do it";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(await screen.findByText("invalid cron expression")).toBeInTheDocument();
+  });
+
   it("initialises from init prop: permissionMode and maxTurns", () => {
     const job = {
       id: "a1",

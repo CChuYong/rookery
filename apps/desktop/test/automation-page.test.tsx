@@ -1,5 +1,5 @@
 import { it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AutomationPage } from "../src/renderer/components/AutomationPage.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 
@@ -176,7 +176,7 @@ it("normal (non-corrupt) automation row does NOT show corrupt badge", () => {
   expect(screen.queryByText("설정 손상 — 삭제/재저장")).toBeNull();
 });
 
-it("corrupt row still has a delete button that fires onDelete", () => {
+it("corrupt row still has a delete button that confirms then fires onDelete", () => {
   const onDelete = vi.fn();
   render(
     <AutomationPage
@@ -189,5 +189,48 @@ it("corrupt row still has a delete button that fires onDelete", () => {
     />,
   );
   fireEvent.click(screen.getByTitle("삭제"));
+  fireEvent.click(screen.getByText("삭제")); // confirm dialog's Delete button
   expect(onDelete).toHaveBeenCalledWith("c1");
+});
+
+// ─── delete confirmation (audit #20) ───────────────────────────────────────────
+
+it("delete click opens a confirm dialog and does NOT call onDelete until confirmed", () => {
+  const onDelete = vi.fn();
+  render(
+    <AutomationPage
+      automations={[cronJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={onDelete}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByTitle("삭제"));
+  // confirm dialog shown, with the rule's name in the body — onDelete not yet called
+  expect(screen.getByText("자동화 삭제")).toBeInTheDocument();
+  expect(screen.getByText(/'nightly' 규칙을 삭제할까요/)).toBeInTheDocument();
+  expect(onDelete).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("삭제")); // confirm
+  expect(onDelete).toHaveBeenCalledWith("s1");
+});
+
+it("delete confirm dialog Cancel closes without calling onDelete", async () => {
+  const onDelete = vi.fn();
+  render(
+    <AutomationPage
+      automations={[cronJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={onDelete}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByTitle("삭제"));
+  fireEvent.click(screen.getByText("취소"));
+  expect(onDelete).not.toHaveBeenCalled();
+  // the dialog unmounts after its exit-transition timeout (useDismissTransition)
+  await waitFor(() => expect(screen.queryByText("자동화 삭제")).toBeNull());
 });

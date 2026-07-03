@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clock, X, Play, Pencil, Trash2, Plus, History, Loader2 } from "lucide-react";
 import type { Automation, AutomationTrigger } from "@daemon/persistence/repositories.js";
 import type { ActionVars } from "@daemon/core/automation-action.js";
@@ -8,6 +8,9 @@ import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
 import { referencedVars } from "../lib/automation-vars.js";
 import { RunAutomationDialog } from "./RunAutomationDialog.js";
+import { useDismissTransition } from "../lib/useDismissTransition.js";
+import { useModalKeys } from "../lib/useModalKeys.js";
+import { useFocusTrap } from "../lib/useFocusTrap.js";
 
 // Trigger badge text — for cron, the cron expression; for slack, a filter summary (channels/keyword, or "slack: all" when empty).
 function triggerBadge(trigger: AutomationTrigger, t: TFunc): string {
@@ -33,6 +36,9 @@ export function AutomationPage(p: {
 }): JSX.Element {
   const t = useT();
   const [runTarget, setRunTarget] = useState<Automation | null>(null);
+  // Delete is destructive (no undo) — gate the trash icon behind a confirm dialog (audit #20), mirroring the
+  // session/worker delete-confirm pattern (Sessions.tsx/RepoTree.tsx).
+  const [confirmDelete, setConfirmDelete] = useState<Automation | null>(null);
   const actionText = (a: Automation): string => a.action.kind === "master" ? a.action.prompt : a.action.task;
   // Run-now: keep the Play button spinning (and disabled) until the request resolves — immediate feedback + blocks the
   // double-fire that actually double-executes (manual/Slack runs aren't overlap-guarded).
@@ -95,7 +101,7 @@ export function AutomationPage(p: {
                   {p.onViewSessions && <button title={t("automationPage.viewSessions")} onClick={() => p.onViewSessions!(a.id)} className="rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim"><History size={14} /></button>}
                   <button title={t("automationPage.run")} disabled={!!running[a.id]} onClick={() => { referencedVars(actionText(a)).length ? setRunTarget(a) : void run(a.id); }} className="rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim disabled:opacity-40">{running[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}</button>
                   <button title={t("automationPage.edit")} onClick={() => p.onEdit(a)} className="rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim"><Pencil size={14} /></button>
-                  <button title={t("automationPage.delete")} onClick={() => p.onDelete(a.id)} className="rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim"><Trash2 size={14} /></button>
+                  <button title={t("automationPage.delete")} onClick={() => setConfirmDelete(a)} className="rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim"><Trash2 size={14} /></button>
                 </div>
               ))}
             </div>
@@ -109,6 +115,36 @@ export function AutomationPage(p: {
           onRun={(vars) => { void run(runTarget.id, vars); setRunTarget(null); }}
         />
       )}
+      {confirmDelete && (
+        <AutomationDeleteConfirm
+          name={confirmDelete.name}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => p.onDelete(confirmDelete.id)}
+        />
+      )}
     </>
+  );
+}
+
+// Destructive delete confirm (no undo). Extracted so it mounts/unmounts with `confirmDelete` → useDismissTransition
+// resets per open and plays a symmetric enter/exit; Escape/cancel button cancel; Cancel autofocused (safe default).
+function AutomationDeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }): JSX.Element {
+  const t = useT();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { closing, dismiss } = useDismissTransition(onCancel);
+  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
+  useModalKeys(dismiss, confirmAndClose);
+  useFocusTrap(panelRef);
+  return (
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("automationPage.deleteConfirmTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
+        <div className="mb-1.5 text-[14px] font-semibold">{t("automationPage.deleteConfirmTitle")}</div>
+        <p className="text-[12.5px] leading-relaxed text-muted">{t("automationPage.deleteConfirmBody", { name })}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
+          <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("common.delete")}</button>
+        </div>
+      </div>
+    </div>
   );
 }

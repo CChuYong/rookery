@@ -154,6 +154,12 @@ export function AutomationForm(p: {
         </Button>
       </div>
 
+      {/* Inline submit error (audit #4) — shown right under the header/Save row so a failed save (e.g. invalid cron) is
+          visible without scrolling the body. */}
+      {submitError && (
+        <p className="shrink-0 border-b border-line bg-fail/12 px-4 py-2 text-[12px] text-fail">{submitError}</p>
+      )}
+
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-6 py-5 flex flex-col gap-5">
@@ -401,10 +407,6 @@ export function AutomationForm(p: {
             )}
             <p className="text-[11px] text-muted">{t("automationModal.templateHint")}</p>
           </section>
-
-          {submitError && (
-            <p className="text-[12px] text-red-400">{submitError}</p>
-          )}
         </div>
       </div>
     </div>
