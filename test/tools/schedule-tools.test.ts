@@ -11,7 +11,18 @@ function ctl(sessionCwd = "/work") {
   repos.createSession({ id: "s1", cwd: sessionCwd });
   const reconciled: string[] = [];
   let n = 0;
-  const c = { repos, reconcile: (id: string) => reconciled.push(id), now: () => new Date("2026-06-23T00:00:00.000Z"), idgen: () => `j${n++}` };
+  const c = {
+    repos,
+    // Mirror the real scheduler.reconcile for once triggers: set next_run_at = runAt so a freshly-scheduled
+    // wakeup counts as pending (a null next_run_at is a claimed/currently-firing row, excluded from pendingFor).
+    reconcile: (id: string) => {
+      reconciled.push(id);
+      const a = repos.getAutomation(id);
+      if (a && a.trigger.kind === "once" && a.enabled) repos.setAutomationNextRun(id, a.trigger.runAt);
+    },
+    now: () => new Date("2026-06-23T00:00:00.000Z"),
+    idgen: () => `j${n++}`,
+  };
   return { repos, c, reconciled };
 }
 
@@ -69,6 +80,16 @@ describe("schedule tools", () => {
     const jobs = JSON.parse(listImpl(c, "s1").text).jobs;
     expect(jobs).toHaveLength(1);
     expect(jobs[0].reason).toBe("mine");
+  });
+
+  it("list/pending excludes a claimed once-row (next_run_at nulled by the Scheduler) — no phantom pending wakeup", () => {
+    const { repos, c } = ctl();
+    const claimedId = JSON.parse(wakeupImpl(c, "s1", { delaySeconds: 100, reason: "firing now", prompt: "p-claimed" }).text).id;
+    const liveId = JSON.parse(wakeupImpl(c, "s1", { delaySeconds: 200, reason: "still pending", prompt: "p-live" }).text).id;
+    repos.setAutomationNextRun(claimedId, null); // the Scheduler's claim right before firing (claim-then-delete, #15)
+    const ids = JSON.parse(listImpl(c, "s1").text).jobs.map((j: { id: string }) => j.id);
+    expect(ids).toContain(liveId); // an unclaimed pending wakeup is still listed
+    expect(ids).not.toContain(claimedId); // the currently-firing (claimed) row is not a phantom pending wakeup
   });
 
   it("cancel: deletes own pending; rejects unknown id and other-session", () => {

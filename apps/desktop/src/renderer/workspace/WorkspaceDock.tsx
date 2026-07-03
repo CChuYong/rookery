@@ -137,7 +137,14 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   // Keep editor panels in sync when tabs change elsewhere (file click, tool chip).
   useEffect(() => {
     disposedRef.current = false;
-    const unsub = useWsStore.subscribe(() => { syncEditors(apiRef.current); syncActive(apiRef.current); });
+    const unsub = useWsStore.subscribe((state, prevState) => {
+      syncEditors(apiRef.current);
+      // Gate the focus sync on THIS page's tab state actually changing: every useWsStore write fires this
+      // listener, and force-activating the tab panel on unrelated writes (expandedByPage from a folder toggle,
+      // setDirty from a file watch) steals activation from focused FIXED panels (files/git/terminal). A re-click
+      // of an open tab still passes — openFile/setActive always produce a NEW byPage[pageKey] object.
+      if (state.byPage[pageKey] !== prevState.byPage[pageKey]) syncActive(apiRef.current);
+    });
     return () => {
       disposedRef.current = true;
       unsub();

@@ -28,7 +28,8 @@ type Result = { text: string; isError?: boolean };
 // Pending one-shot wakeups targeting this session.
 function pendingFor(c: ScheduleControl, sessionId: string): Automation[] {
   return c.repos.listAutomations().filter(
-    (a) => a.trigger.kind === "once" && a.action.kind === "master" && a.action.targetSessionId === sessionId,
+    // a null next_run is a once-row currently firing (claimed by the Scheduler), not a pending wakeup — exclude it.
+    (a) => a.trigger.kind === "once" && a.action.kind === "master" && a.action.targetSessionId === sessionId && a.nextRunAt != null,
   );
 }
 
