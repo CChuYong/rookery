@@ -25,7 +25,7 @@ export default {
   "app.reconnecting": "Connecting to the daemon…",
   "app.sessionEndedRestart": "Session ended by restart — only diff/discard available",
   "app.agentEndedReadonly": "Agent ended — view only",
-  "app.emptyRepoHint": "Pick a worker from the repos on the left, or ask the master to spawn a new one from Sessions.",
+  "app.emptyRepoHint": "Pick a worker from the repos on the left, use the + button on a repo header to spawn a new one, or ask the master to spawn one from Sessions.",
   "app.slackReadOnly": "Slack session — chat from Slack",
   "app.composerPlaceholder": "Type a message…  (/ commands, Shift+Enter for newline, @ to attach files)",
 } satisfies Catalog;

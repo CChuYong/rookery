@@ -1,0 +1,117 @@
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { RepoTree } from "../src/renderer/views/RepoTree.js";
+
+const repo = { name: "app", path: "/code/app", description: "", base: null };
+
+describe("RepoTree repo-header affordances (audit #3, #19)", () => {
+  it("spawn (+) and remove (trash) buttons are focusable — not display:none — and expose their aria-labels", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    const spawnBtn = screen.getByRole("button", { name: "워커 스폰…" });
+    const removeBtn = screen.getByRole("button", { name: "레포 등록 해제" });
+    // Kept in the layout + tab order (opacity-based reveal), not display:none.
+    expect(spawnBtn.className).not.toMatch(/\bhidden\b/);
+    expect(removeBtn.className).not.toMatch(/\bhidden\b/);
+    expect(spawnBtn).not.toHaveAttribute("disabled");
+    expect(removeBtn).not.toHaveAttribute("disabled");
+  });
+
+  it("clicking + opens a worker in this repo via onNewSub", () => {
+    const onNewSub = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={onNewSub}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "워커 스폰…" }));
+    expect(onNewSub).toHaveBeenCalledWith("app");
+  });
+
+  it("clicking trash does NOT call onRemoveRepo until the confirm dialog is confirmed", () => {
+    const onRemoveRepo = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={onRemoveRepo}
+        onNewSub={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "레포 등록 해제" }));
+    expect(onRemoveRepo).not.toHaveBeenCalled();
+    expect(screen.getByText("'app' 레포 등록을 해제할까요? 파일은 그대로 남아요.")).toBeInTheDocument();
+  });
+
+  it("confirming the remove dialog calls onRemoveRepo with the repo name", () => {
+    const onRemoveRepo = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={onRemoveRepo}
+        onNewSub={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "레포 등록 해제" }));
+    // Two elements now say "레포 등록 해제": the header trash button and the dialog's confirm button.
+    const matches = screen.getAllByText("레포 등록 해제");
+    fireEvent.click(matches[matches.length - 1]!);
+    expect(onRemoveRepo).toHaveBeenCalledWith("app");
+  });
+
+  it("cancelling the remove dialog leaves onRemoveRepo uncalled", () => {
+    const onRemoveRepo = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={onRemoveRepo}
+        onNewSub={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "레포 등록 해제" }));
+    fireEvent.click(screen.getByText("취소"));
+    expect(onRemoveRepo).not.toHaveBeenCalled();
+  });
+
+  it("empty state mentions the + entry point", () => {
+    render(
+      <RepoTree
+        repos={[] as never}
+        fleet={[] as never}
+        loaded
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    expect(screen.getByText(/\+ 버튼으로 워커를 스폰할 수 있어요/)).toBeInTheDocument();
+  });
+});

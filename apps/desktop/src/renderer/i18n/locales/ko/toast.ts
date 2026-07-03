@@ -10,6 +10,7 @@ export default {
   "toast.automationFailed": "자동화 실행에 실패했어요",
   "toast.automationRan": "자동화를 실행했어요",
   "toast.repoRegistered": "레포를 등록했어요",
+  "toast.repoRemoved": "레포 등록을 해제했어요",
   "toast.workerSpawned": "워커를 생성했어요",
   "toast.keySaved": "키를 저장했어요",
   "toast.restored": "체크포인트로 되돌렸어요",

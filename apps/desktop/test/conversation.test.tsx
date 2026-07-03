@@ -69,7 +69,7 @@ describe("RepoTree", () => {
     render(<RepoTree repos={[repo]} fleet={[]} onNewSub={onNewSub} {...base} />);
     expect(screen.getByText("app")).toBeInTheDocument();
     expect(screen.queryByText("워커 없음")).toBeNull(); // no child area for an empty group
-    fireEvent.click(screen.getByLabelText("워커 추가"));
+    fireEvent.click(screen.getByLabelText("워커 스폰…"));
     expect(onNewSub).toHaveBeenCalledWith("app");
   });
 

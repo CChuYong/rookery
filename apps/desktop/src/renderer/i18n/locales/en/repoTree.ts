@@ -1,9 +1,10 @@
 import type { Catalog } from "../../types.js";
 export default {
   "repoTree.unreadTitle": "New activity — not seen yet",
-  "repoTree.addWorker": "Add worker",
-  "repoTree.removeRepo": "Remove repo",
-  "repoTree.emptyState": "No repos registered yet — add ‘New repo’ below to start spawning agents there.",
+  "repoTree.spawnWorker": "Spawn worker…",
+  "repoTree.removeRepo": "Unregister repo",
+  "repoTree.removeConfirmBody": "Unregister '{name}'? Files on disk are untouched.",
+  "repoTree.emptyState": "No repos registered yet — add ‘New repo’ below, then use the + button on its header to spawn a worker there.",
   "repoTree.uncategorized": "Other (unregistered)",
   "repoTree.archive": "Archive",
   "repoTree.newRepo": "New repo",

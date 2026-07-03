@@ -37,6 +37,7 @@ function RepoTreeImpl(p: {
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [removeConfirm, setRemoveConfirm] = useState<{ name: string } | null>(null);
   const [q, setQ] = useState(""); // fleet-at-scale filter: by worker label
   const [onlyActive, setOnlyActive] = useState(false); // show only running/idle/unread workers
   // worker spawn appearance: workers present in the first non-empty fleet are excluded as the seed; only workers spawned afterward get the rise-in.
@@ -124,12 +125,24 @@ function RepoTreeImpl(p: {
             <div className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-[12.5px] font-medium text-fg-dim">{headerInner}</div>
           )}
           {opts.canAdd && (
-            <button onClick={() => p.onNewSub(key)} aria-label={t("repoTree.addWorker")} className="hidden h-6 w-6 items-center justify-center rounded text-muted hover:text-accent group-hover:flex">
+            // Stays in the layout + tab order (opacity, not display:none) so it's keyboard-reachable — the hover-only
+            // '+' was the sole GUI entry point for spawning a worker and was invisible to keyboard users (audit #3).
+            <button
+              onClick={() => p.onNewSub(key)}
+              aria-label={t("repoTree.spawnWorker")}
+              title={t("repoTree.spawnWorker")}
+              className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            >
               <Plus size={13} />
             </button>
           )}
           {opts.removable && (
-            <button onClick={() => p.onRemoveRepo(key)} aria-label={t("repoTree.removeRepo")} className="hidden h-6 w-6 items-center justify-center rounded text-muted hover:text-fail group-hover:flex">
+            <button
+              onClick={() => setRemoveConfirm({ name: key })}
+              aria-label={t("repoTree.removeRepo")}
+              title={t("repoTree.removeRepo")}
+              className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition-opacity hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            >
               <Trash2 size={12} />
             </button>
           )}
@@ -209,6 +222,14 @@ function RepoTreeImpl(p: {
           onConfirm={() => p.onDeleteSub?.(confirm.id)}
         />
       )}
+
+      {removeConfirm && (
+        <RepoRemoveConfirm
+          name={removeConfirm.name}
+          onCancel={() => setRemoveConfirm(null)}
+          onConfirm={() => p.onRemoveRepo(removeConfirm.name)}
+        />
+      )}
     </div>
   );
 }
@@ -235,6 +256,29 @@ function WorkerDeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCa
         <div className="mt-4 flex justify-end gap-2">
           <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
           <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("common.delete")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Repo-remove confirm (audit #19) — unregisters the repo row only (files on disk are untouched), but its workers
+// immediately jump to the "Other (unregistered)" group, so it gets the same weight of confirm as worker delete.
+function RepoRemoveConfirm({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }): JSX.Element {
+  const t = useT();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { closing, dismiss } = useDismissTransition(onCancel);
+  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
+  useModalKeys(dismiss, confirmAndClose);
+  useFocusTrap(panelRef);
+  return (
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("repoTree.removeRepo")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
+        <div className="mb-1.5 text-[14px] font-semibold">{t("repoTree.removeRepo")}</div>
+        <p className="text-[12.5px] leading-relaxed text-muted">{t("repoTree.removeConfirmBody", { name })}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
+          <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("repoTree.removeRepo")}</button>
         </div>
       </div>
     </div>

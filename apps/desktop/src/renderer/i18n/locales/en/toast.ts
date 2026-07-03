@@ -10,6 +10,7 @@ export default {
   "toast.automationFailed": "Automation action failed",
   "toast.automationRan": "Automation ran",
   "toast.repoRegistered": "Repo registered",
+  "toast.repoRemoved": "Repo unregistered",
   "toast.workerSpawned": "Worker spawned",
   "toast.keySaved": "Key saved",
   "toast.restored": "Restored to checkpoint",

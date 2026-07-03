@@ -1,9 +1,10 @@
 import type { Catalog } from "../../types.js";
 export default {
   "repoTree.unreadTitle": "새 변화 — 아직 안 봄",
-  "repoTree.addWorker": "워커 추가",
-  "repoTree.removeRepo": "레포 삭제",
-  "repoTree.emptyState": "등록된 레포가 없어요 — 아래 ‘새 레포’를 추가하면 거기서 에이전트를 띄울 수 있어요.",
+  "repoTree.spawnWorker": "워커 스폰…",
+  "repoTree.removeRepo": "레포 등록 해제",
+  "repoTree.removeConfirmBody": "'{name}' 레포 등록을 해제할까요? 파일은 그대로 남아요.",
+  "repoTree.emptyState": "등록된 레포가 없어요 — 아래 ‘새 레포’를 추가하면 레포 헤더의 + 버튼으로 워커를 스폰할 수 있어요.",
   "repoTree.uncategorized": "기타 (미등록)",
   "repoTree.archive": "보관함",
   "repoTree.newRepo": "새 레포",

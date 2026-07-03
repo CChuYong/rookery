@@ -634,7 +634,7 @@ export function App(): JSX.Element {
   }, []);
   const onRemoveRepo = useCallback((name: string) => {
     const c = client; if (!c) return;
-    void c.request({ type: "repos.remove", name }).then(() => c.request({ type: "repos.list" })).then((res) => useStore.getState().setRepos(res.repos ?? [])).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e)));
+    void c.request({ type: "repos.remove", name }).then(() => c.request({ type: "repos.list" })).then((res) => { useStore.getState().setRepos(res.repos ?? []); toast.success(tRef.current("toast.repoRemoved")); }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e)));
   }, []);
   const onStop = useCallback((id: string) => { void client?.request({ type: "fleet.stop", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []); // RepoTree right-click 'stop'
   const onNewRepo = useCallback(() => setRepoModal(true), []);
