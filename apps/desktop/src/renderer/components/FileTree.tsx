@@ -11,6 +11,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu.js";
 import { flatten, ancestorDirs, parentDir, fuzzyFilter, type Entry, type Row } from "../lib/filetree-model.js";
 import { Input } from "../ui/input.js";
 import { Button } from "../ui/button.js";
+import { SkeletonRows } from "./Skeleton.js";
 import { toast } from "../store/toasts.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
@@ -30,6 +31,9 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   const expanded = useMemo(() => new Set(expandedList), [expandedList]);
 
   const [children, setChildren] = useState<Map<string, Entry[]>>(new Map());
+  // Root-listing state, tracked separately from expanded sub-dirs (#13): while "loading", the initial fetch must not
+  // render as an empty folder, and a genuine list() failure must not look like an empty folder either.
+  const [rootStatus, setRootStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [git, setGit] = useState<Map<string, string>>(new Map());
   const [reloadKey, setReloadKey] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -42,14 +46,32 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   const bodyRef = useRef<HTMLDivElement>(null);
   const filtering = filter.trim().length > 0;
 
-  // Load the contents of root + every expanded directory (re-fetch when version, expansion, or reloadKey changes).
+  // Load the root directory's contents, tracked separately from expanded sub-dirs (#13) so the initial load and a
+  // genuine list() failure are never mistaken for an empty folder (re-fetches on version/reloadKey too).
   useEffect(() => {
     let live = true;
-    const dirs = [root, ...expandedList];
-    void Promise.all(dirs.map(async (d) => [d, await window.rookery.ws.list(d).catch(() => [] as Entry[])] as const))
-      .then((pairs) => { if (live) setChildren(new Map(pairs)); });
+    setRootStatus("loading");
+    void window.rookery.ws.list(root).then((entries) => {
+      if (!live) return;
+      setChildren((m) => new Map(m).set(root, entries));
+      setRootStatus("loaded");
+    }).catch(() => { if (live) setRootStatus("error"); });
     return () => { live = false; };
-  }, [root, version, expandedList, reloadKey]);
+  }, [root, version, reloadKey]);
+
+  // Load every expanded directory (root is loaded separately above with its own loading/error state — #13's scope is
+  // root-only). A per-directory failure surfaces via the same fs-op toast as #11 rather than a dedicated state, since
+  // collapsing and re-expanding recovers it.
+  useEffect(() => {
+    if (expandedList.length === 0) return;
+    let live = true;
+    void Promise.all(expandedList.map(async (d) => [d, await window.rookery.ws.list(d).catch((e) => { toast.error(t("fileTree.opFailed"), String(e)); return [] as Entry[]; })] as const))
+      .then((pairs) => {
+        if (!live) return;
+        setChildren((m) => { const next = new Map(m); for (const [d, entries] of pairs) next.set(d, entries); return next; });
+      });
+    return () => { live = false; };
+  }, [root, version, expandedList, reloadKey, t]);
 
   // git status → map of changed files' absolute paths + ancestor-directory markers (•).
   useEffect(() => {
@@ -110,37 +132,47 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   const onRename = (target: Row): void => setNameDialog({ kind: "rename", target, initial: target.name });
   const onDelete = (target: Row): void => setTrashTarget(target);
 
-  // Run the op the name dialog collected; errors surface as toasts (no blocking native alert).
+  // Run the op the name dialog collected; errors surface as toasts (no blocking native alert). The dialog is already
+  // closed by the time this runs, so a rejection (rename/mkdir target gone, permission denied, etc.) must be caught
+  // here or it silently vanishes as an unhandled rejection while the UI shows no reaction at all (#11).
   async function submitName(name: string): Promise<void> {
     const d = nameDialog;
     setNameDialog(null);
     const nm = name.trim();
     if (!d || !nm) return;
-    if (d.kind === "newFile" && d.dir) {
-      const r = await window.rookery.ws.createFile(`${d.dir}/${nm}`);
-      if (r.exists) { toast.error(t("fileTree.fileExistsAlert")); return; }
-      if (d.dir !== root && !expanded.has(d.dir)) toggleDir(pageKey, d.dir);
-      setReloadKey((k) => k + 1);
-      openFile(pageKey, `${d.dir}/${nm}`);
-    } else if (d.kind === "newFolder" && d.dir) {
-      await window.rookery.ws.mkdir(`${d.dir}/${nm}`);
-      if (d.dir !== root && !expanded.has(d.dir)) toggleDir(pageKey, d.dir);
-      setReloadKey((k) => k + 1);
-    } else if (d.kind === "rename" && d.target && nm !== d.target.name) {
-      await window.rookery.ws.rename(d.target.path, `${parentDir(d.target.path)}/${nm}`);
-      const tab = tabs?.find((x) => x.id === `file:${d.target!.path}`);
-      if (tab) closeTab(pageKey, tab.id); // clean up the tab for the old path that was renamed
-      setReloadKey((k) => k + 1);
+    try {
+      if (d.kind === "newFile" && d.dir) {
+        const r = await window.rookery.ws.createFile(`${d.dir}/${nm}`);
+        if (r.exists) { toast.error(t("fileTree.fileExistsAlert")); return; }
+        if (d.dir !== root && !expanded.has(d.dir)) toggleDir(pageKey, d.dir);
+        setReloadKey((k) => k + 1);
+        openFile(pageKey, `${d.dir}/${nm}`);
+      } else if (d.kind === "newFolder" && d.dir) {
+        await window.rookery.ws.mkdir(`${d.dir}/${nm}`);
+        if (d.dir !== root && !expanded.has(d.dir)) toggleDir(pageKey, d.dir);
+        setReloadKey((k) => k + 1);
+      } else if (d.kind === "rename" && d.target && nm !== d.target.name) {
+        await window.rookery.ws.rename(d.target.path, `${parentDir(d.target.path)}/${nm}`);
+        const tab = tabs?.find((x) => x.id === `file:${d.target!.path}`);
+        if (tab) closeTab(pageKey, tab.id); // clean up the tab for the old path that was renamed
+        setReloadKey((k) => k + 1);
+      }
+    } catch (e) {
+      toast.error(t("fileTree.opFailed"), String(e));
     }
   }
   async function confirmTrash(): Promise<void> {
     const target = trashTarget;
     setTrashTarget(null);
     if (!target) return;
-    await window.rookery.ws.trash(target.path);
-    const tab = tabs?.find((x) => x.id === `file:${target.path}`);
-    if (tab) closeTab(pageKey, tab.id);
-    setReloadKey((k) => k + 1);
+    try {
+      await window.rookery.ws.trash(target.path);
+      const tab = tabs?.find((x) => x.id === `file:${target.path}`);
+      if (tab) closeTab(pageKey, tab.id);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      toast.error(t("fileTree.opFailed"), String(e));
+    }
   }
   const nameDialogTitle = (kind: "newFile" | "newFolder" | "rename"): string =>
     kind === "newFile" ? t("fileTree.newFileNamePrompt") : kind === "newFolder" ? t("fileTree.newFolderNamePrompt") : t("fileTree.newNamePrompt");
@@ -175,6 +207,13 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
       <div ref={bodyRef} data-testid="filetree-body" role="tree" tabIndex={0} onKeyDown={onKeyDown} className="min-h-0 flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40">
         {filtering && matches.length === 0 ? (
           <div className="px-3 py-3 text-[12px] text-muted">{t("fileTree.noMatches")}</div>
+        ) : !filtering && rootStatus === "loading" ? (
+          <SkeletonRows rows={8} />
+        ) : !filtering && rootStatus === "error" ? (
+          // The whole string doubles as the retry button's label (same convention as CheckpointMenu.loadFailed).
+          <button onClick={() => setReloadKey((k) => k + 1)} className="w-full px-3 py-3 text-left text-[12px] text-fail hover:bg-fail/10">
+            {t("fileTree.loadFailed")}
+          </button>
         ) : !filtering && rows.length === 0 ? (
           <div className="px-3 py-3 text-[12px] text-muted">{t("fileTree.emptyFolder")}</div>
         ) : (

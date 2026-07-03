@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, AppWindow, Folder, SquareTerminal, Code, Check } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
+import { toast } from "../store/toasts.js";
 import type { DetectedApp } from "../types/rookery.js";
 
 const LS_KEY = "rookery.openInApp"; // id of the last selected app
@@ -42,12 +43,15 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
   const selected = apps && apps.length > 0 ? (apps.find((a) => a.id === selId) ?? apps[0]) : null;
 
   // Remember the selection + resolve the root, then launch. Close when chosen from the dropdown.
+  // Both a thrown rejection and a resolved { ok: false } (e.g. the app failed to launch) must surface — previously
+  // both were swallowed silently, so a failed open looked identical to a successful one (#11).
   const choose = (id: string, closeAfter: boolean): void => {
     setSelId(id);
     localStorage.setItem(LS_KEY, id);
     void window.rookery.ws.resolveRoot({ subId: subId ?? undefined, cwd })
       .then((root) => (root ? window.rookery.apps.open(id, root) : undefined))
-      .catch(() => {});
+      .then((res) => { if (res && !res.ok) toast.error(t("openInAppMenu.openFailed")); })
+      .catch(() => toast.error(t("openInAppMenu.openFailed")));
     if (closeAfter) setOpen(false);
   };
 

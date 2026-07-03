@@ -13,4 +13,6 @@ export default {
   "fileTree.searchPlaceholder": "파일 검색",
   "fileTree.noMatches": "일치하는 파일이 없어요.",
   "fileTree.emptyFolder": "빈 폴더예요.",
+  "fileTree.opFailed": "파일 작업에 실패했어요",
+  "fileTree.loadFailed": "목록을 불러오지 못했어요 — 다시 시도",
 } satisfies Catalog;

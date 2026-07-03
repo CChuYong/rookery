@@ -5,4 +5,5 @@ export default {
   "openInAppMenu.openInOtherApp": "Open in another app",
   "openInAppMenu.selectOtherApp": "Choose another app",
   "openInAppMenu.detectingApps": "Detecting apps…",
+  "openInAppMenu.openFailed": "Couldn't open the folder",
 } satisfies Catalog;

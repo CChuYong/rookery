@@ -13,4 +13,6 @@ export default {
   "fileTree.searchPlaceholder": "Search files",
   "fileTree.noMatches": "No matching files.",
   "fileTree.emptyFolder": "This folder is empty.",
+  "fileTree.opFailed": "File operation failed",
+  "fileTree.loadFailed": "Couldn't read this folder — retry",
 } satisfies Catalog;

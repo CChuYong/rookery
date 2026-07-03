@@ -5,4 +5,5 @@ export default {
   "openInAppMenu.openInOtherApp": "다른 앱에서 열기",
   "openInAppMenu.selectOtherApp": "다른 앱 선택",
   "openInAppMenu.detectingApps": "앱 탐지 중…",
+  "openInAppMenu.openFailed": "폴더를 열 수 없어요",
 } satisfies Catalog;

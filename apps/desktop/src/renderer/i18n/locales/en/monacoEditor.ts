@@ -4,4 +4,6 @@ export default {
   "monacoEditor.reloadFromDisk": "Reload (discard edits)",
   "monacoEditor.tooLarge": "Can't preview — this file is binary or too large.",
   "monacoEditor.openError": "Can't open this file — it's outside the current work folder or failed to read.",
+  "monacoEditor.saveError": "Couldn't save — your edits are not on disk",
+  "monacoEditor.saveRetry": "Retry save",
 } satisfies Catalog;

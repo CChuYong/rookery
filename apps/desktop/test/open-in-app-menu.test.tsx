@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { OpenInAppMenu } from "../src/renderer/components/OpenInAppMenu.js";
+import { useToastStore } from "../src/renderer/store/toasts.js";
 
 function stub(over: Record<string, unknown> = {}) {
   const apps = {
@@ -17,7 +18,7 @@ function stub(over: Record<string, unknown> = {}) {
 }
 
 describe("OpenInAppMenu (split button)", () => {
-  beforeEach(() => { localStorage.clear(); stub(); });
+  beforeEach(() => { localStorage.clear(); useToastStore.setState({ toasts: [] }); stub(); });
 
   it("detects apps on mount and defaults the left button to the first app", async () => {
     const { apps } = stub();
@@ -74,5 +75,36 @@ describe("OpenInAppMenu (split button)", () => {
     void apps;
     const { container } = render(<OpenInAppMenu />);
     await waitFor(() => expect(container.querySelector("button")).toBeNull());
+  });
+});
+
+// Previously both a thrown rejection and a resolved {ok:false} were swallowed silently (#11) — a failed
+// "open in app" click looked identical to a successful one.
+describe("OpenInAppMenu failure feedback (#11)", () => {
+  beforeEach(() => { localStorage.clear(); useToastStore.setState({ toasts: [] }); });
+
+  it("toasts openFailed when resolveRoot rejects", async () => {
+    stub({ ws: { resolveRoot: vi.fn(async () => { throw new Error("boom"); }) } });
+    render(<OpenInAppMenu subId="w1" />);
+    await waitFor(() => expect(screen.getByLabelText("현재 폴더를 앱에서 열기")).toHaveAttribute("title", "VS Code에서 열기"));
+    fireEvent.click(screen.getByLabelText("현재 폴더를 앱에서 열기"));
+    await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.text === "폴더를 열 수 없어요")).toBe(true));
+  });
+
+  it("toasts openFailed when apps.open resolves { ok: false }", async () => {
+    stub({ apps: { list: vi.fn(async () => [{ id: "vscode", name: "VS Code", kind: "editor", icon: null }]), open: vi.fn(async () => ({ ok: false, error: "ENOENT" })) } });
+    render(<OpenInAppMenu subId="w1" />);
+    await waitFor(() => expect(screen.getByLabelText("현재 폴더를 앱에서 열기")).toHaveAttribute("title", "VS Code에서 열기"));
+    fireEvent.click(screen.getByLabelText("현재 폴더를 앱에서 열기"));
+    await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.text === "폴더를 열 수 없어요")).toBe(true));
+  });
+
+  it("does not toast on a successful open", async () => {
+    const { apps } = stub();
+    render(<OpenInAppMenu subId="w1" />);
+    await waitFor(() => expect(screen.getByLabelText("현재 폴더를 앱에서 열기")).toHaveAttribute("title", "VS Code에서 열기"));
+    fireEvent.click(screen.getByLabelText("현재 폴더를 앱에서 열기"));
+    await waitFor(() => expect(apps.open).toHaveBeenCalled());
+    expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 });

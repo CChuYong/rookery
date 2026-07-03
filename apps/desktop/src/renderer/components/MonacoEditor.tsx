@@ -16,7 +16,10 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
   // The content we last wrote to disk — recorded synchronously on Cmd+S so we can identify the watcher echo as a self-write (prevents false-positive banner).
   const lastWrittenRef = useRef<string | null>(null);
   const setDirty = useWsStore((s) => s.setDirty_);
-  const [banner, setBanner] = useState<null | "changed" | "deleted" | "toolarge" | "error">(null);
+  const [banner, setBanner] = useState<null | "changed" | "deleted" | "toolarge" | "error" | "saveError">(null);
+  // The save command, re-bound to the latest closure on every effect run — the saveError banner's retry button
+  // reaches through this ref since the button lives outside the effect that creates the editor instance.
+  const saveRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const host = hostRef.current;
@@ -43,14 +46,18 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
     void load();
 
     ed.onDidChangeModelContent(() => setDirty(pageKey, id, ed.getValue() !== savedRef.current));
-    ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    const save = (): void => {
       const value = ed.getValue();
       lastWrittenRef.current = value; // synchronous record — even if the watcher echo arrives before the write's .then, it's recognized as a self-write
       void window.rookery.ws.write(path, value).then((res) => {
-        if (res.ok) { savedRef.current = value; setDirty(pageKey, id, false); }
-        else setBanner("error");
-      }).catch(() => setBanner("error"));
-    });
+        // A write failure gets its own saveError banner (distinct from the read-failure openError) so the user isn't
+        // misled into thinking a failed save actually landed on disk. A later successful save clears it.
+        if (res.ok) { savedRef.current = value; setDirty(pageKey, id, false); setBanner((b) => (b === "saveError" ? null : b)); }
+        else setBanner("saveError");
+      }).catch(() => setBanner("saveError"));
+    };
+    saveRef.current = save;
+    ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, save);
 
     window.rookery.ws.watch(path);
     const off = window.rookery.ws.onChanged((p) => {
@@ -95,6 +102,11 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
           </div>
         ) : banner === "toolarge" ? (
           <div className="border-b border-line bg-raised px-3 py-1.5 text-[12px] text-muted">{t("monacoEditor.tooLarge")}</div>
+        ) : banner === "saveError" ? (
+          <div className="flex items-center justify-between gap-2 border-b border-fail/30 bg-fail/12 px-3 py-1.5 text-[12px] text-fail">
+            <span>{t("monacoEditor.saveError")}</span>
+            <button onClick={() => saveRef.current()} className="rounded border border-fail/40 px-2 py-0.5 transition-colors hover:bg-fail/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.saveRetry")}</button>
+          </div>
         ) : banner === "error" ? (
           <div className="border-b border-line bg-raised px-3 py-1.5 text-[12px] text-muted">{t("monacoEditor.openError")}</div>
         ) : null}

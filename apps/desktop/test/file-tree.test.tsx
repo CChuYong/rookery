@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { FileTree } from "../src/renderer/components/FileTree.js";
 import { useWsStore } from "../src/renderer/store/workspace.js";
+import { useToastStore } from "../src/renderer/store/toasts.js";
 
 function mockWs(over: Record<string, unknown> = {}) {
   (globalThis as any).window = (globalThis as any).window ?? {};
@@ -24,6 +25,7 @@ function mockWs(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   mockWs();
   useWsStore.setState({ byPage: {}, expandedByPage: {}, right: { open: true, width: 300, segment: "files" } });
+  useToastStore.setState({ toasts: [] });
 });
 
 describe("FileTree", () => {
@@ -113,5 +115,58 @@ describe("FileTree", () => {
     const hit = await screen.findByText("src/b.ts");
     fireEvent.click(hit);
     await waitFor(() => expect(useWsStore.getState().byPage.p1?.activeTabId).toBe("file:/r/src/b.ts"));
+  });
+
+  describe("root loading/error/empty states (#13)", () => {
+    it("shows a loading skeleton — not the empty-folder copy — while the root listing is in flight", async () => {
+      let resolveList: ((v: Array<{ name: string; isDir: boolean }>) => void) | null = null;
+      mockWs({ list: vi.fn(() => new Promise((res) => { resolveList = res; })) });
+      const { container } = render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      expect(screen.queryByText("빈 폴더예요.")).toBeNull();
+      expect(container.querySelector(".sheen")).not.toBeNull();
+      resolveList!([]);
+      await waitFor(() => expect(screen.getByText("빈 폴더예요.")).toBeInTheDocument());
+    });
+
+    it("shows loadFailed (not emptyFolder) when the root listing rejects, and retry re-fetches", async () => {
+      const list = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([{ name: "a.ts", isDir: false }]);
+      mockWs({ list });
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      expect(await screen.findByText("목록을 불러오지 못했어요 — 다시 시도")).toBeInTheDocument();
+      expect(screen.queryByText("빈 폴더예요.")).toBeNull();
+      fireEvent.click(screen.getByText("목록을 불러오지 못했어요 — 다시 시도"));
+      expect(await screen.findByText("a.ts")).toBeInTheDocument();
+      expect(list).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows the emptyFolder copy only after a successful empty listing", async () => {
+      mockWs({ list: vi.fn(async () => []) });
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      expect(await screen.findByText("빈 폴더예요.")).toBeInTheDocument();
+    });
+  });
+
+  describe("fs-op failure feedback (#11)", () => {
+    it("toasts opFailed when a rename rejects (the dialog is already closed by then)", async () => {
+      mockWs({ rename: vi.fn(async () => { throw new Error("boom"); }) });
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      fireEvent.contextMenu(await screen.findByText("a.ts"));
+      fireEvent.click(await screen.findByText("이름 변경"));
+      const dialog = await screen.findByRole("dialog");
+      const input = within(dialog).getByRole("textbox");
+      fireEvent.change(input, { target: { value: "renamed.ts" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(useToastStore.getState().toasts.some((x) => x.text === "파일 작업에 실패했어요")).toBe(true));
+    });
+
+    it("toasts opFailed when a trash rejects", async () => {
+      mockWs({ trash: vi.fn(async () => { throw new Error("boom"); }) });
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      fireEvent.contextMenu(await screen.findByText("a.ts"));
+      fireEvent.click(await screen.findByText("삭제"));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "삭제" }));
+      await waitFor(() => expect(useToastStore.getState().toasts.some((x) => x.text === "파일 작업에 실패했어요")).toBe(true));
+    });
   });
 });
