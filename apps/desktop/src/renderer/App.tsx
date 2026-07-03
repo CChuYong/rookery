@@ -309,7 +309,9 @@ export function App(): JSX.Element {
     if (s.daemon !== "up") return;
     if (!s.sessionsLoaded || !s.fleetLoaded) return; // wait until both lists have arrived
     restoredView.current = true;
-    const known = new Set<string>([...s.sessions.map((x) => x.id), ...Object.keys(s.fleet)]);
+    // NEW_SESSION_DRAFT_KEY is a fixed page key (not a session/worker id) — include it so pruneDrafts doesn't
+    // treat it as a dead page and wipe the New Session draft on every boot (audit #5 review).
+    const known = new Set<string>([...s.sessions.map((x) => x.id), ...Object.keys(s.fleet), NEW_SESSION_DRAFT_KEY]);
     // Prune dead pages (workspace tabs and composer drafts).
     useWsStore.setState((w) => pruneWsPages(w, known));
     useTermStore.setState((t) => pruneLayout(t, known));
@@ -532,8 +534,11 @@ export function App(): JSX.Element {
       .catch((e) => {
         // session.create/list failed: the page already navigated away and the composer cleared on send (Composer.tsx's clear() fires
         // unconditionally), so without this the typed prompt would be unrecoverably gone. Restore it into the draft so reopening
-        // New Session brings it back.
-        if (opts.prompt) useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, opts.prompt);
+        // New Session brings it back. Only restore when the draft is still empty — otherwise a slow failure here would clobber
+        // NEWER text the user already typed after reopening the page (audit #5 review).
+        if (opts.prompt && !useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY]) {
+          useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, opts.prompt);
+        }
         toast.error(tRef.current("toast.actionFailed"), String(e));
       });
   };
