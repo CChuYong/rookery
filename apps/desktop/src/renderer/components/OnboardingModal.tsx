@@ -32,7 +32,7 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
     if (step < last) setStep(step + 1);
     else void finish();
   };
-  useModalKeys(() => void finish(), advance); // Enter → Next/Get started, Escape → Skip (audit #25)
+  useModalKeys(() => void finish(), advance); // Cmd/Ctrl+Enter → Next/Get started (plain Enter activates the autofocused button natively), Escape → Skip (audit #25)
   useFocusTrap(panelRef);
 
   return (

@@ -1165,15 +1165,17 @@ export function App(): JSX.Element {
         />
       )}
       {/* onAccept RETURNS the request promise (rather than swallowing it) so the modal itself can show busy/error
-          feedback on failure — it only mounts once daemon==="up", at which point `client` is guaranteed set. */}
-      <DataConsentModal
-        settings={s.settings}
-        daemon={s.daemon}
-        onAccept={() =>
-          client!.request({ type: "settings.set", settings: { hasAcceptedDataNotice: "1" } })
-            .then(() => useStore.getState().setSettings({ ...useStore.getState().settings!, hasAcceptedDataNotice: "1" }))
-        }
-      />
+          feedback on failure — it only mounts once daemon==="up", at which point `client` is guaranteed set. The
+          visibility gate lives here (not inside the component) so the panel exists on first mount and
+          useFocusTrap's effect actually attaches (mirrors the OnboardingModal/RepoModal precedent below). */}
+      {s.daemon === "up" && s.settings && s.settings.hasAcceptedDataNotice !== "1" && (
+        <DataConsentModal
+          onAccept={() =>
+            client!.request({ type: "settings.set", settings: { hasAcceptedDataNotice: "1" } })
+              .then(() => useStore.getState().setSettings({ ...useStore.getState().settings!, hasAcceptedDataNotice: "1" }))
+          }
+        />
+      )}
       {/* Onboarding (after consent, before all-set): welcome+concept modal, then a non-blocking Getting Started card. */}
       {s.daemon === "up" && s.settings && s.settings.hasAcceptedDataNotice === "1" && s.settings.onboardingDone !== "1" && (
         <OnboardingModal

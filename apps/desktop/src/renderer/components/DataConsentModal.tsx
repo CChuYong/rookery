@@ -2,15 +2,14 @@ import { useId, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useT } from "../i18n/provider.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
-import type { SettingsValues } from "@daemon/core/settings.js";
 
 interface DataConsentModalProps {
-  settings: SettingsValues | null;
-  daemon: "up" | "down" | "starting";
   onAccept: () => Promise<unknown>; // caller returns the settings.set promise so failures surface here (audit #7)
 }
 
-export function DataConsentModal({ settings, daemon, onAccept }: DataConsentModalProps): JSX.Element | null {
+// Visibility (daemon up && settings loaded && hasAcceptedDataNotice !== "1") is decided by the App.tsx mount
+// site (mirroring OnboardingModal) so the panel exists on first mount and useFocusTrap's effect actually attaches.
+export function DataConsentModal({ onAccept }: DataConsentModalProps): JSX.Element {
   const t = useT();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -18,11 +17,8 @@ export function DataConsentModal({ settings, daemon, onAccept }: DataConsentModa
   const [err, setErr] = useState(false);
   // Blocking Accept-only gate: no useModalKeys here on purpose, so Escape stays a no-op (audit #26).
   useFocusTrap(panelRef);
-  // Only show when connected AND settings loaded AND not accepted
-  if (daemon !== "up" || settings === null || settings.hasAcceptedDataNotice === "1") {
-    return null;
-  }
   const accept = async (): Promise<void> => {
+    if (busy) return;
     setBusy(true);
     setErr(false);
     try {
