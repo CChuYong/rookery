@@ -42,7 +42,7 @@ The master system prompt (`master-agent.ts` `SYSTEM_PROMPT_BASE`) and the worker
 - `start()` backfills `next_run_at` only for enabled `cron`/`once` rules missing one (cron is forward-from-now, not back-filled; once persists `runAt` so a past-due wakeup fires on the next tick), then installs a tick (default 30 s, injectable `schedule`).
 - `tick()` (`scheduler.ts:61`) selects enabled `cron`/`once` rules with `next_run_at <= now`.
 - `fireCron` (`scheduler.ts:70`): **advance `next_run_at` first**, re-read the fresh row, then `dispatcher.run(fresh, {})` — so the dispatcher's run-record preserves the already-advanced value (no double recording).
-- `fireOnce` (`scheduler.ts:81`): **claim the rule by nulling `next_run_at` before firing** (the tick skips claimed rows, so a slow run can't double-fire — the dispatcher has no event/once overlap guard), then **delete only after the run settles**. The surviving row makes a crash mid-run recoverable: `start()` re-arms enabled once-rows with no `next_run_at` back to `runAt`, so the wakeup refires (at-least-once) instead of vanishing.
+- `fireOnce` (`scheduler.ts`): **claim the rule by nulling `next_run_at` before firing** (the tick skips claimed rows, so a slow run can't double-fire — the dispatcher has no event/once overlap guard), then **delete only after the run settles**. The surviving row makes a crash mid-run recoverable: `start()` re-arms enabled once-rows with no `next_run_at` back to `runAt`, so the wakeup refires (at-least-once) instead of vanishing.
 - `runNow(id, vars)` fires once immediately without advancing `next_run_at`. `reconcile(id)` recomputes `next_run_at` on create/update/enable; the protocol layer rejects an invalid cron via `isValidCron`.
 
 ## Trigger source ② slack — trigger-source

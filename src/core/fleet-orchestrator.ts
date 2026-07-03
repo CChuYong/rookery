@@ -351,7 +351,7 @@ export class FleetOrchestrator {
       const label = await fn(task);
       if (!label) return; // null/empty → keep the placeholder
       const e = this.entries.get(id);
-      if (!e || e.status === "stopped" || e.status === "failed") return; // already cleaned up → pointless
+      if (!e || FleetOrchestrator.isTerminal(e.status)) return; // already terminal (stopped/failed/error/done/orphaned) → a slow relabel must not label a dead worker
       e.label = label; // so a future resume (materialize) uses the better label
       this.deps.repos.setWorkerLabel(id, label);
       this.deps.bus.emit({ type: "worker.label", sessionId: homeSessionId, workerId: id, label });
@@ -371,13 +371,17 @@ export class FleetOrchestrator {
     if (!entry) return;
     if (entry.status === status) return; // ignore re-recording the same status → prevents duplicate worker.status emits (core of the A3 race)
     if (!force && FleetOrchestrator.isTerminal(entry.status)) return; // write-once: automatic settle can't overwrite a terminal state
+    // On a terminal settle the Worker has usually already written this exact status to the DB AND emitted worker.status
+    // (Worker.transition does both). If the DB row already holds it, our entry merely lagged — do the entry/DB bookkeeping
+    // but SKIP the duplicate bus emit (otherwise a runtime error surfaces worker.status:"error" twice). Read the row before the write.
+    const alreadyEmitted = FleetOrchestrator.isTerminal(status) && this.deps.repos.getWorker(id)?.status === status;
     entry.status = status;
     // on reaching a terminal state, drop the live agent reference so the Worker (query loop/transcript buffer) can be GC'd (FL-3).
     // metadata (worktreePath/branch/base) is kept so diff/discard keep working. Live (running/idle) is held by the Worker.
     if (FleetOrchestrator.isTerminal(status)) entry.agent = undefined;
     this.deps.repos.setWorkerStatus(id, status, force); // force (user stop/discard) bypasses the DB write-once too
 
-    this.deps.bus.emit({ type: "worker.status", sessionId: entry.homeSessionId, workerId: id, status });
+    if (!alreadyEmitted) this.deps.bus.emit({ type: "worker.status", sessionId: entry.homeSessionId, workerId: id, status });
   }
 
   // Terminal write for a worker that never got an entry (cancelled mid-provisioning). force: user-initiated.

@@ -406,7 +406,7 @@ export function App(): JSX.Element {
             scheduleSessionRefresh(c);
           }
         }
-        if (e.type === "worker.status" && ["failed", "stopped"].includes(e.status)) {
+        if (e.type === "worker.status" && ["failed", "stopped", "error"].includes(e.status)) {
           void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});
         }
       },

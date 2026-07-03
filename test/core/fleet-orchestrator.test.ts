@@ -454,7 +454,12 @@ describe("FleetOrchestrator", () => {
       start: () => {},
       send: () => {}, resume: () => {}, stop: async () => {},
       status: () => state,
-      waitUntilSettled: async () => { repos.setWorkerStatus(o.id, "error"); state = "error"; },
+      // Mimic Worker.transition on a runtime error: write terminal 'error' to the DB AND emit worker.status.
+      waitUntilSettled: async () => {
+        repos.setWorkerStatus(o.id, "error");
+        bus.emit({ type: "worker.status", sessionId: "sA", workerId: o.id, status: "error" });
+        state = "error";
+      },
     });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "base0" }), factory, worktreesDir: "/wt", idgen: () => "a0" });
     const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
@@ -462,6 +467,8 @@ describe("FleetOrchestrator", () => {
     expect(repos.getWorker(id)!.status).toBe("error"); // DB — what the Worker itself wrote
     expect(fleet.status(id)).toBe("error");            // orchestrator in-memory entry
     expect(events).not.toContain("failed");            // no phantom 'failed' emitted for a runtime error
+    // The Worker already emitted its own terminal 'error'; the orchestrator's settle must NOT re-emit it.
+    expect(events.filter((s) => s === "error")).toHaveLength(1); // exactly one terminal 'error' event
   });
 
   it("does not reject waitAllSettled when worktree creation fails; marks status failed", async () => {
