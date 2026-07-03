@@ -160,6 +160,32 @@ describe("SessionManager", () => {
     expect(repos.getSession(session.id)).toBeUndefined(); // row cascaded cleanly, no FK throw
   });
 
+  it("get() during an in-flight delete does not resurrect the session from the DB row", async () => {
+    // gate fleet.delete so the delete window stays open while we probe get()
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    // Fleet fake whose delete() awaits the gate → delete() is suspended mid-teardown with the DB row still present.
+    const fleetFake = {
+      delete: async (_id: string) => { await gate; },
+    };
+    const sm = new SessionManager(
+      { repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
+      () => "s0",
+    );
+    const session = sm.create("/x");
+    repos.createWorker({ id: "w1", sessionId: session.id, repoPath: "/r", label: "w", worktreePath: "/wt/w1", branch: "b" });
+
+    const deleting = sm.delete(session.id);
+    await Promise.resolve(); // let delete() reach the gated fleet.delete
+    expect(sm.get(session.id)).toBeUndefined(); // no DB-fallback rebuild mid-delete
+
+    release();
+    await deleting;
+    expect(sm.get(session.id)).toBeUndefined(); // row cascaded; still gone
+  });
+
   it("fork() copies the SDK session + transcript into a new ui session labelled (fork), leaving the original intact", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();

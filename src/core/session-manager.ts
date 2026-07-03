@@ -48,6 +48,10 @@ export interface Session {
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
+  // Sessions currently mid-delete. While delete() awaits teardown (close/worker removal) the DB row still exists,
+  // so a concurrent get()/getOrCreateByKey() would otherwise rebuild a fresh master from the row — resurrecting the
+  // session. This tombstone set makes those paths treat a mid-delete session as already gone.
+  private readonly deleting = new Set<string>();
   private readonly idgen: () => string;
 
   constructor(
@@ -95,6 +99,9 @@ export class SessionManager {
 
   getOrCreateByKey(externalKey: string, cwd: string): Session {
     const existing = this.deps.repos.getSessionByExternalKey(externalKey);
+    // A keyed session (e.g. a Slack thread reply) racing its own deletion must error rather than resurrect the
+    // mid-teardown session or spawn a duplicate keyed one — the caller (Slack) surfaces the error.
+    if (existing && this.deleting.has(existing.id)) throw new Error(`session ${existing.id} is being deleted`);
     if (existing) return this.get(existing.id)!;
     return this.create(cwd, { externalKey }); // origin is derived from the key prefix (slack/automation)
   }
@@ -119,6 +126,7 @@ export class SessionManager {
   }
 
   get(id: string): Session | undefined {
+    if (this.deleting.has(id)) return undefined; // mid-delete: don't rebuild from the still-present DB row
     const live = this.sessions.get(id);
     if (live) return live;
     const row = this.deps.repos.getSession(id);
@@ -128,6 +136,7 @@ export class SessionManager {
 
   // Live master → deliver immediately; cold (unloaded) session → persist and deliver on next load (build() drains).
   deliverWorkerNotification(sessionId: string, line: string): void {
+    if (this.deleting.has(sessionId)) return; // mid-delete: the cascade sweeps the row anyway → don't park a line
     const live = this.sessions.get(sessionId); // NOTE: not get() — must not materialize a cold session here
     if (live) { live.master.notifyWorker(line); return; }
     this.deps.repos.addPendingNotification(sessionId, line);
@@ -153,21 +162,31 @@ export class SessionManager {
   }
 
   // Permanently delete a session. ORDER IS LOAD-BEARING (audit #8):
-  // 1) remove from the live map FIRST — so a worker settling during teardown can't route a notify into this
+  // 0) tombstone FIRST — while the teardown below awaits (close/worker removal), the DB row still exists and
+  //    get()'s lazy DB fallback would otherwise rebuild a fresh master into the map, resurrecting the session
+  //    mid-deletion (ghost turns from build()'s pending-notification drain; a permanent map ghost after the
+  //    cascade). get()/getOrCreateByKey()/deliverWorkerNotification treat a tombstoned id as already gone.
+  // 1) remove from the live map — so a worker settling during teardown can't route a notify into this
   //    master (deliverWorkerNotification falls through to a pending row, which the cascade below sweeps), and
   //    no new turn can attach;
   // 2) close() the master — aborts the in-flight turn, cancels queued turns, and DRAINS the chain's DB writes
   //    while the row still exists (the old stop()-only path let the drain race the cascade → FK violations);
   // 3) clean up this session's workers (abort + remove worktree/branch/checkpoint refs + DB rows);
   // 4) cascade-delete the row.
+  // The try/finally clears the tombstone even if a worker removal throws, so a failure can't leave a permanent one.
   async delete(id: string): Promise<void> {
-    const live = this.sessions.get(id);
-    this.sessions.delete(id);
-    await live?.master.close().catch(() => {});
-    for (const w of this.deps.repos.listWorkers(id)) {
-      try { await this.deps.fleet.delete(w.id); } catch { /* best-effort — remaining rows are cleaned up by the cascade below */ }
+    this.deleting.add(id);
+    try {
+      const live = this.sessions.get(id);
+      this.sessions.delete(id);
+      await live?.master.close().catch(() => {});
+      for (const w of this.deps.repos.listWorkers(id)) {
+        try { await this.deps.fleet.delete(w.id); } catch { /* best-effort — remaining rows are cleaned up by the cascade below */ }
+      }
+      this.deps.repos.deleteSession(id);
+    } finally {
+      this.deleting.delete(id);
     }
-    this.deps.repos.deleteSession(id);
   }
 
   // Shutdown drain (G-SHUTDOWN-RACE): wait for the in-progress master turns of all live sessions to finish.
