@@ -98,6 +98,22 @@ describe("MasterAgent", () => {
     expect(payloads[5]).toMatchObject({ type: "master.result" });
   });
 
+  it("nested Task-subagent traffic (parent_tool_use_id) is not recorded as the master's own activity (audit #23)", async () => {
+    const events: CoreEvent[] = [];
+    const base = deps(fakeQuery([
+      { type: "assistant", text: "sub inner", parent_tool_use_id: "task-1" }, // nested subagent output
+      { type: "assistant", text: "master says" },                              // the master's own message
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    base.bus.subscribe("s1", (e) => events.push(e));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: base });
+    await master.runTurn("go");
+    const texts = events.filter((e) => e.type === "master.message" && e.role === "assistant").map((e) => (e as { content: string }).content);
+    expect(texts).toEqual(["master says"]); // the nested message was neither emitted nor persisted
+    const persisted = base.repos.listSessionEvents("s1").filter((r) => r.type === "master.message" && r.payload_json.includes("sub inner"));
+    expect(persisted).toEqual([]);
+  });
+
   it("stop() aborts + interrupts the in-flight turn; surfaces as notice, not error; resolves cleanly", async () => {
     let interrupted = false;
     const base = deps(fakeQuery([]));

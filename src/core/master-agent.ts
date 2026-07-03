@@ -312,6 +312,12 @@ export class MasterAgent {
       let lastReqContextTokens = 0;
       for await (const msg of q) {
         const type = (msg as { type?: string }).type;
+        // Native nested-subagent traffic (the master's own Task tool) carries parent_tool_use_id. It is NOT the
+        // master's own activity: recording it persisted the subagent's internal tool churn as first-class
+        // master.tool/message events and prematurely flushed the coalesced thinking. The nested concept is
+        // live-only and per-worker (the master has no nested panel) — skip entirely (parity with worker.ts).
+        const parentId = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id ?? null;
+        if (parentId) continue;
         if (type === "stream_event") {
           // When includePartialMessages is on, partial token deltas arrive as stream_event → flow the text/thinking deltas.
           const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string; thinking?: string }; message?: { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } } } }).event;

@@ -2,7 +2,8 @@ import type { QueryFn } from "../../src/core/worker.js";
 
 // Minimal step that mimics the shape of an SDK message. Handles only assistant text/result.
 export type FakeStep =
-  | { type: "assistant"; text: string; parentToolUseId?: string }
+  // `parent_tool_use_id` (snake_case) is a verbatim pass-through of the SDK field for nested-subagent traffic tests; `parentToolUseId` (camelCase) is the pre-existing alias.
+  | { type: "assistant"; text: string; parentToolUseId?: string; parent_tool_use_id?: string | null }
   // Text block carried in a user-type message — not typed by a human but text injected by the SDK (skill body/context). For bug reproduction.
   | { type: "user_text"; text: string; parentToolUseId?: string }
   | { type: "system"; text: string }
@@ -26,7 +27,7 @@ export type FakeStep =
 // Convert a single FakeStep into an SDK message shape (shared by fakeQuery/fakeStreamingQuery).
 function stepToMessage(step: FakeStep): unknown {
   if (step.type === "assistant") {
-    return { type: "assistant", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "assistant", content: [{ type: "text", text: step.text }] } };
+    return { type: "assistant", parent_tool_use_id: step.parent_tool_use_id ?? step.parentToolUseId ?? null, message: { role: "assistant", content: [{ type: "text", text: step.text }] } };
   } else if (step.type === "user_text") {
     return { type: "user", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "user", content: [{ type: "text", text: step.text }] } };
   } else if (step.type === "system") {
