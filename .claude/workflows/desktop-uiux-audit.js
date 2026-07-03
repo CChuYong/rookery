@@ -10,12 +10,17 @@ export const meta = {
   ],
 }
 
-if (!args || typeof args.shotsDir !== 'string' || !args.shotsDir) {
+// args may arrive as a JSON-encoded string depending on the caller — tolerate both.
+let ARGS = args
+if (typeof ARGS === 'string') {
+  try { ARGS = JSON.parse(ARGS) } catch { ARGS = null }
+}
+if (!ARGS || typeof ARGS.shotsDir !== 'string' || !ARGS.shotsDir) {
   throw new Error('args.shotsDir is required — run the Phase 0 capture first and pass the screenshot directory (absolute path)')
 }
-const SHOTS = args.shotsDir
-const NOTES = (args && args.notes) || '(none)'
-const OUT = (args && args.outPath) || 'docs/2026-07-03-desktop-uiux-audit.md'
+const SHOTS = ARGS.shotsDir
+const NOTES = ARGS.notes || '(none)'
+const OUT = ARGS.outPath || 'docs/2026-07-03-desktop-uiux-audit.md'
 const REPO = '/Users/clover/workspace/clovot'
 
 const FINDINGS_SCHEMA = {
