@@ -171,18 +171,19 @@ describe("Conversation", () => {
     expect(onSend).toHaveBeenCalledWith("@/abs/a.ts @/abs/b.png 이거 봐줘");
   });
 
-  it("busy + empty → stop button; once you type → send button (follow-up send while in progress)", () => {
+  it("busy → stop stays visible; typing shows send alongside stop (abort or queue a follow-up, audit #23)", () => {
     const onStop = vi.fn();
     render(<Conversation items={[]} onSend={vi.fn()} busy onStop={onStop} />);
-    // in progress + empty → stop
+    // in progress + empty → stop only
     expect(screen.getByRole("button", { name: "중단" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "보내기" })).toBeNull();
-    // type something → toggles to send
+    // type something → send appears, stop stays (the turn can still be aborted while typing)
     type(composer(), "follow up");
     expect(screen.getByRole("button", { name: "보내기" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "중단" })).toBeNull();
-    // clear it again → reverts to stop
+    expect(screen.getByRole("button", { name: "중단" })).toBeInTheDocument();
+    // clear it again → send hides, stop remains
     type(composer(), "  ");
+    expect(screen.queryByRole("button", { name: "보내기" })).toBeNull();
     expect(screen.getByRole("button", { name: "중단" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "중단" }));
     expect(onStop).toHaveBeenCalled();

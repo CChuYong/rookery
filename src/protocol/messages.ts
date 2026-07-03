@@ -189,8 +189,8 @@ export type ServerMessage =
 
 // Request (a request that gets a response via reqId) type → response ServerMessage mapping — **single source**.
 // Must be 1:1 with the reply types in the daemon's connection.ts (when adding a new request, add it here too → WsClient.request stays type-safe).
-// fire-and-forget (send: session.attach, worker.setModel/setPermissionMode, *.subscribe) is excluded since it has no response.
-// Mutations without their own ack (session/worker delete, archive, rename, restore, session.stop, session.send) all respond with fleet.ack.
+// fire-and-forget (send: session.attach, *.subscribe) is excluded since it has no response.
+// Mutations without their own ack (session/worker delete, archive, rename, restore, session.stop, session.send, worker.setModel/setPermissionMode) all respond with fleet.ack.
 export interface RequestResultMap {
   "session.create": Extract<ServerMessage, { type: "session.created" }>;
   "session.open": Extract<ServerMessage, { type: "session.created" }>;
@@ -205,6 +205,8 @@ export interface RequestResultMap {
   "worker.archive": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.delete": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.send": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "worker.setModel": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "worker.setPermissionMode": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.restore": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.fork": Extract<ServerMessage, { type: "fleet.spawn.result" }>;
   "session.list": Extract<ServerMessage, { type: "session.list.result" }>;

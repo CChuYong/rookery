@@ -573,14 +573,24 @@ export function App(): JSX.Element {
     });
   }, []);
   const subSetModel = useCallback((id: string, model: string) => {
-    client?.send({ type: "worker.setModel", id, model });
+    const prev = useStore.getState().fleet[id]?.model;
     // Optimistic: update the fleet row model immediately (reflects the dropdown value).
     useStore.setState((st) => (st.fleet[id] ? { fleet: { ...st.fleet, [id]: { ...st.fleet[id], model } } } : {}));
+    // request(): a rejected change (terminated worker, disconnected) rolls the dropdown back so it doesn't lie about the applied value.
+    void client?.request({ type: "worker.setModel", id, model }).catch((e) => {
+      useStore.setState((st) => (st.fleet[id] ? { fleet: { ...st.fleet, [id]: { ...st.fleet[id], model: prev } } } : {}));
+      toast.error(tRef.current("toast.actionFailed"), String(e));
+    });
   }, []);
   const subSetPermissionMode = useCallback((id: string, mode: string) => {
-    client?.send({ type: "worker.setPermissionMode", id, permissionMode: mode as "bypassPermissions" | "plan" });
+    const prev = useStore.getState().fleet[id]?.permissionMode;
     // Optimistic: reflect the dropdown value on the fleet row immediately.
     useStore.setState((st) => (st.fleet[id] ? { fleet: { ...st.fleet, [id]: { ...st.fleet[id], permissionMode: mode } } } : {}));
+    // request(): a rejected change rolls the dropdown back so it doesn't lie about the applied value.
+    void client?.request({ type: "worker.setPermissionMode", id, permissionMode: mode as "bypassPermissions" | "plan" }).catch((e) => {
+      useStore.setState((st) => (st.fleet[id] ? { fleet: { ...st.fleet, [id]: { ...st.fleet[id], permissionMode: prev } } } : {}));
+      toast.error(tRef.current("toast.actionFailed"), String(e));
+    });
   }, []);
   // Interrupt the worker's current turn (keep the session) — composer stop button. The worker equivalent of the master's stopMaster.
   const subInterrupt = useCallback((id: string) => { void client?.request({ type: "worker.interrupt", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);

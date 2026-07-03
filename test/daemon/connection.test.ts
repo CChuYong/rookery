@@ -45,6 +45,7 @@ type FleetOverride = {
   stop?: (id: string) => Promise<void>;
   discard?: (id: string) => Promise<void>;
   interrupt?: (id: string) => Promise<void>;
+  setModel?: (id: string, model: string) => Promise<void>;
   setPermissionMode?: (id: string, mode: string) => Promise<void>;
   transcript?: (id: string, sinceSeq?: number) => Array<{ seq: number; type: string; payload: unknown }>;
   send?: (id: string, text: string) => void;
@@ -316,6 +317,24 @@ describe("Connection v2 routes", () => {
     await conn.handleRaw(JSON.stringify({ type: "worker.setPermissionMode", id: "a1", permissionMode: "plan" }));
     expect(calls).toEqual([["a1", "plan"]]);
     expect(sent).toEqual([]); // fire-and-forget — no ack
+  });
+
+  it("worker.setModel with a reqId is acked on success (so the desktop can await it and not falsely roll back)", async () => {
+    const sent: any[] = [];
+    const fleet: FleetOverride = { setModel: async () => {} }; // does not throw → success path
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "worker.setModel", id: "w1", model: "sonnet", reqId: "q1" }));
+    const acks = sent.filter((m) => m.type === "fleet.ack");
+    expect(acks).toContainEqual(expect.objectContaining({ reqId: "q1", action: "setModel", id: "w1" }));
+  });
+
+  it("worker.setPermissionMode with a reqId is acked on success", async () => {
+    const sent: any[] = [];
+    const fleet: FleetOverride = { setPermissionMode: async () => {} }; // does not throw → success path
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "worker.setPermissionMode", id: "w1", permissionMode: "plan", reqId: "q1" }));
+    const acks = sent.filter((m) => m.type === "fleet.ack");
+    expect(acks).toContainEqual(expect.objectContaining({ reqId: "q1", action: "setPermissionMode", id: "w1" }));
   });
 
   it("worker.setPermissionMode rejects non-bypass modes (security boundary: default/acceptEdits never reach the worker)", async () => {

@@ -384,13 +384,18 @@ export class Connection {
         return;
       }
       case "worker.setModel": {
-        // Live-change a running worker's model. On failure the global catch responds with error+reqId.
+        // Live-change a running worker's model. On failure the global catch responds with error+reqId. On success, ack when a
+        // reqId is present so request()-style clients (desktop) settle — otherwise the promise dangles and a later socket close
+        // rejects it, triggering a false optimistic rollback + toast.
         await this.fleet.setModel(msg.id, msg.model);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "setModel", id: msg.id });
         return;
       }
       case "worker.setPermissionMode": {
-        // Live-change a running worker's permission mode (bypassPermissions/plan). On failure the global catch responds with error+reqId.
+        // Live-change a running worker's permission mode (bypassPermissions/plan). On failure the global catch responds with
+        // error+reqId. On success, ack when a reqId is present (see worker.setModel — avoids a dangling promise a later close rejects).
         await this.fleet.setPermissionMode(msg.id, msg.permissionMode);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "setPermissionMode", id: msg.id });
         return;
       }
       case "worker.interrupt": {

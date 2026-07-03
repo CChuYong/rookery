@@ -234,12 +234,15 @@ export function Composer({
               <Paperclip size={15} />
             </Button>
           )}
-          {/* Stop only when a turn is in progress and the input is empty. Once you type/attach something it switches to send. When disabled (e.g. Slack readonly), the stop button is hidden too. */}
-          {busy && onStop && !text.trim() && !disabled ? (
+          {/* Stop stays visible for the whole turn so an in-progress turn can always be aborted (audit #23). Once you type/attach
+              something, Send appears alongside Stop (Stop first) so you can either abort the turn or queue the next message. When
+              disabled (e.g. Slack readonly), the stop button is hidden. */}
+          {busy && onStop && !disabled && (
             <Button variant="danger" size="icon" disabled={stopping} aria-label={t("composer.stop")} onClick={() => { setStopping(true); onStop(); }}>
               {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
             </Button>
-          ) : (
+          )}
+          {!(busy && onStop && !disabled && !text.trim()) && (
             <Button variant="primary" size="icon" aria-label={sendLabelText} disabled={disabled || (!text.trim() && !allowEmpty)} onClick={submit}>
               <Send size={16} />
             </Button>
