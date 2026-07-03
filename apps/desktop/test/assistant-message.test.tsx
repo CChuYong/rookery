@@ -18,16 +18,16 @@ describe("AssistantMessage copy", () => {
 
   it("clicking the copy button copies the original content to the clipboard + shows ✓ feedback", async () => {
     render(<AssistantMessage content={"에이전트 답변 **md**"} />);
-    const btn = screen.getByLabelText("에이전트 메시지 복사");
+    const btn = screen.getByLabelText("어시스턴트 메시지 복사");
     expect(btn.title).toBe("복사"); // initial
     fireEvent.click(btn);
     expect(writeText).toHaveBeenCalledWith("에이전트 답변 **md**"); // the raw markdown as-is
-    await waitFor(() => expect(screen.getByLabelText("에이전트 메시지 복사").title).toBe("복사됨")); // ✓
+    await waitFor(() => expect(screen.getByLabelText("어시스턴트 메시지 복사").title).toBe("복사됨")); // ✓
   });
 
   it("hides the copy button while streaming (incomplete)", () => {
     render(<AssistantMessage content={"…"} streaming />);
-    expect(screen.queryByLabelText("에이전트 메시지 복사")).toBeNull();
+    expect(screen.queryByLabelText("어시스턴트 메시지 복사")).toBeNull();
     expect(screen.getByTestId("streaming")).toBeInTheDocument();
   });
 });

@@ -7,7 +7,7 @@ import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand } from "./PromptEditor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { PERMISSION_MODES, permLabel } from "./Composer.js";
-import { EFFORTS, effortSupported } from "../lib/models.js";
+import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 
 // Comma-separated id string ↔ array. Drops empty tokens, and returns undefined when empty (= no filter).
@@ -268,7 +268,7 @@ export function AutomationForm(p: {
                   onChange={(e) => setEffort(e.target.value)}
                 >
                   {EFFORTS.map((e) => (
-                    <option key={e} value={e}>{e}</option>
+                    <option key={e} value={e}>{t(effortLabelKey(e))}</option>
                   ))}
                 </select>
               </label>

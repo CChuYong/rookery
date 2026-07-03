@@ -6,7 +6,7 @@ import { makeChip } from "../lib/mention-editor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
 import { Select } from "../ui/input.js";
-import { EFFORTS, effortSupported } from "../lib/models.js";
+import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
@@ -203,7 +203,7 @@ export function Composer({
                   onChange={(e) => controls.onEffort?.(e.target.value)}
                 >
                   {EFFORTS.map((ef) => (
-                    <option key={ef} value={ef}>{ef}</option>
+                    <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                   ))}
                 </Select>
               )}
@@ -225,7 +225,7 @@ export function Composer({
           ) : (
             <span className="font-mono text-[11px] text-muted" title={t("composer.fixedModelTitle")}>
               ◇ {models.find((m) => m.id === controls.model)?.label ?? controls.model}
-              {controls.effort !== undefined && effortSupported(controls.model) ? ` · ${controls.effort}` : ""}
+              {controls.effort !== undefined && effortSupported(controls.model) ? ` · ${t(effortLabelKey(controls.effort))}` : ""}
             </span>
           ))}
         <div className="ml-auto flex shrink-0 items-center gap-1">

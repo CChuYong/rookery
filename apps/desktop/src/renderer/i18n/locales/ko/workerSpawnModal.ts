@@ -6,7 +6,6 @@ export default {
   "workerSpawnModal.linearHint": "설정 › 연동에서 Linear 키를 입력하세요",
   "workerSpawnModal.modelTitle": "이 워커 모델 (기본 설정과 무관)",
   "workerSpawnModal.effortTitle": "effort",
-  "workerSpawnModal.effortOption": "effort: {effort}",
   "workerSpawnModal.permTitle": "권한 모드 (이 워커 — 도구 실행 승인 정책) — bypass 또는 plan",
   "workerSpawnModal.permBypass": "Bypass Permissions",
   "workerSpawnModal.permPlan": "Plan Mode",

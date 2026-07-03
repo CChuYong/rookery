@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
-import { EFFORTS, effortSupported } from "../lib/models.js";
+import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
@@ -139,7 +139,7 @@ export function WorkerSpawnModal(p: {
             {effortSupported(model) && (
               <Select size="sm" className="w-28" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
                 {EFFORTS.map((ef) => (
-                  <option key={ef} value={ef}>{t("workerSpawnModal.effortOption", { effort: ef })}</option>
+                  <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                 ))}
               </Select>
             )}

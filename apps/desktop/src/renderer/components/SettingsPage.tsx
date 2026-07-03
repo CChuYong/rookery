@@ -7,7 +7,7 @@ import { X } from "lucide-react";
 import { Button } from "../ui/button.js";
 import { UpdateSettings } from "./UpdateSettings.js";
 import { Input, Select } from "../ui/input.js";
-import { EFFORTS, effortSupported } from "../lib/models.js";
+import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
@@ -74,7 +74,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   return (
     <>
       <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
-        <span className="shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">Settings</span>
+        <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("settings.eyebrow")}</span>
         <span className="font-semibold tracking-[-0.01em]">{t("settings.title")}</span>
         <button onClick={requestClose} aria-label={t("settings.close")} className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim">
           <X size={16} />
@@ -151,7 +151,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       </Field>
                       <Field label={t("settings.effort")}>
                         <Select size="md" className="w-full" value={f.workerEffort} disabled={!effortSupported(f.workerModel)} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
-                          {EFFORTS.map((ef) => (<option key={ef} value={ef}>{ef}</option>))}
+                          {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
                         </Select>
                       </Field>
                     </div>
@@ -271,7 +271,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     </Field>
                     <Field label={t("settings.effort")}>
                       <Select size="md" className="w-full" value={f.masterEffort} disabled={!effortSupported(f.masterModel)} onChange={(e) => setF({ ...f, masterEffort: e.target.value })}>
-                        {EFFORTS.map((ef) => (<option key={ef} value={ef}>{ef}</option>))}
+                        {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
                       </Select>
                     </Field>
                   </div>

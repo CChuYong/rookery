@@ -11,4 +11,9 @@ export default {
   "common.connect": "연결",
   "common.connected": "연결됨",
   "common.retry": "다시 시도",
+  "common.effortLow": "낮음",
+  "common.effortMedium": "보통",
+  "common.effortHigh": "높음",
+  "common.effortXhigh": "매우 높음",
+  "common.effortMax": "최대",
 } satisfies Catalog;

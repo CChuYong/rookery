@@ -1,5 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "automationPage.eyebrow": "Automation",
   "automationPage.title": "Automation",
   "automationPage.newJob": "New job",
   "automationPage.empty": "No scheduled jobs yet.",

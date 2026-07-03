@@ -24,7 +24,7 @@ export default {
   "app.creatingWorktree": "워크트리 생성 중…",
   "app.reconnecting": "데몬에 연결하는 중…",
   "app.sessionEndedRestart": "재시작으로 세션 종료 — diff/discard만 가능",
-  "app.agentEndedReadonly": "종료된 에이전트 — 보기 전용",
+  "app.agentEndedReadonly": "종료된 워커 — 보기 전용",
   "app.emptyRepoHint": "왼쪽 레포에서 워커를 선택하거나, 레포 헤더의 + 버튼으로 새 워커를 스폰하세요. Sessions에서 마스터에게 새로 spawn을 시켜도 돼요.",
   "app.slackReadOnly": "Slack 세션 — Slack에서 대화하세요",
   "app.composerPlaceholder": "메시지 입력…  (/ 명령, Shift+Enter 줄바꿈, @로 파일 첨부)",

@@ -1,5 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "settings.eyebrow": "Settings",
   "settings.title": "Settings",
   "settings.close": "Close settings",
   "settings.tabGeneral": "General",

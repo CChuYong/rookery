@@ -14,7 +14,7 @@ export function NestedAgents({ panels }: { panels: NestedPanel[] }): JSX.Element
   const t = useT();
   return (
     <div className="flex flex-col gap-2 p-2">
-      <div className="px-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+      <div className="eyebrow px-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted">
         {t("nestedAgents.title")} · {panels.length}
       </div>
       {panels.map((p) => (

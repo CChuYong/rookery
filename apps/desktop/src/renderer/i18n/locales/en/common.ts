@@ -11,4 +11,9 @@ export default {
   "common.connect": "Connect",
   "common.connected": "Connected",
   "common.retry": "Retry",
+  "common.effortLow": "Low",
+  "common.effortMedium": "Medium",
+  "common.effortHigh": "High",
+  "common.effortXhigh": "Extra high",
+  "common.effortMax": "Max",
 } satisfies Catalog;

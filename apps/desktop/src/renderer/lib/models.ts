@@ -12,6 +12,10 @@ export const MODELS: ReadonlyArray<ModelOption> = [
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type Effort = (typeof EFFORTS)[number];
 
+// i18n key for an effort's display label (common.effortLow/Medium/High/Xhigh/Max) — raw tokens like
+// "xhigh" are machine values and must never be shown to the user directly.
+export const effortLabelKey = (e: string): string => `common.effort${e.charAt(0).toUpperCase()}${e.slice(1)}`;
+
 export function modelLabel(id: string): string {
   return MODELS.find((m) => m.id === id)?.label ?? id;
 }

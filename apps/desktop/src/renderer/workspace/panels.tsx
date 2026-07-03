@@ -5,6 +5,7 @@ import { NestedAgents } from "../views/NestedAgents.js";
 import type { LogItem } from "../store/reduce.js";
 import type { PanelParams } from "./panel-ids.js";
 import { useWorkspaceRender } from "./WorkspaceRender.js";
+import { useT } from "../i18n/provider.js";
 
 // Nested-agent label: extract subagent_type/description from the Task tool call
 // input in the main transcript. (Copied from RightSidebar for the PoC; dedupe in
@@ -24,10 +25,11 @@ const EMPTY_LOG: LogItem[] = [];
 // Self-subscribing nested panel body: keeps the high-frequency nested/workerLogs
 // reads out of App (same reasoning as the original RightSidebar Worker segment).
 export function NestedPanelBody({ subId }: { subId: string | null }): JSX.Element {
+  const t = useT();
   const nested = useStore((st) => (subId ? st.nested[subId] ?? EMPTY_NESTED : EMPTY_NESTED));
   const workerLog = useStore((st) => (subId ? st.workerLogs[subId] ?? EMPTY_LOG : EMPTY_LOG));
   const panels = Object.entries(nested).map(([id, items]) => ({ id, label: nestedLabel(workerLog, id), items }));
-  if (panels.length === 0) return <div className="px-3 py-3 text-[12px] leading-relaxed text-muted">No nested agents.</div>;
+  if (panels.length === 0) return <div className="px-3 py-3 text-[12px] leading-relaxed text-muted">{t("rightSidebar.noNestedAgents")}</div>;
   return <NestedAgents panels={panels} />;
 }
 

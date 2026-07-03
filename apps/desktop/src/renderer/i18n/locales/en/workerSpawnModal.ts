@@ -6,7 +6,6 @@ export default {
   "workerSpawnModal.linearHint": "Enter your Linear key in Settings › Integrations",
   "workerSpawnModal.modelTitle": "Model for this worker (independent of defaults)",
   "workerSpawnModal.effortTitle": "effort",
-  "workerSpawnModal.effortOption": "effort: {effort}",
   "workerSpawnModal.permTitle": "Permission mode for this worker (tool-execution approval policy) — bypass or plan",
   "workerSpawnModal.permBypass": "Bypass Permissions",
   "workerSpawnModal.permPlan": "Plan Mode",

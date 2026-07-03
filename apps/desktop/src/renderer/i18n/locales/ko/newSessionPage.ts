@@ -1,5 +1,7 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "newSessionPage.eyebrow": "New session",
+  "newSessionPage.title": "새 세션",
   "newSessionPage.defaultFolder": "기본 폴더",
   "newSessionPage.daemonDefaultFolder": "데몬 기본 폴더",
   "newSessionPage.heading": "무엇을 시작할까요?",
