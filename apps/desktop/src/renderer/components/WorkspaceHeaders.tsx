@@ -39,7 +39,7 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
 export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, onFetchCheckpoints, onRestore, dock }: {
   worker: FleetRow; termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean;
   onToggleTerm: () => void; onToggleRight: () => void;
-  onFetchCheckpoints: () => Promise<Checkpoint[]>; onRestore: (seq: number) => void; dock?: boolean;
+  onFetchCheckpoints: () => Promise<Checkpoint[]>; onRestore: (seq: number) => Promise<void>; dock?: boolean;
 }): JSX.Element {
   const t = useT();
   return (

@@ -7,7 +7,7 @@ import { usePrefsStore } from "../src/renderer/store/prefs.js";
 const baseProps = {
   termPageKey: null, termPageOpen: false, rightOpen: false,
   onToggleTerm: () => {}, onToggleRight: () => {},
-  onFetchCheckpoints: async () => [], onRestore: () => {},
+  onFetchCheckpoints: async () => [], onRestore: async () => {},
 };
 
 const openExternal = vi.fn();

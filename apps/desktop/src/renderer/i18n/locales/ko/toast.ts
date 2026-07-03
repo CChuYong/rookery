@@ -12,4 +12,5 @@ export default {
   "toast.repoRegistered": "레포를 등록했어요",
   "toast.workerSpawned": "워커를 생성했어요",
   "toast.keySaved": "키를 저장했어요",
+  "toast.restored": "체크포인트로 되돌렸어요",
 } satisfies Catalog;

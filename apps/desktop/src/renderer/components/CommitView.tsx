@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { MonacoDiff } from "./MonacoDiff.js";
+import { SkeletonRows } from "./Skeleton.js";
 import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
 import { GIT_TONE } from "../lib/gitTone.js";
@@ -26,7 +27,7 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
     return () => { live = false; };
   }, [root, hash]);
 
-  if (!files) return <div className="flex flex-1 items-center justify-center text-[12px] text-muted">{t("common.loading")}</div>;
+  if (!files) return <SkeletonRows rows={8} />;
   if (files.length === 0) return <div className="flex flex-1 items-center justify-center text-[12px] text-muted">{t("commitView.noChangedFiles")}</div>;
   const totalAdded = files.reduce((s, f) => s + f.added, 0);
   const totalDeleted = files.reduce((s, f) => s + f.deleted, 0);

@@ -12,4 +12,5 @@ export default {
   "toast.repoRegistered": "Repo registered",
   "toast.workerSpawned": "Worker spawned",
   "toast.keySaved": "Key saved",
+  "toast.restored": "Restored to checkpoint",
 } satisfies Catalog;

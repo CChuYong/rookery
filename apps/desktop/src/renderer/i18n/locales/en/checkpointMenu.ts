@@ -6,4 +6,5 @@ export default {
   "checkpointMenu.empty": "No checkpoints",
   "checkpointMenu.turn": "Turn {turn}",
   "checkpointMenu.confirmRestore": "Really revert?",
+  "checkpointMenu.loadFailed": "Couldn't load checkpoints — retry",
 } satisfies Catalog;

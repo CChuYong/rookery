@@ -6,4 +6,5 @@ export default {
   "checkpointMenu.empty": "체크포인트 없음",
   "checkpointMenu.turn": "턴 {turn}",
   "checkpointMenu.confirmRestore": "정말 복원?",
+  "checkpointMenu.loadFailed": "목록을 불러오지 못했어요 — 다시 시도",
 } satisfies Catalog;

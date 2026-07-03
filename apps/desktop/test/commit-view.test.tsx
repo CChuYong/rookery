@@ -36,4 +36,15 @@ describe("CommitView", () => {
     fireEvent.click(screen.getByText("b.ts"));
     expect(screen.getByTestId("diff").textContent).toContain("abc123:/r/lib/b.ts");
   });
+
+  it("renders a skeleton (not bare 'Loading…' text) while the commit files are in flight", () => {
+    // A promise that never resolves during the assertion window keeps the component in its loading state.
+    (window as unknown as { rookery: unknown }).rookery = { ws: {
+      gitCommitFiles: vi.fn(() => new Promise(() => {})),
+      gitCommitInfo: vi.fn(() => new Promise(() => {})),
+    } };
+    const { container } = render(<CommitView root="/r" hash="abc123" />);
+    expect(container.querySelector(".sheen")).not.toBeNull();
+    expect(screen.queryByText("불러오는 중…")).toBeNull();
+  });
 });

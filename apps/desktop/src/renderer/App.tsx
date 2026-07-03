@@ -633,9 +633,15 @@ export function App(): JSX.Element {
   const onStop = useCallback((id: string) => { void client?.request({ type: "fleet.stop", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []); // RepoTree right-click 'stop'
   const onNewRepo = useCallback(() => setRepoModal(true), []);
   const onNewSub = useCallback((name: string) => setSpawnRepo(name), []);
+  // Rejects on failure (no swallow-to-empty) so CheckpointMenu can render a distinct error state instead of a false "no checkpoints".
   const fetchCheckpoints = (id: string): Promise<Checkpoint[]> =>
-    client ? client.request({ type: "worker.checkpoints", id }).then((r) => r.checkpoints ?? []).catch(() => []) : Promise.resolve([]);
-  const onRestore = (id: string, seq: number) => { void client?.request({ type: "worker.restore", id, seq }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); };
+    client ? client.request({ type: "worker.checkpoints", id }).then((r) => r.checkpoints ?? []) : Promise.reject(new Error("not connected"));
+  // Returns the request promise so CheckpointMenu can await it (loading state, close only on settle). Success gets a toast since
+  // the restore doesn't otherwise cause any immediately-visible screen change.
+  const onRestore = (id: string, seq: number): Promise<void> =>
+    (client ? client.request({ type: "worker.restore", id, seq }) : Promise.reject(new Error("not connected")))
+      .then(() => { toast.success(tRef.current("toast.restored")); })
+      .catch((e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); throw e; });
   const saveSettings = useCallback((next: SettingsValues) => {
     const c = client; if (!c) return;
     void c.request({ type: "settings.set", settings: next }).then((r) => { useStore.getState().setSettings(r.settings); }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
