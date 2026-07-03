@@ -270,6 +270,31 @@ describe("seedSessionLog (restore by replaying master events)", () => {
     const log = seedSessionLog(prev, SID, turn);
     expect(log.filter((i) => i.kind === "interaction")).toHaveLength(0);
   });
+
+  it("a preserved unresolved card NOT re-announced by the daemon is folded to an expired summary", () => {
+    const withCard = reduceEvent(emptyState(), { type: "interaction.request", sessionId: SID, requestId: "R9", kind: "approve", toolName: "t", inputText: "{}" } as never);
+    const prev = withCard.logsBySession[SID];
+    const turn = [{ payload: { type: "master.message", sessionId: SID, role: "user", content: "hi" } }];
+    const log = seedSessionLog(prev, SID, turn, new Set()); // daemon replayed nothing → card is dead
+    const card = log.find((i) => i.kind === "interaction");
+    expect(card).toMatchObject({ requestId: "R9", resolved: true, expired: true });
+  });
+
+  it("a preserved unresolved card the daemon re-announced stays actionable", () => {
+    const withCard = reduceEvent(emptyState(), { type: "interaction.request", sessionId: SID, requestId: "R9", kind: "approve", toolName: "t", inputText: "{}" } as never);
+    const prev = withCard.logsBySession[SID];
+    const turn = [{ payload: { type: "master.message", sessionId: SID, role: "user", content: "hi" } }];
+    const log = seedSessionLog(prev, SID, turn, new Set(["R9"]));
+    expect(log.at(-1)).toMatchObject({ kind: "interaction", requestId: "R9", resolved: false });
+  });
+
+  it("without a liveCards set (legacy callers), unresolved cards are preserved as before", () => {
+    const withCard = reduceEvent(emptyState(), { type: "interaction.request", sessionId: SID, requestId: "R9", kind: "approve", toolName: "t", inputText: "{}" } as never);
+    const prev = withCard.logsBySession[SID];
+    const turn = [{ payload: { type: "master.message", sessionId: SID, role: "user", content: "hi" } }];
+    const log = seedSessionLog(prev, SID, turn);
+    expect(log.at(-1)).toMatchObject({ kind: "interaction", requestId: "R9", resolved: false });
+  });
 });
 
 describe("reduceEvent", () => {

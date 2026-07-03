@@ -60,6 +60,9 @@ interface Store extends AppState {
   seedRunningFromSessions: (sessions: { id: string; status: string }[]) => void;
   // Sessions whose turn ended (idle) while not being looked at = unread. The session-side counterpart of worker attention (a separate map — so it isn't swept by the setFleet prune).
   sessionAttention: Record<string, boolean>;
+  // requestIds of interaction cards the daemon has announced since the last (re)connect (see the store creator).
+  liveInteractionIds: Set<string>;
+  resetLiveInteractions: () => void;
   applyEvent: (e: CoreEvent) => void;
   setSessions: (s: Store["sessions"]) => void;
   setActive: (id: string) => void;
@@ -131,6 +134,11 @@ export const useStore = create<Store>((set, get) => ({
   // Authoritative seed: since session.list is the truth, explicitly set each session's running flag (even bringing a stale true down to false). Restores missed idle on reconnect.
   seedRunningFromSessions: (sessions) => set((s) => { const running = { ...s.running }; for (const x of sessions) running[x.id] = x.status === "running"; return { running }; }),
   sessionAttention: {},
+  // requestIds of interaction cards the daemon has announced since the last (re)connect. Reset in App's ws
+  // onOpen BEFORE events.subscribe; the daemon's synchronous pending-card replay then repopulates it, so at
+  // seed time "not in this set" means the daemon no longer holds that request (expired).
+  liveInteractionIds: new Set<string>(),
+  resetLiveInteractions: () => set(() => ({ liveInteractionIds: new Set<string>() })),
   applyEvent: (e) =>
     set((s) => {
       const now = Date.now(); // Live message arrival time (for hover relative time) — an impure boundary, injected as an argument into the pure reduce.
@@ -166,7 +174,11 @@ export const useStore = create<Store>((set, get) => ({
         if (e.status === "running") return { ...base, attention: { ...s.attention, [e.workerId]: false } };
         return base;
       }
-      return reduceEvent(s, e, now);
+      // Record every interaction card the daemon announces (fresh live card OR events.subscribe replay) so seed
+      // time can tell live-from-dead. reduceEvent stays the single log-mutation authority (it dedups by requestId).
+      const patch = reduceEvent(s, e, now);
+      if (e.type === "interaction.request") return { ...patch, liveInteractionIds: new Set(s.liveInteractionIds).add(e.requestId) };
+      return patch;
     }),
   setSessions: (sessions) => set((s) => {
     // Clean up overrides for sessions that no longer exist to prevent unbounded accumulation (DSK-7).
@@ -192,7 +204,7 @@ export const useStore = create<Store>((set, get) => ({
   setRepos: (repos) => set({ repos }),
   setDaemon: (daemon) => set({ daemon }),
   setDaemonNote: (daemonNote) => set({ daemonNote }),
-  seedHistory: (sid, events) => set((s) => ({ logsBySession: { ...s.logsBySession, [sid]: seedSessionLog(s.logsBySession[sid], sid, events) } })),
+  seedHistory: (sid, events) => set((s) => ({ logsBySession: { ...s.logsBySession, [sid]: seedSessionLog(s.logsBySession[sid], sid, events, s.liveInteractionIds) } })),
   pushWorkerPending: (id, item) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: [...(s.pendingByWorker[id] ?? []), item] } })),
   pushPending: (sid, item) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: [...(s.pendingBySession[sid] ?? []), item] } })),
   seedWorkerHistory: (id, events) =>

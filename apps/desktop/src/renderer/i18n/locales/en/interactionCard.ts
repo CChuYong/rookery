@@ -5,4 +5,5 @@ export default {
   "interactionCard.deny": "Deny",
   "interactionCard.askPrompt": "Answer the agent's question",
   "interactionCard.submit": "Submit",
+  "interactionCard.expired": "Expired — the daemon is no longer waiting on this request",
 } satisfies Catalog;

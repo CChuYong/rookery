@@ -9,7 +9,7 @@ export type LogItem =
   | { kind: "worker"; workerId: string; status: string }
   | { kind: "notice"; text: string; code?: string; params?: Record<string, string | number> } // informational system push (compaction/retry/fallback)
   // Master canUseTool (approve/AskUserQuestion) inline card. When resolved, shows a one-line summary instead of buttons.
-  | { kind: "interaction"; requestId: string; mode: "approve" | "ask"; toolName?: string; inputText?: string; questions?: InteractionQuestion[]; resolved?: boolean; summary?: string }
+  | { kind: "interaction"; requestId: string; mode: "approve" | "ask"; toolName?: string; inputText?: string; questions?: InteractionQuestion[]; resolved?: boolean; summary?: string; expired?: boolean }
   | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number };
 
 // The worker row's single source of truth is the protocol WorkerRow. archived always arrives on fleet.list but is omitted when building worker.* events, so it's optional.
@@ -48,19 +48,26 @@ function isEchoUser(log: LogItem[] | undefined, role: string, content: string): 
 // We replay persisted master events (coalesced CoreEvent) to build the committed transcript, and preserve prev's uncommitted tail.
 // We restore not just text but tool/thinking/metrics/notice too (replacing the earlier text-only model). The replay reuses the master's own
 // reduceEvent as-is (same logic as live → consistent). Non-persisted worker.* inline markers are not restored.
-export function seedSessionLog(prev: LogItem[] | undefined, sid: string, events: Array<{ payload: unknown; createdAt?: string }>): LogItem[] {
-  const merged = seedCore(prev, sid, events);
+export function seedSessionLog(prev: LogItem[] | undefined, sid: string, events: Array<{ payload: unknown; createdAt?: string }>, liveCards?: Set<string>): LogItem[] {
   // interaction cards are live-only (never persisted to session_events), so the replay can never contain them.
-  // A full reload replays the pending card into an EMPTY log; the message-count anchor then can't match and
-  // seedCore returns `committed` — dropping the card and re-hanging the blocked approval turn invisibly.
-  // Re-append any UNRESOLVED card from prev that the merge lost (resolved summaries are cosmetic; let them go).
+  // Re-append unresolved cards from prev that the merge lost — but keep ACTIONABLE only the ones the daemon has
+  // re-announced since the last (re)connect (liveCards). The daemon replays every pending card synchronously on
+  // events.subscribe, and the client subscribes before requesting history on the same socket, so absence from
+  // liveCards is authoritative: the request died while we were away (abort / answered elsewhere / daemon restart).
+  // Those fold into an expired summary instead of staying actionable-but-dead forever. liveCards undefined =
+  // legacy caller → preserve unconditionally (old behavior). The same authority applies to unresolved cards that
+  // survived INSIDE the merged tail (preserved via the tail path rather than the re-append path).
+  const merged = seedCore(prev, sid, events);
+  const reconciled = liveCards
+    ? merged.map((i) => (i.kind === "interaction" && !i.resolved && !liveCards.has(i.requestId) ? { ...i, resolved: true as const, expired: true } : i))
+    : merged;
   const have = new Set(
-    merged.filter((i): i is Extract<LogItem, { kind: "interaction" }> => i.kind === "interaction").map((i) => i.requestId),
+    reconciled.filter((i): i is Extract<LogItem, { kind: "interaction" }> => i.kind === "interaction").map((i) => i.requestId),
   );
-  const dropped = (prev ?? []).filter(
-    (i): i is Extract<LogItem, { kind: "interaction" }> => i.kind === "interaction" && !i.resolved && !have.has(i.requestId),
-  );
-  return dropped.length ? [...merged, ...dropped] : merged;
+  const dropped = (prev ?? [])
+    .filter((i): i is Extract<LogItem, { kind: "interaction" }> => i.kind === "interaction" && !i.resolved && !have.has(i.requestId))
+    .map((i) => (liveCards && !liveCards.has(i.requestId) ? { ...i, resolved: true as const, expired: true } : i));
+  return dropped.length ? [...reconciled, ...dropped] : reconciled;
 }
 
 function seedCore(prev: LogItem[] | undefined, sid: string, events: Array<{ payload: unknown; createdAt?: string }>): LogItem[] {

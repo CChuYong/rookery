@@ -20,7 +20,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   if (item.resolved) {
     return (
       <div className="max-w-[80%] self-start whitespace-pre-wrap rounded-[var(--radius)] border border-line bg-surface px-3 py-2 text-[12px] text-fg-dim">
-        {item.summary ?? "✅"}
+        {item.summary ?? (item.expired ? t("interactionCard.expired") : "✅")}
       </div>
     );
   }

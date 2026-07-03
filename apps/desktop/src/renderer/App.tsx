@@ -414,6 +414,7 @@ export function App(): JSX.Element {
     client = c;
     c.onOpen(() => {
       if (startTimer) { clearTimeout(startTimer); startTimer = null; } // connection succeeded → release the fallback timer (DSK-10)
+      useStore.getState().resetLiveInteractions(); // must precede events.subscribe: the replay repopulates the set
       useStore.getState().setDaemon("up");
       void c.request({ type: "session.list" }).then((r) => { useStore.getState().setSessions(r.sessions ?? []); useStore.getState().seedRunningFromSessions(r.sessions ?? []); }).catch(() => {});
       void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});
