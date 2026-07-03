@@ -196,11 +196,13 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 <div className="mt-4 flex flex-col gap-3.5">
                   <p className="text-[11px] leading-relaxed text-muted">{t("settings.slackTokensDesc")}</p>
                   {/* Tokens get a full line each — they're quite long, so a half-width field would cut them off. */}
+                  {/* Any status other than "unconfigured" means tokens are already saved (write-only secrets are never echoed
+                      back), so the empty xoxb-…/xapp-… hint would misleadingly read as "not set" (audit #41). */}
                   <Field label={t("settings.slackBotToken")}>
-                    <Input type="password" placeholder="xoxb-…" value={slackBot} onChange={(e) => setSlackBot(e.target.value)} />
+                    <Input type="password" placeholder={p.slack !== "unconfigured" ? t("settings.secretSaved") : "xoxb-…"} value={slackBot} onChange={(e) => setSlackBot(e.target.value)} />
                   </Field>
                   <Field label={t("settings.slackAppToken")}>
-                    <Input type="password" placeholder="xapp-…" value={slackApp} onChange={(e) => setSlackApp(e.target.value)} />
+                    <Input type="password" placeholder={p.slack !== "unconfigured" ? t("settings.secretSaved") : "xapp-…"} value={slackApp} onChange={(e) => setSlackApp(e.target.value)} />
                   </Field>
                   <div className="flex justify-end">
                     <Button variant="outline" size="sm" disabled={!slackBot.trim() || !slackApp.trim()} onClick={() => { p.onSaveSlackTokens?.(slackBot.trim(), slackApp.trim()); setSlackBot(""); setSlackApp(""); }}>{t("settings.slackTokensSave")}</Button>
@@ -270,19 +272,25 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 <h2 className="text-[13px] font-semibold">{t("settings.integrations")}</h2>
                 <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.integrationsDesc")}</p>
 
+                {/* While integrations is still null (loading, or a silently-swallowed request failure), don't assert
+                    "auth needed" — that reads as a confident negative when we simply don't know yet (audit #15). */}
                 <div className="mt-3 flex items-center gap-3 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
                   <span className={cn("h-2 w-2 shrink-0 rounded-full transition-colors duration-200", p.integrations?.github.available ? "bg-pr" : "bg-stop")} />
                   <span className="text-[12px] text-fg-dim">
                     GitHub (gh CLI){p.integrations?.github.available ? ` · ${p.integrations.github.user ?? t("settings.githubConnected")}` : ""}
                   </span>
-                  {!p.integrations?.github.available && <span className="ml-auto text-[11px] text-muted">{t("settings.ghAuthNeeded")}</span>}
+                  {!p.integrations ? (
+                    <span className="ml-auto text-[11px] text-muted">{t("settings.checking")}</span>
+                  ) : !p.integrations.github.available ? (
+                    <span className="ml-auto text-[11px] text-muted">{t("settings.ghAuthNeeded")}</span>
+                  ) : null}
                 </div>
 
                 <div className="mt-2 flex flex-col gap-2 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
                   <div className="flex items-center gap-3">
                     <span className={cn("h-2 w-2 shrink-0 rounded-full transition-colors duration-200", p.integrations?.linear.valid ? "bg-pr" : p.integrations?.linear.configured ? "bg-fail" : "bg-stop")} />
                     <span className="text-[12px] text-fg-dim">
-                      Linear{p.integrations?.linear.valid ? ` · ${p.integrations.linear.user ?? t("settings.linearConnected")}` : p.integrations?.linear.configured ? ` · ${t("settings.linearKeyInvalid")}` : ""}
+                      Linear{!p.integrations ? ` · ${t("settings.checking")}` : p.integrations.linear.valid ? ` · ${p.integrations.linear.user ?? t("settings.linearConnected")}` : p.integrations.linear.configured ? ` · ${t("settings.linearKeyInvalid")}` : ""}
                     </span>
                   </div>
                   <div className="flex gap-2">
@@ -301,9 +309,12 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
 
             {tab === "claude" && (() => {
               const a = p.authStatus;
+              // While authStatus is still null (loading, or a silently-swallowed request failure), don't default to
+              // method="none" — that renders a confident "No auth active" even when a key is actually working (audit #15).
+              const checking = a == null;
               const method = a?.method ?? "none";
-              const dotCls = method === "api-key" ? "bg-accent" : method === "oauth" ? "bg-pr" : "bg-stop";
-              const label = method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
+              const dotCls = checking ? "bg-stop" : method === "api-key" ? "bg-accent" : method === "oauth" ? "bg-pr" : "bg-stop";
+              const label = checking ? t("settings.checking") : method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
               const desc = method === "api-key" ? t("settings.claudeApiKeyActive") : method === "oauth" ? t("settings.claudeSubscriptionActive") : t("settings.claudeNoneActive");
               return (
                 <section>
@@ -316,7 +327,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       <span className="text-[13px] font-medium text-fg">{label}</span>
                       {a?.method === "api-key" && a.apiKeyHint && <span className="font-mono text-[11px] text-muted">{a.apiKeyHint}</span>}
                     </div>
-                    <p className="mt-1 text-[11px] leading-relaxed text-muted">{desc}</p>
+                    {!checking && <p className="mt-1 text-[11px] leading-relaxed text-muted">{desc}</p>}
                   </div>
 
                   {a?.overridesSubscription && (

@@ -947,8 +947,18 @@ export function App(): JSX.Element {
                 .then((r) => { if (r) useStore.getState().setIntegrations({ github: r.github, linear: r.linear }); })
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
             }}
-            onSaveSlackTokens={(bot, app) => { void client?.request({ type: "settings.set", settings: { slackBotToken: bot, slackAppToken: app } }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }}
-            onSaveAnthropicKey={(key) => { void client?.request({ type: "settings.set", settings: { anthropicApiKey: key } }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }}
+            onSaveSlackTokens={(bot, app) => {
+              // slack.status arrives via the daemon's live reconcile-on-save broadcast — no extra refetch needed here (audit #8).
+              void client?.request({ type: "settings.set", settings: { slackBotToken: bot, slackAppToken: app } })
+                .then(() => toast.success(tRef.current("toast.keySaved")))
+                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+            }}
+            onSaveAnthropicKey={(key) => {
+              void client?.request({ type: "settings.set", settings: { anthropicApiKey: key } })
+                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "auth.status" }); })
+                .then((r) => { if (r) useStore.getState().setAuthStatus(r); })
+                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+            }}
           />
         ) : overlay === "newSession" ? (
           <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} />

@@ -30,4 +30,19 @@ describe("SettingsPage Claude tab", () => {
     fireEvent.click(screen.getByText("Claude"));
     expect(screen.getByText(/ANTHROPIC_API_KEY가 우선/)).toBeInTheDocument(); // surprise-billing warning
   });
+
+  it("shows a neutral 'checking' state instead of 'No auth active' while authStatus is still null (audit #15)", () => {
+    render(<SettingsPage {...base} authStatus={null} />);
+    fireEvent.click(screen.getByText("Claude"));
+    expect(screen.getByText("확인 중…")).toBeInTheDocument();
+    expect(screen.queryByText("인증이 감지되지 않았습니다. ANTHROPIC_API_KEY를 설정하거나 터미널에서 claude login을 실행하세요.")).toBeNull();
+    expect(screen.queryByText("인증 없음")).toBeNull(); // no confident "none" method label while unknown
+  });
+
+  it("keeps the 'No auth active' copy once authStatus has actually loaded as none", () => {
+    render(<SettingsPage {...base} authStatus={{ method: "none", apiKeyPresent: false, apiKeyHint: null, oauthPresent: false, overridesSubscription: false }} />);
+    fireEvent.click(screen.getByText("Claude"));
+    expect(screen.getByText("인증 없음")).toBeInTheDocument();
+    expect(screen.queryByText("확인 중…")).toBeNull();
+  });
 });

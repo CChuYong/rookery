@@ -11,4 +11,5 @@ export default {
   "toast.automationRan": "Automation ran",
   "toast.repoRegistered": "Repo registered",
   "toast.workerSpawned": "Worker spawned",
+  "toast.keySaved": "Key saved",
 } satisfies Catalog;

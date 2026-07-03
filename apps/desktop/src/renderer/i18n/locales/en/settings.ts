@@ -54,6 +54,8 @@ export default {
   "settings.linearKeyInvalid": "Key check failed",
   "settings.linearReplace": "Connected — replace with a new Linear API key",
   "settings.linearPlaceholder": "Linear API key (lin_…)",
+  "settings.checking": "Checking…",
+  "settings.secretSaved": "Saved — enter a new value to replace",
   "settings.language": "Language",
   "settings.languageDesc": "App display language. System default follows your OS language.",
   "settings.langSystem": "System default",

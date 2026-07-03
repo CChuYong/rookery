@@ -54,6 +54,8 @@ export default {
   "settings.linearKeyInvalid": "키 확인 실패",
   "settings.linearReplace": "연결됨 — 새 Linear API 키로 교체",
   "settings.linearPlaceholder": "Linear API 키 (lin_…)",
+  "settings.checking": "확인 중…",
+  "settings.secretSaved": "저장됨 — 교체하려면 새 값을 입력하세요",
   "settings.language": "언어",
   "settings.languageDesc": "앱 표시 언어. 시스템 기본값은 OS 언어를 따릅니다.",
   "settings.langSystem": "시스템 기본값",
