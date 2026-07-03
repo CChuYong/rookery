@@ -733,6 +733,28 @@ describe("FleetOrchestrator rehydrate (restart recovery)", () => {
     expect(s.agents.has("old1")).toBe(false); // no SDK session spun up
   });
 
+  it("maxTurns/effort survive a restart: rehydrate→materialize passes them to the factory (audit #9)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const seen: Array<{ maxTurns?: number; effort?: string }> = [];
+    const factory = (o: { maxTurns?: number; effort?: string }): WorkerLike => {
+      seen.push({ maxTurns: o.maxTurns, effort: o.effort });
+      return { start: () => {}, resume: () => {}, send: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: () => new Promise<void>(() => {}) };
+    };
+    const exists = () => true;
+    const fleet1 = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b", checkpointSha: "ck" }), factory, worktreesDir: "/wt", idgen: () => "a0", exists });
+    await fleet1.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t", maxTurns: 10, effort: "low" });
+    expect(seen[0]).toEqual({ maxTurns: 10, effort: "low" }); // persisted AND passed at spawn
+    repos.setWorkerSdkSessionId("a0", "sdk-1"); // make it resumable
+
+    // "restart": a fresh orchestrator over the same DB
+    const fleet2 = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b", checkpointSha: "ck" }), factory, worktreesDir: "/wt", idgen: () => "a1", exists });
+    fleet2.rehydrate();
+    fleet2.send("a0", "continue"); // lazy materialize
+    expect(seen[1]).toEqual({ maxTurns: 10, effort: "low" }); // restored from the row, not dropped
+  });
+
 });
 
 describe("ticket → branch", () => {

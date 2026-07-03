@@ -80,6 +80,8 @@ One row per spawned worker (fleet member).
 | `ticket_url` | TEXT | nullable | Ticket/issue URL |
 | `notify_armed` | INTEGER | NOT NULL, default `0` | One-shot: notify the master when this worker next settles |
 | `permission_mode` | TEXT | NOT NULL, default `'bypassPermissions'` | SDK permission mode (`bypassPermissions`\|`plan`), live-changeable |
+| `max_turns` | INTEGER | nullable | Per-result turn cap (unattended runaway guard). NULL = unlimited. Survives restart/fork. |
+| `effort` | TEXT | nullable | Spawn-time effort override. NULL = global default. Survives restart/fork. |
 
 Index: `idx_workers_session (session_id)`.
 

@@ -139,6 +139,13 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
       CREATE INDEX idx_pending_notifications_session ON pending_notifications(session_id);
     `);
   },
+  (db) => {
+    // Worker budget survives restart (audit #9): max_turns is the only unattended runaway guard and effort a
+    // spawn-time override — both were in-memory-only, so a lazy resume (rehydrate→materialize) or a fork
+    // silently ran uncapped at the global default effort. Nullable: NULL = unlimited / global default.
+    db.exec("ALTER TABLE workers ADD COLUMN max_turns INTEGER");
+    db.exec("ALTER TABLE workers ADD COLUMN effort TEXT");
+  },
 ];
 
 export function currentVersion(db: DB): number {

@@ -63,6 +63,8 @@ interface Entry {
   label?: string; // label to pass to the factory on materialize
   model?: string; // persisted current model → on resume, materialize with the same model (restart consistency)
   permissionMode?: string; // persisted current permission mode → on resume, materialize with the same mode (restart consistency)
+  maxTurns?: number; // persisted per-result turn cap → materialize restores it (the unattended runaway guard)
+  effort?: string; // persisted spawn-time effort override → materialize restores it
   resumeSessionId?: string; // if present, "resumable but not yet started (lazy)" state — materialize on first send/await
   pendingLabel?: boolean; // task-less spawn: relabel from the first send() message (not from spawn)
 }
@@ -110,7 +112,7 @@ export class FleetOrchestrator {
 
   // lazy resume: on first send/await, actually start the SDK session (factory+resume) → register the flow.
   private materialize(id: string, e: Entry): WorkerLike {
-    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, onTurnStart: () => this.checkpoint(id) });
+    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, onTurnStart: () => this.checkpoint(id) });
     agent.resume();
     e.agent = agent;
     e.resumeSessionId = undefined;
@@ -158,6 +160,8 @@ export class FleetOrchestrator {
         label: row.label,
         model: row.model ?? undefined,
         permissionMode: row.permission_mode ?? undefined,
+        maxTurns: row.max_turns ?? undefined,
+        effort: row.effort ?? undefined,
         resumeSessionId,
       });
     }
@@ -209,12 +213,15 @@ export class FleetOrchestrator {
     this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
     if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
     if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
+    if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
+    if (src.effort) this.deps.repos.setWorkerEffort(newId, src.effort);
     this.deps.repos.copyWorkerEvents(id, newId);
     // Register a lazy-resumable entry (like rehydrate) → idle; materializes (resumes the forked SDK session) on first send.
     this.deps.repos.setWorkerStatus(newId, "idle", true);
     this.entries.set(newId, {
       homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
       status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
+      maxTurns: src.max_turns ?? undefined, effort: src.effort ?? undefined,
       resumeSessionId: forkedUuid,
     });
     this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
@@ -243,6 +250,8 @@ export class FleetOrchestrator {
       ticketUrl: input.ticketUrl,
     });
     if (input.notify) this.deps.repos.setWorkerNotifyArmed(id, true);
+    if (input.maxTurns != null) repos.setWorkerMaxTurns(id, input.maxTurns);
+    if (input.effort) repos.setWorkerEffort(id, input.effort);
     // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
     // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
     // The agent's boot below reconciles it to running/idle; a failed worktree-create flips it to failed via the catch.
@@ -277,6 +286,8 @@ export class FleetOrchestrator {
         base,
         status: "provisioning", // reconciled to running/idle right after start() below (a real transition that emits worker.status)
         permissionMode: input.permissionMode, // remember so a later resume (materialize) restores the same mode
+        maxTurns: input.maxTurns, // remember so a later resume (materialize) restores the runaway guard
+        effort: input.effort, // remember so a later resume (materialize) restores the effort override
         pendingLabel: !input.task, // task-less spawn: relabel from the first send() message instead
       };
       this.entries.set(id, entry);

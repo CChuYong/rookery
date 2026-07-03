@@ -58,6 +58,18 @@ describe("Repositories", () => {
     expect(w.ticket_url).toBe("https://l/ENG-1");
   });
 
+  it("persists worker max_turns and effort (restart budget guard, audit #9)", () => {
+    const repos = new Repositories(openDb(":memory:"), () => "t");
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w" });
+    expect(repos.getWorker("w1")!.max_turns).toBeNull();
+    expect(repos.getWorker("w1")!.effort).toBeNull();
+    repos.setWorkerMaxTurns("w1", 10);
+    repos.setWorkerEffort("w1", "low");
+    expect(repos.getWorker("w1")!.max_turns).toBe(10);
+    expect(repos.getWorker("w1")!.effort).toBe("low");
+  });
+
   it("creates and reads a session", () => {
     const s = repos.createSession({ id: "s1", cwd: "/work/repo" });
     expect(s.status).toBe("active");

@@ -35,6 +35,8 @@ export interface WorkerRow {
   sdk_session_id: string | null;
   model: string | null;
   permission_mode: string; // 'bypassPermissions' | 'plan' — the worker's SDK permission mode (spawn-set, live-changeable)
+  max_turns: number | null; // per-result turn cap (the unattended runaway guard). NULL = unlimited.
+  effort: string | null; // spawn-time effort override. NULL = global default.
   archived_at: string | null;
   notify_armed: number; // 0/1 — one-shot "notify the home master when I next settle"
   created_at: string;
@@ -388,6 +390,14 @@ export class Repositories {
     this.db
       .prepare("UPDATE workers SET permission_mode = ?, updated_at = ? WHERE id = ?")
       .run(mode, this.now(), id);
+  }
+
+  setWorkerMaxTurns(id: string, maxTurns: number): void {
+    this.db.prepare("UPDATE workers SET max_turns = ?, updated_at = ? WHERE id = ?").run(maxTurns, this.now(), id);
+  }
+
+  setWorkerEffort(id: string, effort: string): void {
+    this.db.prepare("UPDATE workers SET effort = ?, updated_at = ? WHERE id = ?").run(effort, this.now(), id);
   }
 
   addWorkerEvent(input: {
