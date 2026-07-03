@@ -42,6 +42,8 @@ export function WorkerSpawnModal(p: {
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<SourceItem | null>(null);
   const [focused, setFocused] = useState(false); // show results dropdown only when the search box is focused
+  // -1 = nothing highlighted yet, so the first ArrowDown press lands cleanly on index 0.
+  const [highlight, setHighlight] = useState(-1);
   const seq = useRef(0);
 
   const githubOk = !!p.integrations?.github.available;
@@ -52,12 +54,14 @@ export function WorkerSpawnModal(p: {
     { key: "linear", label: "Linear", enabled: linearOk, hint: t("workerSpawnModal.linearHint") },
   ];
   const sourceMode = mode === "github" || mode === "linear";
+  const dropdownOpen = focused && (searching || results.length > 0 || q.trim().length > 0);
   const seg = useSegmentIndicator(mode); // bg pill that slides over the mode segments
 
   useEffect(() => {
     if (!sourceMode || !p.searchSource || selected) return;
     const mine = ++seq.current;
     setSearching(true);
+    setHighlight(-1); // a new query is in flight — drop any highlight from the previous result list
     const t = setTimeout(() => {
       p.searchSource!(mode, q)
         .then((items) => { if (seq.current === mine) { setResults(items); setSearching(false); } })
@@ -66,7 +70,7 @@ export function WorkerSpawnModal(p: {
     return () => clearTimeout(t);
   }, [q, mode, selected]);
 
-  const switchMode = (m: Mode) => { setMode(m); setSelected(null); setQ(""); setResults([]); };
+  const switchMode = (m: Mode) => { setMode(m); setSelected(null); setQ(""); setResults([]); setHighlight(-1); };
   const pickSource = (item: SourceItem) => {
     const built = buildSourceTask(item);
     setTask(built.task);
@@ -172,17 +176,31 @@ export function WorkerSpawnModal(p: {
                     onChange={(e) => setQ(e.target.value)}
                     onFocus={() => setFocused(true)}
                     onBlur={() => setFocused(false)}
+                    onKeyDown={(e) => {
+                      if (!dropdownOpen) return;
+                      if (e.key === "ArrowDown" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.min(results.length - 1, h + 1)); }
+                      else if (e.key === "ArrowUp" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
+                      else if (e.key === "Enter" && highlight >= 0 && highlight < results.length) { e.preventDefault(); pickSource(results[highlight]!); }
+                      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } // close only the results list, not the whole modal
+                    }}
+                    role="combobox"
+                    aria-expanded={dropdownOpen}
+                    aria-controls="worker-spawn-source-results"
+                    aria-activedescendant={highlight >= 0 && highlight < results.length ? `worker-spawn-source-result-${highlight}` : undefined}
                   />
-                  {focused && (searching || results.length > 0 || q.trim().length > 0) && (
+                  {dropdownOpen && (
                     // onMouseDown preventDefault: prevents the dropdown from closing first on input blur when a result is clicked, which would swallow the click.
-                    <div className="max-h-44 overflow-y-auto rounded-[var(--radius)] border border-line bg-ink/40" onMouseDown={(e) => e.preventDefault()}>
+                    <div id="worker-spawn-source-results" role="listbox" className="max-h-44 overflow-y-auto rounded-[var(--radius)] border border-line bg-ink/40" onMouseDown={(e) => e.preventDefault()}>
                       {searching && results.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-muted">{t("workerSpawnModal.searching")}</div>}
                       {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-2.5 py-1.5 text-[11px] text-muted">{t("workerSpawnModal.noResults")}</div>}
-                      {results.map((it) => (
+                      {results.map((it, i) => (
                         <button
                           key={`${it.provider}:${it.id}`}
+                          id={`worker-spawn-source-result-${i}`}
+                          role="option"
+                          aria-selected={i === highlight}
                           onClick={() => pickSource(it)}
-                          className="flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-accent/10"
+                          className={cn("flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-accent/10", i === highlight && "bg-accent/10")}
                         >
                           <span className="shrink-0 font-mono text-[11px] text-accent">{it.identifier}</span>
                           <span className="truncate text-fg">{it.title}</span>

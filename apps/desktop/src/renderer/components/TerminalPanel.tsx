@@ -43,7 +43,7 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
         {group.tabs.map((tab) => (
           <div key={tab.id} className={cn("group flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11px]", tab.id === group.activeTabId ? "bg-raised text-fg" : "text-muted hover:bg-raised/60")}>
             <button role="tab" aria-selected={tab.id === group.activeTabId} onClick={() => setActive_(sessionId, tab.id)} className={cn("max-w-[120px] truncate", tab.exited && "text-stop line-through")}>{tab.title}</button>
-            <button onClick={() => close(tab.id)} aria-label={t("terminalPanel.closeTerminal")} className="text-muted opacity-0 hover:text-fail group-hover:opacity-100"><X size={11} /></button>
+            <button onClick={() => close(tab.id)} aria-label={t("terminalPanel.closeTerminal")} className="text-muted opacity-0 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={11} /></button>
           </div>
         ))}
         <button onClick={() => void newTab()} aria-label={t("terminalPanel.newTerminal")} className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-raised hover:text-accent"><Plus size={13} /></button>

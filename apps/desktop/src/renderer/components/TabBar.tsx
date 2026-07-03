@@ -33,7 +33,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
               {dirty && <span className="dot-pop h-1.5 w-1.5 rounded-full bg-fg-dim" />}
             </button>
             {tab.kind !== "agent" && (
-              <button onClick={() => closeTab(pageKey, tab.id)} aria-label={t("tabBar.closeTab")} className="text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100"><X size={11} /></button>
+              <button onClick={() => closeTab(pageKey, tab.id)} aria-label={t("tabBar.closeTab")} className="text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={11} /></button>
             )}
           </div>
         );

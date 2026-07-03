@@ -42,7 +42,7 @@ export function RookeryTab(props: IDockviewPanelHeaderProps): JSX.Element {
           onMouseDown={(e) => e.stopPropagation()} /* don't start a tab drag when clicking close */
           onClick={(e) => { e.stopPropagation(); api.close(); }}
           aria-label={t("tabBar.closeTab")}
-          className="ml-0.5 rounded p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100"
+          className="ml-0.5 rounded p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
         >
           <X size={11} />
         </button>
