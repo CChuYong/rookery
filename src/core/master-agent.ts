@@ -126,6 +126,16 @@ export class MasterAgent {
 
   constructor(private readonly opts: MasterAgentOpts) {
     this.sdkSessionId = opts.sdkSessionId;
+    // Seed the session-cumulative counters from the last persisted result: they are documented as cumulative,
+    // and starting from 0 after a rebuild (restart/fork copies the transcript) wrote non-monotonic totals (audit #22).
+    try {
+      const last = opts.deps.repos.lastSessionEventPayload(opts.sessionId, "master.result");
+      if (last) {
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
+        this.cumCostUsd = p.costUsd ?? 0;
+        this.cumTurns = p.numTurns ?? 0;
+      }
+    } catch { /* corrupt row — start from 0 */ }
   }
 
   // Only persist the transcript event to session_events (the source of truth for restore). Live emit is decided separately by the caller.

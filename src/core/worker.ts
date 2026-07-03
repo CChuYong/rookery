@@ -67,7 +67,8 @@ export class Worker {
   private sdkSessionId: string | null;
   private currentModel: string; // current model (changeable live via setModel). The query option holds the value at start time.
   private currentPermissionMode: string; // changeable live via setPermissionMode (query.setPermissionMode). Held value at start time.
-  // cumulative cost/turns — isomorphic to the master (cumCostUsd/cumTurns): accumulates over the worker's entire lifetime, even after restart.
+  // cumulative cost/turns — isomorphic to the master (cumCostUsd/cumTurns): accumulates over the worker's entire lifetime,
+  // even after restart (resume() re-seeds them from the last persisted result — audit #28).
   private cumCostUsd = 0;
   private cumTurns = 0;
 
@@ -107,6 +108,16 @@ export class Worker {
     // continue seq after the pre-restart events (0..N) — otherwise we'd rewrite from 0, causing collisions and
     // breaking sinceSeq incremental / re-seeded transcript fetches.
     this.seq = this.opts.deps.repos.nextWorkerSeq(this.opts.id);
+    // Seed the lifetime-cumulative counters from the last persisted result (audit #28) — resume() restores seq
+    // but the counters started at 0, making the transcript's metrics rows non-monotonic after a restart.
+    try {
+      const last = this.opts.deps.repos.lastWorkerEventPayload(this.opts.id, "result");
+      if (last) {
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
+        this.cumCostUsd = p.costUsd ?? 0;
+        this.cumTurns = p.numTurns ?? 0;
+      }
+    } catch { /* corrupt row — start from 0 */ }
     this.opts.deps.repos.setWorkerModel(this.opts.id, this.currentModel);
     this.opts.deps.repos.setWorkerPermissionMode(this.opts.id, this.currentPermissionMode);
     this.transition("idle");

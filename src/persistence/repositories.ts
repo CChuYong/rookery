@@ -253,6 +253,17 @@ export class Repositories {
       .run(toId, fromId);
   }
 
+  // Latest persisted payload of an event type — seeds in-memory cumulative counters after a rebuild (audit #22/#28).
+  lastSessionEventPayload(sessionId: string, type: string): string | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM session_events WHERE session_id = ? AND type = ? ORDER BY seq DESC LIMIT 1").get(sessionId, type) as { payload_json: string } | undefined;
+    return row?.payload_json;
+  }
+
+  lastWorkerEventPayload(workerId: string, type: string): string | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM worker_events WHERE worker_id = ? AND type = ? ORDER BY seq DESC LIMIT 1").get(workerId, type) as { payload_json: string } | undefined;
+    return row?.payload_json;
+  }
+
   createWorker(input: {
     id: string;
     sessionId: string;

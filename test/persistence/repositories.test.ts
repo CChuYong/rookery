@@ -50,6 +50,19 @@ describe("Repositories", () => {
     expect(repos.listWorkerEvents("wa")).toHaveLength(2); // source untouched
   });
 
+  it("lastSessionEventPayload / lastWorkerEventPayload return the highest-seq payload of the type", () => {
+    const repos = new Repositories(openDb(":memory:"), () => "t");
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.addSessionEvent({ sessionId: "s1", seq: 0, type: "master.result", payloadJson: '{"costUsd":1}' });
+    repos.addSessionEvent({ sessionId: "s1", seq: 1, type: "master.message", payloadJson: '{"content":"x"}' });
+    repos.addSessionEvent({ sessionId: "s1", seq: 2, type: "master.result", payloadJson: '{"costUsd":2}' });
+    expect(repos.lastSessionEventPayload("s1", "master.result")).toBe('{"costUsd":2}');
+    expect(repos.lastSessionEventPayload("s1", "nope")).toBeUndefined();
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w" });
+    repos.addWorkerEvent({ workerId: "w1", seq: 0, type: "result", payloadJson: '{"costUsd":3}' });
+    expect(repos.lastWorkerEventPayload("w1", "result")).toBe('{"costUsd":3}');
+  });
+
   it("createWorker stores ticketKey/ticketUrl", () => {
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "t", ticketKey: "ENG-1", ticketUrl: "https://l/ENG-1" });

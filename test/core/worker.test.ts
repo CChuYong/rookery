@@ -180,6 +180,36 @@ describe("Worker", () => {
     expect(Math.max(...seqs)).toBeGreaterThanOrEqual(3); // new events continue from 3 or higher
   });
 
+  it("resume() seeds cumulative cost/turns from the last persisted result — monotonic after restart (audit #28)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // A pre-restart result already persisted the lifetime-cumulative totals (cost 1.2 / turns 3).
+    repos.addWorkerEvent({ workerId: "a1", seq: 0, type: "message", payloadJson: '{"kind":"message","role":"user","content":"go"}' });
+    repos.addWorkerEvent({ workerId: "a1", seq: 1, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 1.2, numTurns: 3 }) });
+    const bus = new EventBus();
+    const events: CoreEvent[] = [];
+    bus.subscribe("s1", (e) => events.push(e));
+    const agent = new Worker({
+      id: "a1",
+      sessionId: "s1",
+      repoPath: "/r",
+      label: "t",
+      sdkSessionId: "sdk-1",
+      // Streaming fake so resume() drops to idle and a later send() drives one more turn (+0.1 cost / +1 turn).
+      deps: { repos, bus, model: "m", queryFn: fakeStreamingQuery(() => [{ type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "sdk-1" }]) },
+    });
+    agent.resume();
+    await until(() => agent.status() === "idle");
+    agent.send("continue");
+    await until(() => agent.status() === "idle");
+    const results = events.filter((e) => e.type === "worker.event" && (e as Extract<CoreEvent, { type: "worker.event" }>).data.kind === "result");
+    const last = (results.at(-1) as Extract<CoreEvent, { type: "worker.event" }>).data as { costUsd: number; numTurns: number };
+    expect(last.costUsd).toBeCloseTo(1.3); // 1.2 (seeded) + 0.1 (this turn) — not a reset to 0.1
+    expect(last.numTurns).toBe(4); // 3 (seeded) + 1 (this turn)
+    await agent.stop();
+  });
+
   it("routes nested-worker activity (parent_tool_use_id) to a live worker.nested event, not the DB", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });

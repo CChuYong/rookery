@@ -805,4 +805,17 @@ describe("MasterAgent", () => {
       expect(base.repos.pendingNotifications("s1")).toEqual([]);
     });
   });
+
+  it("cumulative cost/turns survive a rebuild — master.result totals stay monotonic (audit #22)", async () => {
+    const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0.5, num_turns: 2, session_id: "s" }]));
+    const m1 = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: base });
+    await m1.runTurn("a");
+    const m2 = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: "s", deps: base }); // "restart" rebuild
+    const events: CoreEvent[] = [];
+    base.bus.subscribe("s1", (e) => events.push(e));
+    await m2.runTurn("b");
+    const results = events.filter((e) => e.type === "master.result") as Array<{ costUsd: number; numTurns: number }>;
+    expect(results.at(-1)!.costUsd).toBeCloseTo(1.0); // 0.5 (seeded) + 0.5 (this turn) — not a reset to 0.5
+    expect(results.at(-1)!.numTurns).toBe(4);
+  });
 });
