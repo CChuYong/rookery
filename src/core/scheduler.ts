@@ -76,11 +76,18 @@ export class Scheduler {
     if (fresh) await this.d.dispatcher.run(fresh, {});
   }
 
-  // Once (self-wakeup): delete BEFORE firing — so that even if the run takes longer than a tick, the next tick can't re-fire it (prevents double-firing).
-  // The dispatcher has no overlap guard for event/once triggers, so this delete-first is once's only protection.
+  // Once (self-wakeup): CLAIM first (null next_run) instead of delete-before-fire. The null claim keeps the
+  // 30s tick from double-firing while the run is in flight (tick skips rows without next_run_at), and the row
+  // surviving the run means a daemon crash mid-run is recoverable: boot's start() re-arms enabled once-rows
+  // with no next_run_at back to trigger.runAt, so the wakeup refires (at-least-once) instead of vanishing.
+  // Delete only after the run settles (success or error — the wakeup fired either way).
   private async fireOnce(a: Automation): Promise<void> {
     if (a.trigger.kind !== "once") return;
-    this.d.repos.deleteAutomation(a.id);
-    await this.d.dispatcher.run(a, {});
+    this.d.repos.setAutomationNextRun(a.id, null);
+    try {
+      await this.d.dispatcher.run(a, {});
+    } finally {
+      this.d.repos.deleteAutomation(a.id);
+    }
   }
 }

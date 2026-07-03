@@ -193,6 +193,42 @@ it("start() populates nextRunAt for a 'once' with runAt and no nextRunAt", () =>
   expect(h.repos.getAutomation("w1")!.nextRunAt).toBe(at);
 });
 
+it("once: claims (next_run=null) before firing and deletes only after the run settles — a crash mid-run can refire on boot", async () => {
+  const h = harness(past);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const runs: string[] = [];
+  // Gate the dispatch so the run stays "in flight" across the assertions below.
+  h.dispatchRun.mockImplementation(async (a) => { runs.push(a.id); await gate; });
+  h.repos.createAutomation("a1", {
+    name: "wakeup", enabled: true,
+    trigger: { kind: "once", runAt: past },
+    action: { kind: "master", prompt: "resume", cwd: "/w", sessionMode: "reuse" },
+  });
+  h.repos.setAutomationNextRun("a1", past); // due (overdue)
+  h.sched.start();
+  h.fireTick(); // fires fireOnce
+  await Promise.resolve();
+  expect(runs).toEqual(["a1"]);
+  expect(h.repos.getAutomation("a1")).toBeDefined(); // row survives while the run is in flight (crash-safe)
+  expect(h.repos.getAutomation("a1")!.nextRunAt).toBeNull(); // claimed — the next tick cannot double-fire
+  h.fireTick(); // second tick during the run
+  await Promise.resolve();
+  expect(runs).toEqual(["a1"]); // no double fire (claimed row is skipped)
+  release();
+  await new Promise((r) => setTimeout(r, 0)); // flush the fired promise's finally
+  expect(h.repos.getAutomation("a1")).toBeUndefined(); // deleted after settle
+});
+
+it("once: a row left claimed by a crash is re-armed by start() and refires", () => {
+  const h = harness(past);
+  const at = "2026-06-22T05:00:00.000Z";
+  h.repos.createAutomation("a1", { name: "wakeup", enabled: true, trigger: { kind: "once", runAt: at }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" } });
+  h.repos.setAutomationNextRun("a1", null); // simulate the crash state: claimed (nulled) but not yet deleted
+  h.sched.start(); // reconcile re-arms enabled once-rows with no next_run_at back to trigger.runAt
+  expect(h.repos.getAutomation("a1")!.nextRunAt).toBe(at);
+});
+
 it("start() auto-populates nextRunAt for enabled cron with no nextRunAt", () => {
   const h = harness(past);
   h.repos.createAutomation("a1", {

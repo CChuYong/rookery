@@ -14,7 +14,7 @@ An automation rule = a **trigger** + an **action**, persisted in the `automation
 
 Every trigger source funnels through `AutomationDispatcher.run(a, vars)` (`src/core/automation-dispatcher.ts:21`). The source only decides *what* rule and *which vars*; the dispatcher owns overlap policy, run-recording, and the change event.
 
-- **Overlap guard is trigger-kind-specific:** only `cron` (time) triggers skip when already in-flight (`inflight` Set), recording `last_status:"skipped"` to prevent schedule pile-up when a run outlasts its period. `slack` (event) triggers allow **concurrent** runs — every message must be processed, none dropped. (`once` needs no dispatcher guard; the Scheduler deletes it before firing.)
+- **Overlap guard is trigger-kind-specific:** only `cron` (time) triggers skip when already in-flight (`inflight` Set), recording `last_status:"skipped"` to prevent schedule pile-up when a run outlasts its period. `slack` (event) triggers allow **concurrent** runs — every message must be processed, none dropped. (`once` needs no dispatcher guard; the Scheduler claims it by nulling `next_run_at` before firing — the tick skips claimed rows — and deletes only after the run settles.)
 - **Run recording:** sets a transient `running` (UI pulse) → `beforeRun?` hook (best-effort; the daemon uses it to attach a Slack thread reporter before the first event) → `runAutomationAction` → `setAutomationRun` with final `ok`/`error` (+ error string), **always preserving `next_run_at`** (the Scheduler owns that). Each transition emits `automation.changed` on `ALL_CHANNEL`.
 
 ## runAutomationAction — the pure action
@@ -42,7 +42,7 @@ The master system prompt (`master-agent.ts` `SYSTEM_PROMPT_BASE`) and the worker
 - `start()` backfills `next_run_at` only for enabled `cron`/`once` rules missing one (cron is forward-from-now, not back-filled; once persists `runAt` so a past-due wakeup fires on the next tick), then installs a tick (default 30 s, injectable `schedule`).
 - `tick()` (`scheduler.ts:61`) selects enabled `cron`/`once` rules with `next_run_at <= now`.
 - `fireCron` (`scheduler.ts:70`): **advance `next_run_at` first**, re-read the fresh row, then `dispatcher.run(fresh, {})` — so the dispatcher's run-record preserves the already-advanced value (no double recording).
-- `fireOnce` (`scheduler.ts:81`): **delete the rule before firing** — the only protection against double-firing for once (the dispatcher has no event/once overlap guard).
+- `fireOnce` (`scheduler.ts:81`): **claim the rule by nulling `next_run_at` before firing** (the tick skips claimed rows, so a slow run can't double-fire — the dispatcher has no event/once overlap guard), then **delete only after the run settles**. The surviving row makes a crash mid-run recoverable: `start()` re-arms enabled once-rows with no `next_run_at` back to `runAt`, so the wakeup refires (at-least-once) instead of vanishing.
 - `runNow(id, vars)` fires once immediately without advancing `next_run_at`. `reconcile(id)` recomputes `next_run_at` on create/update/enable; the protocol layer rejects an invalid cron via `isValidCron`.
 
 ## Trigger source ② slack — trigger-source
