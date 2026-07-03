@@ -169,12 +169,16 @@ export class Connection {
       case "session.send": {
         const session = this.sessions.get(msg.sessionId);
         if (!session) {
-          this.reply({ type: "error", message: `unknown session: ${msg.sessionId}` });
+          // error+reqId so a request()-style client (desktop) can roll back its optimistic bubble instead of it hanging silently.
+          this.reply({ type: "error", message: `unknown session: ${msg.sessionId}`, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
           return;
         }
         this.subscribe(session.id);
         // Per-UI-session model/effort/permissionMode overrides (if present). Otherwise the global defaults (Slack also uses this path).
+        // A runTurn throw is caught by the outer try/catch and replied as error+reqId.
         await session.master.runTurn(msg.text, { model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
+        // Ack when a reqId is present so request()-style clients get a settled promise; fire-and-forget (no reqId) stays unchanged for old clients.
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sessionId });
         return;
       }
       case "session.stop": {

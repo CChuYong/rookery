@@ -518,7 +518,11 @@ export function App(): JSX.Element {
             // select is async, so we can't rely on send()'s activeSessionId → send explicitly with the new sid. The pending bubble immediately shows "in progress".
             const clientMsgId = crypto.randomUUID();
             useStore.getState().pushPending(sid, { clientMsgId, text: prompt });
-            c.send({ type: "session.send", sessionId: sid, text: prompt, model: opts.model, effort: opts.effort, clientMsgId });
+            // request(): a rejected send rolls the pending bubble back and surfaces a toast instead of silently stranding it.
+            void c.request({ type: "session.send", sessionId: sid, text: prompt, model: opts.model, effort: opts.effort, clientMsgId }).catch((e) => {
+              useStore.getState().dropPending(sid, clientMsgId);
+              toast.error(tRef.current("toast.sendFailed"), String(e));
+            });
           }
         }),
       )
@@ -532,7 +536,12 @@ export function App(): JSX.Element {
     const clientMsgId = crypto.randomUUID();
     st.pushPending(sid, { clientMsgId, text }); // pending bubble: immediately "in progress" (stop button) → switches to committed when the daemon's user echo arrives
     const ov = st.overrides[sid] ?? {}; // per-session override (backend uses defaults if absent)
-    client?.send({ type: "session.send", sessionId: sid, text, model: ov.model, effort: ov.effort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId });
+    // request(): a rejected send (unknown session, runTurn throw, disconnected) rolls the pending bubble back and surfaces a toast —
+    // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished while the composer stayed stuck busy.
+    void client?.request({ type: "session.send", sessionId: sid, text, model: ov.model, effort: ov.effort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
+      useStore.getState().dropPending(sid, clientMsgId);
+      toast.error(tRef.current("toast.sendFailed"), String(e));
+    });
   }, []);
   // Stop the in-progress master turn. The backend aborts+interrupts and emits a "stopped" notice.
   // The stop button disappears when running clears via master.status:idle (server authority) — no optimistic immediate release needed.

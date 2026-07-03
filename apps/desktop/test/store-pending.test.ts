@@ -34,6 +34,16 @@ describe("pushPending (pending message infra — dormant)", () => {
     useStore.getState().applyEvent({ type: "master.message", sessionId: "s1", role: "user", content: "q", clientMsgId: "c1" });
     expect(useStore.getState().pendingBySession.s1).toEqual([{ clientMsgId: "c2", text: "r", epoch: 0 }]);
   });
+
+  it("dropPending rolls back the failed send's bubble and leaves other sessions untouched", () => {
+    useStore.getState().pushPending("s1", { clientMsgId: "c1", text: "a" });
+    useStore.getState().pushPending("s1", { clientMsgId: "c2", text: "b" });
+    useStore.getState().pushPending("s2", { clientMsgId: "c3", text: "c" });
+    useStore.getState().dropPending("s1", "c1");
+    useStore.getState().dropPending("s1", "c2");
+    expect(useStore.getState().pendingBySession.s1).toEqual([]);
+    expect(useStore.getState().pendingBySession.s2).toEqual([{ clientMsgId: "c3", text: "c", epoch: 0 }]);
+  });
 });
 
 describe("pendingBySession fallback reconciliation (audit #17)", () => {

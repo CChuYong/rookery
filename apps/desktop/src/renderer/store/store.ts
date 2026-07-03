@@ -88,6 +88,8 @@ interface Store extends AppState {
   dropWorkerPending: (id: string, clientMsgId: string) => void;
   // Add an optimistic pending bubble on the App send path. Transitioned to committed via isEchoUser dedup when the daemon user echo (master.message role=user) arrives.
   pushPending: (sid: string, item: { clientMsgId: string; text: string }) => void;
+  // Roll back an optimistic master bubble whose session.send was rejected (unknown session, runTurn throw, disconnected).
+  dropPending: (sid: string, clientMsgId: string) => void;
 }
 
 // DSK-7: Persist per-session overrides to localStorage (kept across reloads) + clean up overrides for sessions that no longer exist.
@@ -229,6 +231,8 @@ export const useStore = create<Store>((set, get) => ({
   // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
   dropWorkerPending: (id, clientMsgId) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: (s.pendingByWorker[id] ?? []).filter((p) => p.clientMsgId !== clientMsgId) } })),
   pushPending: (sid, item) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: [...(s.pendingBySession[sid] ?? []), { ...item, epoch: s.connectionEpoch }] } })),
+  // Roll back an optimistic master bubble whose session.send was rejected (unknown session, runTurn throw, disconnected).
+  dropPending: (sid, clientMsgId) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: (s.pendingBySession[sid] ?? []).filter((p) => p.clientMsgId !== clientMsgId) } })),
   seedWorkerHistory: (id, events) =>
     set((s) => ({
       workerLogs: {

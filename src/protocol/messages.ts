@@ -43,7 +43,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
-  z.object({ type: z.literal("session.send"), sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional() }),
+  z.object({ type: z.literal("session.send"), sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.stop"), sessionId: z.string(), reqId: z.string().optional() }),
   // Master canUseTool (approval/AskUserQuestion) response — resolves the pending interaction by requestId (=toolUseID).
   z.object({
@@ -189,12 +189,13 @@ export type ServerMessage =
 
 // Request (a request that gets a response via reqId) type → response ServerMessage mapping — **single source**.
 // Must be 1:1 with the reply types in the daemon's connection.ts (when adding a new request, add it here too → WsClient.request stays type-safe).
-// fire-and-forget (send: session.send/attach, worker.setModel/setPermissionMode, *.subscribe) is excluded since it has no response.
-// Mutations without their own ack (session/worker delete, archive, rename, restore, session.stop) all respond with fleet.ack.
+// fire-and-forget (send: session.attach, worker.setModel/setPermissionMode, *.subscribe) is excluded since it has no response.
+// Mutations without their own ack (session/worker delete, archive, rename, restore, session.stop, session.send) all respond with fleet.ack.
 export interface RequestResultMap {
   "session.create": Extract<ServerMessage, { type: "session.created" }>;
   "session.open": Extract<ServerMessage, { type: "session.created" }>;
   "session.fork": Extract<ServerMessage, { type: "session.created" }>;
+  "session.send": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.rename": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.archive": Extract<ServerMessage, { type: "fleet.ack" }>;

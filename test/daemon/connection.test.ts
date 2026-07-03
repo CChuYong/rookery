@@ -159,6 +159,23 @@ describe("Connection", () => {
     expect(types).toContain("master.result");
   });
 
+  it("session.send with a reqId is acked on success (so the desktop can await it)", async () => {
+    const { conn, sent } = setup();
+    await conn.handleRaw(JSON.stringify({ type: "session.create", cwd: "/work" }));
+    sent.length = 0;
+    await conn.handleRaw(JSON.stringify({ type: "session.send", sessionId: "s0", text: "hi", clientMsgId: "c1", reqId: "q1" }));
+    const acks = parsed(sent).filter((m) => m.type === "fleet.ack");
+    expect(acks).toContainEqual(expect.objectContaining({ reqId: "q1", action: "send", id: "s0" }));
+  });
+
+  it("session.send to an unknown session replies error+reqId (so the desktop can roll back the bubble)", async () => {
+    const { conn, sent } = setup();
+    await conn.handleRaw(JSON.stringify({ type: "session.send", sessionId: "nope", text: "hi", clientMsgId: "c1", reqId: "q2" }));
+    const err = parsed(sent).find((m) => m.type === "error");
+    expect(err).toBeTruthy();
+    expect(err!.reqId).toBe("q2");
+  });
+
   it("replies with error on invalid message", async () => {
     const { conn, sent } = setup();
     await conn.handleRaw("{bad json");
