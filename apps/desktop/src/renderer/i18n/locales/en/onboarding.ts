@@ -14,4 +14,5 @@ export default {
   "onboarding.back": "Back",
   "onboarding.next": "Next",
   "onboarding.getStarted": "Get started",
+  "onboarding.saveFailed": "Couldn't save — please try again.",
 } satisfies Catalog;

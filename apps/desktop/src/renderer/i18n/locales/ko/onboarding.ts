@@ -14,4 +14,5 @@ export default {
   "onboarding.back": "이전",
   "onboarding.next": "다음",
   "onboarding.getStarted": "시작하기",
+  "onboarding.saveFailed": "저장하지 못했어요 — 다시 시도해주세요.",
 } satisfies Catalog;

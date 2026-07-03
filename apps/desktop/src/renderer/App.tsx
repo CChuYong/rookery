@@ -1164,23 +1164,23 @@ export function App(): JSX.Element {
           onClose={() => setSpawnRepo(null)}
         />
       )}
+      {/* onAccept RETURNS the request promise (rather than swallowing it) so the modal itself can show busy/error
+          feedback on failure — it only mounts once daemon==="up", at which point `client` is guaranteed set. */}
       <DataConsentModal
         settings={s.settings}
         daemon={s.daemon}
-        onAccept={() => {
-          void client?.request({ type: "settings.set", settings: { hasAcceptedDataNotice: "1" } })
+        onAccept={() =>
+          client!.request({ type: "settings.set", settings: { hasAcceptedDataNotice: "1" } })
             .then(() => useStore.getState().setSettings({ ...useStore.getState().settings!, hasAcceptedDataNotice: "1" }))
-            .catch(() => {});
-        }}
+        }
       />
       {/* Onboarding (after consent, before all-set): welcome+concept modal, then a non-blocking Getting Started card. */}
       {s.daemon === "up" && s.settings && s.settings.hasAcceptedDataNotice === "1" && s.settings.onboardingDone !== "1" && (
         <OnboardingModal
-          onFinish={() => {
-            void client?.request({ type: "settings.set", settings: { onboardingDone: "1" } })
+          onFinish={() =>
+            client!.request({ type: "settings.set", settings: { onboardingDone: "1" } })
               .then(() => useStore.getState().setSettings({ ...useStore.getState().settings!, onboardingDone: "1" }))
-              .catch(() => {});
-          }}
+          }
         />
       )}
       {(() => {

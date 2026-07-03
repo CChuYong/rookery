@@ -1,26 +1,52 @@
-import { useState } from "react";
-import { Sparkles, Bot, Users, Brain, ArrowRight } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { Sparkles, Bot, Users, Brain, ArrowRight, Loader2 } from "lucide-react";
 import { useT } from "../i18n/provider.js";
+import { useModalKeys } from "../lib/useModalKeys.js";
+import { useFocusTrap } from "../lib/useFocusTrap.js";
 
 // First-run onboarding (shown after the data-consent gate, before the app proper): a short welcome + a
-// concept screen explaining rookery's master / worker-fleet / memory model. onFinish persists onboardingDone.
-export function OnboardingModal({ onFinish }: { onFinish: () => void }): JSX.Element {
+// concept screen explaining rookery's master / worker-fleet / memory model. onFinish persists onboardingDone
+// and returns the settings.set promise so this modal owns success/failure feedback (audit #7).
+export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown> }): JSX.Element {
   const t = useT();
   const [step, setStep] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(false);
   const last = 1;
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const finish = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setErr(false);
+    try {
+      await onFinish();
+      // On success, onboardingDone flips to "1" and the parent stops rendering this modal — no reset needed.
+    } catch {
+      setErr(true);
+      setBusy(false);
+    }
+  };
+  const advance = (): void => {
+    if (step < last) setStep(step + 1);
+    else void finish();
+  };
+  useModalKeys(() => void finish(), advance); // Enter → Next/Get started, Escape → Skip (audit #25)
+  useFocusTrap(panelRef);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="rise-in mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-8 shadow-2xl">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="rise-in mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-8 shadow-2xl">
         {step === 0 ? (
           <div className="flex flex-col items-center text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent"><Sparkles size={22} /></div>
-            <h2 className="text-lg font-semibold">{t("onboarding.welcomeTitle")}</h2>
+            <h2 id={titleId} className="text-lg font-semibold">{t("onboarding.welcomeTitle")}</h2>
             <p className="mt-3 text-sm leading-relaxed text-muted">{t("onboarding.welcomeBody")}</p>
           </div>
         ) : (
           <div>
-            <h2 className="text-center text-lg font-semibold">{t("onboarding.conceptTitle")}</h2>
+            <h2 id={titleId} className="text-center text-lg font-semibold">{t("onboarding.conceptTitle")}</h2>
             <p className="mt-2 text-center text-[12px] leading-relaxed text-muted">{t("onboarding.conceptBody")}</p>
             <div className="mt-5 flex flex-col gap-3">
               <ConceptRow icon={<Bot size={16} />} title={t("onboarding.master")} desc={t("onboarding.masterDesc")} />
@@ -37,17 +63,21 @@ export function OnboardingModal({ onFinish }: { onFinish: () => void }): JSX.Ele
             ))}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={onFinish} className="rounded-md px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-fg-dim">{t("onboarding.skip")}</button>
-            {step > 0 && <button onClick={() => setStep(step - 1)} className="rounded-md px-3 py-1.5 text-[12px] text-fg-dim transition-colors hover:bg-raised">{t("onboarding.back")}</button>}
+            <button disabled={busy} onClick={() => void finish()} className="rounded-md px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-fg-dim disabled:opacity-50">{t("onboarding.skip")}</button>
+            {step > 0 && <button disabled={busy} onClick={() => setStep(step - 1)} className="rounded-md px-3 py-1.5 text-[12px] text-fg-dim transition-colors hover:bg-raised disabled:opacity-50">{t("onboarding.back")}</button>}
             {step < last ? (
-              <button onClick={() => setStep(step + 1)} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent/90">
+              <button autoFocus disabled={busy} onClick={() => setStep(step + 1)} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-70">
                 {t("onboarding.next")} <ArrowRight size={13} />
               </button>
             ) : (
-              <button onClick={onFinish} className="rounded-lg bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent/90">{t("onboarding.getStarted")}</button>
+              <button autoFocus disabled={busy} aria-busy={busy || undefined} onClick={() => void finish()} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-70">
+                {busy && <Loader2 size={13} className="animate-spin motion-reduce:hidden" aria-hidden />}
+                {t("onboarding.getStarted")}
+              </button>
             )}
           </div>
         </div>
+        {err && <p className="mt-2 text-right text-[12px] text-fail">{t("onboarding.saveFailed")}</p>}
       </div>
     </div>
   );
