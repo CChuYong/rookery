@@ -1,6 +1,7 @@
 # 2026-07-03 — Agent-loop / lifecycle / state-sync audit
 
 > Status 2026-07-03: the 6 HIGH findings plus the interaction bundle (#1 reload card wipe, #7 abort resolved, #26 card dedup) and the notify bundle (#11 restart arm sweep, #14 shutdown parking, #21 pending re-drain) are fixed on feat/dockable-panes — 11 findings total (see docs/superpowers/plans/2026-07-03-agent-loop-audit-fixes.md). The remaining medium/low findings below are still open.
+> Follow-up wave (same day): #8 (session.delete close-first ordering), #9 (maxTurns/effort persisted), #18 (bridge.dispose drains pending approvals) fixed, plus the two final-review follow-ups (stale-card expiry on reconnect; worker.send ack + visible failures) — see docs/superpowers/plans/2026-07-03-agent-loop-followups.md.
 
 Scope: the Claude Agent SDK agent loop vs rookery's own state — master turn lifecycle, worker streaming loop, fleet control plane, event persistence/replay, daemon protocol, cross-source session concurrency, automation/unattended runs, and desktop state sync.
 
