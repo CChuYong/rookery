@@ -117,6 +117,17 @@ export class SlackInteractionBridge {
     else p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.postFailed") });
   }
 
+  // The bridge is being discarded (token-swap reconcile, toggle-off, shutdown) while prompts are pending.
+  // Resolve them all with deny NOW: the old cards' buttons route to a NEW bridge (or nothing) after this,
+  // so these promises could otherwise never resolve and the master turn would stay wedged in canUseTool.
+  dispose(): void {
+    for (const [id, p] of this.pending) {
+      process.stderr.write(`[rookery][slack] interaction ${id} (${p.kind}) expired: bridge disposed before an answer\n`);
+      p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.expired") });
+    }
+    this.pending.clear();
+  }
+
   // Turn cancellation (AbortSignal) → if still pending, close it out with deny.
   private armAbort(id: string, signal: AbortSignal | undefined, resolve: (r: PermissionResult) => void): void {
     if (!signal) return;

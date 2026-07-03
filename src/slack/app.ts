@@ -197,6 +197,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
 
   return {
     stop: async () => {
+      bridge.dispose(); // resolve pending approval prompts with deny — a discarded bridge can never be answered
       // Owner-scoped release: a late stop() from a superseded connection must not null holders a newer
       // connection re-installed. Fall back to unconditional set*(null) only when clear* isn't wired (tests).
       if (deps.clearBridge) deps.clearBridge(bridge); else deps.setBridge?.(null);

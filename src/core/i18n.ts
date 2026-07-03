@@ -21,6 +21,7 @@ export const KO = {
   "interaction.answered": "✅ 답변 완료\n{summary}",
   "interaction.cancelled": "취소됨",
   "interaction.postFailed": "Slack에 질문 카드를 게시하지 못했어요 — 사용자에게 물어볼 수 없습니다.",
+  "interaction.expired": "만료됨 — 이 요청은 더 이상 대기 중이 아니에요.",
   // slack.* — Slack adapter UI strings
   "slack.greeting": "안녕하세요! rookery입니다. 무엇을 도와드릴까요?",
   "slack.askQuestion": "❓ 에이전트의 질문에 답해주세요",
@@ -59,6 +60,7 @@ export const EN: Record<keyof typeof KO, string> = {
   "interaction.answered": "✅ Answered\n{summary}",
   "interaction.cancelled": "Cancelled",
   "interaction.postFailed": "Failed to post the question card to Slack — the user could not be asked.",
+  "interaction.expired": "Expired — this request is no longer pending.",
   "slack.greeting": "Hi! I'm rookery. How can I help?",
   "slack.askQuestion": "❓ Please answer the agent's question",
   "slack.approveNeeded": "🔐 Approval needed: {tool}",

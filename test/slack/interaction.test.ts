@@ -141,3 +141,24 @@ describe("post failure (card never reached Slack)", () => {
     expect(bridge.handleAction(JSON.stringify({ t: "TF2", q: 0, a: "A" }))).toBeUndefined();
   });
 });
+
+describe("dispose (bridge discarded with prompts pending — reconcile/toggle-off/shutdown)", () => {
+  const target = { channel: "C1", threadTs: "111.222", team: "T1" };
+
+  it("resolves every pending prompt with deny so the master turn is not wedged", async () => {
+    const bridge = new SlackInteractionBridge(async () => ({}));
+    const p1 = bridge.prompt(target, "Bash", { command: "ls" }, { toolUseID: "D1" });
+    const p2 = bridge.prompt(target, "AskUserQuestion", { questions: [{ question: "Q?", options: [{ label: "A" }] }] }, { toolUseID: "D2" });
+    bridge.dispose();
+    await expect(p1).resolves.toMatchObject({ behavior: "deny" });
+    await expect(p2).resolves.toMatchObject({ behavior: "deny" });
+    // late clicks on the old cards are ignored no-ops, not double-resolves
+    expect(bridge.handleAction(JSON.stringify({ t: "D1", d: "allow" }))).toBeUndefined();
+    expect(bridge.handleAction(JSON.stringify({ t: "D2", q: 0, a: "A" }))).toBeUndefined();
+  });
+
+  it("dispose is idempotent and safe on an empty bridge", () => {
+    const bridge = new SlackInteractionBridge(async () => ({}));
+    expect(() => { bridge.dispose(); bridge.dispose(); }).not.toThrow();
+  });
+});
