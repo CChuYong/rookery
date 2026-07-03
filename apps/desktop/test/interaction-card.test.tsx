@@ -48,4 +48,38 @@ describe("InteractionCard", () => {
     expect(screen.getByText("✅ 승인됨")).toBeInTheDocument();
     expect(screen.queryByText("승인")).toBeNull();
   });
+
+  it("approve: after clicking Approve, both buttons disable and the sending hint appears", () => {
+    const onRespond = vi.fn();
+    const item: Item = { kind: "interaction", requestId: "R5", mode: "approve", resolved: false };
+    render(<InteractionCard item={item} onRespond={onRespond} />);
+    // Grab the button elements before clicking — the clicked one swaps its label for a loading spinner (Button's `loading` prop).
+    const approveBtn = screen.getByText("승인").closest("button")!;
+    const denyBtn = screen.getByText("거부").closest("button")!;
+    fireEvent.click(approveBtn);
+    expect(approveBtn).toBeDisabled();
+    expect(denyBtn).toBeDisabled();
+    expect(screen.getByText("응답 전송 중…")).toBeInTheDocument();
+    // Clicking again while sent must not fire a second respond (button is disabled).
+    fireEvent.click(approveBtn);
+    expect(onRespond).toHaveBeenCalledTimes(1);
+  });
+
+  it("ask: after clicking Submit, option pills and Submit disable and the sending hint appears", () => {
+    const onRespond = vi.fn();
+    const item: Item = {
+      kind: "interaction", requestId: "R6", mode: "ask", resolved: false,
+      questions: [{ question: "Format?", header: "Fmt", options: [{ label: "Summary" }, { label: "Detailed" }] }],
+    };
+    render(<InteractionCard item={item} onRespond={onRespond} />);
+    const summaryOption = screen.getByText("Summary").closest("button")!;
+    fireEvent.click(summaryOption);
+    // Grab the Submit button before clicking — it swaps its label for a loading spinner once sent.
+    const submit = screen.getByText("제출").closest("button")!;
+    fireEvent.click(submit);
+    expect(onRespond).toHaveBeenCalledTimes(1);
+    expect(submit).toBeDisabled();
+    expect(summaryOption).toBeDisabled();
+    expect(screen.getByText("응답 전송 중…")).toBeInTheDocument();
+  });
 });

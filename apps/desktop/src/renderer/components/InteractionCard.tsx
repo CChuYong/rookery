@@ -16,6 +16,9 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   const t = useT();
   // ask: question index → selected labels (single-select holds 1, multiSelect accumulates via toggle).
   const [picked, setPicked] = useState<Record<number, string[]>>({});
+  // Which action was clicked and sent to the daemon (interaction.respond is fire-and-forget, so this is our only
+  // in-flight signal until interaction.resolved swaps the card for a summary — see item.resolved below).
+  const [sent, setSent] = useState<false | "allow" | "deny" | "submit">(false);
 
   if (item.resolved) {
     return (
@@ -26,17 +29,23 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   }
 
   const cardCls = "max-w-[80%] self-start rounded-[var(--radius)] border border-line border-l-2 border-l-accent/70 bg-surface px-3 py-2.5";
+  const sendingHint = sent ? <div className="mt-1.5 text-[11px] text-fg-dim">{t("interactionCard.sending")}</div> : null;
 
   if (item.mode === "approve") {
+    const respond = (decision: "allow" | "deny"): void => {
+      setSent(decision);
+      onRespond?.(item.requestId, { decision });
+    };
     return (
       <div className={cardCls}>
         <div className="mb-1.5 text-[13px] text-fg">🔐 {t("interactionCard.approvePrompt")}</div>
         {item.toolName ? <div className="mb-1 font-mono text-[12px] text-accent">{item.toolName}</div> : null}
         {item.inputText ? <div className="mb-2 max-h-24 overflow-auto rounded bg-raised px-2 py-1 font-mono text-[11px] text-fg-dim">{item.inputText}</div> : null}
         <div className="flex gap-2">
-          <Button variant="primary" size="sm" onClick={() => onRespond?.(item.requestId, { decision: "allow" })}>{t("interactionCard.approve")}</Button>
-          <Button variant="danger" size="sm" onClick={() => onRespond?.(item.requestId, { decision: "deny" })}>{t("interactionCard.deny")}</Button>
+          <Button variant="primary" size="sm" disabled={!!sent} loading={sent === "allow"} onClick={() => respond("allow")}>{t("interactionCard.approve")}</Button>
+          <Button variant="danger" size="sm" disabled={!!sent} loading={sent === "deny"} onClick={() => respond("deny")}>{t("interactionCard.deny")}</Button>
         </div>
+        {sendingHint}
       </div>
     );
   }
@@ -51,6 +60,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   };
   const allAnswered = questions.length > 0 && questions.every((_, qi) => (picked[qi]?.length ?? 0) > 0);
   const submit = (): void => {
+    setSent("submit");
     const answers: Record<string, string | string[]> = {};
     questions.forEach((q, qi) => {
       const sel = picked[qi] ?? [];
@@ -73,6 +83,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
                 size="sm"
                 title={o.description}
                 aria-pressed={(picked[qi] ?? []).includes(o.label)}
+                disabled={!!sent}
                 onClick={() => toggle(qi, o.label, !!q.multiSelect)}
               >
                 {o.label}
@@ -81,7 +92,8 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
           </div>
         </div>
       ))}
-      <Button variant="primary" size="sm" disabled={!allAnswered} onClick={submit}>{t("interactionCard.submit")}</Button>
+      <Button variant="primary" size="sm" disabled={!allAnswered || !!sent} loading={sent === "submit"} onClick={submit}>{t("interactionCard.submit")}</Button>
+      {sendingHint}
     </div>
   );
 }
