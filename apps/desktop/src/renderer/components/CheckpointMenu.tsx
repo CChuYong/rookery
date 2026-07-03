@@ -76,9 +76,10 @@ export function CheckpointMenu({
                   if (restoring !== null) return;
                   if (armed === c.seq) {
                     setRestoring(c.seq);
-                    // Close only after settle: success closes the menu, failure resets so the user can re-arm and retry (the failure toast is fired by onRestore itself).
+                    // Close only after settle: both paths reset restoring/armed so a reopened menu is
+                    // clickable again (the failure toast is fired by onRestore itself).
                     void onRestore(c.seq).then(
-                      () => setOpen(false),
+                      () => { setOpen(false); setRestoring(null); setArmed(null); },
                       () => { setRestoring(null); setArmed(null); },
                     );
                   } else setArmed(c.seq);

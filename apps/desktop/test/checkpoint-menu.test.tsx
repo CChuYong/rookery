@@ -53,4 +53,24 @@ describe("CheckpointMenu", () => {
     await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   });
+
+  it("re-enables rows after a successful restore so a second restore can be armed/confirmed", async () => {
+    const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
+    const onRestore = vi.fn().mockResolvedValue(undefined);
+    render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("턴 1")); // arm
+    fireEvent.click(screen.getByText("턴 1")); // confirm → succeeds, closes the menu
+    await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    // Reopen: the row must not be stuck disabled from the previous restore.
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
+    expect(screen.getByRole("menuitem")).not.toBeDisabled();
+    fireEvent.click(screen.getByText("턴 1")); // arm again
+    expect(screen.getByText("정말 복원?")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("턴 1")); // confirm again → executes a second restore
+    await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(2));
+  });
 });
