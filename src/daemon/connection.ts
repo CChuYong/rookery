@@ -118,7 +118,12 @@ export class Connection {
     try {
       msg = parseClientMessage(raw);
     } catch (err) {
-      this.reply({ type: "error", message: `invalid message: ${String(err)}` });
+      // Best-effort reqId echo: the frame failed schema validation so `msg` never existed, but if the raw JSON
+      // carried a reqId the client has a pending request() that would otherwise hang forever (the desktop's
+      // WsClient drops error frames without a reqId). Reachable via e.g. an invalid cron in automation.create.
+      let reqId: string | undefined;
+      try { const j = JSON.parse(raw) as { reqId?: unknown }; if (typeof j.reqId === "string") reqId = j.reqId; } catch { /* not JSON at all */ }
+      this.reply({ type: "error", message: `invalid message: ${String(err)}`, ...(reqId ? { reqId } : {}) });
       return;
     }
 

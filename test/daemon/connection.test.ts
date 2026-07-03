@@ -176,6 +176,16 @@ describe("Connection", () => {
     expect(err!.reqId).toBe("q2");
   });
 
+  it("a schema-invalid frame with a reqId gets an error reply carrying that reqId (no hung request)", async () => {
+    const { conn, sent } = setup();
+    // Invalid cron (minute 61) → automationInputSchema.superRefine rejects it AT PARSE TIME (parseClientMessage throws).
+    // The client's request() has a pending reqId "q9" → the error reply must echo it or the desktop promise hangs forever.
+    await conn.handleRaw(JSON.stringify({ type: "automation.create", reqId: "q9", automation: { name: "n", trigger: { kind: "cron", cron: "61 3 * * *", timezone: "UTC" }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" }, enabled: true } }));
+    const errs = parsed(sent).filter((m) => m.type === "error");
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs[0]).toMatchObject({ reqId: "q9" });
+  });
+
   it("worker.send surfaces an error for an unknown/not-running agent (no silent swallow)", async () => {
     const { conn, sent } = setup();
     await conn.handleRaw(JSON.stringify({ type: "worker.send", id: "nope", text: "hi", reqId: "q1" }));
