@@ -36,9 +36,22 @@ export function acquireSingleInstance(pidPath: string): { release: () => void } 
         throw new Error(`rookery daemon already running (pid ${existing})`);
       }
       try {
-        fs.rmSync(pidPath); // remove the stale lock, then retry wx in the next loop (on a race, retry if the other side won)
-      } catch {
-        /* another instance cleaned up/acquired it first — retry */
+        // Race-safe takeover (audit #29): a blind rm could delete a COMPETITOR's freshly-written live lock
+        // (our read of the dead pid may predate their write). rename() is atomic — exactly one contender
+        // captures the file; the content then proves what was captured.
+        const stale = `${pidPath}.stale-${process.pid}`;
+        fs.renameSync(pidPath, stale);
+        let captured = NaN;
+        try { captured = Number.parseInt(fs.readFileSync(stale, "utf8").trim(), 10); } catch { /* unreadable → stale */ }
+        if (Number.isInteger(captured) && captured !== existing && isProcessAlive(captured)) {
+          // We swept up a live competitor's lock — put it back and concede.
+          try { fs.renameSync(stale, pidPath); } catch { /* they re-acquired already — fine */ }
+          throw new Error(`rookery daemon already running (pid ${captured})`);
+        }
+        fs.rmSync(stale, { force: true }); // confirmed stale — discard and retry wx in the next loop
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith("rookery daemon already running")) throw e;
+        /* rename lost the race (competitor took the file first) → retry wx */
       }
     }
   }

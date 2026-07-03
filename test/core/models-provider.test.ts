@@ -51,6 +51,21 @@ describe("models provider", () => {
     expect(cap.headers!.Authorization).toBeUndefined();
   });
 
+  it("re-resolves the api key on every call (audit #30) — a key saved after boot reaches the picker without a restart", async () => {
+    let key: string | undefined;
+    const seen: string[] = [];
+    const fetchImpl = (async (_url: string, init: { headers: Record<string, string> }) => {
+      seen.push(init.headers["x-api-key"] ?? "none");
+      return { ok: true, json: async () => ({ data: [{ id: "m1", display_name: "M1" }] }) };
+    }) as never;
+    const reader = { read: async () => null }; // no OAuth either
+    const list = makeModelsProvider({ apiKey: () => key, reader, fetchImpl });
+    expect(await list()).toEqual(STATIC_MODELS); // no key yet → static fallback, no fetch with a key
+    key = "sk-new";
+    expect((await list())[0]!.id).toBe("m1"); // the just-saved key is used live
+    expect(seen).toEqual(["sk-new"]);
+  });
+
   it("falls back to STATIC_MODELS with no auth, on fetch failure, and on a non-ok response", async () => {
     const noAuth = makeModelsProvider({ reader: { read: async () => null } });
     expect(await noAuth()).toEqual(STATIC_MODELS); // no token/key → static list

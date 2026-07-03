@@ -36,6 +36,14 @@ describe("lifecycle", () => {
     lock.release();
   });
 
+  it("stale takeover leaves no residue and acquires cleanly (audit #29)", () => {
+    fs.writeFileSync(pidPath, "999999999"); // dead pid
+    const lock = acquireSingleInstance(pidPath);
+    expect(fs.readFileSync(pidPath, "utf8")).toBe(String(process.pid));
+    expect(fs.readdirSync(path.dirname(pidPath)).filter((f) => f.includes(".stale"))).toEqual([]);
+    lock.release();
+  });
+
   it("isProcessAlive reports current process as alive", () => {
     expect(isProcessAlive(process.pid)).toBe(true);
   });

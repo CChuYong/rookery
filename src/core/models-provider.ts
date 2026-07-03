@@ -41,13 +41,16 @@ export async function fetchModels(headers: Record<string, string>, fetchImpl: Fe
 
 // Provider that bundles token reading / auth-header selection + the lookup. **Always returns a non-empty list** (live or static fallback).
 // Auth priority: ANTHROPIC_API_KEY (x-api-key) > Claude Code OAuth token (Bearer + oauth beta, same token reader as usage).
-export function makeModelsProvider(opts: { reader?: TokenReader; apiKey?: string; fetchImpl?: FetchLike } = {}): () => Promise<ModelInfo[]> {
+export function makeModelsProvider(opts: { reader?: TokenReader; apiKey?: string | (() => string | undefined); fetchImpl?: FetchLike } = {}): () => Promise<ModelInfo[]> {
   const reader = opts.reader ?? defaultTokenReader();
   return async () => {
     try {
+      // Resolve per call (audit #30): a boot-time snapshot meant a key saved in Settings never reached the
+      // model picker until a daemon restart (and a rotated key kept 401ing into the static fallback).
+      const apiKey = typeof opts.apiKey === "function" ? opts.apiKey() : opts.apiKey;
       let headers: Record<string, string>;
-      if (opts.apiKey) {
-        headers = { "x-api-key": opts.apiKey, "anthropic-version": ANTHROPIC_VERSION };
+      if (apiKey) {
+        headers = { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION };
       } else {
         const token = await reader.read();
         if (!token) return STATIC_MODELS; // no auth means → static list

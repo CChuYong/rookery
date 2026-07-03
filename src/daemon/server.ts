@@ -184,7 +184,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   usageCollector.start();
   const usageProvider = { snapshot: () => usageCollector.snapshot() };
   // List of available models (for the settings picker): x-api-key if there's an API key, otherwise the Claude Code OAuth token (same token reader as usage). Static fallback on failure.
-  const modelsList = makeModelsProvider({ apiKey: settings.anthropicApiKey() });
+  const modelsList = makeModelsProvider({ apiKey: () => settings.anthropicApiKey() });
   const modelsProvider = { list: () => modelsList() };
 
   // Slack runtime config is resolved per call from settings (DB, tokens fall back to env). Tokens at connect time, the rest per message.
