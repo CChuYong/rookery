@@ -19,4 +19,5 @@ export default {
   "repoTree.onlyActive": "활성",
   "repoTree.onlyActiveTitle": "실행·대기·안 본 워커만 보기",
   "repoTree.noMatches": "일치하는 워커가 없어요.",
+  "repoTree.loadFailed": "목록을 불러오지 못했어요",
 } satisfies Catalog;

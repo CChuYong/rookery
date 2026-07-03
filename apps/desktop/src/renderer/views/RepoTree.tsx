@@ -17,6 +17,8 @@ function RepoTreeImpl(p: {
   repos: Repo[];
   fleet: FleetRow[];
   loaded?: boolean; // fleet/repos have arrived → only then is "no repos" real (avoids the cold-connect false-empty flash)
+  loadFailed?: boolean; // the initial fleet.list fetch was rejected and hasn't succeeded since → error+retry row instead of staying blank forever (audit #14)
+  onRetry?: () => void; // re-fires fleet.list (cleared by the store once it succeeds)
   activeSubId: string | null;
   onSelectSub: (id: string) => void;
   onNewRepo: () => void;
@@ -155,7 +157,14 @@ function RepoTreeImpl(p: {
           </button>
         </div>
       )}
-      {(p.loaded ?? true) && p.repos.length === 0 && orphans.length === 0 && <div className="px-2 py-3 text-[12px] leading-relaxed text-muted">{t("repoTree.emptyState")}</div>}
+      {!(p.loaded ?? true) && p.loadFailed ? (
+        <div className="flex items-center justify-between gap-2 px-2 py-3 text-[12px] leading-relaxed">
+          <span className="text-fail">{t("repoTree.loadFailed")}</span>
+          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
+        </div>
+      ) : (
+        (p.loaded ?? true) && p.repos.length === 0 && orphans.length === 0 && <div className="px-2 py-3 text-[12px] leading-relaxed text-muted">{t("repoTree.emptyState")}</div>
+      )}
       {p.repos.filter((repo) => !filtering || shown.some((f) => f.repoPath === repo.path)).map((repo) => group(repo.name, repo.name, shown.filter((f) => f.repoPath === repo.path), { removable: true, canAdd: true }))}
       {orphans.length > 0 && group("__orphans__", t("repoTree.uncategorized"), orphans, { removable: false, canAdd: false })}
       {filtering && shown.length === 0 && <div className="px-2 py-3 text-[12px] text-muted">{t("repoTree.noMatches")}</div>}

@@ -24,4 +24,5 @@ export default {
   "sessions.pin": "고정",
   "sessions.unpin": "고정 해제",
   "sessions.pinnedSection": "고정",
+  "sessions.loadFailed": "목록을 불러오지 못했어요",
 } satisfies Catalog;

@@ -10,4 +10,5 @@ export default {
   "common.confirm": "OK",
   "common.connect": "Connect",
   "common.connected": "Connected",
+  "common.retry": "Retry",
 } satisfies Catalog;

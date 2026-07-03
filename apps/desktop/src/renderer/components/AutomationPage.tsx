@@ -5,6 +5,7 @@ import type { ActionVars } from "@daemon/core/automation-action.js";
 import { useT } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
 import { Button } from "../ui/button.js";
+import { SkeletonRows } from "./Skeleton.js";
 import { cn } from "../lib/cn.js";
 import { referencedVars } from "../lib/automation-vars.js";
 import { RunAutomationDialog } from "./RunAutomationDialog.js";
@@ -27,6 +28,9 @@ function triggerBadge(trigger: AutomationTrigger, t: TFunc): string {
 export function AutomationPage(p: {
   onClose?: () => void;
   automations: Automation[];
+  loaded?: boolean; // automation.list has arrived from the daemon → gates the empty copy the same way Sessions/RepoTree do (audit #14)
+  loadFailed?: boolean; // the initial fetch was rejected and hasn't succeeded since → error+retry row instead of a false "no jobs" empty state
+  onRetry?: () => void; // re-fires automation.list (cleared by the store once it succeeds)
   onRun: (id: string, vars?: ActionVars) => Promise<void>;
   onToggle: (id: string, enabled: boolean) => Promise<void>;
   onDelete: (id: string) => void;
@@ -73,7 +77,16 @@ export function AutomationPage(p: {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-6">
-          {p.automations.length === 0 ? (
+          {!(p.loaded ?? true) ? (
+            p.loadFailed ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+                <p className="text-[12.5px] text-fail">{t("automationPage.loadFailed")}</p>
+                <button onClick={p.onRetry} className="rounded-md border border-line px-3 py-1 text-[12px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
+              </div>
+            ) : (
+              <SkeletonRows rows={5} />
+            )
+          ) : p.automations.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center text-muted">
               <Clock size={30} className="opacity-40" />
               <p className="text-[12.5px]">{t("automationPage.empty")}</p>

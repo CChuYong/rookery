@@ -16,4 +16,5 @@ export default {
   "automationPage.corrupt": "설정 손상 — 삭제/재저장",
   "automationPage.deleteConfirmTitle": "자동화 삭제",
   "automationPage.deleteConfirmBody": "'{name}' 규칙을 삭제할까요? 되돌릴 수 없어요.",
+  "automationPage.loadFailed": "목록을 불러오지 못했어요",
 } satisfies Catalog;

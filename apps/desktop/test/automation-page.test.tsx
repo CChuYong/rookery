@@ -78,6 +78,35 @@ it("shows empty state with no jobs", () => {
   expect(screen.getByText("예약된 작업이 없어요.")).toBeInTheDocument();
 });
 
+// ─── load state (audit #14) ─────────────────────────────────────────────────
+
+it("not loaded → shows a skeleton, not the false-empty 'no jobs' copy", () => {
+  const { container } = render(
+    <AutomationPage automations={[]} loaded={false} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />,
+  );
+  expect(container.querySelector(".sheen")).not.toBeNull();
+  expect(screen.queryByText("예약된 작업이 없어요.")).toBeNull();
+});
+
+it("loaded and empty → shows the real empty copy, not the skeleton", () => {
+  const { container } = render(
+    <AutomationPage automations={[]} loaded={true} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />,
+  );
+  expect(screen.getByText("예약된 작업이 없어요.")).toBeInTheDocument();
+  expect(container.querySelector(".sheen")).toBeNull();
+});
+
+it("loadFailed && !loaded → shows an error row with a retry button that re-fires the request", () => {
+  const onRetry = vi.fn();
+  render(
+    <AutomationPage automations={[]} loaded={false} loadFailed={true} onRetry={onRetry} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />,
+  );
+  expect(screen.getByText("목록을 불러오지 못했어요")).toBeInTheDocument();
+  expect(screen.queryByText("예약된 작업이 없어요.")).toBeNull();
+  fireEvent.click(screen.getByText("다시 시도"));
+  expect(onRetry).toHaveBeenCalledTimes(1);
+});
+
 // ─── RunAutomationDialog tests ───────────────────────────────────────────────
 
 it("automation with {{message}} in prompt → click play → shows {{message}} field only, not {{channel}}; submit fires onRun(id, vars)", () => {

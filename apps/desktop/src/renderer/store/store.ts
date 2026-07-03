@@ -29,6 +29,12 @@ interface Store extends AppState {
   // Whether the initial lists have arrived at least once — prevents state restore/prune from running before fleet arrives and wiping the worker page.
   sessionsLoaded: boolean;
   fleetLoaded: boolean;
+  // Initial list fetch rejected (and hasn't succeeded since) — Sessions/RepoTree show an inline error+retry row instead of
+  // staying permanently blank when `!loaded` (audit #14). Cleared by a subsequent successful setSessions/setFleet.
+  sessionsLoadFailed: boolean;
+  fleetLoadFailed: boolean;
+  setSessionsLoadFailed: (v: boolean) => void;
+  setFleetLoadFailed: (v: boolean) => void;
   repos: Array<{ name: string; path: string; description: string; base: string | null }>;
   daemon: "up" | "down" | "starting";
   daemonNote: string | null; // Specific cause of daemon down (e.g. Node ABI mismatch) — shown in the banner when present
@@ -74,6 +80,10 @@ interface Store extends AppState {
   setFleet: (rows: Array<WorkerRow & { archived?: boolean }>) => void;
   automations: Automation[];
   setAutomations: (automations: Automation[]) => void;
+  // Same loaded/loadFailed gate as sessions/fleet, for AutomationPage (audit #14) — no automation-list-specific state existed before.
+  automationsLoaded: boolean;
+  automationsLoadFailed: boolean;
+  setAutomationsLoadFailed: (v: boolean) => void;
   // Sessions source-segment state — held in the store so AutomationPage cross-links can set it from outside.
   sessionFilter: { source: "all" | "ui" | "slack" | "automation"; automationId?: string | null };
   setSessionFilter: (f: Store["sessionFilter"]) => void;
@@ -108,7 +118,7 @@ const spreadNav = (nav: NavState) => ({ overlay: nav.loc.overlay, showRepos: nav
 
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
-  sessions: [], activeSessionId: null, activeWorkerId: null, sessionsLoaded: false, fleetLoaded: false, repos: [], daemon: "starting",
+  sessions: [], activeSessionId: null, activeWorkerId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
   overlay: null, showRepos: false, navBack: [], navFwd: [],
   navigate: (patch) => set((s) => {
     const nav = navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch);
@@ -201,16 +211,19 @@ export const useStore = create<Store>((set, get) => ({
     const sessionAttention = Object.fromEntries(Object.entries(s.sessionAttention).filter(([k]) => ids.has(k)));
     // Also clean up running for sessions that vanished (A4) — otherwise a deleted/archived running session lingers in the map forever.
     const running = Object.fromEntries(Object.entries(s.running).filter(([k]) => ids.has(k)));
-    return { sessions, overrides, sessionAttention, running, sessionsLoaded: true };
+    return { sessions, overrides, sessionAttention, running, sessionsLoaded: true, sessionsLoadFailed: false };
   }),
+  setSessionsLoadFailed: (v) => set({ sessionsLoadFailed: v }),
   // setActive/setActiveSub are thin aliases over navigate (navigate handles clearing unread). Just patch the id.
   setActive: (id) => get().navigate({ sessionId: id }),
   setActiveSub: (id) => get().navigate({ subId: id }),
   // Clean up unread entries for workers that vanished (so a tab badge doesn't stay lit after delete/discard).
   // Prune vanished workers. Even for those that remain, if non-running, clear pending (A6: prevent ghost "pending" bubbles for settled workers on reconnect) — preserved only while running.
-  setFleet: (rows) => set((s) => ({ fleet: Object.fromEntries(rows.map((r) => [r.id, { ...r, permissionMode: r.permissionMode ?? "bypassPermissions" }])), fleetLoaded: true, attention: Object.fromEntries(Object.entries(s.attention).filter(([k]) => rows.some((r) => r.id === k))), pendingByWorker: Object.fromEntries(Object.entries(s.pendingByWorker).filter(([k]) => rows.some((r) => r.id === k && r.status === "running"))) })),
-  automations: [],
-  setAutomations: (automations) => set({ automations }),
+  setFleet: (rows) => set((s) => ({ fleet: Object.fromEntries(rows.map((r) => [r.id, { ...r, permissionMode: r.permissionMode ?? "bypassPermissions" }])), fleetLoaded: true, fleetLoadFailed: false, attention: Object.fromEntries(Object.entries(s.attention).filter(([k]) => rows.some((r) => r.id === k))), pendingByWorker: Object.fromEntries(Object.entries(s.pendingByWorker).filter(([k]) => rows.some((r) => r.id === k && r.status === "running"))) })),
+  setFleetLoadFailed: (v) => set({ fleetLoadFailed: v }),
+  automations: [], automationsLoaded: false, automationsLoadFailed: false,
+  setAutomations: (automations) => set({ automations, automationsLoaded: true, automationsLoadFailed: false }),
+  setAutomationsLoadFailed: (v) => set({ automationsLoadFailed: v }),
   sessionFilter: { source: "ui" }, // Default to the isolated view (your own UI sessions) — so externally-driven Slack/automation sessions aren't mixed in by default. If empty, falls back to the first existing source.
   setSessionFilter: (sessionFilter) => set({ sessionFilter }),
   setRepos: (repos) => set({ repos }),

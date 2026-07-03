@@ -16,4 +16,5 @@ export default {
   "automationPage.corrupt": "Corrupt config — delete or re-save",
   "automationPage.deleteConfirmTitle": "Delete automation",
   "automationPage.deleteConfirmBody": "Delete the rule '{name}'? This can't be undone.",
+  "automationPage.loadFailed": "Couldn't load the list",
 } satisfies Catalog;

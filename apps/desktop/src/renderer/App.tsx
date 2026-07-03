@@ -121,8 +121,10 @@ type AppSelected = Pick<
   | "slack"
   | "sessions"
   | "sessionsLoaded"
+  | "sessionsLoadFailed"
   | "fleet"
   | "fleetLoaded"
+  | "fleetLoadFailed"
   | "repos"
   | "overrides"
   | "commands"
@@ -131,6 +133,8 @@ type AppSelected = Pick<
   | "sessionAttention"
   | "usage"
   | "automations"
+  | "automationsLoaded"
+  | "automationsLoadFailed"
   | "sessionFilter"
   | "setSessionFilter"
   | "authStatus"
@@ -155,8 +159,10 @@ export function App(): JSX.Element {
         slack: st.slack,
         sessions: st.sessions,
         sessionsLoaded: st.sessionsLoaded,
+        sessionsLoadFailed: st.sessionsLoadFailed,
         fleet: st.fleet,
         fleetLoaded: st.fleetLoaded,
+        fleetLoadFailed: st.fleetLoadFailed,
         repos: st.repos,
         overrides: st.overrides,
         commands: st.commands,
@@ -167,6 +173,8 @@ export function App(): JSX.Element {
         integrations: st.integrations,
         authStatus: st.authStatus,
         automations: st.automations,
+        automationsLoaded: st.automationsLoaded,
+        automationsLoadFailed: st.automationsLoadFailed,
         sessionFilter: st.sessionFilter,
         setSessionFilter: st.setSessionFilter,
       }),
@@ -413,8 +421,10 @@ export function App(): JSX.Element {
       useStore.getState().resetLiveInteractions(); // must precede events.subscribe: the replay repopulates the set
       useStore.getState().bumpConnectionEpoch(); // pending bubbles from before this reconnect become prunable at seed time
       useStore.getState().setDaemon("up");
-      void c.request({ type: "session.list" }).then((r) => { useStore.getState().setSessions(r.sessions ?? []); useStore.getState().seedRunningFromSessions(r.sessions ?? []); }).catch(() => {});
-      void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});
+      // A rejection here (vs. the swallowed .catch(()=>{}) elsewhere) sets the loadFailed flag so Sessions/RepoTree can
+      // show an error+retry row instead of staying blank forever when the initial fetch never arrives (audit #14).
+      void c.request({ type: "session.list" }).then((r) => { useStore.getState().setSessions(r.sessions ?? []); useStore.getState().seedRunningFromSessions(r.sessions ?? []); }).catch(() => useStore.getState().setSessionsLoadFailed(true));
+      void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => useStore.getState().setFleetLoadFailed(true));
       void c.request({ type: "repos.list" }).then((r) => useStore.getState().setRepos(r.repos ?? [])).catch(() => {});
       c.send({ type: "events.subscribe" }); // global channel: receive all session/fleet events
       pollUsage(c);
@@ -422,7 +432,7 @@ export function App(): JSX.Element {
       void c.request({ type: "models.list" }).then((r) => useStore.getState().setModels((r.models ?? []).map((m) => ({ id: m.id, label: m.displayName })))).catch(() => {});
       void c.request({ type: "integrations.status" }).then((r) => useStore.getState().setIntegrations({ github: r.github, linear: r.linear })).catch(() => {});
       void c.request({ type: "auth.status" }).then((r) => useStore.getState().setAuthStatus(r)).catch(() => {});
-      void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => {});
+      void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true));
       // On reconnect, re-seed the open conversation — to prevent cards from being stuck in_progress forever due to a
       // tool-end/result lost while disconnected (the DB is the source of truth, so we re-fetch the full transcript and overwrite).
       const { activeSessionId, activeWorkerId } = useStore.getState();
@@ -483,6 +493,8 @@ export function App(): JSX.Element {
     }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
   }, [refetchSessions]);
   const refetchFleet = useCallback(() => { void client?.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {}); }, []);
+  // Retry hook for AutomationPage's load-failed row (audit #14) — no other refetch path existed for automation.list.
+  const refetchAutomations = useCallback(() => { void client?.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true)); }, []);
   // Rename worker — updates live via the worker.label event. Archive/delete refetch fleet.list.
   const renameSub = useCallback((id: string, label: string) => { void client?.request({ type: "worker.rename", id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   const archiveSub = useCallback((id: string, archived: boolean) => { void client?.request({ type: "worker.archive", id, archived }).then(refetchFleet).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchFleet]);
@@ -891,9 +903,9 @@ export function App(): JSX.Element {
               </div>
             )}
             {showRepos ? (
-              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
+              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
             ) : (
-              <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
+              <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
             <UsagePanel usage={s.usage} />
             {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
@@ -996,6 +1008,9 @@ export function App(): JSX.Element {
             <AutomationPage
               onClose={closeOverlay}
               automations={s.automations}
+              loaded={s.automationsLoaded}
+              loadFailed={s.automationsLoadFailed}
+              onRetry={refetchAutomations}
               onRun={(id, vars) => {
                 // The request resolves only when the run finishes (runNow awaits the action), so AutomationPage keeps the Play
                 // button spinning until then (feedback + double-fire block); we toast either way. Always resolves so the spinner clears.

@@ -19,4 +19,5 @@ export default {
   "repoTree.onlyActive": "live",
   "repoTree.onlyActiveTitle": "Show only running / idle / unread workers",
   "repoTree.noMatches": "No matching workers.",
+  "repoTree.loadFailed": "Couldn't load the list",
 } satisfies Catalog;

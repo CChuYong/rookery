@@ -165,4 +165,30 @@ describe("Sessions source segmentation + automation grouping", () => {
     ] as never} />);
     expect(screen.getByText("(삭제된 자동화)")).toBeInTheDocument();
   });
+
+  it("active session stays visible even when the source filter would otherwise exclude it (audit #21)", () => {
+    render(<Sessions activeId="s" onSelect={() => {}} filter={{ source: "ui" }} sessions={[
+      mk({ id: "u", label: "uirow", origin: "ui" }),
+      mk({ id: "s", label: "slackrow", origin: "slack" }), // active, but filtered to 'ui' — must still show
+    ] as never} />);
+    expect(screen.getByText("uirow")).toBeInTheDocument();
+    expect(screen.getByText("slackrow")).toBeInTheDocument(); // the active session isn't hidden by the filter
+  });
+});
+
+describe("Sessions initial load failure (audit #14)", () => {
+  it("loadFailed && !loaded → shows an error row (not the empty copy) with a retry button that re-fires the request", () => {
+    const onRetry = vi.fn();
+    render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={false} loadFailed={true} onRetry={onRetry} />);
+    expect(screen.getByText("목록을 불러오지 못했어요")).toBeInTheDocument();
+    expect(screen.queryByText("아직 대화가 없어요 — 위 ‘새 세션’으로 마스터에게 일을 맡겨보세요.")).toBeNull();
+    fireEvent.click(screen.getByText("다시 시도"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("loaded but empty → shows the normal empty copy, not the error row", () => {
+    render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={true} loadFailed={false} />);
+    expect(screen.getByText("아직 대화가 없어요 — 위 ‘새 세션’으로 마스터에게 일을 맡겨보세요.")).toBeInTheDocument();
+    expect(screen.queryByText("목록을 불러오지 못했어요")).toBeNull();
+  });
 });

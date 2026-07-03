@@ -136,6 +136,8 @@ function SessionsImpl(p: {
   sessions: Session[];
   activeId: string | null;
   loaded?: boolean; // session list has arrived from the daemon → only then is an empty list really "no sessions" (avoids the cold-connect false-empty flash)
+  loadFailed?: boolean; // the initial fetch was rejected and hasn't succeeded since → show an error+retry row instead of staying blank forever (audit #14)
+  onRetry?: () => void; // re-fires session.list (cleared by the store once it succeeds)
   onSelect: (id: string) => void;
   running?: Record<string, boolean>; // sessions with a master turn in progress → live pulse dot
   attention?: Record<string, boolean>; // sessions whose turn finished while unseen → right-side unread dot
@@ -177,7 +179,11 @@ function SessionsImpl(p: {
   const sourceFiltered = effectiveSource === "all" ? active : active.filter((s) => srcOf(s.origin) === effectiveSource);
   // automationId focus (cross-link): only that automation's sessions.
   const focusedAuto = effectiveSource === "automation" && filter.automationId;
-  const visible = focusedAuto ? sourceFiltered.filter((s) => s.originRef === filter.automationId) : sourceFiltered;
+  const filtered = focusedAuto ? sourceFiltered.filter((s) => s.originRef === filter.automationId) : sourceFiltered;
+  // The session you're currently viewing must never disappear from the sidebar just because the source filter (or
+  // automation focus) would otherwise exclude it (audit #21) — otherwise there's no location highlight anywhere.
+  const activeSession = p.activeId ? active.find((s) => s.id === p.activeId) : undefined;
+  const visible = activeSession && !filtered.some((s) => s.id === p.activeId) ? [...filtered, activeSession] : filtered;
   // Pinned sessions go into the top 'Pinned' section (within the current source view). The rest stay in the existing groups (date/automation).
   const pinnedItems = [...visible.filter((s) => s.pinned)].sort(byActivityDesc);
   const rest = visible.filter((s) => !s.pinned);
@@ -261,7 +267,14 @@ function SessionsImpl(p: {
         </div>
       )}
 
-      {(p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-[12px] leading-relaxed text-muted">{t("sessions.empty")}</div>}
+      {!(p.loaded ?? true) && p.loadFailed ? (
+        <div className="flex items-center justify-between gap-2 px-2 py-3 text-[12px] leading-relaxed">
+          <span className="text-fail">{t("sessions.loadFailed")}</span>
+          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
+        </div>
+      ) : (
+        (p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-[12px] leading-relaxed text-muted">{t("sessions.empty")}</div>
+      )}
 
       {pinnedItems.length > 0 && (
         <div>

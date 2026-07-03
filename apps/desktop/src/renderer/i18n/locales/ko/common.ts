@@ -10,4 +10,5 @@ export default {
   "common.confirm": "확인",
   "common.connect": "연결",
   "common.connected": "연결됨",
+  "common.retry": "다시 시도",
 } satisfies Catalog;

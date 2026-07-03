@@ -100,4 +100,13 @@ describe("RepoTree", () => {
     fireEvent.click(screen.getByText(/새 레포/));
     expect(onNewRepo).toHaveBeenCalled();
   });
+
+  it("loadFailed && !loaded → shows an error row (not the empty copy) with a retry button that re-fires fleet.list (audit #14)", () => {
+    const onRetry = vi.fn();
+    render(<RepoTree repos={[]} fleet={[]} activeSubId={null} onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}} loaded={false} loadFailed={true} onRetry={onRetry} />);
+    expect(screen.getByText("목록을 불러오지 못했어요")).toBeInTheDocument();
+    expect(screen.queryByText(/등록된 레포가 없어요/)).toBeNull();
+    fireEvent.click(screen.getByText("다시 시도"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });

@@ -24,4 +24,5 @@ export default {
   "sessions.pin": "Pin",
   "sessions.unpin": "Unpin",
   "sessions.pinnedSection": "Pinned",
+  "sessions.loadFailed": "Couldn't load the list",
 } satisfies Catalog;
