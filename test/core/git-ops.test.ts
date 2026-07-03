@@ -159,6 +159,35 @@ describe("RealGitOps (real git, no network)", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }, 20000);
 
+  // #32: a fork() pins a one-shot full-tree snapshot at refs/rookery/fork/<id> in the shared .git. removeCheckpointRefs
+  // (run on discard/delete) must also reclaim it, or every fork leaks a permanently-pinned commit.
+  it("removeCheckpointRefs also deletes the fork snapshot ref (audit #32)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gitops-fork-ref-"));
+    const repo = path.join(dir, "repo");
+    fs.mkdirSync(repo);
+    const sh = (args: string[], cwd: string) => execFileSync("git", args, { cwd });
+    sh(["init", "-q"], repo);
+    sh(["config", "user.email", "x@x.com"], repo);
+    sh(["config", "user.name", "x"], repo);
+    fs.writeFileSync(path.join(repo, "README.md"), "hi\n");
+    sh(["add", "-A"], repo);
+    sh(["commit", "-qm", "init"], repo);
+
+    const g = new RealGitOps();
+    const base = await g.currentBranch(repo);
+    const wt = path.join(dir, "wt");
+    await g.addWorktree(repo, wt, "rookery/fork-ref", base);
+    fs.writeFileSync(path.join(wt, "w.txt"), "v1\n");
+    const sha = await g.checkpoint(wt, "refs/rookery/fork/w1");
+    expect(sha).toBeTruthy();
+    await g.removeCheckpointRefs(repo, "w1");
+    const refs = execFileSync("git", ["for-each-ref", "--format=%(refname)", "refs/rookery"], { cwd: repo }).toString();
+    expect(refs).not.toContain("refs/rookery/fork/w1");
+
+    await g.removeWorktree(repo, wt, "rookery/fork-ref");
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 20000);
+
   // git error messages must be in English (the git() helper forces LC_ALL=C).
   it("removeWorktree is idempotent — a second remove of an already-gone worktree does not throw", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gitops-idem-"));

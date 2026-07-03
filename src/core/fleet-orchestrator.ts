@@ -215,25 +215,33 @@ export class FleetOrchestrator {
     try { snapSha = await this.deps.git.checkpoint(src.worktree_path, `refs/rookery/fork/${newId}`); } catch { snapSha = null; }
     // New worktree branched from the source's branch HEAD (carries its committed history), then overlay the snapshot.
     await this.deps.git.addWorktree(src.repo_path, worktreePath, branch, src.branch ?? src.base ?? "HEAD");
-    if (snapSha) { try { await this.deps.git.restoreCheckpoint(worktreePath, snapSha); } catch { /* best-effort: committed state still present */ } }
-    // Persist the new worker (diff base = the source's base, so the fork's diff shows the same body of work).
-    this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined });
-    this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
-    if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
-    if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
-    if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
-    if (src.effort) this.deps.repos.setWorkerEffort(newId, src.effort);
-    this.deps.repos.copyWorkerEvents(id, newId);
-    // Register a lazy-resumable entry (like rehydrate) → idle; materializes (resumes the forked SDK session) on first send.
-    this.deps.repos.setWorkerStatus(newId, "idle", true);
-    this.entries.set(newId, {
-      homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
-      status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
-      maxTurns: src.max_turns ?? undefined, effort: src.effort ?? undefined,
-      resumeSessionId: forkedUuid,
-    });
-    this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
-    return { id: newId };
+    try {
+      if (snapSha) { try { await this.deps.git.restoreCheckpoint(worktreePath, snapSha); } catch { /* best-effort: committed state still present */ } }
+      // Persist the new worker (diff base = the source's base, so the fork's diff shows the same body of work).
+      this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined });
+      this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
+      if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
+      if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
+      if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
+      if (src.effort) this.deps.repos.setWorkerEffort(newId, src.effort);
+      this.deps.repos.copyWorkerEvents(id, newId);
+      // Register a lazy-resumable entry (like rehydrate) → idle; materializes (resumes the forked SDK session) on first send.
+      this.deps.repos.setWorkerStatus(newId, "idle", true);
+      this.entries.set(newId, {
+        homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
+        status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
+        maxTurns: src.max_turns ?? undefined, effort: src.effort ?? undefined,
+        resumeSessionId: forkedUuid,
+      });
+      this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
+      return { id: newId };
+    } catch (err) {
+      // The fork's worktree/branch/snapshot-ref were already created — reclaim them, or they leak with no row
+      // to ever find them again (the same pre-entry class audit #12 closed for spawn()).
+      try { await this.deps.git.removeWorktree(src.repo_path, worktreePath, branch); } catch { /* best-effort */ }
+      try { await this.deps.git.removeCheckpointRefs(src.repo_path, newId); } catch { /* best-effort */ }
+      throw err;
+    }
   }
 
   private async run(
@@ -244,27 +252,31 @@ export class FleetOrchestrator {
     signalReady: () => void,
   ): Promise<void> {
     const { repos, bus, git, factory } = this.deps;
-    // persist the workers row first: even if base resolution/addWorktree fails, status/events can be safely
-    // recorded in catch without an FK violation. (the base column uses the unresolved input value)
-    repos.createWorker({
-      id,
-      sessionId: input.homeSessionId,
-      repoPath: input.repoPath,
-      label: input.label,
-      worktreePath,
-      branch,
-      base: input.base,
-      ticketKey: input.ticketKey,
-      ticketUrl: input.ticketUrl,
-    });
-    if (input.notify) this.deps.repos.setWorkerNotifyArmed(id, true);
-    if (input.maxTurns != null) repos.setWorkerMaxTurns(id, input.maxTurns);
-    if (input.effort) repos.setWorkerEffort(id, input.effort);
-    // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
-    // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
-    // The agent's boot below reconciles it to running/idle; a failed worktree-create flips it to failed via the catch.
-    bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
     try {
+      // persist the workers row first: even if base resolution/addWorktree fails, status/events can be safely
+      // recorded in catch without an FK violation. (the base column uses the unresolved input value)
+      // These provisioning statements (createWorker / notify-arm / maxTurns+effort persists / the spawned emit) are INSIDE
+      // the try on purpose — load-bearing for audit #25: createWorker itself can throw (an FK on a concurrently-deleted home
+      // session, SQLITE_FULL). If it did outside the try, the catch's signalReady() would be skipped and spawn()'s returned
+      // promise would never settle (a wedged master turn), while the rejected flow escaped as an unhandledRejection.
+      repos.createWorker({
+        id,
+        sessionId: input.homeSessionId,
+        repoPath: input.repoPath,
+        label: input.label,
+        worktreePath,
+        branch,
+        base: input.base,
+        ticketKey: input.ticketKey,
+        ticketUrl: input.ticketUrl,
+      });
+      if (input.notify) this.deps.repos.setWorkerNotifyArmed(id, true);
+      if (input.maxTurns != null) repos.setWorkerMaxTurns(id, input.maxTurns);
+      if (input.effort) repos.setWorkerEffort(id, input.effort);
+      // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
+      // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
+      // The agent's boot below reconciles it to running/idle; a failed worktree-create flips it to failed via the catch.
+      bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
       // launch: resolve base → addWorktree → factory(cwd=worktree) → start → reconcile status.
       // base resolution: explicit choice > remote default branch (refreshed via best-effort fetch) > current HEAD (fallback).
       let baseStale = false; // a best-effort fetch failed → branched from a possibly-stale ref (surfaced as a worker notice after boot)

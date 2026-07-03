@@ -119,6 +119,9 @@ export class RealGitOps implements GitOps {
     for (const ref of out.split("\n").map((s) => s.trim()).filter(Boolean)) {
       await this.git(repoPath, ["update-ref", "-d", ref]).catch(() => {});
     }
+    // A worker created by fork() also pinned a one-shot full-tree snapshot at refs/rookery/fork/<id> (its own id).
+    // It lives in the same shared .git and was never cleaned — every fork leaked a permanently-pinned commit (audit #32).
+    await this.git(repoPath, ["update-ref", "-d", `refs/rookery/fork/${workerId}`]).catch(() => {});
   }
 
   async remoteDefaultBranch(repoPath: string): Promise<string | null> {

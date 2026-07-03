@@ -619,6 +619,43 @@ describe("FleetOrchestrator", () => {
     expect(git.calls.some((c) => c.startsWith("removeWorktree"))).toBe(true);
   });
 
+  it("spawn settles even when createWorker throws (audit #25) — no wedged master turn, no unhandled rejection", async () => {
+    const git = new FakeGitOps({ headValue: "base0", checkpointSha: "ck" });
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    // repos WITHOUT the home session row → createWorker FK-throws (the audit's concurrent session-delete shape)
+    const repos = new Repositories(openDb(":memory:"));
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", idgen: () => "a0" });
+    await expect(fleet.spawn({ homeSessionId: "no-such-session", repoPath: "/code", label: "x", task: "t" })).resolves.toEqual({ id: "a0" });
+    await fleet.waitAllSettled(); // the flow settled through the catch — drain must not hang or reject
+  }, 5000);
+
+  it("fork failure after addWorktree cleans up its worktree and fork ref (fork pre-entry window + audit #32)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    class GatedGit extends FakeGitOps {
+      async addWorktree(repo: string, wt: string, branch: string, base: string): Promise<void> {
+        await gate;
+        return super.addWorktree(repo, wt, branch, base);
+      }
+    }
+    const git = new GatedGit({ headValue: "base0", checkpointSha: "ck" });
+    // fixture: session sA + source worker a0 with sdk_session_id + existing worktree; forkSession stub; idgen returns "fk1" for the fork
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    repos.createWorker({ id: "a0", sessionId: "sA", repoPath: "/repo", label: "build", worktreePath: "/wt/a0", branch: "rookery/a0", base: "origin/main" });
+    repos.setWorkerSdkSessionId("a0", "src-sdk");
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    const forkSession = async () => ({ sessionId: "forked-uuid" });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk1" });
+    const forking = fleet.fork("a0");
+    await new Promise((r) => setTimeout(r, 0)); // park inside the gated addWorktree
+    repos.deleteSession("sA"); // cascades the rows → createWorker(newId) will FK-throw after the gate
+    release();
+    await expect(forking).rejects.toThrow();
+    expect(git.calls.some((c) => c.startsWith("removeWorktree"))).toBe(true); // fork cleaned its own worktree+branch
+    expect(git.calls.some((c) => c.startsWith("removeCheckpointRefs"))).toBe(true); // and its fork ref
+  });
+
 });
 
 describe("FleetOrchestrator rehydrate (restart recovery)", () => {
