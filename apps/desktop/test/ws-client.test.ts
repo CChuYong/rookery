@@ -105,6 +105,35 @@ describe("WsClient", () => {
     }
   });
 
+  // audit #31: a send during the browser CONNECTING window (readyState 0) must not throw and must buffer.
+  // start() assigns this.sock while the socket is still CONNECTING; the real browser send() throws
+  // InvalidStateError there, so the frame must fall through to the DSK-1 outbox and flush on open.
+  it("send during CONNECTING buffers to the outbox instead of throwing (audit #31)", () => {
+    const sock = fakeSocket();
+    sock.readyState = 0; // CONNECTING — onopen not yet fired
+    const c = new WsClient(() => sock, () => {});
+    c.start();
+    // send while still connecting: no throw, and the frame is not delivered to the socket yet
+    expect(() => c.send({ type: "session.send", sessionId: "s1", text: "hi" } as any)).not.toThrow();
+    expect(sock.sent.length).toBe(0);
+    // socket opens → the buffered frame flushes
+    sock.readyState = 1;
+    sock.onopen?.();
+    const sent = sock.sent.map((d: string) => JSON.parse(d));
+    expect(sent.some((m: any) => m.type === "session.send" && m.text === "hi")).toBe(true);
+  });
+
+  // audit #31: request() during the CONNECTING window rejects fast (before creating a pending entry)
+  // rather than sending on a not-yet-open socket and leaking a pending that never resolves.
+  it("request during CONNECTING rejects fast instead of leaking a pending entry", async () => {
+    const sock = fakeSocket();
+    sock.readyState = 0; // CONNECTING
+    const c = new WsClient(() => sock, () => {});
+    c.start();
+    await expect(c.request({ type: "fleet.list" })).rejects.toThrow(/not connected/);
+    expect(sock.sent.length).toBe(0);
+  });
+
   // FIX I4: stop() drains pending and prevents reconnect
   it("stop() rejects pending and prevents reconnect", async () => {
     let connectCount = 0;

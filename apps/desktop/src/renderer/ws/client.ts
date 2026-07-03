@@ -4,6 +4,7 @@ import type { CoreEvent } from "@daemon/core/events.js";
 export interface SocketLike {
   send(data: string): void;
   close(): void;
+  readyState?: number; // browser WebSocket readyState (1 = OPEN). The test fake may omit it → treated as open.
   // The browser WebSocket passes a MessageEvent({data}) to onmessage. The test fake passes a string, so accept both.
   onmessage: ((ev: { data: string } | string) => void) | null;
   onopen: (() => void) | null;
@@ -97,7 +98,12 @@ export class WsClient {
 
   send(msg: ClientMessage): void {
     const data = JSON.stringify(msg);
-    if (this.sock) { this.sock.send(data); return; }
+    // OPEN check: a socket in CONNECTING (every 1s reconnect attempt while the daemon is down) throws
+    // InvalidStateError from send() — the frame was neither sent nor buffered, defeating the DSK-1 outbox.
+    const open = this.sock !== null && (this.sock.readyState === undefined || this.sock.readyState === 1);
+    if (open) {
+      try { this.sock!.send(data); return; } catch { /* fall through to the outbox */ }
+    }
     // While disconnected, don't drop it but buffer it in the outbox (flushed in the reconnect onopen). Capped to prevent unbounded growth.
     if (!this.stopped && this.outbox.length < WsClient.OUTBOX_MAX) this.outbox.push(data);
   }
@@ -105,14 +111,18 @@ export class WsClient {
   // Type-safe: the request type determines the response type (RequestResultMap[K]). reqId is injected here, so callers omit it.
   // Responses are correlated by reqId, and we cast trusting the contract that the daemon sends the response for that type (the protocol is the single source for the request-response mapping).
   request<K extends RequestType>(msg: RequestInput<K>): Promise<RequestResultMap[K]> {
-    // FIX C3: reject immediately when not connected
-    if (!this.sock) {
-      return Promise.reject(new Error("not connected"));
-    }
+    // FIX C3 + audit #31: reject when not connected OR still CONNECTING (send() would throw and leak a pending).
+    const open = this.sock !== null && (this.sock.readyState === undefined || this.sock.readyState === 1);
+    if (!open) return Promise.reject(new Error("not connected"));
     const reqId = `q${this.seq++}`;
     return new Promise<RequestResultMap[K]>((resolve, reject) => {
       this.pending.set(reqId, { resolve: resolve as (m: ServerMessage) => void, reject });
-      this.sock?.send(JSON.stringify({ ...msg, reqId }));
+      try {
+        this.sock!.send(JSON.stringify({ ...msg, reqId }));
+      } catch (e) {
+        this.pending.delete(reqId);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
     });
   }
 }
