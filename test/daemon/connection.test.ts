@@ -436,6 +436,15 @@ describe("Connection worker chat routes", () => {
     expect(sent.find((m) => m.type === "error" && m.reqId === "q9")).toBeTruthy();
   });
 
+  it("worker.send with a reqId is acked on success (so the desktop can await it)", async () => {
+    const sent: any[] = [];
+    const fleet: FleetOverride = { send: () => {} }; // does not throw → success path
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "worker.send", id: "w1", text: "hi", clientMsgId: "c1", reqId: "q1" }));
+    const acks = sent.filter((m) => m.type === "fleet.ack");
+    expect(acks).toContainEqual(expect.objectContaining({ reqId: "q1", action: "send", id: "w1" }));
+  });
+
   it("fleet.spawn resolves a registered repo, spawns, returns the new id", async () => {
     const sent: any[] = [];
     const calls: Array<{ repoPath: string; task: string; label: string }> = [];

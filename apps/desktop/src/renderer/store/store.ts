@@ -81,6 +81,8 @@ interface Store extends AppState {
   seedWorkerHistory: (id: string, events: Array<{ seq: number; type: string; payload: unknown; createdAt?: string }>) => void;
   // Optimistic "pending" bubble for a message sent while a worker is busy. Reconciled to committed when the worker.event user echo (clientMsgId) arrives.
   pushWorkerPending: (id: string, item: { clientMsgId: string; text: string }) => void;
+  // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
+  dropWorkerPending: (id: string, clientMsgId: string) => void;
   // Add an optimistic pending bubble on the App send path. Transitioned to committed via isEchoUser dedup when the daemon user echo (master.message role=user) arrives.
   pushPending: (sid: string, item: { clientMsgId: string; text: string }) => void;
 }
@@ -206,6 +208,8 @@ export const useStore = create<Store>((set, get) => ({
   setDaemonNote: (daemonNote) => set({ daemonNote }),
   seedHistory: (sid, events) => set((s) => ({ logsBySession: { ...s.logsBySession, [sid]: seedSessionLog(s.logsBySession[sid], sid, events, s.liveInteractionIds) } })),
   pushWorkerPending: (id, item) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: [...(s.pendingByWorker[id] ?? []), item] } })),
+  // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
+  dropWorkerPending: (id, clientMsgId) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: (s.pendingByWorker[id] ?? []).filter((p) => p.clientMsgId !== clientMsgId) } })),
   pushPending: (sid, item) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: [...(s.pendingBySession[sid] ?? []), item] } })),
   seedWorkerHistory: (id, events) =>
     set((s) => ({

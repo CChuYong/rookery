@@ -34,3 +34,16 @@ describe("pushPending (pending message infra — dormant)", () => {
     expect(useStore.getState().pendingBySession.s1).toEqual([{ clientMsgId: "c2", text: "r" }]);
   });
 });
+
+describe("pendingByWorker (optimistic worker bubbles)", () => {
+  beforeEach(() => {
+    useStore.setState({ pendingByWorker: {} });
+  });
+
+  it("dropWorkerPending removes exactly the rolled-back bubble", () => {
+    useStore.getState().pushWorkerPending("w1", { clientMsgId: "c1", text: "a" });
+    useStore.getState().pushWorkerPending("w1", { clientMsgId: "c2", text: "b" });
+    useStore.getState().dropWorkerPending("w1", "c1");
+    expect(useStore.getState().pendingByWorker["w1"]).toEqual([{ clientMsgId: "c2", text: "b" }]);
+  });
+});

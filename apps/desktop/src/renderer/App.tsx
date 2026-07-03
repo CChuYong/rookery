@@ -551,7 +551,12 @@ export function App(): JSX.Element {
     const clientMsgId = crypto.randomUUID();
     // Show a queued bubble immediately → after the worker finishes its current turn (boundary echo) it switches to committed and settles into place.
     useStore.getState().pushWorkerPending(id, { clientMsgId, text });
-    client?.send({ type: "worker.send", id, text, clientMsgId });
+    // request(): a rejected send (mid-restore, terminated worker, disconnected) rolls the bubble back and surfaces a toast —
+    // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished.
+    void client?.request({ type: "worker.send", id, text, clientMsgId }).catch((e) => {
+      useStore.getState().dropWorkerPending(id, clientMsgId);
+      toast.error(tRef.current("toast.sendFailed"), String(e));
+    });
   }, []);
   const subSetModel = useCallback((id: string, model: string) => {
     client?.send({ type: "worker.setModel", id, model });

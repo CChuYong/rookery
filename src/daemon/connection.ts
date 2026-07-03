@@ -367,9 +367,11 @@ export class Connection {
         return;
       }
       case "worker.send": {
-        // Deliver a follow-up message to a running worker (streaming input). Throws if the agent is terminated/unknown,
-        // and the outer try/catch responds with error+reqId (previously this was silently swallowed, so typo/detached instructions vanished without a trace).
+        // Deliver a follow-up message to a running worker (streaming input). Throws if the agent is terminated/unknown
+        // or mid-restore, and the outer try/catch responds with error+reqId. On success, ack when a reqId is present so
+        // request()-style clients (desktop) get a settled promise instead of a silently-dropped frame.
         this.fleet.send(msg.id, msg.text, msg.clientMsgId);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.id });
         return;
       }
       case "worker.setModel": {
