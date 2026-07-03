@@ -63,6 +63,9 @@ interface Store extends AppState {
   // requestIds of interaction cards the daemon has announced since the last (re)connect (see the store creator).
   liveInteractionIds: Set<string>;
   resetLiveInteractions: () => void;
+  // Monotonic counter bumped on every ws (re)connect. pending master bubbles are stamped with it so the history seed can prune pre-reconnect ghosts (audit #17).
+  connectionEpoch: number;
+  bumpConnectionEpoch: () => void;
   applyEvent: (e: CoreEvent) => void;
   setSessions: (s: Store["sessions"]) => void;
   setActive: (id: string) => void;
@@ -141,6 +144,11 @@ export const useStore = create<Store>((set, get) => ({
   // seed time "not in this set" means the daemon no longer holds that request (expired).
   liveInteractionIds: new Set<string>(),
   resetLiveInteractions: () => set(() => ({ liveInteractionIds: new Set<string>() })),
+  // Bumped on every ws (re)connect (App onOpen). pending entries carry the epoch they were created in; the
+  // history seed drops pre-reconnect entries — their turn is dead (restart) or their echo will re-render the
+  // message anyway when the still-queued turn starts. Prevents the audit-#17 forever-ghost bubble.
+  connectionEpoch: 0,
+  bumpConnectionEpoch: () => set((s) => ({ connectionEpoch: s.connectionEpoch + 1 })),
   applyEvent: (e) =>
     set((s) => {
       const now = Date.now(); // Live message arrival time (for hover relative time) — an impure boundary, injected as an argument into the pure reduce.
@@ -206,11 +214,21 @@ export const useStore = create<Store>((set, get) => ({
   setRepos: (repos) => set({ repos }),
   setDaemon: (daemon) => set({ daemon }),
   setDaemonNote: (daemonNote) => set({ daemonNote }),
-  seedHistory: (sid, events) => set((s) => ({ logsBySession: { ...s.logsBySession, [sid]: seedSessionLog(s.logsBySession[sid], sid, events, s.liveInteractionIds) } })),
+  seedHistory: (sid, events) => set((s) => {
+    // Fallback reconciliation (audit #17): the live echo is the primary remover, but a lost echo left the
+    // bubble forever. The persisted transcript is authoritative — drop entries already committed there, and
+    // drop pre-reconnect entries the seed didn't find (dead turn, or a queued echo that will re-render itself).
+    const committed = new Set(events.map((ev) => (ev.payload as { clientMsgId?: string }).clientMsgId).filter((c): c is string => typeof c === "string"));
+    const pending = (s.pendingBySession[sid] ?? []).filter((p) => !committed.has(p.clientMsgId) && (p.epoch === undefined || p.epoch >= s.connectionEpoch));
+    return {
+      logsBySession: { ...s.logsBySession, [sid]: seedSessionLog(s.logsBySession[sid], sid, events, s.liveInteractionIds) },
+      pendingBySession: { ...s.pendingBySession, [sid]: pending },
+    };
+  }),
   pushWorkerPending: (id, item) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: [...(s.pendingByWorker[id] ?? []), item] } })),
   // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
   dropWorkerPending: (id, clientMsgId) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: (s.pendingByWorker[id] ?? []).filter((p) => p.clientMsgId !== clientMsgId) } })),
-  pushPending: (sid, item) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: [...(s.pendingBySession[sid] ?? []), item] } })),
+  pushPending: (sid, item) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: [...(s.pendingBySession[sid] ?? []), { ...item, epoch: s.connectionEpoch }] } })),
   seedWorkerHistory: (id, events) =>
     set((s) => ({
       workerLogs: {

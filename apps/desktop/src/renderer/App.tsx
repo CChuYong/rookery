@@ -415,6 +415,7 @@ export function App(): JSX.Element {
     c.onOpen(() => {
       if (startTimer) { clearTimeout(startTimer); startTimer = null; } // connection succeeded → release the fallback timer (DSK-10)
       useStore.getState().resetLiveInteractions(); // must precede events.subscribe: the replay repopulates the set
+      useStore.getState().bumpConnectionEpoch(); // pending bubbles from before this reconnect become prunable at seed time
       useStore.getState().setDaemon("up");
       void c.request({ type: "session.list" }).then((r) => { useStore.getState().setSessions(r.sessions ?? []); useStore.getState().seedRunningFromSessions(r.sessions ?? []); }).catch(() => {});
       void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});

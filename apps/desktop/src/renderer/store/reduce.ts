@@ -24,7 +24,7 @@ export interface AppState {
   nested: Record<string, Record<string, LogItem[]>>;
   // User messages not yet acknowledged (echoed) by the daemon — removed when reconciled via master.message by clientMsgId.
   // Always empty (dormant) until the App send path in Task 2 calls pushPending.
-  pendingBySession: Record<string, { clientMsgId: string; text: string }[]>;
+  pendingBySession: Record<string, { clientMsgId: string; text: string; epoch?: number }[]>;
   // "Pending" messages sent while the worker is busy (not yet committed at the boundary) — keyed by workerId. Reconciled via the clientMsgId of the worker.event echo.
   pendingByWorker: Record<string, { clientMsgId: string; text: string }[]>;
 }
