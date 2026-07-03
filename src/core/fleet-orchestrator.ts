@@ -359,7 +359,10 @@ export class FleetOrchestrator {
         // worker saw the failed badge over an empty transcript until a manual history refetch (audit #27).
         bus.emit({ type: "worker.event", sessionId: input.homeSessionId, workerId: id, seq, data });
       } catch { /* ignore */ }
-      bus.emit({ type: "worker.status", sessionId: input.homeSessionId, workerId: id, status: "failed" });
+      // Gate the terminal emit on the row existing: a createWorker-origin failure has no row and was never announced
+      // (no worker.spawned) — emitting worker.status here would materialize a phantom fleet row in clients (the desktop
+      // reducer's ?? fallback). A provisioning failure (addWorktree throws) has a row + spawned emit, so it still fires.
+      if (repos.getWorker(id)) bus.emit({ type: "worker.status", sessionId: input.homeSessionId, workerId: id, status: "failed" });
     }
   }
 

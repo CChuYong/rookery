@@ -475,9 +475,14 @@ describe("FleetOrchestrator", () => {
     const badGit = new FakeGitOps({});
     badGit.addWorktree = async () => { throw new Error("worktree exists"); };
     const s = setup({ git: badGit });
+    const statuses: string[] = [];
+    s.bus.subscribe("@fleet", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
     const { id } = await s.fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
     await expect(s.fleet.waitAllSettled()).resolves.toBeUndefined();
     expect(s.fleet.status(id)).toBe("failed");
+    // provisioning failure: the worker row DOES exist and was announced (worker.spawned) → the 'failed' status must still be emitted
+    // (this is the positive branch of the phantom-emit guard: emit only when repos.getWorker(id) exists).
+    expect(statuses).toContain("failed");
   });
 
   it("records the failure event with a real next seq (not the magic 9999)", async () => {
@@ -632,14 +637,20 @@ describe("FleetOrchestrator", () => {
     expect(git.calls.some((c) => c.startsWith("removeWorktree"))).toBe(true);
   });
 
-  it("spawn settles even when createWorker throws (audit #25) — no wedged master turn, no unhandled rejection", async () => {
+  it("spawn settles even when createWorker throws (audit #25) — no wedged master turn, no unhandled rejection, no phantom status", async () => {
     const git = new FakeGitOps({ headValue: "base0", checkpointSha: "ck" });
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
     // repos WITHOUT the home session row → createWorker FK-throws (the audit's concurrent session-delete shape)
     const repos = new Repositories(openDb(":memory:"));
-    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", idgen: () => "a0" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("@fleet", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", idgen: () => "a0" });
     await expect(fleet.spawn({ homeSessionId: "no-such-session", repoPath: "/code", label: "x", task: "t" })).resolves.toEqual({ id: "a0" });
     await fleet.waitAllSettled(); // the flow settled through the catch — drain must not hang or reject
+    // createWorker itself threw → no worker row exists and no worker.spawned was ever announced. The catch must NOT emit a
+    // phantom worker.status 'failed' for an id no client saw spawned (the desktop reducer's ?? fallback would materialize a ghost row).
+    expect(statuses).toHaveLength(0);
   }, 5000);
 
   it("fork failure after addWorktree cleans up its worktree and fork ref (fork pre-entry window + audit #32)", async () => {

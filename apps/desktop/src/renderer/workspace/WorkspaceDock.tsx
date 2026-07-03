@@ -153,8 +153,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        // Flush instead of dropping (audit #33): a layout change within the 400ms debounce of a page switch,
-        // reload, or quit was silently lost and the page reverted to its previous saved arrangement.
+        // Flush instead of dropping (audit #33): a layout change within the 400ms debounce of a page switch was silently lost. (Window reload/app quit still skip React cleanups — that residual sliver is accepted.)
         const api = apiRef.current;
         if (api) { try { useLayoutStore.getState().save_(pageKey, api.toJSON()); } catch { /* dockview mid-teardown — keep the last saved layout */ } }
       }
