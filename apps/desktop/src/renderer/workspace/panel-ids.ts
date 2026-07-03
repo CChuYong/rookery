@@ -22,3 +22,15 @@ export function editorPanelId(tabId: string): string {
 export function fixedPanelId(kind: FixedKind): string {
   return `panel:${kind}`;
 }
+
+// tab id ("agent" | "file:..." | "diff:..." | "commit:...") → the dock panel id that renders it.
+export function panelIdForTab(tabId: string): string {
+  return tabId === "agent" ? fixedPanelId("conversation") : editorPanelId(tabId);
+}
+
+// dock panel id → the workspace tab id it represents, or null for fixed panels that aren't tabs (files/git/terminal/nested).
+export function tabIdForPanel(panelId: string): string | null {
+  if (panelId === fixedPanelId("conversation")) return "agent";
+  const p = "panel:editor:";
+  return panelId.startsWith(p) ? panelId.slice(p.length) : null;
+}

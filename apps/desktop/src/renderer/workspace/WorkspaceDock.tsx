@@ -5,7 +5,7 @@ import { useT } from "../i18n/provider.js";
 import { useWsStore, type Tab } from "../store/workspace.js";
 import { useLayoutStore } from "../store/layout.js";
 import { defaultPanels } from "./default-template.js";
-import { fixedPanelId, editorPanelId, type FixedKind } from "./panel-ids.js";
+import { fixedPanelId, editorPanelId, panelIdForTab, tabIdForPanel, type FixedKind } from "./panel-ids.js";
 import { dockComponents } from "./panels.js";
 import { RookeryTab } from "./RookeryTab.js";
 import "./dockview-theme.css";
@@ -84,6 +84,19 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     }
   };
 
+  // Store → dock: focus the panel for the store's active tab. Re-clicking an already-open file in the
+  // FileTree only writes activeTabId (openFile_ early-returns when the tab exists) — without this, the click
+  // was a silent no-op while the panel stayed buried behind another tab (audit #20).
+  const syncActive = (api: DockviewApi | null): void => {
+    if (!api || disposedRef.current) return;
+    const want = panelIdForTab(useWsStore.getState().byPage[pageKey]?.activeTabId ?? "agent");
+    if (api.activePanel?.id === want) return;
+    const panel = api.getPanel(want);
+    if (!panel) return;
+    reconcilingRef.current = true;
+    try { panel.api.setActive(); } finally { reconcilingRef.current = false; }
+  };
+
   const persist = (api: DockviewApi): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { if (!disposedRef.current) useLayoutStore.getState().save_(pageKey, api.toJSON()); }, 400);
@@ -98,6 +111,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     // The conversation is the primary panel — if a restored layout dropped it, re-seed it.
     if (!api.getPanel(fixedPanelId("conversation"))) addFixed(api, "conversation");
     syncEditors(api);
+    syncActive(api);
 
     const disposables: Disposable[] = [];
     // User-closing a panel: editors → reflect in the workspace store; conversation → re-add (it must always exist).
@@ -106,6 +120,16 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       if (e.id === fixedPanelId("conversation")) { addFixed(api, "conversation"); return; }
       if (e.id.startsWith(EDITOR_PREFIX)) useWsStore.getState().closeTab_(pageKey, e.id.slice(EDITOR_PREFIX.length));
     }));
+    // Dock → store: clicking a dock tab makes it the workspace-active tab, so the FileTree highlight and any
+    // store-driven consumers track the actually-focused panel. Fixed non-tab panels (files/git/terminal) are
+    // not tabs — they don't touch activeTabId.
+    disposables.push(api.onDidActivePanelChange((e) => {
+      const p = e.panel;
+      if (reconcilingRef.current || disposedRef.current || !p) return;
+      const tabId = tabIdForPanel(p.id);
+      if (!tabId) return;
+      if ((useWsStore.getState().byPage[pageKey]?.activeTabId ?? "agent") !== tabId) useWsStore.getState().setActive_(pageKey, tabId);
+    }));
     disposables.push(api.onDidLayoutChange(() => persist(api)));
     disposablesRef.current = disposables;
   };
@@ -113,7 +137,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   // Keep editor panels in sync when tabs change elsewhere (file click, tool chip).
   useEffect(() => {
     disposedRef.current = false;
-    const unsub = useWsStore.subscribe(() => syncEditors(apiRef.current));
+    const unsub = useWsStore.subscribe(() => { syncEditors(apiRef.current); syncActive(apiRef.current); });
     return () => {
       disposedRef.current = true;
       unsub();
