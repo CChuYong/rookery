@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'After capturing a screenshot set of the desktop app (Phase 0, done inline), to produce a prioritized UI/UX issue inventory. Pass args {shotsDir, notes?, outPath?}.',
   phases: [
     { title: 'Lens audit', detail: '7 parallel lens agents over screenshots + renderer code (judgment lenses inherit fable, checklist lenses opus)' },
-    { title: 'Verify', detail: 'per-finding adversarial verify + severity/effort scoring', model: 'opus' },
+    { title: 'Verify', detail: 'per-finding adversarial verify + severity/effort scoring', model: 'claude-sonnet-5' },
     { title: 'Synthesize', detail: 'merge duplicates, group by theme, write prioritized report' },
     { title: 'Critique', detail: 'completeness critic checks and fixes the report', model: 'opus' },
   ],
@@ -169,7 +169,8 @@ function criticPrompt(confirmed) {
 // --- Phase 1+2: lens fan-out, each lens's findings verified as soon as that lens finishes ---
 // Model tiering: judgment lenses inherit the session model (fable); checklist lenses
 // carry model:'opus' on their LENSES entry; verifiers are volume-heavy mechanical
-// checks → opus at medium effort.
+// checks → Sonnet 5 at medium effort. NOTE: the full ID is required — the 'sonnet'
+// alias still resolves to 4.6 (probe-verified 2026-07-03).
 const perLens = await pipeline(
   LENSES,
   (l) => agent(lensPrompt(l), { label: `lens:${l.key}`, phase: 'Lens audit', schema: FINDINGS_SCHEMA, ...(l.model ? { model: l.model } : {}) }),
@@ -177,7 +178,7 @@ const perLens = await pipeline(
     if (!res) return []
     log(`lens:${l.key} → ${res.findings.length} findings`)
     return parallel(res.findings.map((f) => () =>
-      agent(verifyPrompt(f), { label: `verify:${l.key}/${f.id}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'opus', effort: 'medium' })
+      agent(verifyPrompt(f), { label: `verify:${l.key}/${f.id}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'claude-sonnet-5', effort: 'medium' })
         .then((v) => ({ ...f, lens: l.key, verdict: v }))
     ))
   },

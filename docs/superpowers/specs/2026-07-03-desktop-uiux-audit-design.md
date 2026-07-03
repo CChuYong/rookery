@@ -89,7 +89,7 @@ get a cheaper tier:
 |---|---|---|---|
 | Lenses: visual-consistency, interaction-feedback, ia-navigation, pixel-pass | inherit (fable) | inherit (high) | taste/judgment calls — the audit's core value |
 | Lenses: state-coverage, copy-i18n, a11y-keyboard | opus | inherit (high) | checklist-style sweeps with verifiable criteria |
-| Verify (per finding, the volume bulk) | opus | medium | mechanical re-check of cited evidence + scoring |
+| Verify (per finding, the volume bulk) | claude-sonnet-5 (full ID — the `sonnet` alias still resolves to 4.6) | medium | mechanical re-check of cited evidence + scoring; combo probe-verified 2026-07-03 |
 | Synthesize (1) | inherit (fable) | inherit (high) | the single user-facing deliverable |
 | Critique (1) | opus | medium | mechanical report↔findings cross-check |
 
