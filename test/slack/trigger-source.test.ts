@@ -4,6 +4,16 @@ import { Repositories } from "../../src/persistence/repositories.js";
 import { makeSlackTriggerHandler } from "../../src/slack/trigger-source.js";
 
 describe("makeSlackTriggerHandler", () => {
+  // Minimal enabled slack-trigger automation (no channel/keyword/user filters -> matches any message).
+  const mkRule = (id: string) => ({
+    id,
+    name: id,
+    enabled: true,
+    trigger: { kind: "slack" as const },
+    action: { kind: "master" as const, prompt: "p", cwd: "/w", sessionMode: "reuse" as const },
+  });
+
+
   it("fires matching enabled slack automations with message vars", async () => {
     const repos = new Repositories(openDb(":memory:"), () => "t");
     repos.createAutomation("a1", { name: "n", trigger: { kind: "slack", channels: ["C1"], keyword: "deploy" }, action: { kind: "master", prompt: "{{message}}", cwd: "/w", sessionMode: "reuse" }, enabled: true });
@@ -65,5 +75,29 @@ describe("makeSlackTriggerHandler", () => {
     const handle = makeSlackTriggerHandler({ repos, dispatcher: { run } as any });
     await handle({ channel: "C1", userId: "U1", text: "hi", ts: "111.222", threadTs: "100.000", team: "T1" });
     expect(run.mock.calls[0]![1]).toEqual({ message: "hi", channel: "C1", user: "U1", ts: "111.222", threadTs: "100.000", team: "T1" });
+  });
+
+  it("matching rules dispatch concurrently — a later rule is not delayed behind an earlier rule's full run", async () => {
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((r) => { releaseA = r; });
+    const started: string[] = [];
+    const dispatcher = { run: async (a: { id: string }) => { started.push(a.id); if (a.id === "a") await gateA; } };
+    const rules = [mkRule("a"), mkRule("b")]; // both enabled slack rules matching the message
+    const repos = { listAutomations: () => rules, getAutomation: (id: string) => rules.find((r) => r.id === id) };
+    const handle = makeSlackTriggerHandler({ repos, dispatcher } as never);
+    const p = handle({ channel: "C1", text: "hello" });
+    await Promise.resolve(); await Promise.resolve();
+    expect(started).toEqual(["a", "b"]); // b started while a is still gated
+    releaseA();
+    await p;
+  });
+
+  it("a rule disabled after the snapshot does not fire (fresh re-read at dispatch)", async () => {
+    const ran: string[] = [];
+    const dispatcher = { run: async (a: { id: string }) => { ran.push(a.id); } };
+    const rule = mkRule("a");
+    const repos = { listAutomations: () => [rule], getAutomation: () => ({ ...rule, enabled: false }) };
+    await makeSlackTriggerHandler({ repos, dispatcher } as never)({ channel: "C1", text: "hello" });
+    expect(ran).toEqual([]);
   });
 });
