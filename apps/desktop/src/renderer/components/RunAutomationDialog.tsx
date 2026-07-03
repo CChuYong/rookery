@@ -58,7 +58,7 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
         </div>
         <div className="mt-1 flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={dismiss}>{t("common.cancel")}</Button>
-          <Button size="sm" onClick={submit}>{t("runAutomationDialog.run")}</Button>
+          <Button variant="primary" size="sm" onClick={submit}>{t("runAutomationDialog.run")}</Button>
         </div>
       </div>
     </div>

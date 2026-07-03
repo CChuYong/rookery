@@ -29,7 +29,7 @@ export function RestartDaemonDialog({ onConfirm, onClose, busy }: { onConfirm: (
         <p className="text-[12.5px] leading-relaxed text-muted">{t("restartDaemonDialog.body")}</p>
         <div className="mt-1 flex justify-end gap-2">
           <Button variant="outline" size="sm" autoFocus onClick={dismiss}>{t("common.cancel")}</Button>
-          <Button size="sm" onClick={onConfirm} loading={busy}>{t("restartDaemonDialog.confirm")}</Button>
+          <Button variant="primary" size="sm" onClick={onConfirm} loading={busy}>{t("restartDaemonDialog.confirm")}</Button>
         </div>
       </div>
     </div>

@@ -291,7 +291,7 @@ function NameDialog({ title, initial, onSubmit, onCancel }: { title: string; ini
         <Input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <div className="flex justify-end gap-2">
           <button onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <Button size="sm" onClick={submit}>{t("common.confirm")}</Button>
+          <Button variant="primary" size="sm" onClick={submit}>{t("common.confirm")}</Button>
         </div>
       </div>
     </div>

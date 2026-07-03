@@ -23,7 +23,7 @@ export function Tooltip({ label, side = "top", children }: { label: string; side
         id={id}
         role="tooltip"
         className={cn(
-          "pointer-events-none absolute z-50 max-w-[220px] whitespace-normal break-words rounded-md border border-line bg-raised px-2 py-1 text-[11px] leading-snug text-fg-dim opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+          "pointer-events-none absolute z-50 w-max max-w-[220px] whitespace-normal break-words rounded-md border border-line bg-raised px-2 py-1 text-[11px] leading-snug text-fg-dim opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
           SIDE[side],
         )}
       >

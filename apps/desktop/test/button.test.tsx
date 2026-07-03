@@ -27,3 +27,21 @@ describe("Button loading state", () => {
     expect(screen.getByRole("button")).toHaveAttribute("type", "button");
   });
 });
+
+describe("Button disabled treatment", () => {
+  it("a disabled primary button gets a grey fill, not a faded coral one (audit #39)", () => {
+    render(<Button variant="primary" disabled>Send</Button>);
+    const btn = screen.getByRole("button");
+    expect(btn.className).toContain("disabled:bg-raised");
+    expect(btn.className).toContain("disabled:text-muted");
+    expect(btn.className).toContain("disabled:opacity-100");
+    expect(btn.className).not.toContain("disabled:opacity-40"); // twMerge drops the base fade for primary
+  });
+
+  it("a disabled ghost button keeps the plain opacity fade (unaffected variant)", () => {
+    render(<Button variant="ghost" disabled>Cancel</Button>);
+    const btn = screen.getByRole("button");
+    expect(btn.className).toContain("disabled:opacity-40");
+    expect(btn.className).not.toContain("disabled:bg-raised");
+  });
+});

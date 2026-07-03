@@ -910,11 +910,11 @@ export function App(): JSX.Element {
             <UsagePanel usage={s.usage} />
             {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
             <div className="flex items-center gap-3 px-1 py-0.5 font-mono text-[11px] text-muted">
-              <span className="flex items-center gap-1.5" title={`daemon · ${s.daemon}`}>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`daemon · ${s.daemon}`}>
                 <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.daemon === "up" ? "bg-pr led-live" : s.daemon === "starting" ? "bg-run led-live" : "bg-fail", daemonJustUp && "status-flash")} />
                 <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {s.daemon}</span>}</span>
               </span>
-              <span className="flex items-center gap-1.5" title={`slack · ${s.slack}`}>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`slack · ${s.slack}`}>
                 <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.slack === "up" ? "bg-pr led-live" : s.slack === "connecting" ? "bg-run led-live" : s.slack === "error" ? "bg-fail" : "bg-stop", slackJustUp && "status-flash")} />
                 <span>slack{s.slack !== "up" && <span className="text-fg-dim"> · {s.slack}</span>}</span>
               </span>
