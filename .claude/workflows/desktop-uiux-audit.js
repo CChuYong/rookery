@@ -3,10 +3,10 @@ export const meta = {
   description: 'Lens-based parallel UI/UX audit of the rookery desktop renderer (screenshots + code)',
   whenToUse: 'After capturing a screenshot set of the desktop app (Phase 0, done inline), to produce a prioritized UI/UX issue inventory. Pass args {shotsDir, notes?, outPath?}.',
   phases: [
-    { title: 'Lens audit', detail: '7 parallel lens agents over screenshots + renderer code' },
-    { title: 'Verify', detail: 'per-finding adversarial verify + severity/effort scoring' },
+    { title: 'Lens audit', detail: '7 parallel lens agents over screenshots + renderer code (judgment lenses inherit fable, checklist lenses opus)' },
+    { title: 'Verify', detail: 'per-finding adversarial verify + severity/effort scoring', model: 'opus' },
     { title: 'Synthesize', detail: 'merge duplicates, group by theme, write prioritized report' },
-    { title: 'Critique', detail: 'completeness critic checks and fixes the report' },
+    { title: 'Critique', detail: 'completeness critic checks and fixes the report', model: 'opus' },
   ],
 }
 
@@ -83,6 +83,7 @@ const LENSES = [
   },
   {
     key: 'state-coverage',
+    model: 'opus',
     focus: 'State coverage: loading/empty/error/skeleton states. For every data-driven surface, check what renders while loading, when the list is empty, and when the fetch or WS request fails. Look for layout jumps when data arrives, missing empty-state guidance (blank panels with no hint), spinners that never resolve, and errors that vanish silently instead of surfacing.',
     hints: 'apps/desktop/src/renderer/components/Skeleton.tsx usage, views/Sessions.tsx, views/RepoTree.tsx, components/GitChanges.tsx, components/GitHistory.tsx, components/UsagePanel.tsx, components/AutomationPage.tsx, store/ fetch paths',
   },
@@ -98,11 +99,13 @@ const LENSES = [
   },
   {
     key: 'copy-i18n',
+    model: 'opus',
     focus: 'Copy and i18n quality: awkward or inconsistent wording in BOTH locales, terms translated inconsistently across namespaces (same concept, different words), text truncation/overflow visible in screenshots, placeholder/tooltip/aria texts that are missing or unhelpful, and tone drift (formal vs casual) within one locale. The ko/en key-parity is already test-enforced — do not report parity, report quality.',
     hints: 'apps/desktop/src/renderer/i18n/locales/ko/ and en/ (all namespaces), ko/en screenshot pairs in the shots directory',
   },
   {
     key: 'a11y-keyboard',
+    model: 'opus',
     focus: 'Accessibility and keyboard: focus management in modals (trap, restore on close, Escape), Tab order through composer/sidebar/dock, missing aria-labels on icon-only buttons, keyboard operability of context menus and menus, visible focus rings, and useful shortcuts that are missing or undiscoverable (no hint anywhere).',
     hints: 'apps/desktop/src/renderer/components/ modals (WorkerSpawnModal.tsx, RepoModal.tsx, OnboardingModal.tsx, DataConsentModal.tsx), ContextMenu.tsx, Tooltip.tsx, icon-only buttons across components/, Composer.tsx key handling',
   },
@@ -164,14 +167,17 @@ function criticPrompt(confirmed) {
 }
 
 // --- Phase 1+2: lens fan-out, each lens's findings verified as soon as that lens finishes ---
+// Model tiering: judgment lenses inherit the session model (fable); checklist lenses
+// carry model:'opus' on their LENSES entry; verifiers are volume-heavy mechanical
+// checks → opus at medium effort.
 const perLens = await pipeline(
   LENSES,
-  (l) => agent(lensPrompt(l), { label: `lens:${l.key}`, phase: 'Lens audit', schema: FINDINGS_SCHEMA }),
+  (l) => agent(lensPrompt(l), { label: `lens:${l.key}`, phase: 'Lens audit', schema: FINDINGS_SCHEMA, ...(l.model ? { model: l.model } : {}) }),
   (res, l) => {
     if (!res) return []
     log(`lens:${l.key} → ${res.findings.length} findings`)
     return parallel(res.findings.map((f) => () =>
-      agent(verifyPrompt(f), { label: `verify:${l.key}/${f.id}`, phase: 'Verify', schema: VERDICT_SCHEMA })
+      agent(verifyPrompt(f), { label: `verify:${l.key}/${f.id}`, phase: 'Verify', schema: VERDICT_SCHEMA, model: 'opus', effort: 'medium' })
         .then((v) => ({ ...f, lens: l.key, verdict: v }))
     ))
   },
@@ -192,7 +198,7 @@ if (confirmed.length === 0) {
 const synth = await agent(synthPrompt(confirmed, rejected), { label: 'synthesize', phase: 'Synthesize', schema: SYNTH_SCHEMA })
 
 // --- Phase 4: completeness critic ---
-const critique = await agent(criticPrompt(confirmed), { label: 'critic', phase: 'Critique', schema: CRITIC_SCHEMA })
+const critique = await agent(criticPrompt(confirmed), { label: 'critic', phase: 'Critique', schema: CRITIC_SCHEMA, model: 'opus', effort: 'medium' })
 
 return {
   reportPath: (synth && synth.reportPath) || OUT,

@@ -80,6 +80,19 @@ Args: `{ shotsDir (required, absolute), notes?, outPath? }`.
 
 Expected scale: ~7 lens agents + one verifier per finding (est. 40–80) + 2.
 
+### Model/effort allocation
+
+Judgment-heavy work gets the strongest model; volume-heavy mechanical checks
+get a cheaper tier:
+
+| Stage | Model | Effort | Rationale |
+|---|---|---|---|
+| Lenses: visual-consistency, interaction-feedback, ia-navigation, pixel-pass | inherit (fable) | inherit (high) | taste/judgment calls — the audit's core value |
+| Lenses: state-coverage, copy-i18n, a11y-keyboard | opus | inherit (high) | checklist-style sweeps with verifiable criteria |
+| Verify (per finding, the volume bulk) | opus | medium | mechanical re-check of cited evidence + scoring |
+| Synthesize (1) | inherit (fable) | inherit (high) | the single user-facing deliverable |
+| Critique (1) | opus | medium | mechanical report↔findings cross-check |
+
 ## After the audit (separate cycle, out of scope here)
 
 Review the report together → pick improvement waves → each wave gets its own
