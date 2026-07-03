@@ -338,13 +338,13 @@ describe("WorkspaceManager git", () => {
     ]);
   });
 
-  it("gitLog parses recent commits (NUL-ish field split)", async () => {
-    const exec = vi.fn(async () => ({ stdout: "abc123\x1fabc\x1ffix app bug\x1fCChuYonng\x1f2 hours ago\ndef456\x1fdef\x1finit\x1fbob\x1f1 day ago\n", code: 0 }));
+  it("gitLog parses recent commits (NUL-ish field split), date as a locale-independent unix-seconds number (%ct)", async () => {
+    const exec = vi.fn(async () => ({ stdout: "abc123\x1fabc\x1ffix app bug\x1fCChuYonng\x1f1750000000\ndef456\x1fdef\x1finit\x1fbob\x1f1750086400\n", code: 0 }));
     const mgr = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec });
     mgr.root({});
     expect(await mgr.gitLog("/r", 50)).toEqual([
-      { hash: "abc123", shortHash: "abc", subject: "fix app bug", author: "CChuYonng", relDate: "2 hours ago" },
-      { hash: "def456", shortHash: "def", subject: "init", author: "bob", relDate: "1 day ago" },
+      { hash: "abc123", shortHash: "abc", subject: "fix app bug", author: "CChuYonng", date: 1750000000 },
+      { hash: "def456", shortHash: "def", subject: "init", author: "bob", date: 1750086400 },
     ]);
   });
 

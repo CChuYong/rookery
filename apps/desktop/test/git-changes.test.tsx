@@ -16,7 +16,7 @@ function stubWs(over: Record<string, unknown> = {}) {
     gitDiscard: vi.fn(async () => ({ ok: true })),
     gitCommit: vi.fn(async () => ({ ok: true })),
     gitPush: vi.fn(async () => ({ ok: true })),
-    gitLog: vi.fn(async () => [{ hash: "abc123", shortHash: "abc123", subject: "fix app", author: "CChuYonng", relDate: "2h" }]),
+    gitLog: vi.fn(async () => [{ hash: "abc123", shortHash: "abc123", subject: "fix app", author: "CChuYonng", date: Math.floor(Date.now() / 1000) - 3600 }]),
     ...over,
   };
   (window as unknown as { rookery: unknown }).rookery = { ws };

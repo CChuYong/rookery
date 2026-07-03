@@ -78,7 +78,7 @@ contextBridge.exposeInMainWorld("rookery", {
     gitDiscard: (cwd: string, path: string, untracked: boolean) => ipcRenderer.invoke("git:discard", cwd, path, untracked) as Promise<{ ok: boolean; error?: string }>,
     gitCommit: (cwd: string, message: string) => ipcRenderer.invoke("git:commit", cwd, message) as Promise<{ ok: boolean; error?: string }>,
     gitPush: (cwd: string) => ipcRenderer.invoke("git:push", cwd) as Promise<{ ok: boolean; error?: string }>,
-    gitLog: (cwd: string, limit?: number) => ipcRenderer.invoke("git:log", cwd, limit) as Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; relDate: string }>>,
+    gitLog: (cwd: string, limit?: number) => ipcRenderer.invoke("git:log", cwd, limit) as Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }>>,
     gitCommitInfo: (cwd: string, hash: string) => ipcRenderer.invoke("git:commitInfo", cwd, hash) as Promise<{ hash: string; shortHash: string; author: string; email: string; date: string; subject: string; body: string }>,
     gitCommitFiles: (cwd: string, hash: string) => ipcRenderer.invoke("git:commitFiles", cwd, hash) as Promise<Array<{ path: string; status: string; added: number; deleted: number }>>,
     gitShowFileDiff: (cwd: string, hash: string, path: string) => ipcRenderer.invoke("git:showFileDiff", cwd, hash, path) as Promise<{ before: string; after: string }>,

@@ -1,13 +1,29 @@
 import { useEffect, useState } from "react";
 import { useWsStore } from "../store/workspace.js";
 import { SkeletonRows } from "./Skeleton.js";
-import { useT } from "../i18n/provider.js";
+import { useT, useLocale } from "../i18n/provider.js";
+import type { TFunc } from "../i18n/provider.js";
+import type { Locale } from "../i18n/types.js";
+import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 
-type Commit = { hash: string; shortHash: string; subject: string; author: string; relDate: string };
+type Commit = { hash: string; shortHash: string; subject: string; author: string; date: number };
+
+// Turn a commit date (unix seconds, %ct — locale-independent) into a label that follows the app locale.
+// Within 7 days, relative time (i18n); beyond that, absolute date. Same convention as AssistantMessage's timeLabel.
+function commitDateLabel(dateSeconds: number, now: number, t: TFunc, locale: Locale): string {
+  const ts = dateSeconds * 1000;
+  const rel = relativeTime(ts, now);
+  if (!rel) return absoluteDate(ts, now, locale);
+  if (rel.unit === "now") return t("relativeTime.justNow");
+  if (rel.unit === "m") return t("relativeTime.minutesAgo", { n: rel.value });
+  if (rel.unit === "h") return t("relativeTime.hoursAgo", { n: rel.value });
+  return t("relativeTime.daysAgo", { n: rel.value });
+}
 
 // Recent commit history list. Clicking a row → opens that commit's multi-file Diff page (commit tab).
 export function GitHistory({ root, pageKey, version = 0 }: { root: string; pageKey: string; version?: number }): JSX.Element {
   const t = useT();
+  const locale = useLocale();
   const [commits, setCommits] = useState<Commit[] | null>(null);
   const openCommit = useWsStore((s) => s.openCommit_);
   useEffect(() => {
@@ -27,7 +43,7 @@ export function GitHistory({ root, pageKey, version = 0 }: { root: string; pageK
             <span className="shrink-0">·</span>
             <span className="min-w-0 truncate">{c.author}</span>
             <span className="shrink-0">·</span>
-            <span className="shrink-0">{c.relDate}</span>
+            <span className="shrink-0">{commitDateLabel(c.date, Date.now(), t, locale)}</span>
           </span>
         </button>
       ))}

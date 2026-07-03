@@ -26,7 +26,7 @@ export interface RookeryWs {
   gitDiscard(cwd: string, path: string, untracked: boolean): Promise<{ ok: boolean; error?: string }>;
   gitCommit(cwd: string, message: string): Promise<{ ok: boolean; error?: string }>;
   gitPush(cwd: string): Promise<{ ok: boolean; error?: string }>;
-  gitLog(cwd: string, limit?: number): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; relDate: string }>>;
+  gitLog(cwd: string, limit?: number): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }>>;
   gitCommitInfo(cwd: string, hash: string): Promise<{ hash: string; shortHash: string; author: string; email: string; date: string; subject: string; body: string }>;
   gitCommitFiles(cwd: string, hash: string): Promise<Array<{ path: string; status: string; added: number; deleted: number }>>;
   gitShowFileDiff(cwd: string, hash: string, path: string): Promise<{ before: string; after: string }>;

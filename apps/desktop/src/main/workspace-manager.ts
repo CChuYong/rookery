@@ -323,14 +323,16 @@ export class WorkspaceManager {
   }
 
   // Recent commit history. Fields are separated by \x1f (unit sep), commits by newline (%s is a single line).
-  async gitLog(cwd: string, limit = 50): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; relDate: string }>> {
+  // %ct (committer date, unix seconds) is locale-independent — unlike %cr ("2 hours ago"), which follows git/OS locale
+  // regardless of the app's UI language. The renderer formats `date` via its own relativeTime()+i18n so it follows the app locale.
+  async gitLog(cwd: string, limit = 50): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }>> {
     this.guardCwd(cwd);
     if (!this.d.exec) return [];
-    const { stdout, code } = await this.d.exec("git", ["log", "-n", String(limit), "--format=%H%x1f%h%x1f%s%x1f%an%x1f%cr"], cwd);
+    const { stdout, code } = await this.d.exec("git", ["log", "-n", String(limit), "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct"], cwd);
     if (code !== 0) return [];
     return stdout.split("\n").filter(Boolean).map((line) => {
-      const [hash, shortHash, subject, author, relDate] = line.split("\x1f");
-      return { hash, shortHash, subject, author, relDate };
+      const [hash, shortHash, subject, author, date] = line.split("\x1f");
+      return { hash, shortHash, subject, author, date: Number(date) };
     });
   }
 
