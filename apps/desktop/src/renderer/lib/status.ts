@@ -28,3 +28,8 @@ export const statusTag = (s: string): string => TAG[s] ?? s.slice(0, 5).toUpperC
 export const isLive = (s: string): boolean => s === "running";
 // Spawn in flight — its worktree is still being created. Rendered with a spinner instead of the LED dot.
 export const isProvisioning = (s: string): boolean => s === "provisioning";
+// A worker in one of these states will never resume running — its worktree may already be gone (stopped/discarded)
+// or the live session died on a daemon restart (orphaned) without the worktree coming back. Mirrors the daemon's
+// TERMINAL_WORKER_STATUSES (src/persistence/repositories.ts) — same set, kept here as the renderer-side source of truth.
+const TERMINAL = new Set(["stopped", "done", "error", "failed", "orphaned"]);
+export const isTerminalStatus = (s: string): boolean => TERMINAL.has(s);

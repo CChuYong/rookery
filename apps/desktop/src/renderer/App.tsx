@@ -56,7 +56,9 @@ import { WorkspaceRenderProvider, type WorkspaceRender } from "./workspace/Works
 import { NestedPanelBody } from "./workspace/panels.js";
 import { FileTree } from "./components/FileTree.js";
 import { GitChanges } from "./components/GitChanges.js";
+import { SkeletonRows } from "./components/Skeleton.js";
 import { useTreeVersion } from "./lib/useTreeVersion.js";
+import { useWorkRoot } from "./lib/useWorkRoot.js";
 
 declare global {
   interface Window {
@@ -228,27 +230,19 @@ export function App(): JSX.Element {
   // Right sidebar: delay unmount by 180ms so the width-collapse animation is visible on close (useMountTransition).
   const rightVisible = rightOpen && !!termPageKey && !overlay;
   const rightMounted = useMountTransition(rightVisible, 180);
-  const [wsRoot, setWsRoot] = useState<string>("");
-  const treeVersion = useTreeVersion(wsRoot); // fs-watch bump for the dockable files/git panels (parity with RightSidebar)
   // cwd must be in deps so that even when session.list arrives late (initially undefined→home), the root is re-resolved once cwd is filled in.
   const wsSessionCwd = s.sessions.find((x) => x.id === s.activeSessionId)?.cwd;
-  useEffect(() => {
-    if (!termPageKey) return;
-    const subId = showRepos ? s.activeWorkerId ?? undefined : undefined;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let tries = 0;
-    const tick = (): void => {
-      void window.rookery.ws.resolveRoot({ subId, cwd: showRepos ? undefined : wsSessionCwd }).then((r) => {
-        if (!live) return;
-        setWsRoot(r);
-        // A freshly created worker's worktree is built asynchronously, so if it fell back to ~, retry until the worktree exists (for the diff root).
-        if (subId && !r.endsWith(subId) && tries < 15) { tries += 1; timer = setTimeout(tick, 300); }
-      }).catch(() => { /* ignore */ });
-    };
-    tick();
-    return () => { live = false; if (timer) clearTimeout(timer); };
-  }, [termPageKey, showRepos, wsSessionCwd, s.activeWorkerId]);
+  // Worker's fleet status feeds useWorkRoot so a terminal status (worktree gone/orphaned) short-circuits the retry
+  // loop instead of waiting it out (audit #2). Only meaningful when viewing a worker (showRepos + a real subId).
+  const activeWorkerStatus = showRepos && s.activeWorkerId ? s.fleet[s.activeWorkerId]?.status : undefined;
+  const { root: wsRootRaw, state: wsRootState } = useWorkRoot({
+    enabled: !!termPageKey,
+    subId: showRepos ? s.activeWorkerId ?? undefined : undefined,
+    cwd: showRepos ? undefined : wsSessionCwd,
+    status: activeWorkerStatus,
+  });
+  const wsRoot = wsRootRaw ?? "";
+  const treeVersion = useTreeVersion(wsRootRaw); // fs-watch bump for the dockable files/git panels (parity with RightSidebar)
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("rookery.sidebar") === "1");
   const toggleSidebar = () =>
     setCollapsed((v) => {
@@ -691,7 +685,15 @@ export function App(): JSX.Element {
   // behavior is preserved; the dockview panels pull them via WorkspaceRender context.
   const dockable = isDockableEnabled();
   const activeTabPath = activeTab.startsWith("file:") ? activeTab.slice("file:".length) : null;
-  const findingWorkDir = <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.findingWorkDir")}</div>;
+  // While genuinely still resolving (retries in progress, non-terminal status), a skeleton beats a bare static
+  // "locating…" line (audit #17's third leg). A terminal outcome (retries exhausted or the fleet status is
+  // terminal) gets an explicit message instead of looping silently (audit #2).
+  const workRootFallback =
+    wsRootState === "missing" ? (
+      <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.workdirMissing")}</div>
+    ) : (
+      <SkeletonRows rows={8} />
+    );
   const workerRender: WorkspaceRender | null = activeSub
     ? {
         conversation: () => (
@@ -730,8 +732,8 @@ export function App(): JSX.Element {
         ),
         editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} />,
         terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} dock />,
-        files: () => (wsRoot && wsRoot.endsWith(activeSub.id) ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : findingWorkDir),
-        git: () => (wsRoot && wsRoot.endsWith(activeSub.id) ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : findingWorkDir),
+        files: () => (wsRootState === "ready" ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback),
+        git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : workRootFallback),
         nested: () => <NestedPanelBody subId={activeSub.id} />,
       }
     : null;
@@ -758,8 +760,8 @@ export function App(): JSX.Element {
         ),
         editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={s.activeSessionId!} root={wsRoot} />,
         terminal: () => <TerminalPanel sessionId={s.activeSessionId!} subId={null} cwd={activeSess?.cwd} dock />,
-        files: () => (wsRoot ? <FileTree root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} activeTabPath={activeTabPath} /> : findingWorkDir),
-        git: () => (wsRoot ? <GitChanges root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} /> : findingWorkDir),
+        files: () => (wsRootState === "ready" ? <FileTree root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback),
+        git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} /> : workRootFallback),
         nested: () => <NestedPanelBody subId={null} />,
       }
     : null;

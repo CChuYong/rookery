@@ -9,7 +9,9 @@ import { cn } from "../lib/cn.js";
 import type { LogItem } from "../store/reduce.js";
 import { FileTree } from "./FileTree.js";
 import { GitChanges } from "./GitChanges.js";
+import { SkeletonRows } from "./Skeleton.js";
 import { useTreeVersion } from "../lib/useTreeVersion.js";
+import { useWorkRoot } from "../lib/useWorkRoot.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
 import { useT } from "../i18n/provider.js";
 
@@ -43,28 +45,24 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath }: { ope
   const nested = useStore((st) => (subId ? st.nested[subId] ?? EMPTY_NESTED : EMPTY_NESTED));
   const workerLog = useStore((st) => (subId ? st.workerLogs[subId] ?? EMPTY_LOG : EMPTY_LOG));
   const nestedPanels: Nested[] = Object.entries(nested).map(([id, items]) => ({ id, label: nestedLabel(workerLog, id), items }));
-  const [root, setRoot] = useState<string | null>(null);
-  // A worker worktree is created asynchronously (git worktree add) right after fleet.spawn. Viewing a just-created worker immediately,
-  // the worktree doesn't exist yet so it falls back to ~/cwd; resolving only once would get stuck there → retry until the worktree appears (until the path ends with subId).
-  useEffect(() => {
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let tries = 0;
-    const tick = (): void => {
-      void window.rookery.ws.resolveRoot({ subId: subId ?? undefined, cwd }).then((r) => {
-        if (!live) return;
-        setRoot(r);
-        if (subId && !r.endsWith(subId) && tries < 15) { tries += 1; timer = setTimeout(tick, 300); }
-      }).catch(() => { /* ignore */ });
-    };
-    tick();
-    return () => { live = false; if (timer) clearTimeout(timer); };
-  }, [subId, cwd]);
-  const treeVersion = useTreeVersion(root); // watch the root → increment on change (auto-refresh tree/git)
+  // Worker's fleet status: a terminal status (stopped/done/error/failed/orphaned) means the worktree is either
+  // already gone or never coming back — feeds useWorkRoot so it short-circuits to `missing` instead of retrying.
+  const workerStatus = useStore((st) => (subId ? st.fleet[subId]?.status : undefined));
   // For a worker, only show the files/git of its ACTUAL worktree. resolveWorkRoot falls back to ~/home while `git worktree add`
   // is still running, so without this guard the user would see (and could Cmd+S-edit) their real home files as if they were the
-  // worktree. Until the resolved root ends with the subId, keep the "finding work dir" placeholder. (Sessions have no subId → always ready.)
-  const ready = !!root && (!subId || root.endsWith(subId));
+  // worktree. (Sessions have no subId → always ready.)
+  const { root, state: rootState } = useWorkRoot({ enabled: true, subId: subId ?? undefined, cwd, status: workerStatus });
+  const treeVersion = useTreeVersion(root); // watch the root → increment on change (auto-refresh tree/git)
+  const ready = rootState === "ready";
+  // While genuinely still resolving (retries in progress, non-terminal status), a skeleton beats a bare static
+  // "locating…" line (audit #17's third leg). A terminal outcome (retries exhausted or the fleet status is
+  // terminal) gets an explicit message instead of looping silently (audit #2).
+  const workRootFallback =
+    rootState === "missing" ? (
+      <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.workdirMissing")}</div>
+    ) : (
+      <SkeletonRows rows={8} />
+    );
   const widthState = useResizableWidth("rookery.rightWidth", 300, { min: 200, max: 560, side: "right" });
   // Width enter/exit: on mount, start at width 0 then go to the stored width after rAF → transition-[width] slides it.
   // On close, open=false makes width 0 → App's useMountTransition keeps it mounted in the meantime. (Intended layout exception since it's a docked flex child.)
@@ -104,8 +102,8 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath }: { ope
         </div>
         {/* Replay rise-in on each segment switch (key=segment) — confirms that the visually similar dense panel actually changed. */}
         <div key={segment} className="rise-in min-h-0 flex-1 overflow-y-auto">
-          {segment === "files" && (ready ? <FileTree root={root!} pageKey={pageKey} version={treeVersion} activeTabPath={activeTabPath} /> : <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.findingWorkDir")}</div>)}
-          {segment === "git" && (ready ? <GitChanges root={root!} pageKey={pageKey} version={treeVersion} /> : <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.findingWorkDir")}</div>)}
+          {segment === "files" && (ready ? <FileTree root={root!} pageKey={pageKey} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback)}
+          {segment === "git" && (ready ? <GitChanges root={root!} pageKey={pageKey} version={treeVersion} /> : workRootFallback)}
           {segment === "worker" && (
             nestedPanels.length > 0
               ? <NestedAgents panels={nestedPanels} />
