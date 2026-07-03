@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SlackStatus } from "@daemon/core/events.js";
 import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
@@ -13,6 +13,9 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { usePrefsStore } from "../store/prefs.js";
 import type { LocalePref } from "../i18n/types.js";
+import { useDismissTransition } from "../lib/useDismissTransition.js";
+import { useModalKeys } from "../lib/useModalKeys.js";
+import { useFocusTrap } from "../lib/useFocusTrap.js";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: JSX.Element }): JSX.Element {
   return (
@@ -42,6 +45,15 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const allowAll = f.slackAllowAll === "1";
   const refuseReply = f.slackRefuseReply === "1";
 
+  // Explicit-Save page + no auto-save → closing while dirty silently discarded edits (audit #18). Gate the page's own
+  // close affordance (the header X) behind a confirm when dirty; not dirty closes exactly as before. Out of scope:
+  // intercepting sidebar navigation away from the page — only this in-page close action.
+  const [confirmClose, setConfirmClose] = useState(false);
+  const requestClose = (): void => {
+    if (dirty) setConfirmClose(true);
+    else p.onClose();
+  };
+
   // Native folder-picker dialog (preload bridge), same as for worktree/session cwd.
   const pickCwd = async (): Promise<void> => {
     const dir = await window.rookery.pickDirectory();
@@ -64,7 +76,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
       <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
         <span className="shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">Settings</span>
         <span className="font-semibold tracking-[-0.01em]">{t("settings.title")}</span>
-        <button onClick={p.onClose} aria-label={t("settings.close")} className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim">
+        <button onClick={requestClose} aria-label={t("settings.close")} className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim">
           <X size={16} />
         </button>
       </div>
@@ -357,6 +369,38 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
           )}
         </div>
       </div>
+      {confirmClose && (
+        <UnsavedChangesConfirm
+          onCancel={() => setConfirmClose(false)}
+          onDiscard={p.onClose}
+          onSave={() => { p.onSave(f); p.onClose(); }}
+        />
+      )}
     </>
+  );
+}
+
+// Unsaved-changes guard shown when the header X is clicked while dirty (audit #18) — same overlay/panel idiom as the
+// app's other confirm dialogs (AutomationPage's AutomationDeleteConfirm / Sessions' DeleteConfirm). Discard/Save both
+// close the whole page, so they fire directly rather than routing through the local exit-transition; Cancel (stay on
+// the page) uses `dismiss()` for the dialog's own animated exit.
+function UnsavedChangesConfirm({ onCancel, onDiscard, onSave }: { onCancel: () => void; onDiscard: () => void; onSave: () => void }): JSX.Element {
+  const t = useT();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { closing, dismiss } = useDismissTransition(onCancel);
+  useModalKeys(dismiss, onSave);
+  useFocusTrap(panelRef);
+  return (
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("settings.unsavedTitle")} className={cn("w-[380px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
+        <div className="mb-1.5 text-[14px] font-semibold">{t("settings.unsavedTitle")}</div>
+        <p className="text-[12.5px] leading-relaxed text-muted">{t("settings.unsavedBody")}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
+          <Button variant="outline" size="sm" onClick={onDiscard}>{t("settings.confirmDiscard")}</Button>
+          <Button variant="primary" size="sm" onClick={onSave}>{t("settings.confirmSave")}</Button>
+        </div>
+      </div>
+    </div>
   );
 }

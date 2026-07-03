@@ -89,4 +89,8 @@ export default {
   "settings.workerRelayDesc": "Slack에서 시작한 대화의 워커가 스폰되면 지정 채널에 스레드를 만들어 워커의 말·액션을 중계하고, 마스터 스레드에 그 링크를 남깁니다.",
   "settings.workerRelayChannel": "중계 채널 ID",
   "settings.workerRelayChannelHint": "예: C0123456789. 봇을 해당 채널에 초대해야 합니다.",
+  "settings.unsavedTitle": "저장 안 된 변경이 있어요",
+  "settings.unsavedBody": "이대로 닫으면 변경 내용이 사라져요.",
+  "settings.confirmSave": "저장하고 닫기",
+  "settings.confirmDiscard": "버리고 닫기",
 } satisfies Catalog;

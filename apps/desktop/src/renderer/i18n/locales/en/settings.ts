@@ -89,4 +89,8 @@ export default {
   "settings.workerRelayDesc": "When a worker spawns from a Slack-started conversation, post a thread to the chosen channel mirroring the worker's messages/actions, and drop a link to it in the master's thread.",
   "settings.workerRelayChannel": "Relay channel ID",
   "settings.workerRelayChannelHint": "e.g. C0123456789. Invite the bot to that channel.",
+  "settings.unsavedTitle": "You have unsaved changes",
+  "settings.unsavedBody": "Closing now will discard your edits.",
+  "settings.confirmSave": "Save & close",
+  "settings.confirmDiscard": "Discard & close",
 } satisfies Catalog;
