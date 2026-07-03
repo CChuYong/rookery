@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder, X, AlertTriangle } from "lucide-react";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import { Composer } from "./Composer.js";
@@ -7,9 +7,15 @@ import type { BrowseResult } from "../types/rookery.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
+import { useDraftStore } from "../store/drafts.js";
 
 // New master session — full page (entire main area). The input field is identical to the chat composer (markdown, file attachments, @ prefill, / skills).
 // Start with it empty for an empty session. @ and / operate live against the repo/folder (cwd) picked below (if none selected, the daemon's default cwd).
+
+// Fixed draft-store key for this page's composer — unlike conversation composers there's only ever one New Session page, not one per id.
+// Exported so App's startSession can restore/clear it around session.create (audit #5).
+export const NEW_SESSION_DRAFT_KEY = "newSession";
+
 export function NewSessionPage(p: {
   repos: Array<{ name: string; path: string }>;
   defaultModel: string;
@@ -29,6 +35,11 @@ export function NewSessionPage(p: {
   const [model, setModel] = useState(p.defaultModel);
   const [effort, setEffort] = useState(p.defaultEffort);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
+
+  // Preserve the typed prompt across page close/reopen and session-create failures — same draft-store wiring as ConversationPane,
+  // but with a fixed key since this page isn't per-session. Read non-reactively (only at mount); this page remounts (key={pageId}) on reopen.
+  const initialText = useMemo(() => useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY] ?? "", []);
+  const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, text), []);
 
   // When the selected repo/folder (cwd) changes, reload that cwd's skills (live). If none selected, the daemon's default cwd.
   useEffect(() => {
@@ -98,6 +109,8 @@ export function NewSessionPage(p: {
             onEscape={p.onClose}
             leftSlot={folderPicker}
             className="rounded-2xl border-line bg-surface/70 px-3 py-2.5"
+            initialText={initialText}
+            onDraftChange={onDraftChange}
           />
 
           {p.repos.length > 0 && (

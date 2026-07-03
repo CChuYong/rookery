@@ -24,7 +24,7 @@ import { OnboardingModal } from "./components/OnboardingModal.js";
 import { GettingStartedChecklist } from "./components/GettingStartedChecklist.js";
 import { usePrefsStore } from "./store/prefs.js";
 import type { Checkpoint } from "./components/CheckpointMenu.js";
-import { NewSessionPage } from "./components/NewSessionPage.js";
+import { NewSessionPage, NEW_SESSION_DRAFT_KEY } from "./components/NewSessionPage.js";
 import type { SlashCommand } from "./views/Conversation.js";
 import { AutomationPage } from "./components/AutomationPage.js";
 import { AutomationForm } from "./components/AutomationForm.js";
@@ -523,10 +523,19 @@ export function App(): JSX.Element {
               useStore.getState().dropPending(sid, clientMsgId);
               toast.error(tRef.current("toast.sendFailed"), String(e));
             });
+            // The session now exists (the send failure above already has its own rollback+toast), so the new-session draft has served
+            // its purpose — clear it only here, on confirmed create success (audit #5).
+            useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, "");
           }
         }),
       )
-      .catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e)));
+      .catch((e) => {
+        // session.create/list failed: the page already navigated away and the composer cleared on send (Composer.tsx's clear() fires
+        // unconditionally), so without this the typed prompt would be unrecoverably gone. Restore it into the draft so reopening
+        // New Session brings it back.
+        if (opts.prompt) useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, opts.prompt);
+        toast.error(tRef.current("toast.actionFailed"), String(e));
+      });
   };
   const send = useCallback((text: string) => {
     const st = useStore.getState();
