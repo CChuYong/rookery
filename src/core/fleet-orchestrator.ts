@@ -79,6 +79,11 @@ export function branchSlug(identifier: string): string {
 export class FleetOrchestrator {
   private readonly entries = new Map<string, Entry>();
   private readonly flows = new Set<Promise<void>>(); // in-flight spawn/live flows (for shutdown-drain waiting, tracked synchronously)
+  // Per-id handle on the in-flight spawn flow + cooperative-cancel marks. discard/delete during provisioning
+  // set the mark and AWAIT the flow: run() checks the mark after each await and bails — removing the worktree
+  // it just created and never registering an entry/agent — so nothing leaks and no ghost survives (audit #12).
+  private readonly flowById = new Map<string, Promise<void>>();
+  private readonly cancelledSpawns = new Set<string>();
   private readonly idgen: () => string;
   private readonly exists: (p: string) => boolean;
   private closing = false; // close() in progress — even a just-started launch flow stops and finishes its DB writes (G-SHUTDOWN-RACE)
@@ -183,7 +188,8 @@ export class FleetOrchestrator {
     const ready = new Promise<void>((res) => { signalReady = res; });
     const flow = this.run(id, input, branch, worktreePath, signalReady);
     this.flows.add(flow); // synchronous registration — so shutdown drain (waitAllSettled) waits even for in-flight spawns
-    void flow.finally(() => this.flows.delete(flow));
+    this.flowById.set(id, flow);
+    void flow.finally(() => { this.flows.delete(flow); this.flowById.delete(id); this.cancelledSpawns.delete(id); });
     return ready.then(() => ({ id })); // {id} after worktree provisioning completes
   }
 
@@ -276,7 +282,15 @@ export class FleetOrchestrator {
         }
       }
       repos.setWorkerBase(id, base); // persist the resolved base → after restart, rehydrate can diff against the correct base
+      if (this.cancelledSpawns.has(id)) { signalReady(); return; } // cancelled before the worktree existed — nothing to clean
       await git.addWorktree(input.repoPath, worktreePath, branch, base);
+      if (this.cancelledSpawns.has(id)) {
+        // Cancelled while the worktree was being created: remove it and bail WITHOUT registering an entry or
+        // starting the agent. The discard/delete that cancelled us proceeds once this flow settles.
+        try { await git.removeWorktree(input.repoPath, worktreePath, branch); } catch { /* best-effort */ }
+        signalReady();
+        return;
+      }
       signalReady(); // worktree provisioned → spawn() can return (the rest of boot continues)
       const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns });
       const entry: Entry = {
@@ -364,6 +378,13 @@ export class FleetOrchestrator {
     this.deps.repos.setWorkerStatus(id, status, force); // force (user stop/discard) bypasses the DB write-once too
 
     this.deps.bus.emit({ type: "worker.status", sessionId: entry.homeSessionId, workerId: id, status });
+  }
+
+  // Terminal write for a worker that never got an entry (cancelled mid-provisioning). force: user-initiated.
+  private setStatusRowOnly(id: string, status: string): void {
+    try { this.deps.repos.setWorkerStatus(id, status, true); } catch { /* row may already be deleted */ }
+    const row = this.deps.repos.getWorker(id);
+    this.deps.bus.emit({ type: "worker.status", sessionId: row?.session_id ?? "", workerId: id, status });
   }
 
   // Arm a one-shot "notify the home master when this worker next settles" (used by send_worker with notify:true).
@@ -532,6 +553,14 @@ export class FleetOrchestrator {
   }
 
   async discard(id: string): Promise<void> {
+    // A provisioning spawn has no entry yet (entries.set happens after the worktree+factory). Cancel it
+    // cooperatively and wait for the flow to clean up after itself; then there is nothing left to discard.
+    const inflight = this.flowById.get(id);
+    if (inflight && !this.entries.has(id)) {
+      this.cancelledSpawns.add(id);
+      await inflight.catch(() => {});
+      if (!this.entries.has(id)) { this.setStatusRowOnly(id, "stopped"); return; }
+    }
     const e = this.require(id);
     if (e.agent) {
       try {

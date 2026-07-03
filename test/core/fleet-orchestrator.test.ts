@@ -580,6 +580,38 @@ describe("FleetOrchestrator", () => {
     expect(terminals).toEqual(["stopped"]); // exactly once (no duplicate emit / flip-flop)
   });
 
+  it("delete during provisioning cancels the spawn: no worktree leak, no ghost entry, row removed (audit #12)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    let releaseAdd!: () => void;
+    const addGate = new Promise<void>((r) => { releaseAdd = r; });
+    class AddGatedGit extends FakeGitOps {
+      async addWorktree(repo: string, wt: string, branch: string, base: string): Promise<void> {
+        await addGate;
+        return super.addWorktree(repo, wt, branch, base);
+      }
+    }
+    const git = new AddGatedGit({ headValue: "base0", checkpointSha: "ck" });
+    let factoryCalls = 0;
+    const factory = (): WorkerLike => { factoryCalls++; return { start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} }; };
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", idgen: () => "a0" });
+    const spawnP = fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
+    // Drain microtasks so run() advances past base-resolution and PARKS inside the gated addWorktree (worktree not yet
+    // created). A single microtask would leave it before the worktree existed → the pre-worktree bail, not the leak path.
+    await new Promise((r) => setTimeout(r, 0));
+    const deleteP = fleet.delete("a0"); // user deletes the provisioning worker (entry not registered yet)
+    releaseAdd();
+    await deleteP;
+    await spawnP.catch(() => {}); // spawn's ready promise must settle either way
+    await fleet.waitAllSettled();
+    expect(factoryCalls).toBe(0); // the agent never started (no ghost, no FK write)
+    expect(repos.getWorker("a0")).toBeUndefined(); // row removed by delete()
+    expect(fleet.status("a0")).toBe("unknown"); // no ghost entry in the map
+    // the worktree created mid-cancel was removed by the bailing flow (FakeGitOps records calls as space-joined strings):
+    expect(git.calls.some((c) => c.startsWith("removeWorktree"))).toBe(true);
+  });
+
 });
 
 describe("FleetOrchestrator rehydrate (restart recovery)", () => {
