@@ -656,6 +656,25 @@ describe("FleetOrchestrator", () => {
     expect(git.calls.some((c) => c.startsWith("removeCheckpointRefs"))).toBe(true); // and its fork ref
   });
 
+  it("fork reclaims its already-pinned snapshot ref when addWorktree itself throws (audit #32 residual)", async () => {
+    // The fork snapshot ref is pinned by checkpoint() BEFORE addWorktree. If addWorktree throws, the worker row
+    // never exists, so nothing (discard/delete) could ever find and clean that ref — fork must reclaim it itself.
+    class AddThrowsGit extends FakeGitOps {
+      async addWorktree(): Promise<void> { throw new Error("worktree add failed"); }
+    }
+    const git = new AddThrowsGit({ headValue: "base0", checkpointSha: "snap0" });
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    repos.createWorker({ id: "a0", sessionId: "sA", repoPath: "/repo", label: "build", worktreePath: "/wt/a0", branch: "rookery/a0", base: "origin/main" });
+    repos.setWorkerSdkSessionId("a0", "src-sdk");
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "forked-uuid" }), exists: () => true, idgen: () => "fk1" });
+    await expect(fleet.fork("a0")).rejects.toThrow(/worktree add failed/);
+    expect(git.calls).toContain("checkpoint /wt/a0 refs/rookery/fork/fk1"); // the snapshot ref WAS pinned before the throw
+    expect(git.calls).toContain("removeCheckpointRefs /repo fk1"); // and fork reclaimed it (nothing else ever could)
+    expect(repos.getWorker("fk1")).toBeUndefined(); // no ghost row
+  });
+
 });
 
 describe("FleetOrchestrator rehydrate (restart recovery)", () => {

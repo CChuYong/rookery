@@ -213,9 +213,11 @@ export class FleetOrchestrator {
     // Snapshot the source worktree's full state (tracked + untracked) → overlay it onto the fork so uncommitted work carries over.
     let snapSha: string | null = null;
     try { snapSha = await this.deps.git.checkpoint(src.worktree_path, `refs/rookery/fork/${newId}`); } catch { snapSha = null; }
-    // New worktree branched from the source's branch HEAD (carries its committed history), then overlay the snapshot.
-    await this.deps.git.addWorktree(src.repo_path, worktreePath, branch, src.branch ?? src.base ?? "HEAD");
+    // From here the snapshot ref is already pinned in the shared .git — the try must start BEFORE addWorktree so a
+    // worktree-add throw also reaches the cleanup (the worker row never exists, so nothing else could ever reclaim it).
     try {
+      // New worktree branched from the source's branch HEAD (carries its committed history), then overlay the snapshot.
+      await this.deps.git.addWorktree(src.repo_path, worktreePath, branch, src.branch ?? src.base ?? "HEAD");
       if (snapSha) { try { await this.deps.git.restoreCheckpoint(worktreePath, snapSha); } catch { /* best-effort: committed state still present */ } }
       // Persist the new worker (diff base = the source's base, so the fork's diff shows the same body of work).
       this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined });
@@ -236,8 +238,9 @@ export class FleetOrchestrator {
       this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
       return { id: newId };
     } catch (err) {
-      // The fork's worktree/branch/snapshot-ref were already created — reclaim them, or they leak with no row
-      // to ever find them again (the same pre-entry class audit #12 closed for spawn()).
+      // The fork's snapshot-ref (and possibly its worktree/branch) were already created — reclaim them, or they
+      // leak with no row to ever find them again (the same pre-entry class audit #12 closed for spawn()).
+      // removeWorktree is harmless if addWorktree itself threw: RealGitOps ignores not-a-working-tree errors.
       try { await this.deps.git.removeWorktree(src.repo_path, worktreePath, branch); } catch { /* best-effort */ }
       try { await this.deps.git.removeCheckpointRefs(src.repo_path, newId); } catch { /* best-effort */ }
       throw err;
