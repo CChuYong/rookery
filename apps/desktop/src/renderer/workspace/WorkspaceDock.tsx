@@ -6,7 +6,7 @@ import { useWsStore, type Tab } from "../store/workspace.js";
 import { useTermStore } from "../store/terminals.js";
 import { useLayoutStore } from "../store/layout.js";
 import { defaultPanels, terminalSeedHeight, isTerminalGroupCollapsed, TERMINAL_EXPANDED_HEIGHT } from "./default-template.js";
-import { fixedPanelId, editorPanelId, panelIdForTab, tabIdForPanel, type FixedKind } from "./panel-ids.js";
+import { fixedPanelId, editorPanelId, panelIdForTab, tabIdForPanel, conversationAgentKindPatch, type FixedKind } from "./panel-ids.js";
 import { fixedPanelTitle } from "./panel-titles.js";
 import { dockComponents } from "./panels.js";
 import { RookeryTab } from "./RookeryTab.js";
@@ -113,6 +113,15 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     else seed(api);
     // The conversation is the primary panel — if a restored layout dropped it, re-seed it.
     if (!api.getPanel(fixedPanelId("conversation"))) addFixed(api, "conversation");
+    // A restored conversation panel may be missing (or disagree with) agentKind
+    // in its params — re-assert the page's own known value so RookeryTab's live
+    // label (params.agentKind, not the persisted title) is never wrong (task 18
+    // review). Fixes existing persisted layouts without a layout-store version bump.
+    const conv = api.getPanel(fixedPanelId("conversation"));
+    if (conv) {
+      const patch = conversationAgentKindPatch(conv.params as { agentKind?: "master" | "worker" } | undefined, agentKind);
+      if (patch) conv.api.updateParameters(patch);
+    }
     syncEditors(api);
     syncActive(api);
 
