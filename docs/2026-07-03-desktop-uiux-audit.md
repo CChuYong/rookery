@@ -18,6 +18,8 @@
 
 공수 분포: **S 70건 · M 11건** (L 없음). 인벤토리는 심각도 high→low, 같은 심각도 안에서는 공수 S→M 순으로 정렬했다.
 
+**진행 상태**: Quick wins #1~#41은 브랜치 `uiux/quick-wins`(2026-07-03)에서 전량 구현 완료됐다.
+
 **High 3건**
 - **#1** 마스터 세션 전송 실패가 무피드백으로 사라지고 pending 버블·composer가 영구 고착 (`App.tsx` fire-and-forget vs 이미 고쳐진 `subSend` 비대칭)
 - **#2** orphaned 워커의 Files/Git 패널이 `Locating work folder…`에 영구 고착 — 4개 렌즈가 독립적으로 재발견한 최다 중복 이슈

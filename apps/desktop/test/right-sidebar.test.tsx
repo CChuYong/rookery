@@ -84,4 +84,33 @@ describe("RightSidebar work-root resolution (audit #2, task 11 review)", () => {
     expect(container.querySelector(".sheen")).toBeNull();
     expect(screen.queryByText(/워크트리를 찾을 수 없어요/)).toBeNull();
   });
+
+  it("switching from a ready worker to a terminal worker shows a locating skeleton, not the previous worker's tree, until the new root resolves (F2)", async () => {
+    // Worker A (w1) resolves immediately; worker B (w2, terminal) is held pending until resolveB() is called —
+    // this reproduces the stale-"ready" window where the closure's state/root still belong to A.
+    let resolveB!: (v: string) => void;
+    const resolveRoot = vi.fn(async ({ subId }: { subId?: string }) => {
+      if (subId === "w1") return "/wt/w1";
+      if (subId === "w2") return new Promise<string>((res) => { resolveB = res; });
+      return "/home/user";
+    });
+    const list = vi.fn(async (root: string) => (root === "/wt/w1" ? [{ name: "a.ts", isDir: false }] : [{ name: "b.ts", isDir: false }]));
+    stubWs({ resolveRoot, list });
+    useStore.setState({
+      fleet: {
+        w1: { id: "w1", label: "worker", repoPath: "/repo", status: "running", branch: null, model: null, permissionMode: "bypassPermissions" },
+        w2: { id: "w2", label: "worker2", repoPath: "/repo", status: "stopped", branch: null, model: null, permissionMode: "bypassPermissions" },
+      },
+    } as never);
+    const { rerender, container } = render(<RightSidebar open pageKey="w1" subId="w1" cwd={undefined} activeTabPath={null} />);
+    await screen.findByText("a.ts");
+
+    rerender(<RightSidebar open pageKey="w2" subId="w2" cwd={undefined} activeTabPath={null} />);
+    // Must NOT still show worker A's tree while worker B's (terminal, one-shot) resolve is still in flight.
+    expect(screen.queryByText("a.ts")).toBeNull();
+    expect(container.querySelector(".sheen")).not.toBeNull();
+
+    await act(async () => { resolveB("/wt/w2"); await Promise.resolve(); });
+    await screen.findByText("b.ts");
+  });
 });

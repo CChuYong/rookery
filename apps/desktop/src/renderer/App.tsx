@@ -867,6 +867,13 @@ export function App(): JSX.Element {
                 <RotateCcw size={16} className={cn(restarting && "animate-spin")} />
               </button>
             </Tooltip>
+            {/* Automation is a top-level feature (audit #22) — the collapsed rail needs the same reachable-from-anywhere
+                entry as the expanded footer, not just restart/Settings. */}
+            <Tooltip label={t("app.automation")} side="right">
+              <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                <Clock size={16} />
+              </button>
+            </Tooltip>
             <Tooltip label={t("app.settings")} side="right">
               <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag mb-1 rounded-md p-1.5 transition-colors", overlay === "settings" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                 <Settings size={16} />
@@ -909,7 +916,7 @@ export function App(): JSX.Element {
             )}
             <UsagePanel usage={s.usage} />
             {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
-            <div className="flex items-center gap-3 px-1 py-0.5 font-mono text-[11px] text-muted">
+            <div className="flex flex-wrap items-center gap-3 px-1 py-0.5 font-mono text-[11px] text-muted">
               <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`daemon · ${s.daemon}`}>
                 <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.daemon === "up" ? "bg-pr led-live" : s.daemon === "starting" ? "bg-run led-live" : "bg-fail", daemonJustUp && "status-flash")} />
                 <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {s.daemon}</span>}</span>
@@ -921,7 +928,7 @@ export function App(): JSX.Element {
               {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
                   shouldn't require switching to the Sessions tab first. */}
               <Tooltip label={t("app.automation")} side="top">
-                <button onClick={() => { navigate({ overlay: "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                   <Clock size={14} />
                 </button>
               </Tooltip>

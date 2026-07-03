@@ -33,6 +33,10 @@ export function useWorkRoot(opts: { enabled: boolean; subId?: string; cwd?: stri
     if (subId && status && isTerminalStatus(status)) {
       // Already showing a resolved worktree for this worker when it went terminal — keep the live panel as is.
       if (state === "ready" && root && root.endsWith(subId)) return;
+      // Otherwise this is a fresh subId (e.g. switching from a ready worker A to a terminal worker B) — the closure
+      // state may still be A's "ready"/root, so drop to "locating" before the one-shot resolve to avoid a frame+ of
+      // A's stale FileTree/GitChanges rendering under B's page.
+      setState("locating");
       void window.rookery.ws.resolveRoot({ subId, cwd }).then((r) => {
         if (!live) return;
         setRoot(r);
