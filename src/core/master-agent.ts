@@ -118,6 +118,9 @@ export class MasterAgent {
   // Abort handle for the in-progress turn (null if none). Same abort + interrupt pattern as the worker.
   private currentAbort: AbortController | null = null;
   private currentQuery: { interrupt(): Promise<void> } | null = null;
+  // Session teardown in progress (SessionManager.delete). Queued turns must not start (their DB writes would
+  // race the row cascade → FK violations) and new worker notifications must not chain ghost SDK turns.
+  private closing = false;
   // Accumulate thinking-summary deltas — persisted as a single coalesced master.thinking when the answer/tool starts (deltas are not persisted). Shared with the worker.
   private readonly thinking = new ThinkingCoalescer();
 
@@ -155,6 +158,14 @@ export class MasterAgent {
     } catch {
       /* best-effort */
     }
+  }
+
+  // Deletion lifecycle: abort the in-flight turn, cancel everything queued, drain the chain's DB writes.
+  // After this resolves it is safe to cascade-delete the session row.
+  async close(): Promise<void> {
+    this.closing = true;
+    await this.stop();
+    await this.idle(); // queued turns reject fast via the closing guard; the aborted turn finishes its drain
   }
 
   getSdkSessionId(): string | null {
@@ -210,6 +221,7 @@ export class MasterAgent {
   // Inject a worker-completion notification. Coalesces onto turnChain: if the master is mid-turn, buffered lines are flushed as
   // ONE follow-up turn when it ends; if idle, delivered immediately. Recorded as a master.notice, not a user message.
   notifyWorker(line: string): void {
+    if (this.closing) return; // session being deleted — a wake-up now would ghost-turn into a cascading row
     this.pendingNotifications.push(line);
     if (this.notifyFlushScheduled) return; // a flush is already queued on turnChain — it will drain everything accumulated by then
     this.notifyFlushScheduled = true;
@@ -228,6 +240,7 @@ export class MasterAgent {
   }
 
   private async doTurn(userText: string, override?: TurnOverride, opts?: { asNotice?: boolean }): Promise<void> {
+    if (this.closing) throw new Error("session closed"); // teardown started: reject before any DB write / SDK call (avoids racing the row cascade)
     const { repos, bus, queryFn, fleet } = this.opts.deps;
     // Per-turn override (UI) takes precedence; otherwise the global default (Slack/default entry point).
     // Treat empty/whitespace strings as "unspecified" — with only `??`, model:'' would be passed to query() as an empty model and the SDK would fail.

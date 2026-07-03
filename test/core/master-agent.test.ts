@@ -744,4 +744,49 @@ describe("MasterAgent", () => {
       expect(base.repos.pendingNotifications("s1")).toEqual([]);
     });
   });
+
+  describe("close() (session deletion lifecycle)", () => {
+    it("cancels queued turns without touching the SDK and drains the in-flight one", async () => {
+      let calls = 0;
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]));
+      // Gated wrapper mirroring this file's in-flight-turn tests: a plain fn returning Object.assign(gen(), {...}).
+      // The gate holds the first (in-flight) turn open; `calls` counts how many turns actually reached the SDK.
+      const wrapped = ((input: unknown) => {
+        calls++;
+        async function* gen(): AsyncGenerator<unknown> {
+          await gate; // hold the first turn in flight until release()
+          yield* base.queryFn(input as Parameters<typeof base.queryFn>[0]) as AsyncIterable<unknown>;
+        }
+        return Object.assign(gen(), { interrupt: async () => {}, close: () => {} });
+      }) as unknown as typeof base.queryFn;
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+
+      const turnA = master.runTurn("first");
+      const turnB = master.runTurn("second"); // queued behind A
+      await new Promise((r) => setTimeout(r, 0)); // let turnA's doTurn start + block on the gate (genuinely in flight)
+      const closing = master.close();
+      release();
+      await expect(turnB).rejects.toThrow(/session closed/);
+      await closing;
+      await turnA; // the aborted/drained in-flight turn resolves (stop() treats user aborts as non-failures)
+      expect(calls).toBe(1); // the queued turn never reached the SDK
+    });
+
+    it("notifyWorker after close() is a no-op (no ghost turn, nothing persisted)", async () => {
+      const prompts: string[] = [];
+      const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]));
+      const wrapped = ((input: { prompt?: string }) => {
+        if (typeof input?.prompt === "string") prompts.push(input.prompt);
+        return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
+      }) as typeof base.queryFn;
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+      await master.close();
+      master.notifyWorker("worker w settled");
+      await master.idle();
+      expect(prompts).toEqual([]);
+      expect(base.repos.pendingNotifications("s1")).toEqual([]);
+    });
+  });
 });

@@ -152,16 +152,21 @@ export class SessionManager {
     this.deps.repos.setSessionPinned(id, pinned);
   }
 
-  // Permanently delete a session: abort the in-progress turn + clean up its workers + remove from the live map + DB cascade delete.
+  // Permanently delete a session. ORDER IS LOAD-BEARING (audit #8):
+  // 1) remove from the live map FIRST — so a worker settling during teardown can't route a notify into this
+  //    master (deliverWorkerNotification falls through to a pending row, which the cascade below sweeps), and
+  //    no new turn can attach;
+  // 2) close() the master — aborts the in-flight turn, cancels queued turns, and DRAINS the chain's DB writes
+  //    while the row still exists (the old stop()-only path let the drain race the cascade → FK violations);
+  // 3) clean up this session's workers (abort + remove worktree/branch/checkpoint refs + DB rows);
+  // 4) cascade-delete the row.
   async delete(id: string): Promise<void> {
-    await this.sessions.get(id)?.master.stop().catch(() => {});
-    // Clean up this session's workers in the fleet first (abort + remove worktree/branch/checkpoint ref + DB row).
-    // Otherwise, even after deleteSession's cascade deletes the worker rows, a still-running worker keeps going and writing events,
-    // throwing FK violations, the worktree is orphaned on disk, and the SDK session keeps consuming tokens.
+    const live = this.sessions.get(id);
+    this.sessions.delete(id);
+    await live?.master.close().catch(() => {});
     for (const w of this.deps.repos.listWorkers(id)) {
       try { await this.deps.fleet.delete(w.id); } catch { /* best-effort — remaining rows are cleaned up by the cascade below */ }
     }
-    this.sessions.delete(id);
     this.deps.repos.deleteSession(id);
   }
 

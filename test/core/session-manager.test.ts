@@ -124,6 +124,42 @@ describe("SessionManager", () => {
     expect(repos.getSession(s.id)).toBeUndefined(); // session removed
   });
 
+  it("delete() with an armed worker settling mid-teardown does not launch a ghost turn (audit #8)", async () => {
+    // A worker that settles during teardown consumes its notify arm and tries to wake its home master. If the session
+    // is still live when that happens, the wake-up chains a REAL ghost SDK turn whose DB writes race the row cascade
+    // (→ FK violations). delete() must remove the session from the map BEFORE tearing down workers so the settle
+    // notification falls through to a pending row that the cascade then sweeps — never a live master turn.
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const prompts: string[] = [];
+    const base = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk" }]);
+    const queryFn = ((input: { prompt?: string }) => {
+      if (typeof input?.prompt === "string") prompts.push(input.prompt); // record any turn that reaches the SDK
+      return (base as (x: unknown) => unknown)(input);
+    }) as ReturnType<typeof fakeQuery>;
+    // Fleet fake whose delete() reproduces the settle a real Worker.stop() produces: mark terminal, consume the arm,
+    // and — as the production WorkerNotifier does — route the settle back into the manager as a notification.
+    const fleetFake = {
+      delete: async (id: string) => {
+        repos.setWorkerStatus(id, "stopped", true);
+        const arm = repos.consumeWorkerNotifyArmed(id);
+        if (arm?.armed) sm.deliverWorkerNotification(session.id, "worker w settled");
+      },
+    };
+    const sm = new SessionManager(
+      { repos, bus, queryFn, masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
+      () => "s0",
+    );
+    const session = sm.create("/x");
+    repos.createWorker({ id: "w1", sessionId: session.id, repoPath: "/r", label: "w", worktreePath: "/wt/w1", branch: "b" });
+    repos.setWorkerNotifyArmed("w1", true);
+
+    await sm.delete(session.id);
+
+    expect(prompts).toEqual([]); // no SDK turn was launched during deletion (no ghost turn)
+    expect(repos.getSession(session.id)).toBeUndefined(); // row cascaded cleanly, no FK throw
+  });
+
   it("fork() copies the SDK session + transcript into a new ui session labelled (fork), leaving the original intact", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
