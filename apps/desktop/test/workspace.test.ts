@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { emptyWsState, openFile, openDiff, openCommit, closeTab, setActive, setDirty, toggleRight, setSegment, setRightWidth, pruneWsPages, toggleDir, collapseAll, expandAncestors } from "../src/renderer/store/workspace.js";
+import { emptyWsState, openFile, openDiff, openCommit, closeTab, setActive, setDirty, toggleRight, setSegment, setRightWidth, pruneWsPages, toggleDir, collapseAll, expandAncestors, type Tab } from "../src/renderer/store/workspace.js";
 
 describe("workspace reducer", () => {
   it("a fresh page has a pinned agent tab", () => {
@@ -51,11 +51,22 @@ describe("workspace reducer", () => {
     expect(tab && tab.kind === "file" && tab.dirty).toBe(true);
   });
 
-  it("openDiff adds a read-only diff tab", () => {
+  it("openDiff adds a read-only diff tab titled '<basename> (diff)' — distinguishes it from a same-named file tab (audit #28)", () => {
     let s = emptyWsState();
     s = openDiff(s, "p1", "/r/app.ts");
-    expect(s.byPage.p1.tabs.find((t) => t.id === "diff:/r/app.ts")).toEqual({ id: "diff:/r/app.ts", kind: "diff", path: "/r/app.ts", title: "app.ts" });
+    expect(s.byPage.p1.tabs.find((t) => t.id === "diff:/r/app.ts")).toEqual({ id: "diff:/r/app.ts", kind: "diff", path: "/r/app.ts", title: "app.ts (diff)" });
     expect(s.byPage.p1.activeTabId).toBe("diff:/r/app.ts");
+  });
+
+  it("a file tab and a diff tab for the same path have distinct titles", () => {
+    let s = emptyWsState();
+    s = openFile(s, "p1", "/r/app.ts");
+    s = openDiff(s, "p1", "/r/app.ts");
+    const fileTab = s.byPage.p1.tabs.find((t): t is Extract<Tab, { kind: "file" }> => t.id === "file:/r/app.ts");
+    const diffTab = s.byPage.p1.tabs.find((t): t is Extract<Tab, { kind: "diff" }> => t.id === "diff:/r/app.ts");
+    expect(fileTab?.title).toBe("app.ts");
+    expect(diffTab?.title).toBe("app.ts (diff)");
+    expect(fileTab?.title).not.toBe(diffTab?.title);
   });
 
   it("openCommit adds a commit tab (title from subject, cut at 32 chars)", () => {

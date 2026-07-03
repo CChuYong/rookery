@@ -2,6 +2,8 @@
 // Callbacks NEVER live in panel params (dockview serializes params into the
 // saved layout) — panels pull live callbacks from WorkspaceActions instead.
 
+import { DIFF_TITLE_SUFFIX } from "../store/workspace.js";
+
 export type FixedKind = "conversation" | "terminal" | "files" | "git" | "nested";
 
 export type PanelParams = { pageKey: string } & (
@@ -33,4 +35,15 @@ export function tabIdForPanel(panelId: string): string | null {
   if (panelId === fixedPanelId("conversation")) return "agent";
   const p = "panel:editor:";
   return panelId.startsWith(p) ? panelId.slice(p.length) : null;
+}
+
+// Full-path + kind tooltip for an editor tab's label span. The visible label is
+// truncated (long paths) and a diff tab shares its basename with the matching
+// file tab, so hovering must disambiguate which is which (audit #28). `tabId`
+// already carries the full, untruncated path (`file:<path>` / `diff:<path>`),
+// so no store lookup is needed. Commit tabs have no path — undefined (no tooltip).
+export function editorTooltip(tabId: string): string | undefined {
+  if (tabId.startsWith("file:")) return tabId.slice("file:".length);
+  if (tabId.startsWith("diff:")) return `${tabId.slice("diff:".length)}${DIFF_TITLE_SUFFIX}`;
+  return undefined;
 }

@@ -3,7 +3,8 @@ import type { IDockviewPanelHeaderProps } from "dockview";
 import { MessageSquare, FileText, GitCompare, GitCommitHorizontal, SquareTerminal, Files, GitBranch, Bot, X, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
-import type { PanelParams } from "./panel-ids.js";
+import { editorTooltip, type PanelParams } from "./panel-ids.js";
+import { fixedPanelTitle } from "./panel-titles.js";
 
 // Custom dockview tab matching the app's TabBar aesthetic (per-kind icon, coral
 // for the conversation, hover-reveal close on editor tabs only). Active/inactive
@@ -31,12 +32,20 @@ export function RookeryTab(props: IDockviewPanelHeaderProps): JSX.Element {
     const d = api.onDidTitleChange(() => setTitle(api.title ?? ""));
     return () => d.dispose();
   }, [api]);
+  // Fixed panels (conversation/terminal/files/git/nested) render their label LIVE
+  // from the current locale via the SAME keys WorkspaceDock.titleFor uses, instead
+  // of trusting the persisted api.title — otherwise a locale switch (or a layout
+  // restored from a session saved under a different locale) leaves stale-language
+  // chrome behind (audit #29). Editor tabs (file/diff/commit) keep api.title, since
+  // that's the real, live filename/subject.
+  const label = params.kind === "editor" ? title : fixedPanelTitle(params.kind, t, params.kind === "conversation" ? params.agentKind : undefined);
+  const tooltip = params.kind === "editor" ? editorTooltip(params.tabId) : undefined;
   const Icon = iconFor(params);
   const closable = params.kind === "editor"; // fixed panels are move/split-only, never closed (prevents footguns)
   return (
     <div className="rk-tab group flex h-full items-center gap-1.5 px-2 text-[11.5px] font-medium select-none">
       <Icon size={12} className={cn("shrink-0", params.kind === "conversation" ? "text-accent" : "text-muted")} />
-      <span className="max-w-[168px] truncate">{title}</span>
+      <span title={tooltip} className="max-w-[168px] truncate">{label}</span>
       {closable && (
         <button
           onMouseDown={(e) => e.stopPropagation()} /* don't start a tab drag when clicking close */

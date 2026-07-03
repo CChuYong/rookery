@@ -16,6 +16,11 @@ export interface WsState { byPage: Record<string, WsPage>; right: RightState; ex
 const RW_MIN = 200;
 const RW_MAX = 560;
 const AGENT: Tab = { id: "agent", kind: "agent" };
+// A diff tab shares its basename with the corresponding file tab (both open at
+// "CLAUDE.md", say) — this suffix disambiguates them in the tab strip. It's a
+// filename-adjacent technical label rather than user-facing copy, so it's a
+// literal here instead of going through i18n (reused by the tab tooltips too).
+export const DIFF_TITLE_SUFFIX = " (diff)";
 
 export function emptyWsState(): WsState {
   return { byPage: {}, right: { open: false, width: 300, segment: "files" }, expandedByPage: {} };
@@ -39,7 +44,7 @@ export function openDiff(s: WsState, key: string, path: string): WsState {
   const cur = page(s, key);
   const id = `diff:${path}`;
   if (cur.tabs.some((t) => t.id === id)) return put(s, key, { ...cur, activeTabId: id });
-  const tab: Tab = { id, kind: "diff", path, title: basename(path) };
+  const tab: Tab = { id, kind: "diff", path, title: basename(path) + DIFF_TITLE_SUFFIX };
   return put(s, key, { tabs: [...cur.tabs, tab], activeTabId: id });
 }
 

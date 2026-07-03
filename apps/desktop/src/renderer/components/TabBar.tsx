@@ -3,6 +3,7 @@ import { useWsStore } from "../store/workspace.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
+import { editorTooltip } from "../workspace/panel-ids.js";
 
 export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: string }): JSX.Element {
   const t = useT();
@@ -29,7 +30,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
           <div key={tab.id} data-seg={tab.id} className={cn("group flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] transition-colors duration-150", tab.id === active ? "bg-raised text-fg" : "text-muted hover:bg-raised/60")}>
             <button onClick={() => setActive(pageKey, tab.id)} className="flex items-center gap-1.5">
               <Icon size={12} className={tab.kind === "agent" ? "text-accent" : undefined} />
-              <span className="max-w-[140px] truncate">{title}</span>
+              <span title={editorTooltip(tab.id)} className="max-w-[140px] truncate">{title}</span>
               {dirty && <span className="dot-pop h-1.5 w-1.5 rounded-full bg-fg-dim" />}
             </button>
             {tab.kind !== "agent" && (

@@ -3,9 +3,11 @@ import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent, DockviewApi, Direction, SerializedDockview } from "dockview";
 import { useT } from "../i18n/provider.js";
 import { useWsStore, type Tab } from "../store/workspace.js";
+import { useTermStore } from "../store/terminals.js";
 import { useLayoutStore } from "../store/layout.js";
-import { defaultPanels } from "./default-template.js";
+import { defaultPanels, terminalSeedHeight, isTerminalGroupCollapsed, TERMINAL_EXPANDED_HEIGHT } from "./default-template.js";
 import { fixedPanelId, editorPanelId, panelIdForTab, tabIdForPanel, type FixedKind } from "./panel-ids.js";
+import { fixedPanelTitle } from "./panel-titles.js";
 import { dockComponents } from "./panels.js";
 import { RookeryTab } from "./RookeryTab.js";
 import "./dockview-theme.css";
@@ -27,27 +29,28 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   const disposablesRef = useRef<Disposable[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const titleFor = (kind: FixedKind): string => {
-    switch (kind) {
-      case "conversation": return agentKind === "worker" ? t("app.worker") : t("app.master");
-      case "files": return t("rightSidebar.segmentFiles");
-      case "git": return "Git";
-      case "terminal": return t("workspaceHeaders.terminalTitle");
-      case "nested": return t("rightSidebar.segmentWorker");
-    }
-  };
+  // addPanel-time translation (see panel-titles.ts) — this is what gets persisted
+  // into the saved layout JSON. RookeryTab re-derives the SAME thing live on every
+  // render instead of trusting that persisted value (audit #29).
+  const titleFor = (kind: FixedKind): string => fixedPanelTitle(kind, t, agentKind);
 
   // Initial size for the panel that CREATES a group: the right sidebar group is
-  // narrow, the terminal group is short; the conversation keeps the rest.
+  // narrow, the conversation keeps the rest, and the terminal group seeds
+  // collapsed (tab-strip only) unless the page already has open terminals —
+  // an empty terminal shouldn't permanently occupy ~220px (audit #30).
   const seedSize = (kind: FixedKind): { initialWidth?: number; initialHeight?: number } =>
-    kind === "files" ? { initialWidth: 320 } : kind === "terminal" ? { initialHeight: 220 } : {};
+    kind === "files"
+      ? { initialWidth: 320 }
+      : kind === "terminal"
+        ? { initialHeight: terminalSeedHeight(useTermStore.getState().layout[pageKey]?.count ?? 0) }
+        : {};
 
   const addFixed = (api: DockviewApi, kind: FixedKind, anchor?: FixedKind, direction?: Direction): void => {
     api.addPanel({
       id: fixedPanelId(kind),
       component: kind,
       title: titleFor(kind),
-      params: { pageKey, kind },
+      params: { pageKey, kind, ...(kind === "conversation" ? { agentKind } : {}) },
       ...seedSize(kind),
       ...(anchor ? { position: { referencePanel: fixedPanelId(anchor), direction } } : {}),
     });
@@ -145,9 +148,24 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       // of an open tab still passes — openFile/setActive always produce a NEW byPage[pageKey] object.
       if (state.byPage[pageKey] !== prevState.byPage[pageKey]) syncActive(apiRef.current);
     });
+    // Grow a still-collapsed terminal group once the page's first terminal opens
+    // (the existing +/tab path in TerminalPanel). Only fires on a 0→>0 open-count
+    // transition, and only if the group still looks like the collapsed seed —
+    // never overriding a size the user picked deliberately (audit #30). This
+    // deliberately ignores restore-time count churn (a page's persisted terminals
+    // re-opening one by one on first view produces no 0→>0 edge, since the seed
+    // already accounted for them being non-zero — see task-18-report.md).
+    const unsubTerm = useTermStore.subscribe((state, prevState) => {
+      const had = prevState.layout[pageKey]?.count ?? 0;
+      const has = state.layout[pageKey]?.count ?? 0;
+      if (had !== 0 || has === 0 || disposedRef.current) return;
+      const panel = apiRef.current?.getPanel(fixedPanelId("terminal"));
+      if (panel && isTerminalGroupCollapsed(panel.group.api.height)) panel.group.api.setSize({ height: TERMINAL_EXPANDED_HEIGHT });
+    });
     return () => {
       disposedRef.current = true;
       unsub();
+      unsubTerm();
       for (const d of disposablesRef.current) d.dispose();
       disposablesRef.current = [];
       if (saveTimer.current) {
