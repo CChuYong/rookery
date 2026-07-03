@@ -46,18 +46,34 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   const bodyRef = useRef<HTMLDivElement>(null);
   const filtering = filter.trim().length > 0;
 
+  // Roots that have completed at least one successful listing — gates the skeleton to a root's genuinely first
+  // load. `version`/`reloadKey` re-fire this effect on every live fs event and every create/mkdir/rename/trash/
+  // manual-refresh, so without this a background refetch would blink the already-rendered tree to a skeleton and
+  // back on every one of those (task 10 review of #13). A `root` change (switching pages/worktrees) is never in
+  // this set yet, so it still gets the initial skeleton.
+  const loadedRootsRef = useRef<Set<string>>(new Set());
+
   // Load the root directory's contents, tracked separately from expanded sub-dirs (#13) so the initial load and a
   // genuine list() failure are never mistaken for an empty folder (re-fetches on version/reloadKey too).
   useEffect(() => {
     let live = true;
-    setRootStatus("loading");
+    const isFirstLoad = !loadedRootsRef.current.has(root);
+    if (isFirstLoad) setRootStatus("loading");
     void window.rookery.ws.list(root).then((entries) => {
       if (!live) return;
       setChildren((m) => new Map(m).set(root, entries));
       setRootStatus("loaded");
-    }).catch(() => { if (live) setRootStatus("error"); });
+      loadedRootsRef.current.add(root);
+    }).catch((e) => {
+      if (!live) return;
+      if (isFirstLoad) setRootStatus("error");
+      // A background refetch failing (live fs event, or a manual refresh after the root already loaded once)
+      // keeps the already-rendered tree in place rather than replacing it with the error panel — the stale
+      // tree plus this toast beats losing the user's expanded state over a transient failure.
+      else toast.error(t("fileTree.opFailed"), String(e));
+    });
     return () => { live = false; };
-  }, [root, version, reloadKey]);
+  }, [root, version, reloadKey, t]);
 
   // Load every expanded directory (root is loaded separately above with its own loading/error state — #13's scope is
   // root-only). A per-directory failure surfaces via the same fs-op toast as #11 rather than a dedicated state, since

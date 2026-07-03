@@ -144,6 +144,31 @@ describe("FileTree", () => {
       render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
       expect(await screen.findByText("빈 폴더예요.")).toBeInTheDocument();
     });
+
+    it("does not re-flash the skeleton on a background refetch after a successful initial load (task 10 review)", async () => {
+      let resolveRefetch: ((v: Array<{ name: string; isDir: boolean }>) => void) | null = null;
+      let calls = 0;
+      const list = vi.fn(() => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve([{ name: "src", isDir: true }, { name: "a.ts", isDir: false }]);
+        return new Promise<Array<{ name: string; isDir: boolean }>>((res) => { resolveRefetch = res; });
+      });
+      mockWs({ list });
+      const { rerender, container } = render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      expect(await screen.findByText("a.ts")).toBeInTheDocument();
+
+      // Bump version (simulates a live fs:tree event) — the refetch is held open via the pending promise.
+      rerender(<FileTree root="/r" pageKey="p1" version={1} activeTabPath={null} />);
+      await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+
+      // The already-rendered rows must stay put — no skeleton flash while the refetch is in flight.
+      expect(screen.getByText("a.ts")).toBeInTheDocument();
+      expect(screen.getByText("src")).toBeInTheDocument();
+      expect(container.querySelector(".sheen")).toBeNull();
+
+      resolveRefetch!([{ name: "src", isDir: true }, { name: "a.ts", isDir: false }]);
+      await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
+    });
   });
 
   describe("fs-op failure feedback (#11)", () => {
