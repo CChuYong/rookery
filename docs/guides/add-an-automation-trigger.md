@@ -52,7 +52,7 @@ Instantiate the source in `startDaemon()` and connect it to its event stream —
 
 - **Don't record runs in the source.** `setAutomationRun` is the dispatcher's exclusive job; the source/Scheduler only advances `next_run_at`.
 - **Overlap semantics differ by type.** Time triggers must skip on overlap (the `guard = a.trigger.kind === "cron"` line, `src/core/automation-dispatcher.ts:25` — extend it for a new time-type kind). Event triggers must NOT skip (process every event).
-- **`once` deletes before firing** (`src/core/scheduler.ts:81`) to prevent double-fire; it has no dispatcher guard. Apply the same delete-first pattern for any self-deleting one-shot kind.
+- **`once` claims before firing** (`src/core/scheduler.ts` `fireOnce`): it nulls `next_run_at` (the tick skips claimed rows — no double-fire) and deletes only after the run settles, so a crash mid-run is re-armed at boot and refires (at-least-once). It has no dispatcher guard. Apply the same claim-then-delete pattern for any self-deleting one-shot kind.
 - **Prompt injection / no budget guards.** Untrusted text reaches the master prompt as `{{message}}` under `bypassPermissions` with no cost/turn cap. Treat new event sources as untrusted.
 - **`once` is hidden from the UI list** (`src/daemon/connection.ts:447`) — internal kinds may need the same filter.
 - ESM NodeNext: `.js` extensions, `import type`.
