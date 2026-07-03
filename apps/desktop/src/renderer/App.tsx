@@ -481,8 +481,10 @@ export function App(): JSX.Element {
     // until session.list returns and the delete reads as if it didn't register.
     if (useStore.getState().activeSessionId === id) useStore.setState({ activeSessionId: null });
     useStore.setState((st) => ({ sessions: st.sessions.filter((x) => x.id !== id) }));
-    useLayoutStore.getState().clear_(id); // dockable-panes: forget this page's saved layout
-    void client?.request({ type: "session.delete", sessionId: id }).then(refetchSessions).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
+    void client?.request({ type: "session.delete", sessionId: id }).then(() => {
+      useLayoutStore.getState().clear_(id); // only after the daemon confirms (audit #34) — a failed delete restores the row AND keeps its layout
+      refetchSessions();
+    }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
   }, [refetchSessions]);
   const refetchFleet = useCallback(() => { void client?.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {}); }, []);
   // Rename worker — updates live via the worker.label event. Archive/delete refetch fleet.list.
@@ -492,8 +494,10 @@ export function App(): JSX.Element {
     // Optimistic removal — mirrors deleteSession (refetch reconciles; restored on failure).
     if (useStore.getState().activeWorkerId === id) useStore.getState().navigate({ subId: null });
     useStore.setState((st) => { const f = { ...st.fleet }; delete f[id]; return { fleet: f }; });
-    useLayoutStore.getState().clear_(id); // dockable-panes: forget this page's saved layout
-    void client?.request({ type: "worker.delete", id }).then(refetchFleet).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchFleet(); });
+    void client?.request({ type: "worker.delete", id }).then(() => {
+      useLayoutStore.getState().clear_(id); // only after the daemon confirms (audit #34) — a failed delete restores the row AND keeps its layout
+      refetchFleet();
+    }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchFleet(); });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
   const startSession = (opts: { cwd?: string; prompt?: string; model: string; effort: string }) => {

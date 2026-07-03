@@ -150,7 +150,14 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       unsub();
       for (const d of disposablesRef.current) d.dispose();
       disposablesRef.current = [];
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        // Flush instead of dropping (audit #33): a layout change within the 400ms debounce of a page switch,
+        // reload, or quit was silently lost and the page reverted to its previous saved arrangement.
+        const api = apiRef.current;
+        if (api) { try { useLayoutStore.getState().save_(pageKey, api.toJSON()); } catch { /* dockview mid-teardown — keep the last saved layout */ } }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageKey]);
