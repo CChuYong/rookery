@@ -493,6 +493,19 @@ describe("FleetOrchestrator", () => {
     expect(evs.every((e) => e.seq !== 9999)).toBe(true);
   });
 
+  it("a provisioning failure emits the error worker.event live, not just persists it (audit #27)", async () => {
+    class FailingGit extends FakeGitOps {
+      async addWorktree(): Promise<void> { throw new Error("worktree boom"); }
+    }
+    const git = new FailingGit({ headValue: "base0", checkpointSha: "ck" });
+    const { bus, fleet } = setup({ git });
+    const events: Array<{ kind: string }> = [];
+    bus.subscribe("@fleet", (e) => { if (e.type === "worker.event") events.push(e.data as { kind: string }); });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
+    await fleet.waitAllSettled();
+    expect(events.some((d) => d.kind === "error")).toBe(true);
+  });
+
   it("list is global across home sessions; diff + discard delegate to git", async () => {
     const s = setup();
     s.fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });

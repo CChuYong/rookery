@@ -352,7 +352,12 @@ export class FleetOrchestrator {
       if (entry) entry.status = "failed";
       try { repos.setWorkerStatus(id, "failed"); } catch { /* ignore */ }
       try {
-        repos.addWorkerEvent({ workerId: id, seq: repos.nextWorkerSeq(id), type: "error", payloadJson: JSON.stringify({ kind: "error", message: String(err) }) });
+        const seq = repos.nextWorkerSeq(id);
+        const data = { kind: "error" as const, message: String(err) };
+        repos.addWorkerEvent({ workerId: id, seq, type: "error", payloadJson: JSON.stringify(data) });
+        // Persist+emit as a pair (like Worker.record): without the emit, a client watching the provisioning
+        // worker saw the failed badge over an empty transcript until a manual history refetch (audit #27).
+        bus.emit({ type: "worker.event", sessionId: input.homeSessionId, workerId: id, seq, data });
       } catch { /* ignore */ }
       bus.emit({ type: "worker.status", sessionId: input.homeSessionId, workerId: id, status: "failed" });
     }
