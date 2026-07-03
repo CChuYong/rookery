@@ -439,11 +439,29 @@ describe("FleetOrchestrator", () => {
     expect(s.repos.getWorker(id)?.base).toBe("base0");
   });
 
-  it("on settle (error): records status 'failed'", async () => {
-    const s = setup({ settle: "error" });
-    const { id } = await s.fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
-    await s.fleet.waitAllSettled();
-    expect(s.fleet.status(id)).toBe("failed");
+  it("a worker runtime error settles as 'error' everywhere — DB, orchestrator status, and the emitted event agree (audit #10)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const events: string[] = [];
+    bus.subscribe("@fleet", (e) => { if (e.type === "worker.status") events.push(e.status); });
+    // Factory mimicking the real Worker: runs 'running', then on a runtime error writes its OWN terminal 'error'
+    // to the DB (through the write-once chokepoint) before settling, and status() flips to 'error' after settle.
+    // The orchestrator must NOT remap this to 'failed' (that used to diverge: the DB write-once dropped the remap
+    // while the in-memory entry + emitted event said 'failed'). 'failed' is reserved for provisioning failures.
+    let state = "running";
+    const factory = (o: { id: string }): WorkerLike => ({
+      start: () => {},
+      send: () => {}, resume: () => {}, stop: async () => {},
+      status: () => state,
+      waitUntilSettled: async () => { repos.setWorkerStatus(o.id, "error"); state = "error"; },
+    });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "base0" }), factory, worktreesDir: "/wt", idgen: () => "a0" });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
+    await fleet.waitAllSettled();
+    expect(repos.getWorker(id)!.status).toBe("error"); // DB — what the Worker itself wrote
+    expect(fleet.status(id)).toBe("error");            // orchestrator in-memory entry
+    expect(events).not.toContain("failed");            // no phantom 'failed' emitted for a runtime error
   });
 
   it("does not reject waitAllSettled when worktree creation fails; marks status failed", async () => {

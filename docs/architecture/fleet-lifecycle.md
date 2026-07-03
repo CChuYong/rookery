@@ -15,7 +15,7 @@ The fleet is the **control plane**: one `FleetOrchestrator` per daemon (a global
 4. `git.addWorktree(repo, worktreePath, branch, base)` → `signalReady()` (spawn can return).
 5. `factory(...)` builds the `Worker` (cwd = worktree), `agent.start(task)`, then `setStatus(agent.status())` reconciles out of `provisioning` (a real transition that clears the spinner). If `baseStale`, surface a worker `notice`.
 6. With a task, `relabel` (best-effort Haiku label). If the daemon is `closing`, immediately `stop`.
-7. `await agent.waitUntilSettled()` then `setStatus(error → "failed", else the settled status)`.
+7. `await agent.waitUntilSettled()` then `setStatus(agent.status())` — the worker settles as its own terminal status (a runtime `error` stays `error`, no remap).
 
 **Branch naming:** `rookery/<id>`, or `rookery/<slug>` from a ticket key (`branchSlug`, e.g. `#123` → `issue-123`) with a `-<id[:6]>` suffix on collision. Worktree path: `<worktreesDir>/<id>` (= `~/.rookery/worktrees/<id>`).
 
@@ -29,8 +29,8 @@ Worker-owned union (`worker.ts:22`): `running | idle | stopped | done | error`. 
 - **idle** — turn finished, queue alive, awaiting `send()` (task-less spawn starts here; a turn boundary with nothing deferred drops here, `worker.ts:368`).
 - **stopped** — `stop()`/`discard`/user termination, or `maxTurns` cap, or shutdown-drain stop. Keeps the worktree.
 - **done** — the SDK generator ended **naturally** (`worker.ts:376`). Rare in practice — a real streaming queue only ends on close, so workers almost always end `stopped`.
-- **error** — the consume loop threw (non-abort) (`worker.ts:383`). The orchestrator maps this to `failed` at settle (`trackFlow`/`run`).
-- **failed** — orchestrator terminal: a thrown worker `error`, or a spawn/provisioning failure (`run` catch, `fleet-orchestrator.ts:262`).
+- **error** — the consume loop threw (non-abort) (`worker.ts:383`). A worker runtime error settles as `error` **everywhere** — the `Worker` writes terminal `error` through the write-once chokepoint, and the orchestrator settles as `agent.status()` with **no remap** (`trackFlow`/`run`), so the DB row, the in-memory entry, and the emitted `worker.status` all agree (audit #10). It is **not** remapped to `failed`.
+- **failed** — orchestrator terminal, **provisioning/spawn failures only**: a thrown base-resolve / `git.addWorktree` (`run` catch, `fleet-orchestrator.ts` catch). No longer used for worker runtime errors.
 - **orphaned** — set only by `rehydrate()` for a zombie (no live process after restart, can't resume).
 
 ### Terminal write-once chokepoint

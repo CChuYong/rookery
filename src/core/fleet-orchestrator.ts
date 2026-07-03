@@ -97,13 +97,15 @@ export class FleetOrchestrator {
   }
 
   // register a live (running/idle) agent into a flow → shutdown-drain (waitAllSettled) waiting + final
-  // status cleanup on termination (error→failed). Resumed agents also go through this.
+  // status cleanup on termination (settle as the worker's own terminal status). Resumed agents also go through this.
   private trackFlow(id: string, agent: WorkerLike): void {
     const flow = agent
       .waitUntilSettled()
       .then(() => {
-        const s = agent.status();
-        this.setStatus(id, s === "error" ? "failed" : s);
+        // Settle as the worker's own terminal status. A runtime error stays 'error' — remapping to 'failed'
+        // diverged from the DB (the Worker already wrote terminal 'error'; the write-once guard dropped the
+        // remap write while the entry/event said 'failed'). 'failed' is reserved for provisioning failures.
+        this.setStatus(id, agent.status());
       })
       .catch(() => {});
     this.flows.add(flow);
@@ -313,8 +315,8 @@ export class FleetOrchestrator {
       // waitUntilSettled only resolves when the agent terminates (stopped/done/error) (not on idle). So while alive,
       // this flow stays in flows and the shutdown drain waits; when it terminates it drops out of flows.
       await agent.waitUntilSettled();
-      const settled = agent.status();
-      this.setStatus(id, settled === "error" ? "failed" : settled);
+      // Settle as the worker's own terminal status (see trackFlow): a runtime error stays 'error' — no remap to 'failed'.
+      this.setStatus(id, agent.status());
     } catch (err) {
       signalReady(); // so spawn() doesn't hang even if provisioning (base/worktree) fails (one-shot, duplicate calls are harmless)
       const entry = this.entries.get(id);
@@ -494,7 +496,7 @@ export class FleetOrchestrator {
     const e = this.entries.get(id);
     if (e) {
       // while alive (running/idle), the agent's real-time status is the truth. When terminated/restored (detached),
-      // the status the orchestrator recorded (error→failed, orphaned, etc.) is canonical.
+      // the status the orchestrator recorded (orphaned, provisioning-'failed', etc.) is canonical.
       if (e.agent) {
         const live = e.agent.status();
         if (live === "running" || live === "idle") return live;
