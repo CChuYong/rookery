@@ -22,13 +22,21 @@ const TERMINAL = new Set(["stopped", "done", "error", "failed", "orphaned"]);
 export class WorkerSlackRelay {
   private readonly workers = new Map<string, SlackThreadReporter>();
   private tail: Promise<void> = Promise.resolve(); // serializes async spawn/terminal work (+ deterministic in tests)
+  // Events that arrive while onSpawned's Slack round-trips are still in flight — flushed on registration.
+  // Bounded: a stalled spawn must not buffer unboundedly (beyond the cap, oldest are kept, newest dropped).
+  private readonly spawnBuffer = new Map<string, Array<Extract<CoreEvent, { type: "worker.event" }>>>();
+  private static readonly SPAWN_BUFFER_MAX = 200;
 
   constructor(private readonly deps: WorkerRelayDeps) {}
 
   onEvent(e: CoreEvent): void {
     if (e.type === "worker.spawned") {
+      // Open the buffer synchronously so events racing the async spawn round-trips are captured, not dropped.
+      if (!this.workers.has(e.workerId) && !this.spawnBuffer.has(e.workerId)) this.spawnBuffer.set(e.workerId, []);
       this.tail = this.tail.then(() => this.onSpawned(e)).catch((err) => { process.stderr.write(`[rookery] worker-slack-relay error: ${String(err)}\n`); });
     } else if (e.type === "worker.event") {
+      const buf = this.spawnBuffer.get(e.workerId);
+      if (buf) { if (buf.length < WorkerSlackRelay.SPAWN_BUFFER_MAX) buf.push(e); return; }
       const reporter = this.workers.get(e.workerId);
       if (!reporter) return;
       const ce = workerEventToCoreEvent(e.data, e.sessionId);
@@ -59,36 +67,52 @@ export class WorkerSlackRelay {
   }
 
   private async onSpawned(e: Extract<CoreEvent, { type: "worker.spawned" }>): Promise<void> {
-    const channel = this.channelIfEnabled();
-    if (!channel) return;
-    const master = this.deps.resolveThread(e.sessionId);
-    if (!master) return; // not a Slack-origin master → out of scope
-    if (this.workers.has(e.workerId)) return; // double-emit safety
-    const repo = basename(e.repoPath) || e.repoPath;
-    const rows: Array<[string, string]> = [["Worker", e.label || e.workerId], ["Repo", repo]];
-    if (e.task) rows.push(["Task", e.task]);
-    // Quoted bullet list with bold labels (rich_text, border:1). text is the mrkdwn fallback for notifications/search.
-    const blocks = [{
-      type: "rich_text",
-      elements: [{
-        type: "rich_text_list", style: "bullet", indent: 0, border: 1,
-        elements: rows.map(([k, v]) => ({ type: "rich_text_section", elements: [{ type: "text", text: k, style: { bold: true } }, { type: "text", text: `: ${v}` }] })),
-      }],
-    }];
-    const fallback = rows.map(([k, v]) => `> • *${k}*: ${v}`).join("\n");
-    const root = await this.deps.client.chat.postMessage({ channel, text: fallback, blocks });
-    const rootTs = root.ts;
-    if (!rootTs) return; // can't thread/permalink without a ts
-    // Link the worker thread back into the master's Slack thread so the user can follow it.
-    const permalink = await this.deps.client.chat.getPermalink({ channel, message_ts: rootTs }).then((r) => r.permalink).catch(() => undefined);
-    if (permalink) {
-      await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: `🧵 Worker \`${e.label || e.workerId}\` started — follow: ${permalink}` });
+    try {
+      const channel = this.channelIfEnabled();
+      if (!channel) return;
+      const master = this.deps.resolveThread(e.sessionId);
+      if (!master) return; // not a Slack-origin master → out of scope
+      if (this.workers.has(e.workerId)) return; // double-emit safety
+      const repo = basename(e.repoPath) || e.repoPath;
+      const rows: Array<[string, string]> = [["Worker", e.label || e.workerId], ["Repo", repo]];
+      if (e.task) rows.push(["Task", e.task]);
+      // Quoted bullet list with bold labels (rich_text, border:1). text is the mrkdwn fallback for notifications/search.
+      const blocks = [{
+        type: "rich_text",
+        elements: [{
+          type: "rich_text_list", style: "bullet", indent: 0, border: 1,
+          elements: rows.map(([k, v]) => ({ type: "rich_text_section", elements: [{ type: "text", text: k, style: { bold: true } }, { type: "text", text: `: ${v}` }] })),
+        }],
+      }];
+      const fallback = rows.map(([k, v]) => `> • *${k}*: ${v}`).join("\n");
+      const root = await this.deps.client.chat.postMessage({ channel, text: fallback, blocks });
+      const rootTs = root.ts;
+      if (!rootTs) return; // can't thread/permalink without a ts
+      // Link the worker thread back into the master's Slack thread — BEST-EFFORT: a failed link post must not
+      // skip the registration below (it used to disable the relay for this worker entirely).
+      try {
+        const permalink = await this.deps.client.chat.getPermalink({ channel, message_ts: rootTs }).then((r) => r.permalink).catch(() => undefined);
+        if (permalink) {
+          await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: `🧵 Worker \`${e.label || e.workerId}\` started — follow: ${permalink}` });
+        }
+      } catch (err) {
+        process.stderr.write(`[rookery] worker-slack-relay link post failed: ${String(err)}\n`);
+      }
+      // master.userId → recipient_user_id, required for chat.startStream to stream in a regular (non-assistant) channel.
+      const reporter = new SlackThreadReporter(this.deps.client, { channel, threadTs: rootTs, team: master.team, userId: master.userId }, this.deps.getLocale);
+      this.workers.set(e.workerId, reporter);
+      // Flush events that raced the spawn round-trips, in arrival order.
+      for (const ev of this.spawnBuffer.get(e.workerId) ?? []) {
+        const ce = workerEventToCoreEvent(ev.data, ev.sessionId);
+        if (ce) reporter.onEvent(ce);
+      }
+    } finally {
+      this.spawnBuffer.delete(e.workerId); // every exit path: stop buffering (direct delivery or out-of-scope drop)
     }
-    // master.userId → recipient_user_id, required for chat.startStream to stream in a regular (non-assistant) channel.
-    this.workers.set(e.workerId, new SlackThreadReporter(this.deps.client, { channel, threadTs: rootTs, team: master.team, userId: master.userId }, this.deps.getLocale));
   }
 
   private async onTerminal(workerId: string): Promise<void> {
+    this.spawnBuffer.delete(workerId); // a worker that dies before registration must not leave a buffer behind
     const reporter = this.workers.get(workerId);
     if (!reporter) return;
     this.workers.delete(workerId);

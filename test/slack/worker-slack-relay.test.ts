@@ -103,4 +103,43 @@ describe("WorkerSlackRelay", () => {
     await relay.idle();
     expect(f.appends).toEqual([]); // worker untracked → not relayed
   });
+
+  it("events emitted before onSpawned finishes are buffered and flushed in order (audit #19)", async () => {
+    const f = fakeClient();
+    const relay = new WorkerSlackRelay(makeDeps(f.client));
+    // spawn, then IMMEDIATELY emit worker.events WITHOUT awaiting relay.idle() — they race the spawn round-trips.
+    relay.onEvent(spawn());
+    relay.onEvent(workerEvent({ kind: "message", role: "assistant", content: "first" }));
+    relay.onEvent(workerEvent({ kind: "message", role: "assistant", content: "second" }));
+    await relay.idle();
+    const delivered = f.appends.map((a) => a.markdown_text);
+    expect(delivered).toContain("first");
+    expect(delivered).toContain("second");
+    // flushed in arrival order
+    expect(delivered.indexOf("first")).toBeLessThan(delivered.indexOf("second"));
+  });
+
+  it("a failed master-thread link post does not disable the relay for that worker (audit #19)", async () => {
+    const posts: Array<{ channel: string; thread_ts?: string; text: string }> = [];
+    const appends: Array<{ markdown_text?: string }> = [];
+    const client: SlackClient = {
+      chatStream: () => ({ append: async (p) => { appends.push(p as { markdown_text?: string }); }, stop: async () => {} }),
+      chat: {
+        // Root post to the relay channel succeeds; the link post into the master thread rejects.
+        postMessage: async (a) => {
+          if (a.channel === MASTER.channel) throw new Error("link post boom");
+          posts.push(a);
+          return { ts: `ts${posts.length}` };
+        },
+        getPermalink: async (a) => ({ permalink: `https://slack/${a.channel}/${a.message_ts}` }),
+      },
+    };
+    const relay = new WorkerSlackRelay(makeDeps(client));
+    relay.onEvent(spawn());
+    await relay.idle();
+    relay.onEvent(workerEvent({ kind: "message", role: "assistant", content: "still alive" }));
+    await relay.idle();
+    // the worker registered despite the failed link post → its event was relayed
+    expect(appends.some((a) => a.markdown_text === "still alive")).toBe(true);
+  });
 });
