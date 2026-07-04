@@ -438,10 +438,15 @@ describe("workerActivityAndCost", () => {
     // w3: no events at all
     repos.createWorker({ id: "w3", sessionId: "s", repoPath: "/r", label: "c", worktreePath: "/wt3", branch: "b3" });
 
+    // w4: has an event, but it is neither a message nor a result → GROUP BY row with both columns NULL → must be omitted
+    repos.createWorker({ id: "w4", sessionId: "s", repoPath: "/r", label: "d", worktreePath: "/wt4", branch: "b4" });
+    cur = "2026-01-01T00:00:06.000Z"; repos.addWorkerEvent({ workerId: "w4", seq: 0, type: "thinking", payloadJson: JSON.stringify({ kind: "thinking", text: "hmm" }) });
+
     const m = repos.workerActivityAndCost();
     expect(m.get("w1")).toEqual({ lastActivityTs: Date.parse("2026-01-01T00:00:03.000Z"), costUsd: 1.25 });
     expect(m.get("w2")!.lastActivityTs).toBe(Date.parse("2026-01-01T00:00:05.000Z"));
     expect(m.get("w2")!.costUsd).toBeUndefined();
     expect(m.has("w3")).toBe(false);
+    expect(m.has("w4")).toBe(false); // events but no message/result → both metrics NULL → omitted by the guard
   });
 });

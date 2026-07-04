@@ -264,7 +264,7 @@ export class Repositories {
     return row?.payload_json;
   }
 
-  // worker_id → { lastActivityTs?, costUsd? } for the WHOLE fleet in one indexed GROUP BY pass (idx_worker_events).
+  // worker_id → { lastActivityTs?, costUsd? } for the WHOLE fleet in one GROUP BY pass over worker_events.
   // lastActivityTs = ms of the last 'message' event (created_at is ISO → MAX is latest, Date.parse → ms, matching the
   // renderer). costUsd = the last 'result' event's cumulative total (non-decreasing → MAX). Absent metric = no such event;
   // a worker with neither is omitted from the map.

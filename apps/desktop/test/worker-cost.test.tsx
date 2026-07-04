@@ -19,6 +19,12 @@ describe("WorkerCost", () => {
     const { container } = render(<WorkerCost workerId="w2" />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("prefers the live log cost over a lower fleet costUsd (max — a streaming worker stays fresh)", () => {
+    useStore.setState({ workerLogs: { w1: [metrics(5)] } });
+    render(<WorkerCost workerId="w1" fleetCost={2.5} />);
+    expect(screen.getByText("$5.00")).toBeInTheDocument();
+  });
 });
 
 describe("FleetBurn", () => {
