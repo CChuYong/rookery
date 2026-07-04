@@ -5,6 +5,7 @@ export default {
   "interactionCard.deny": "Deny",
   "interactionCard.askPrompt": "Answer the assistant's question",
   "interactionCard.submit": "Submit",
+  "interactionCard.skip": "Skip",
   "interactionCard.expired": "Expired — the daemon is no longer waiting on this request",
   "interactionCard.sending": "Sending response…",
 } satisfies Catalog;

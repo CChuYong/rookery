@@ -18,7 +18,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   // Which action was clicked and sent to the daemon (interaction.respond is fire-and-forget, so this is our only
   // in-flight signal until interaction.resolved swaps the card for a summary — see item.resolved below).
-  const [sent, setSent] = useState<false | "allow" | "deny" | "submit">(false);
+  const [sent, setSent] = useState<false | "allow" | "deny" | "submit" | "skip">(false);
 
   if (item.resolved) {
     return (
@@ -68,6 +68,12 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
     });
     onRespond?.(item.requestId, { answers });
   };
+  // Escape hatch for when none of the offered options fit: resolves with empty answers (the same shape the
+  // registry already falls back to when no canUseTool handler is present) instead of forcing a Stop of the whole turn.
+  const skip = (): void => {
+    setSent("skip");
+    onRespond?.(item.requestId, { answers: {} });
+  };
 
   return (
     <div className={cardCls}>
@@ -92,7 +98,10 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
           </div>
         </div>
       ))}
-      <Button variant="primary" size="sm" disabled={!allAnswered || !!sent} loading={sent === "submit"} onClick={submit}>{t("interactionCard.submit")}</Button>
+      <div className="flex gap-2">
+        <Button variant="primary" size="sm" disabled={!allAnswered || !!sent} loading={sent === "submit"} onClick={submit}>{t("interactionCard.submit")}</Button>
+        <Button variant="outline" size="sm" disabled={!!sent} loading={sent === "skip"} onClick={skip}>{t("interactionCard.skip")}</Button>
+      </div>
       {sendingHint}
     </div>
   );

@@ -42,6 +42,30 @@ describe("InteractionCard", () => {
     expect(onRespond).toHaveBeenCalledWith("R3", { answers: { "Format?": "Summary", "Lang?": "EN" } });
   });
 
+  it("ask: Skip is enabled with no options selected, calls onRespond with empty answers, and locks the card", () => {
+    const onRespond = vi.fn();
+    const item: Item = {
+      kind: "interaction", requestId: "R7", mode: "ask", resolved: false,
+      questions: [
+        { question: "Format?", header: "Fmt", options: [{ label: "Summary" }, { label: "Detailed" }] },
+        { question: "Lang?", header: "Lang", options: [{ label: "KO" }, { label: "EN" }] },
+      ],
+    };
+    render(<InteractionCard item={item} onRespond={onRespond} />);
+    const submit = screen.getByText("제출");
+    const skip = screen.getByText("건너뛰기").closest("button")!;
+    expect(submit).toBeDisabled(); // nothing selected
+    expect(skip).not.toBeDisabled(); // Skip is never gated on allAnswered
+    fireEvent.click(skip);
+    expect(onRespond).toHaveBeenCalledWith("R7", { answers: {} });
+    expect(skip).toBeDisabled();
+    expect(submit).toBeDisabled();
+    expect(screen.getByText("응답 전송 중…")).toBeInTheDocument();
+    // Clicking again while sent must not fire a second respond.
+    fireEvent.click(skip);
+    expect(onRespond).toHaveBeenCalledTimes(1);
+  });
+
   it("resolved: shows the summary and no buttons", () => {
     const item: Item = { kind: "interaction", requestId: "R4", mode: "approve", resolved: true, summary: "✅ 승인됨" };
     render(<InteractionCard item={item} />);
