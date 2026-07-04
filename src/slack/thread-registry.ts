@@ -31,6 +31,12 @@ export class ThreadRegistry {
     return reporter;
   }
 
+  // Passive lookup of an existing reporter without creating one (used by the worker relay to weave an alert into the
+  // master's live stream). No LRU bump — a read, not a use.
+  get(sessionId: string): SlackThreadReporter | undefined {
+    return this.entries.get(sessionId)?.reporter;
+  }
+
   disposeAll(): void {
     for (const { unsubscribe, reporter } of this.entries.values()) {
       unsubscribe();

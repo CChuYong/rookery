@@ -39,6 +39,8 @@ export const KO = {
   "slack.thinking": "💭 추론",
   "slack.worker": "🔧 워커 {label}",
   "slack.workerRepo": "레포 {repo}",
+  "slack.workerStartedAlert": "🧵 워커 `{label}` 시작됨",
+  "slack.openThread": "스레드 보기",
   // cli.* — CLI client-local notices
   "cli.noResponse": "데몬에서 응답이 없어요 — 처리 중이거나 멈췄을 수 있어요.",
   "cli.sessionNotReady": "세션이 아직 준비되지 않았어요. 잠시 후 다시 시도하세요.",
@@ -80,6 +82,8 @@ export const EN: Record<keyof typeof KO, string> = {
   "slack.thinking": "💭 Reasoning",
   "slack.worker": "🔧 Worker {label}",
   "slack.workerRepo": "Repo {repo}",
+  "slack.workerStartedAlert": "🧵 Worker `{label}` started",
+  "slack.openThread": "open thread",
   "cli.noResponse": "No response from the daemon — it may be working or stuck.",
   "cli.sessionNotReady": "Session not ready yet, try again.",
   "cli.connected": "connected. type a message (Ctrl-D to quit).",

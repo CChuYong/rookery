@@ -65,4 +65,14 @@ describe("ThreadRegistry", () => {
     await r.idle();
     expect(appends).toEqual([]);
   });
+
+  it("get returns the ensured reporter and undefined for an unknown session", () => {
+    const bus = new EventBus();
+    const { client } = recClient();
+    const reg = new ThreadRegistry(bus);
+    expect(reg.get("s1")).toBeUndefined();
+    const r = reg.ensure("s1", () => new SlackThreadReporter(client, target));
+    expect(reg.get("s1")).toBe(r);
+    expect(reg.get("nope")).toBeUndefined();
+  });
 });

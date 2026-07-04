@@ -80,6 +80,19 @@ export class SlackThreadReporter {
     return this.tail;
   }
 
+  // Inject a one-line alert (already-formatted mrkdwn, e.g. a "> …" blockquote) into the master thread. Enqueued on the
+  // same serialized tail as events so it lands in order; woven into the live stream when a turn is open, else a threaded
+  // post (avoids append lazily opening an orphaned streaming bubble outside a turn). Used by the worker→Slack relay.
+  threadAlert(markdown: string): Promise<void> {
+    this.tail = this.tail.then(async () => {
+      if (this.streamer) { await this.flushProse(); await this.append({ markdown_text: `\n${markdown}\n` }); }
+      else { await this.post(markdown, { unfurl: false }); }
+    }).catch((err) => {
+      process.stderr.write(`[rookery] slack reporter threadAlert error: ${String(err)}\n`);
+    });
+    return this.tail;
+  }
+
   private openStream(): ChatStreamerLike {
     return this.client.chatStream({
       channel: this.target.channel,
@@ -128,10 +141,15 @@ export class SlackThreadReporter {
     }
   }
 
-  private async post(text: string): Promise<void> {
+  private async post(text: string, opts?: { unfurl?: boolean }): Promise<void> {
     try {
       // Send it byte-truncated — otherwise the post fallback also loses it again to msg_too_long (G-UNICODE).
-      await this.client.chat.postMessage({ channel: this.target.channel, thread_ts: this.target.threadTs, text: truncateBytes(text, SLACK_TEXT_MAX_BYTES) });
+      await this.client.chat.postMessage({
+        channel: this.target.channel,
+        thread_ts: this.target.threadTs,
+        text: truncateBytes(text, SLACK_TEXT_MAX_BYTES),
+        ...(opts?.unfurl === false ? { unfurl_links: false, unfurl_media: false } : {}),
+      });
     } catch (err) {
       // Doesn't kill the adapter, but prevents silent loss — log what got dropped (slack-silent-post-loss).
       process.stderr.write(`[rookery] slack post failed: ${String(err)}\n`);

@@ -358,3 +358,30 @@ describe("SlackThreadReporter (plan card)", () => {
     expect(Buffer.byteLength(rec.posts[0]!, "utf8")).toBeLessThanOrEqual(38000); // the post is byte-truncated too, so real Slack doesn't lose it either
   });
 });
+
+describe("threadAlert", () => {
+  it("weaves the alert into the live stream when a turn is streaming", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), target);
+    r.onEvent(ev.toolStart("t1", "spawn_worker")); // opens the stream (tool card)
+    await r.idle();
+    await r.threadAlert("> 🧵 alert · <https://x|open>");
+    const streamed = rec.streams.flatMap(texts).join("");
+    expect(streamed).toContain("> 🧵 alert · <https://x|open>");
+    expect(rec.posts).toEqual([]); // woven in, not a separate post
+  });
+
+  it("posts a threaded blockquote with unfurl off when no stream is open", async () => {
+    const posts: Array<{ text: string; unfurl_links?: boolean; unfurl_media?: boolean }> = [];
+    const client: SlackClient = {
+      chatStream: () => { throw new Error("should not open a stream"); },
+      chat: { async postMessage(a) { posts.push(a as typeof posts[number]); return {}; } },
+    };
+    const r = new SlackThreadReporter(client, target);
+    await r.threadAlert("> 🧵 alert · <https://x|open>");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.text).toContain("> 🧵 alert");
+    expect(posts[0]!.unfurl_links).toBe(false);
+    expect(posts[0]!.unfurl_media).toBe(false);
+  });
+});
