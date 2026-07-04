@@ -19,17 +19,19 @@ function latestCost(items: LogItem[]): number {
 
 // Per-worker cumulative cost — surfaced on the fleet row. The engine has no budget guards, so the UI is the only place
 // runaway spend is visible. Renders nothing until there's a cost (avoids $0.00 noise on fresh workers).
-export function WorkerCost({ workerId }: { workerId: string }): JSX.Element | null {
+export function WorkerCost({ workerId, fleetCost }: { workerId: string; fleetCost?: number }): JSX.Element | null {
   const t = useT();
-  const cost = useStore((s) => latestCost(s.workerLogs[workerId] ?? EMPTY));
+  const logCost = useStore((s) => latestCost(s.workerLogs[workerId] ?? EMPTY));
+  const cost = Math.max(logCost, fleetCost ?? 0); // fleet.list snapshot shows cost without opening; the live log wins when higher (fresher)
   if (!cost) return null;
   return <span className="shrink-0 font-mono text-[9px] tabular-nums text-muted/70" title={t("workerCost.workerTitle")}>{fmtUsd(cost)}</span>;
 }
 
-// Fleet-wide spend = sum of each live worker's cumulative cost. The "fleet is burning" signal the review flagged as missing.
-export function FleetBurn({ ids }: { ids: string[] }): JSX.Element | null {
+// Fleet-wide spend = sum of each live worker's cumulative cost (fleet snapshot, or the live log when higher). The "fleet
+// is burning" signal — now accurate for never-opened workers too, not just the ones whose logs are loaded.
+export function FleetBurn({ rows }: { rows: Array<{ id: string; costUsd?: number }> }): JSX.Element | null {
   const t = useT();
-  const total = useStore((s) => ids.reduce((sum, id) => sum + latestCost(s.workerLogs[id] ?? EMPTY), 0));
+  const total = useStore((s) => rows.reduce((sum, r) => sum + Math.max(latestCost(s.workerLogs[r.id] ?? EMPTY), r.costUsd ?? 0), 0));
   if (!total) return null;
   return (
     <div

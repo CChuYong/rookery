@@ -214,6 +214,19 @@ describe("RepoTree fallback-label disambiguating subline (audit #46)", () => {
     );
     expect(screen.queryByText("방금")).toBeNull();
   });
+
+  it("shows the subline from the fleet lastActivityTs with NO log loaded (no open needed)", () => {
+    // workerLogs is empty (beforeEach) — the time comes purely from the fleet.list snapshot
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[{ ...fallbackWorker, lastActivityTs: Date.now() }] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+      />,
+    );
+    expect(screen.getByText("방금")).toBeInTheDocument();
+  });
 });
 
 // Audit #50: the tree's status tag is a deliberate colorblind-safe abbreviation (kept short — "ORPH"), but it must
@@ -256,5 +269,35 @@ describe("RepoTree right-side cluster yields to the '⋯' button on hover (final
     const tag = screen.getByText("IDLE");
     expect(tag.className).toMatch(/\btransition-opacity\b/);
     expect(tag.className).toMatch(/\bgroup-hover:opacity-0\b/);
+  });
+});
+
+describe("RepoTree fleet-provided cost (no open needed)", () => {
+  beforeEach(() => useStore.setState({ workerLogs: {} }));
+
+  it("shows a worker's cost from the fleet costUsd with no log loaded", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[{ ...worker, costUsd: 2.5 }] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+      />,
+    );
+    // With a single fleet worker, the FleetBurn total is numerically identical to this row's cost (both $2.50) —
+    // scope to the per-row WorkerCost span via its title so this asserts the row, not the (also-correct) burn total.
+    expect(screen.getByTitle("이 워커의 누적 비용")).toHaveTextContent("$2.50");
+  });
+
+  it("the fleet-burn total sums fleet costUsd across workers even when none are opened", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[{ ...worker, costUsd: 2.5 }, { ...fallbackWorker, costUsd: 1.25 }] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+      />,
+    );
+    expect(screen.getByText("$3.75")).toBeInTheDocument();
   });
 });

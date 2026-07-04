@@ -38,10 +38,11 @@ const EMPTY_LOG: LogItem[] = [];
 // Disambiguating subline for a fleet row still on its spawn-time repo-name label (audit #46) — a dim relative-time
 // line under the label. Subscribes narrowly to just this one worker's log (mirrors WorkerCost's per-row live read)
 // so activity elsewhere in the fleet doesn't re-render every row; renders nothing until a timestamp is available.
-function WorkerActivity({ workerId }: { workerId: string }): JSX.Element | null {
+function WorkerActivity({ workerId, fleetTs }: { workerId: string; fleetTs?: number }): JSX.Element | null {
   const t = useT();
   const locale = useLocale();
-  const ts = useStore((s) => lastActivityTs(s.workerLogs[workerId] ?? EMPTY_LOG));
+  const logTs = useStore((s) => lastActivityTs(s.workerLogs[workerId] ?? EMPTY_LOG));
+  const ts = Math.max(logTs ?? 0, fleetTs ?? 0) || null; // fleet snapshot covers never-opened workers; the live log wins when fresher
   if (ts === null) return null;
   // Within 7 days, relative time (i18n); beyond that, absolute date. Same convention as GitHistory's
   // commitDateLabel / AssistantMessage's timeLabel.
@@ -142,12 +143,12 @@ function RepoTreeImpl(p: {
             : isLive(sub.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
           <span className="flex min-w-0 flex-1 flex-col">
             <span className={cn("truncate", p.attention?.[sub.id] && !active && "font-semibold text-fg")}>{sub.label}</span>
-            {fallback && <WorkerActivity workerId={sub.id} />}
+            {fallback && <WorkerActivity workerId={sub.id} fleetTs={sub.lastActivityTs} />}
           </span>
           {/* right-side indicators (cost/tag/unread) yield to the '⋯' overflow button on hover — otherwise the
               absolutely-positioned button overlaps them and the tag's full-word title becomes unreachable (audit
               final-review F1). Same idiom as Sessions.tsx's OriginBadge/unread-dot hover yield. */}
-          <span className="shrink-0 transition-opacity group-hover:opacity-0"><WorkerCost workerId={sub.id} /></span>
+          <span className="shrink-0 transition-opacity group-hover:opacity-0"><WorkerCost workerId={sub.id} fleetCost={sub.costUsd} /></span>
           {/* colorblind-safe short tag stays as the visible glyph (rail/dot alt-channel), but the title carries the
               full localized word — same label source as the header StatusBadge, so tree and header never disagree
               (audit #50: tree used to say 'ORPH' while the header said 'orphaned'). */}
@@ -228,7 +229,7 @@ function RepoTreeImpl(p: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-      <FleetBurn ids={live.map((f) => f.id)} />
+      <FleetBurn rows={live} />
       {live.length > 4 && (
         <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 transition-colors focus-within:border-accent/50">
           <Search size={11} className="shrink-0 text-muted" />
