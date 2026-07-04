@@ -11,10 +11,29 @@ import { cn } from "../lib/cn.js";
 import { railClass, statusTag, isLive } from "../lib/status.js";
 import { scrollToBottom } from "../lib/scroll.js";
 import { useT } from "../i18n/provider.js";
+import { SkeletonRows } from "./Skeleton.js";
 
 type ToolItem = Extract<LogItem, { kind: "tool" }>;
 
-function MessageListImpl({ items, onOpenFile, onSelectWorker, onRespond }: { items: LogItem[]; onOpenFile?: (path: string) => void; onSelectWorker?: (id: string) => void; onRespond?: (requestId: string, res: InteractionAnswer) => void }): JSX.Element {
+function MessageListImpl({
+  items,
+  kind = "master",
+  loaded,
+  loadFailed,
+  onRetryHistory,
+  onOpenFile,
+  onSelectWorker,
+  onRespond,
+}: {
+  items: LogItem[];
+  kind?: "master" | "worker"; // which empty hint to show once loaded-and-empty (audit #43 — the worker copy must not say "master")
+  loaded?: boolean; // the session.history/worker.history fetch for this id has succeeded at least once (default true — keeps direct/test callers on the old immediate-empty behavior)
+  loadFailed?: boolean; // that fetch was rejected and hasn't succeeded since → error+retry instead of a permanently blank pane
+  onRetryHistory?: () => void; // re-fires the history fetch that failed
+  onOpenFile?: (path: string) => void;
+  onSelectWorker?: (id: string) => void;
+  onRespond?: (requestId: string, res: InteractionAnswer) => void;
+}): JSX.Element {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // auto-follow new content when the user is near the bottom
@@ -37,10 +56,30 @@ function MessageListImpl({ items, onOpenFile, onSelectWorker, onRespond }: { ite
   }, [items]);
 
   if (items.length === 0) {
+    // No committed transcript yet — three distinct states (audit #43): still fetching, fetch failed, or genuinely
+    // empty. Mirrors the loaded/loadFailed idiom already used by RepoTree/Sessions/AutomationPage: once loaded is
+    // true, a later background-refresh failure (e.g. on reconnect) doesn't hide what's already showing.
+    if (!(loaded ?? true)) {
+      if (loadFailed) {
+        return (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center">
+            <button onClick={onRetryHistory} className="flex flex-col items-center gap-2.5 text-fail transition-colors hover:underline">
+              <MessageSquareDashed size={28} className="opacity-40" />
+              <span className="text-[13px]">{t("messageList.loadFailed")}</span>
+            </button>
+          </div>
+        );
+      }
+      return (
+        <div className="flex flex-1 flex-col justify-center px-6">
+          <SkeletonRows rows={5} />
+        </div>
+      );
+    }
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center text-muted">
         <MessageSquareDashed size={28} className="opacity-40" />
-        <p className="text-[13px]">{t("messageList.emptyHint")}</p>
+        <p className="text-[13px]">{t(kind === "worker" ? "messageList.emptyHintWorker" : "messageList.emptyHintMaster")}</p>
       </div>
     );
   }

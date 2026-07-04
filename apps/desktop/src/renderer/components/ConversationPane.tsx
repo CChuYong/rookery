@@ -15,7 +15,12 @@ import { useT } from "../i18n/provider.js";
 const EMPTY: LogItem[] = [];
 const EMPTY_PENDING: { clientMsgId: string; text: string }[] = [];
 
-export function ConversationPane({ kind, id, ...rest }: { kind: "master" | "worker"; id: string } & Omit<ConversationProps, "items" | "busy">): JSX.Element {
+export function ConversationPane({
+  kind,
+  id,
+  onRetryHistory,
+  ...rest
+}: { kind: "master" | "worker"; id: string; onRetryHistory?: (kind: "master" | "worker", id: string) => void } & Omit<ConversationProps, "items" | "busy" | "kind" | "loaded" | "loadFailed" | "onRetryHistory">): JSX.Element {
   const t = useT();
   const items = useStore((st) => (kind === "master" ? st.logsBySession[id] : st.workerLogs[id]) ?? EMPTY);
   // "Pending" messages sent mid-turn — they convert to committed and disappear when the echo (clientMsgId) arrives.
@@ -23,13 +28,17 @@ export function ConversationPane({ kind, id, ...rest }: { kind: "master" | "work
   // Authoritative progress state: master = running map (master.status), worker = FleetRow.status. Both are server-authoritative. A boolean selector, so it only re-renders on flip.
   const statusRunning = useStore((st) => (kind === "master" ? !!st.running[id] : st.fleet[id]?.status === "running"));
   const busy = statusRunning || pending.length > 0; // immediate feedback comes from pending (the moment you send), sustained state from running (turn start to end)
+  // History-fetch state for this conversation (audit #43) — gates MessageList's skeleton/error/empty-hint split.
+  const historyLoaded = useStore((st) => st.historyLoaded[id] ?? false);
+  const historyLoadFailed = useStore((st) => st.historyLoadFailed[id] ?? false);
+  const retryHistory = useCallback(() => onRetryHistory?.(kind, id), [onRetryHistory, kind, id]);
 
   // draft is read non-reactively, only when id changes (we write to the store on every keystroke but don't subscribe). App uses key={id}, so it remounts on switch.
   const initialText = useMemo(() => useDraftStore.getState().byPage[id] ?? "", [id]);
   const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(id, text), [id]);
   return (
     <>
-      <Conversation items={items} {...rest} busy={busy} initialText={initialText} onDraftChange={onDraftChange} />
+      <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} busy={busy} initialText={initialText} onDraftChange={onDraftChange} />
       {pending.length > 0 && (
         <div className="flex flex-col gap-1 px-4 pb-2">
           {pending.map((p) => (

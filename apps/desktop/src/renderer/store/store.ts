@@ -92,6 +92,15 @@ interface Store extends AppState {
   setDaemonNote: (note: string | null) => void;
   seedHistory: (sid: string, events: Array<{ seq: number; type: string; payload: unknown; createdAt?: string }>) => void;
   seedWorkerHistory: (id: string, events: Array<{ seq: number; type: string; payload: unknown; createdAt?: string }>) => void;
+  // Per-conversation history-fetch state (audit #43), keyed by the same session/worker id as logsBySession/workerLogs.
+  // Prevents the false "empty conversation" flash while session.history/worker.history is in flight, and turns a
+  // swallowed fetch failure into a visible error+retry row instead of a permanently blank pane. seedHistory/seedWorkerHistory
+  // (the success path) set loaded=true+failed=false themselves; setHistoryLoaded is also called directly for a freshly
+  // created session, which has zero prior turns by construction and shouldn't wait on the round trip to look right.
+  historyLoaded: Record<string, boolean>;
+  historyLoadFailed: Record<string, boolean>;
+  setHistoryLoaded: (id: string, v: boolean) => void;
+  setHistoryLoadFailed: (id: string, v: boolean) => void;
   // Optimistic "pending" bubble for a message sent while a worker is busy. Reconciled to committed when the worker.event user echo (clientMsgId) arrives.
   pushWorkerPending: (id: string, item: { clientMsgId: string; text: string }) => void;
   // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
@@ -119,6 +128,7 @@ const spreadNav = (nav: NavState) => ({ overlay: nav.loc.overlay, showRepos: nav
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
   sessions: [], activeSessionId: null, activeWorkerId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
+  historyLoaded: {}, historyLoadFailed: {},
   overlay: null, showRepos: false, navBack: [], navFwd: [],
   navigate: (patch) => set((s) => {
     const nav = navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch);
@@ -238,8 +248,12 @@ export const useStore = create<Store>((set, get) => ({
     return {
       logsBySession: { ...s.logsBySession, [sid]: seedSessionLog(s.logsBySession[sid], sid, events, s.liveInteractionIds) },
       pendingBySession: { ...s.pendingBySession, [sid]: pending },
+      historyLoaded: { ...s.historyLoaded, [sid]: true },
+      historyLoadFailed: { ...s.historyLoadFailed, [sid]: false },
     };
   }),
+  setHistoryLoaded: (id, v) => set((s) => ({ historyLoaded: { ...s.historyLoaded, [id]: v } })),
+  setHistoryLoadFailed: (id, v) => set((s) => ({ historyLoadFailed: { ...s.historyLoadFailed, [id]: v } })),
   pushWorkerPending: (id, item) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: [...(s.pendingByWorker[id] ?? []), item] } })),
   // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
   dropWorkerPending: (id, clientMsgId) => set((s) => ({ pendingByWorker: { ...s.pendingByWorker, [id]: (s.pendingByWorker[id] ?? []).filter((p) => p.clientMsgId !== clientMsgId) } })),
@@ -252,5 +266,7 @@ export const useStore = create<Store>((set, get) => ({
         ...s.workerLogs,
         [id]: events.reduce<LogItem[]>((log, ev) => applySubEvent(log, ev.payload as WorkerEventData, ev.createdAt ? Date.parse(ev.createdAt) : undefined), []),
       },
+      historyLoaded: { ...s.historyLoaded, [id]: true },
+      historyLoadFailed: { ...s.historyLoadFailed, [id]: false },
     })),
 }));

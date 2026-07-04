@@ -326,11 +326,11 @@ export function App(): JSX.Element {
     if (v.subId && s.fleet[v.subId]) {
       const subId = v.subId;
       useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId });
-      void client?.request({ type: "worker.history", id: subId }).then((r) => useStore.getState().seedWorkerHistory(subId, r.events ?? [])).catch(() => {});
+      void client?.request({ type: "worker.history", id: subId }).then((r) => useStore.getState().seedWorkerHistory(subId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(subId, true));
     } else if (v.sessionId && s.sessions.some((x) => x.id === v.sessionId)) {
       const sessionId = v.sessionId;
       useStore.getState().restoreLocation({ overlay: null, showRepos: v.showRepos, sessionId, subId: null });
-      void client?.request({ type: "session.history", sessionId }).then((r) => useStore.getState().seedHistory(sessionId, r.events ?? [])).catch(() => {});
+      void client?.request({ type: "session.history", sessionId }).then((r) => useStore.getState().seedHistory(sessionId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(sessionId, true));
     }
   }, [s.daemon, s.sessionsLoaded, s.fleetLoaded]);
 
@@ -436,8 +436,8 @@ export function App(): JSX.Element {
       // On reconnect, re-seed the open conversation — to prevent cards from being stuck in_progress forever due to a
       // tool-end/result lost while disconnected (the DB is the source of truth, so we re-fetch the full transcript and overwrite).
       const { activeSessionId, activeWorkerId } = useStore.getState();
-      if (activeSessionId) void c.request({ type: "session.history", sessionId: activeSessionId }).then((r) => useStore.getState().seedHistory(activeSessionId, r.events ?? [])).catch(() => {});
-      if (activeWorkerId) void c.request({ type: "worker.history", id: activeWorkerId }).then((r) => useStore.getState().seedWorkerHistory(activeWorkerId, r.events ?? [])).catch(() => {});
+      if (activeSessionId) void c.request({ type: "session.history", sessionId: activeSessionId }).then((r) => useStore.getState().seedHistory(activeSessionId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(activeSessionId, true));
+      if (activeWorkerId) void c.request({ type: "worker.history", id: activeWorkerId }).then((r) => useStore.getState().seedWorkerHistory(activeWorkerId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(activeWorkerId, true));
     });
     // On disconnect, drop the daemon indicator to 'starting' (back to 'up' on the reconnect's onOpen). Prevents 'up' from getting stuck.
     c.onClose(() => {
@@ -471,7 +471,12 @@ export function App(): JSX.Element {
   const select = useCallback((id: string) => {
     useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: id }); // select session → sessions view / close full page
     // Live events arrive via the @all global subscription, so no separate attach is needed. Seed only the past conversation.
-    void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => {});
+    void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
+  }, []);
+  // Retry hook for MessageList's load-failed row (audit #43) — re-fires the same history fetch that failed, for either kind.
+  const retryHistory = useCallback((k: "master" | "worker", id: string) => {
+    if (k === "worker") void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
+    else void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
   }, []);
   const create = () => navigate({ overlay: "newSession" }); // open the new-session full page (mutually exclusive with settings/automation)
   const refetchSessions = useCallback(() => { void client?.request({ type: "session.list" }).then((r) => useStore.getState().setSessions(r.sessions ?? [])).catch(() => {}); }, []);
@@ -480,7 +485,7 @@ export function App(): JSX.Element {
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   const archiveSession = useCallback((id: string, archived: boolean) => { void client?.request({ type: "session.archive", sessionId: id, archived }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
   const pinSession = useCallback((id: string, pinned: boolean) => { void client?.request({ type: "session.pin", sessionId: id, pinned }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
-  const forkSession = useCallback((id: string) => { void client?.request({ type: "session.fork", sessionId: id }).then((r) => { refetchSessions(); useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: r.sessionId }); void client?.request({ type: "session.history", sessionId: r.sessionId }).then((h) => useStore.getState().seedHistory(r.sessionId, h.events ?? [])).catch(() => {}); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchSessions]);
+  const forkSession = useCallback((id: string) => { void client?.request({ type: "session.fork", sessionId: id }).then((r) => { refetchSessions(); useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: r.sessionId }); void client?.request({ type: "session.history", sessionId: r.sessionId }).then((h) => useStore.getState().seedHistory(r.sessionId, h.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(r.sessionId, true)); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchSessions]);
   // Use getState to remove the dependency on render state and stabilize with useCallback [] (as an event handler, getState() at call time = the existing closure value).
   const deleteSession = useCallback((id: string) => {
     // Optimistic removal — the row vanishes immediately (the refetch reconciles; restored on failure). Otherwise it lingers
@@ -520,6 +525,10 @@ export function App(): JSX.Element {
           const sid = r.sessionId;
           if (!sid) return;
           useStore.getState().setOverride(sid, { model: opts.model, effort: opts.effort }); // subsequent turns use the same model/effort
+          // A freshly created session has zero prior turns by construction — mark it loaded immediately so the
+          // composer-only empty state shows right away instead of a skeleton flash while select()'s redundant
+          // history fetch round-trips (audit #43).
+          useStore.getState().setHistoryLoaded(sid, true);
           select(sid);
           const prompt = opts.prompt?.trim();
           if (prompt) {
@@ -578,7 +587,7 @@ export function App(): JSX.Element {
 
   const selectSub = useCallback((id: string) => {
     useStore.getState().navigate({ overlay: null, showRepos: true, subId: id });
-    void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => {});
+    void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
   }, []);
   const forkSub = useCallback((id: string) => { void client?.request({ type: "worker.fork", id }).then((r) => { refetchFleet(); selectSub(r.id); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchFleet, selectSub]);
   const subSend = useCallback((id: string, text: string) => {
@@ -713,6 +722,7 @@ export function App(): JSX.Element {
             key={activeSub.id}
             kind="worker"
             id={activeSub.id}
+            onRetryHistory={retryHistory}
             onSend={(text) => subSend(activeSub.id, text)}
             onStop={() => subInterrupt(activeSub.id)}
             onOpenFile={openFileInPage}
@@ -756,6 +766,7 @@ export function App(): JSX.Element {
             key={s.activeSessionId ?? "none"}
             kind="master"
             id={s.activeSessionId!}
+            onRetryHistory={retryHistory}
             onSend={send}
             onOpenFile={openFileInPage}
             onSelectWorker={selectSub}
@@ -1075,6 +1086,7 @@ export function App(): JSX.Element {
                       key={activeSub.id}
                       kind="worker"
                       id={activeSub.id}
+                      onRetryHistory={retryHistory}
                       onSend={(t) => subSend(activeSub.id, t)}
                       onStop={() => subInterrupt(activeSub.id)}
                       onOpenFile={openFileInPage}
@@ -1158,6 +1170,7 @@ export function App(): JSX.Element {
                 key={s.activeSessionId ?? "none"}
                 kind="master"
                 id={s.activeSessionId!}
+                onRetryHistory={retryHistory}
                 onSend={send}
                 onOpenFile={openFileInPage}
                 onSelectWorker={selectSub}
