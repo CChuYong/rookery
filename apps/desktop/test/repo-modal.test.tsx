@@ -9,8 +9,8 @@ describe("RepoModal duplicate validation", () => {
   it("blocks duplicate name and shows inline error", () => {
     const onRegister = vi.fn();
     render(<RepoModal repos={existing} onRegister={onRegister} onClose={() => {}} />);
-    type("이름", "app");               // namePlaceholder ko fallback
-    type("경로", "/code/new");         // pathPlaceholder ko fallback
+    type("my-service", "app");               // namePlaceholder ko fallback
+    type("/Users/you/project", "/code/new"); // pathPlaceholder ko fallback
     fireEvent.click(screen.getByText("등록")); // register button ko fallback
     expect(screen.getByText("이미 같은 이름의 레포가 있어요")).toBeInTheDocument();
     expect(onRegister).not.toHaveBeenCalled();
@@ -18,8 +18,8 @@ describe("RepoModal duplicate validation", () => {
   it("blocks duplicate path and shows inline error", () => {
     const onRegister = vi.fn();
     render(<RepoModal repos={existing} onRegister={onRegister} onClose={() => {}} />);
-    type("이름", "newname");
-    type("경로", "/code/app");
+    type("my-service", "newname");
+    type("/Users/you/project", "/code/app");
     fireEvent.click(screen.getByText("등록"));
     expect(screen.getByText("이미 같은 경로의 레포가 있어요")).toBeInTheDocument();
     expect(onRegister).not.toHaveBeenCalled();
@@ -27,8 +27,8 @@ describe("RepoModal duplicate validation", () => {
   it("registers when name and path are new (trimmed)", () => {
     const onRegister = vi.fn();
     render(<RepoModal repos={existing} onRegister={onRegister} onClose={() => {}} />);
-    type("이름", " ads ");
-    type("경로", " /code/ads ");
+    type("my-service", " ads ");
+    type("/Users/you/project", " /code/ads ");
     fireEvent.click(screen.getByText("등록"));
     expect(onRegister).toHaveBeenCalledWith({ name: "ads", path: "/code/ads", description: "" });
   });

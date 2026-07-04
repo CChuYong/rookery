@@ -1,6 +1,5 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "settings.eyebrow": "Settings",
   "settings.title": "Settings",
   "settings.close": "Close settings",
   "settings.tabGeneral": "General",
@@ -13,7 +12,7 @@ export default {
   "settings.masterEntrypointDesc": "Used by non-UI entry points — Slack, the CLI, and automation rules that don’t set a model. The desktop chat picks model/effort per session, so this doesn’t affect it.",
   "settings.masterModel": "Master default model",
   "settings.applyNewSession": "Applies from new sessions",
-  "settings.effort": "effort",
+  "settings.effort": "Effort",
   "settings.workerModel": "Worker default model",
   "settings.applyNewWorker": "Applies from new workers",
   "settings.botName": "Agent name",

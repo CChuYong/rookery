@@ -23,7 +23,7 @@ export default {
   "app.instructWorker": "Instruct the worker…",
   "app.creatingWorktree": "Creating the worktree…",
   "app.reconnecting": "Connecting to the daemon…",
-  "app.sessionEndedRestart": "Session ended by restart — only diff/discard available",
+  "app.sessionEndedRestart": "Worker ended by restart — view changes in the Git tab, delete from the right-click menu.",
   "app.agentEndedReadonly": "Worker ended — view only",
   "app.emptyRepoHint": "Pick a worker from the repos on the left, use the + button on a repo header to spawn a new one, or ask the master to spawn one from Sessions.",
   "app.slackReadOnly": "Slack session — chat from Slack",

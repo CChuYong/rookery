@@ -9,9 +9,9 @@ describe("RepoModal", () => {
     const onRegister = vi.fn();
     const onClose = vi.fn();
     render(<RepoModal repos={[]} onRegister={onRegister} onClose={onClose} />);
-    fireEvent.change(screen.getByPlaceholderText("이름"), { target: { value: "ops" } });
-    fireEvent.change(screen.getByPlaceholderText("경로"), { target: { value: "/o" } });
-    fireEvent.change(screen.getByPlaceholderText("설명"), { target: { value: "운영" } });
+    fireEvent.change(screen.getByPlaceholderText("my-service"), { target: { value: "ops" } });
+    fireEvent.change(screen.getByPlaceholderText("/Users/you/project"), { target: { value: "/o" } });
+    fireEvent.change(screen.getByPlaceholderText("이 레포가 하는 일"), { target: { value: "운영" } });
     fireEvent.click(screen.getByText("등록"));
     expect(onRegister).toHaveBeenCalledWith({ name: "ops", path: "/o", description: "운영" });
   });

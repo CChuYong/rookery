@@ -24,7 +24,7 @@ describe("CommitView", () => {
 
   it("renders the changed-file list and diffs the first by default; clicking switches", async () => {
     render(<CommitView root="/r" hash="abc123" />);
-    await waitFor(() => expect(screen.getByText("변경 파일 2")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("변경 파일 (2)")).toBeInTheDocument());
     // Commit details at the top
     expect(screen.getByText("fix app")).toBeInTheDocument();
     expect(screen.getByText("CChuYonng")).toBeInTheDocument();

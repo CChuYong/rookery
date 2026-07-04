@@ -7,5 +7,5 @@ export default {
   "automationForm.maxTurns": "최대 턴 수",
   "automationForm.maxTurnsHint": "비우면 제한 없음 (워커 액션에만 적용).",
   "automationForm.bypassWarning": "bypassPermissions는 무인 실행 시 승인 없이 모든 도구를 실행합니다. 신뢰된 트리거에만 사용하세요.",
-  "automationForm.modelDefaultOption": "— 모델 (기본값) —",
+  "automationForm.modelDefaultOption": "기본값",
 } satisfies Catalog;

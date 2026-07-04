@@ -44,7 +44,7 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
           {info?.email && <span className="text-muted/70">&lt;{info.email}&gt;</span>}
           {info?.date && <><span>·</span><span>{info.date}</span></>}
           <span>·</span>
-          <span className="font-mono">{t("commitView.fileCount", { count: files.length })} <span className="text-pr">+{totalAdded}</span> <span className="text-fail">−{totalDeleted}</span></span>
+          <span className="font-mono">{t(files.length === 1 ? "commitView.filesOne" : "commitView.filesMany", { count: files.length })} <span className="text-pr">+{totalAdded}</span> <span className="text-fail">−{totalDeleted}</span></span>
         </div>
         {info?.body && <pre className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words font-sans text-[11.5px] leading-relaxed text-fg-dim/90">{info.body}</pre>}
       </div>

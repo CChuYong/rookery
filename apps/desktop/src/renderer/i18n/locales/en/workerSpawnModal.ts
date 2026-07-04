@@ -5,7 +5,7 @@ export default {
   "workerSpawnModal.githubHint": "gh auth required in Settings › Integrations",
   "workerSpawnModal.linearHint": "Enter your Linear key in Settings › Integrations",
   "workerSpawnModal.modelTitle": "Model for this worker (independent of defaults)",
-  "workerSpawnModal.effortTitle": "effort",
+  "workerSpawnModal.effortTitle": "Effort",
   "workerSpawnModal.permTitle": "Permission mode for this worker (tool-execution approval policy) — bypass or plan",
   "workerSpawnModal.permBypass": "Bypass Permissions",
   "workerSpawnModal.permPlan": "Plan Mode",
@@ -21,5 +21,5 @@ export default {
   "workerSpawnModal.taskPlaceholderSource": "The selected issue/ticket fills in here. Feel free to add more instructions…  (⌘/Ctrl+Enter to spawn)",
   "workerSpawnModal.taskPlaceholderDirect": "Describe what to do in this repo…  (⌘/Ctrl+Enter to spawn) (leave empty to spawn an idle worker and start it with your first message)",
   "workerSpawnModal.footerNote": "Creates a worktree (rookery/<id>) and works inside it. Model/effort are locked in at spawn time.",
-  "workerSpawnModal.spawn": "spawn",
+  "workerSpawnModal.spawn": "Spawn",
 } satisfies Catalog;

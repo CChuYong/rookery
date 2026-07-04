@@ -1,6 +1,5 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "settings.eyebrow": "설정",
   "settings.title": "설정",
   "settings.close": "설정 닫기",
   "settings.tabGeneral": "일반",

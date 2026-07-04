@@ -1,9 +1,8 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "automationPage.eyebrow": "Automation",
   "automationPage.title": "Automation",
-  "automationPage.newJob": "New job",
-  "automationPage.empty": "No scheduled jobs yet.",
+  "automationPage.newJob": "New automation",
+  "automationPage.empty": "No automations yet.",
   "automationPage.typeMaster": "Master",
   "automationPage.typeWorker": "Worker",
   "automationPage.slackAll": "slack: all",
