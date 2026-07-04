@@ -8,7 +8,7 @@ import { AssistantMessage } from "./AssistantMessage.js";
 import { MentionText } from "./MentionText.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { cn } from "../lib/cn.js";
-import { railClass, statusTag, isLive } from "../lib/status.js";
+import { railClass, statusTag, statusLabelKey, isLive } from "../lib/status.js";
 import { scrollToBottom } from "../lib/scroll.js";
 import { useT } from "../i18n/provider.js";
 import { SkeletonRows } from "./Skeleton.js";
@@ -138,13 +138,13 @@ function MessageListImpl({
           >
             <span className={dotCls} />
             <span className="text-fg-dim group-hover:underline">{wid}</span>
-            <span>{tail}</span>
+            <span title={t(statusLabelKey(it.status))}>{tail}</span>
           </button>
         ) : (
           <div key={i} className="flex items-center gap-1.5 self-start font-mono text-[11.5px] text-muted">
             <span className={dotCls} />
             <span className="text-fg-dim">{wid}</span>
-            <span>{tail}</span>
+            <span title={t(statusLabelKey(it.status))}>{tail}</span>
           </div>
         ),
       );

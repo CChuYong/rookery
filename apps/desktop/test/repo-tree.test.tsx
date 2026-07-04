@@ -236,3 +236,25 @@ describe("RepoTree status tag full-word title (audit #50)", () => {
     expect(tag).toHaveAttribute("title", "유실됨"); // same full word the header StatusBadge shows for this status
   });
 });
+
+// Final-review F1: the absolutely-positioned '⋯' overflow button (audit #45) paints over the right-side
+// cluster (cost/tag/unread) and sits above it in hit-testing, making the tag's title unreachable on hover.
+// Mirrors Sessions.tsx's OriginBadge/unread-dot hover-yield idiom — pin the classes so the fade stays wired up.
+describe("RepoTree right-side cluster yields to the '⋯' button on hover (final-review F1)", () => {
+  it("the status tag fades out on row hover so the '⋯' button doesn't collide with it", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[worker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    const tag = screen.getByText("IDLE");
+    expect(tag.className).toMatch(/\btransition-opacity\b/);
+    expect(tag.className).toMatch(/\bgroup-hover:opacity-0\b/);
+  });
+});

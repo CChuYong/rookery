@@ -43,7 +43,9 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
       {!dock && <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>}
       {!dock && termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
       {dock && termPageKey && (
-        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(dockTerminalOpen)}>
+        // dock mode: the panel can be dragged anywhere, so "(bottom panel)" would lie here — use the plain tab
+        // label instead (same reasoning as #49a's tab rename). The legacy (!dock) toggle above keeps terminalTitle.
+        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTab")} className={btn(dockTerminalOpen)}>
           <SquareTerminal size={14} />
         </button>
       )}

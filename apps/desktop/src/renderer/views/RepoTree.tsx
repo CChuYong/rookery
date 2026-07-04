@@ -145,14 +145,17 @@ function RepoTreeImpl(p: {
             <span className={cn("truncate", p.attention?.[sub.id] && !active && "font-semibold text-fg")}>{sub.label}</span>
             {fallback && <WorkerActivity workerId={sub.id} />}
           </span>
-          <WorkerCost workerId={sub.id} />
+          {/* right-side indicators (cost/tag/unread) yield to the '⋯' overflow button on hover — otherwise the
+              absolutely-positioned button overlaps them and the tag's full-word title becomes unreachable (audit
+              final-review F1). Same idiom as Sessions.tsx's OriginBadge/unread-dot hover yield. */}
+          <span className="shrink-0 transition-opacity group-hover:opacity-0"><WorkerCost workerId={sub.id} /></span>
           {/* colorblind-safe short tag stays as the visible glyph (rail/dot alt-channel), but the title carries the
               full localized word — same label source as the header StatusBadge, so tree and header never disagree
               (audit #50: tree used to say 'ORPH' while the header said 'orphaned'). */}
-          <span title={t(statusLabelKey(sub.status))} className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted">{statusTag(sub.status)}</span>
+          <span title={t(statusLabelKey(sub.status))} className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted transition-opacity group-hover:opacity-0">{statusTag(sub.status)}</span>
           {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}
           {p.attention?.[sub.id] && !active && (
-            <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
+            <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full transition-opacity group-hover:opacity-0", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
           )}
         </button>
         {/* overflow '⋯' — worker rows previously had zero hover actions and the menu was right-click-only (audit #45; macOS
