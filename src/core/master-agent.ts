@@ -13,6 +13,7 @@ import { classifySystemPush } from "./system-push.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { truncateBytes } from "./truncate.js";
 import { turnContext } from "./result-telemetry.js";
+import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
 
 export interface MasterAgentDeps {
   repos: Repositories;
@@ -47,6 +48,23 @@ export interface TurnOverride {
   permissionMode?: string; // Unspecified → bypassPermissions (current). Selected per UI session.
   clientMsgId?: string; // Optimistic bubble ID attached by the client — flowed back on the daemon echo so the client transitions pending→committed.
   maxTurns?: number; // Warning-only cap for master (no abort). When r.num_turns >= cap, a notice is emitted but the turn completes normally.
+}
+
+// A pre-localized display notice for a system-injected (non-user) turn. code+params so each client re-localizes.
+interface DisplayNotice { code: string; params?: Record<string, string | number>; text: string }
+
+// Bucket a settled worker status into a display notice code (so the verb localizes cleanly).
+function workerNoticeCode(status: string): "notice.workerDone" | "notice.workerFailed" | "notice.workerStopped" {
+  if (status === "error" || status === "failed") return "notice.workerFailed";
+  if (status === "stopped" || status === "orphaned") return "notice.workerStopped";
+  return "notice.workerDone"; // idle, done (and anything unexpected → done)
+}
+
+// The clean, localized display notice for a settled worker (no tail — the chip stays a one-line marker).
+function buildWorkerNotice(n: WorkerNotification): DisplayNotice {
+  const code = workerNoticeCode(n.status);
+  const params = { label: n.label || n.branch || "worker" };
+  return { code, params, text: t(DEFAULT_LOCALE, code, params) };
 }
 
 interface MasterAgentOpts {
@@ -110,7 +128,7 @@ export class MasterAgent {
   private sdkSessionId: string | null;
   private turnChain: Promise<void> = Promise.resolve();
   // Worker-completion notifications waiting to be delivered as a single coalesced master turn (one per worker line).
-  private pendingNotifications: string[] = [];
+  private pendingNotifications: WorkerNotification[] = [];
   private notifyFlushScheduled = false;
   // Session cumulative cost/turns (in-memory). Each turn's result gives only that turn's values, so accumulate for the UI session total.
   private cumCostUsd = 0;
@@ -220,36 +238,37 @@ export class MasterAgent {
   // Drain stranded retry rows (a failed notification flush persisted its lines). build() drains them only once
   // per process, so a live session must re-drain on its own activity — otherwise a notify:true wake-up that
   // failed once is parked until the next daemon restart. Synchronous read+delete (better-sqlite3): no race.
-  private drainPersistedNotifications(): string[] {
+  private drainPersistedNotifications(): WorkerNotification[] {
     const { repos } = this.opts.deps;
     const rows = repos.pendingNotifications(this.opts.sessionId);
     if (rows.length === 0) return [];
     repos.deletePendingNotifications(this.opts.sessionId);
-    return rows.map((r) => r.text);
+    return rows.map((r) => parseNotification(r.text));
   }
 
   // Inject a worker-completion notification. Coalesces onto turnChain: if the master is mid-turn, buffered lines are flushed as
   // ONE follow-up turn when it ends; if idle, delivered immediately. Recorded as a master.notice, not a user message.
-  notifyWorker(line: string): void {
+  notifyWorker(n: WorkerNotification): void {
     if (this.closing) return; // session being deleted — a wake-up now would ghost-turn into a cascading row
-    this.pendingNotifications.push(line);
+    this.pendingNotifications.push(n);
     if (this.notifyFlushScheduled) return; // a flush is already queued on turnChain — it will drain everything accumulated by then
     this.notifyFlushScheduled = true;
     this.turnChain = this.turnChain.then(() => {
       this.notifyFlushScheduled = false;
       // Prepend any stranded rows from a previously-failed flush (older first) so ordering is preserved and they retry.
-      const lines = [...this.drainPersistedNotifications(), ...this.pendingNotifications.splice(0)];
-      if (lines.length === 0) return;
+      const items = [...this.drainPersistedNotifications(), ...this.pendingNotifications.splice(0)];
+      if (items.length === 0) return;
+      const lines = items.map(formatNotificationLine);
       const prompt = `<worker-notification>\n${lines.join("\n")}\n\nUse view_worker_transcript / view_worker_diff for detail, send_worker to continue, or report to the user.\n</worker-notification>`;
-      return this.doTurn(prompt, undefined, { asNotice: true }).catch(() => {
-        // Turn failed → persist the lines so the next activation (incl. after a restart) retries. Spec §6. (Not in-memory: the
-        // buffer is lost on restart, and the pending rows were already drained by SessionManager.build before this flush.)
-        for (const l of lines) this.opts.deps.repos.addPendingNotification(this.opts.sessionId, l);
+      const notices = items.map(buildWorkerNotice);
+      return this.doTurn(prompt, undefined, { notices }).catch(() => {
+        // Turn failed → persist the notifications (as JSON) so the next activation (incl. after a restart) retries.
+        for (const it of items) this.opts.deps.repos.addPendingNotification(this.opts.sessionId, JSON.stringify(it));
       });
     }).catch(() => {});
   }
 
-  private async doTurn(userText: string, override?: TurnOverride, opts?: { asNotice?: boolean }): Promise<void> {
+  private async doTurn(userText: string, override?: TurnOverride, opts?: { notices?: DisplayNotice[] }): Promise<void> {
     if (this.closing) throw new Error("session closed"); // teardown started: reject before any DB write / SDK call (avoids racing the row cascade)
     const { repos, bus, queryFn, fleet } = this.opts.deps;
     // Per-turn override (UI) takes precedence; otherwise the global default (Slack/default entry point).
@@ -274,9 +293,10 @@ export class MasterAgent {
     repos.setSessionStatus(sessionId, "running"); // Persist — seeds the running indicator via session.list on reconnect
     try {
       this.thinking.reset(); // Turn start — clear leftover thinking buffer from the previous turn
-      if (opts?.asNotice) {
-        // System-injected worker-completion turn: show it as a notice, not as something the user typed; don't relabel the session.
-        this.recordEvent({ type: "master.notice", sessionId, text: userText });
+      if (opts?.notices) {
+        // System-injected worker-completion turn: record clean per-worker notices (code+params, re-localized by clients);
+        // the model still receives `userText` (the tagged prompt) below. Not a user message, and don't relabel the session.
+        for (const dn of opts.notices) this.recordEvent({ type: "master.notice", sessionId, text: dn.text, code: dn.code, params: dn.params });
       } else {
         repos.addMessage({ sessionId, role: "user", content: userText }); // messages table (last_activity)
         this.persistEvent({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId }); // Persist transcript (restore)

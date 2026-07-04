@@ -20,11 +20,11 @@ it("armed worker reaching idle delivers one line to its home session, then disar
   x.repos.setWorkerNotifyArmed("w1", true);
   x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "idle" });
   expect(x.deliver).toHaveBeenCalledTimes(1);
-  const [sid, line] = x.deliver.mock.calls[0]!;
+  const [sid, n] = x.deliver.mock.calls[0]!;
   expect(sid).toBe("sA");
-  expect(line).toContain("app");
-  expect(line).toContain("idle");
-  expect(line).toContain("done the thing");
+  expect(n.label).toBe("app");
+  expect(n.status).toBe("idle");
+  expect(n.tail).toContain("done the thing");
   // disarmed → a second settle does nothing
   x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "idle" });
   expect(x.deliver).toHaveBeenCalledTimes(1);
@@ -44,7 +44,7 @@ it("fires on a failure settle too (so the master never hangs)", () => {
   x.repos.setWorkerNotifyArmed("w1", true);
   x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "failed" });
   expect(x.deliver).toHaveBeenCalledTimes(1);
-  expect(x.deliver.mock.calls[0]![1]).toContain("failed");
+  expect(x.deliver.mock.calls[0]![1].status).toBe("failed");
 });
 
 describe("WorkerNotifier.sweepSettled (boot-time stranded arms)", () => {
@@ -54,9 +54,9 @@ describe("WorkerNotifier.sweepSettled (boot-time stranded arms)", () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w", worktreePath: "/wt/w1", branch: "b" });
-    const delivered: Array<{ sessionId: string; line: string }> = [];
+    const delivered: Array<{ sessionId: string; n: WorkerNotification }> = [];
     const bus = new EventBus();
-    const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, line) => delivered.push({ sessionId, line }) });
+    const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, n) => delivered.push({ sessionId, n }) });
     return { repos, bus, notifier, delivered };
   }
 
@@ -88,9 +88,9 @@ describe("shutdown parking (arm survives to the next boot)", () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w", worktreePath: "/wt/w1", branch: "b" });
-    const delivered: Array<{ sessionId: string; line: string }> = [];
+    const delivered: Array<{ sessionId: string; n: WorkerNotification }> = [];
     const bus = new EventBus();
-    const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, line) => delivered.push({ sessionId, line }) });
+    const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, n) => delivered.push({ sessionId, n }) });
     return { repos, bus, notifier, delivered };
   }
 

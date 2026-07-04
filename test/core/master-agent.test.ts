@@ -589,20 +589,24 @@ describe("MasterAgent", () => {
 
   it("notifyWorker runs a single coalesced notice turn (not a user message) carrying all buffered lines", async () => {
     const prompts: string[] = [];
-    const events: string[] = [];
-    const { master } = makeMaster({ onPrompt: (p) => prompts.push(p), onEvent: (e) => events.push(e.type) });
+    const events: CoreEvent[] = [];
+    const { master } = makeMaster({ onPrompt: (p) => prompts.push(p), onEvent: (e) => events.push(e) });
 
     // deliver two completions back-to-back while no turn is running → they coalesce into ONE turn.
-    master.notifyWorker("worker app — idle\n  did A");
-    master.notifyWorker("worker web — failed\n  hit B");
-    await master.idle(); // wait for the turnChain to drain
+    master.notifyWorker({ label: "app", branch: "rookery/app", status: "idle", tail: "did A" });
+    master.notifyWorker({ label: "web", branch: "rookery/web", status: "failed", tail: "hit B" });
+    await master.idle();
 
-    expect(prompts).toHaveLength(1);                              // coalesced — one turn, not two
+    // Model still gets today's tagged prompt with both lines.
     expect(prompts[0]).toContain("<worker-notification>");
-    expect(prompts[0]).toContain("worker app — idle");
-    expect(prompts[0]).toContain("worker web — failed");
-    expect(events).toContain("master.notice");                   // recorded as a notice…
-    expect(events).not.toContain("master.message");              // …not a user echo
+    expect(prompts[0]).toContain("worker app (rookery/app) — idle");
+    expect(prompts[0]).toContain("worker web (rookery/web) — failed");
+
+    // Display: one structured notice per worker, localized, WITHOUT the raw tag.
+    const notices = events.filter((e) => e.type === "master.notice") as Array<{ code?: string; params?: { label?: string }; text?: string }>;
+    expect(notices.map((n) => n.code)).toEqual(["notice.workerDone", "notice.workerFailed"]);
+    expect(notices.map((n) => n.params?.label)).toEqual(["app", "web"]);
+    expect(notices.every((n) => !n.text?.includes("<worker-notification>"))).toBe(true);
   });
 
   it("persists the lines as pending_notifications rows when the flush turn throws (durable re-queue, not in-memory) — spec §6", async () => {
@@ -611,11 +615,11 @@ describe("MasterAgent", () => {
     const d = deps(qfn);
     const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
 
-    master.notifyWorker("worker app — idle\n  did A");
+    master.notifyWorker({ label: "app", branch: "rookery/app", status: "idle", tail: "did A" });
     await master.idle(); // wait for the failed flush turn to settle
 
-    // The failed flush persisted the line as a pending_notifications row (survives a restart) — NOT only the in-memory buffer (which is lost on restart).
-    expect(d.repos.pendingNotifications("s1").map((p) => p.text)).toEqual(["worker app — idle\n  did A"]);
+    // The failed flush persisted the notification (as JSON) as a pending_notifications row (survives a restart) — NOT only the in-memory buffer (which is lost on restart).
+    expect(d.repos.pendingNotifications("s1").map((p) => JSON.parse(p.text).label)).toEqual(["app"]);
   });
 
   it("coalesces two notifyWorker calls during an in-flight turn into exactly ONE follow-up notice turn", async () => {
@@ -637,8 +641,8 @@ describe("MasterAgent", () => {
 
     const turn = master.runTurn("go");           // in-flight (blocked on the gate)
     await new Promise((r) => setTimeout(r, 0));   // let doTurn start consuming the generator
-    master.notifyWorker("worker app — idle");     // buffered (a turn is in flight)
-    master.notifyWorker("worker web — failed");   // buffered onto the SAME pending flush (notifyFlushScheduled already set)
+    master.notifyWorker({ label: "app", branch: "ra", status: "idle", tail: "" });     // buffered (a turn is in flight)
+    master.notifyWorker({ label: "web", branch: "rw", status: "failed", tail: "" });   // buffered onto the SAME pending flush (notifyFlushScheduled already set)
     releaseFirst();                               // release the user turn
     await turn;
     await master.idle();                          // drain the coalesced flush turn
@@ -647,8 +651,8 @@ describe("MasterAgent", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[0]).toBe("go");
     expect(prompts[1]).toContain("<worker-notification>");
-    expect(prompts[1]).toContain("worker app — idle");
-    expect(prompts[1]).toContain("worker web — failed");
+    expect(prompts[1]).toContain("worker app (ra) — idle");
+    expect(prompts[1]).toContain("worker web (rw) — failed");
   });
 
   it("includes the untrusted-input fence instruction in the system prompt (every turn)", async () => {
@@ -731,15 +735,15 @@ describe("MasterAgent", () => {
       }) as typeof base.queryFn;
       const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
 
-      master.notifyWorker("worker A settled");
+      master.notifyWorker({ label: "A", branch: "ra", status: "idle", tail: "" });
       await master.idle();
-      expect(base.repos.pendingNotifications("s1").map((r) => r.text)).toEqual(["worker A settled"]); // persisted by the catch
+      expect(base.repos.pendingNotifications("s1").map((r) => JSON.parse(r.text).label)).toEqual(["A"]); // persisted by the catch
 
-      master.notifyWorker("worker B settled");
+      master.notifyWorker({ label: "B", branch: "rb", status: "idle", tail: "" });
       await master.idle();
-      const flush = prompts.find((p) => p.includes("worker B settled"))!;
-      expect(flush).toContain("worker A settled"); // stranded line drained into the same flush
-      expect(flush.indexOf("worker A settled")).toBeLessThan(flush.indexOf("worker B settled")); // older first
+      const flush = prompts.find((p) => p.includes("worker B (rb)"))!;
+      expect(flush).toContain("worker A (ra)"); // stranded line drained into the same flush
+      expect(flush.indexOf("worker A (ra)")).toBeLessThan(flush.indexOf("worker B (rb)")); // older first
       expect(base.repos.pendingNotifications("s1")).toEqual([]); // rows consumed
     });
 
@@ -799,7 +803,7 @@ describe("MasterAgent", () => {
       }) as typeof base.queryFn;
       const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
       await master.close();
-      master.notifyWorker("worker w settled");
+      master.notifyWorker({ label: "w", branch: "rw", status: "idle", tail: "" });
       await master.idle();
       expect(prompts).toEqual([]);
       expect(base.repos.pendingNotifications("s1")).toEqual([]);

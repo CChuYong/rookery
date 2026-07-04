@@ -143,7 +143,7 @@ describe("SessionManager", () => {
       delete: async (id: string) => {
         repos.setWorkerStatus(id, "stopped", true);
         const arm = repos.consumeWorkerNotifyArmed(id);
-        if (arm?.armed) sm.deliverWorkerNotification(session.id, "worker w settled");
+        if (arm?.armed) sm.deliverWorkerNotification(session.id, { label: "w", branch: "b", status: "idle", tail: "" });
       },
     };
     const sm = new SessionManager(
@@ -280,14 +280,14 @@ describe("SessionManager", () => {
     const { sm, repos } = makeSM();
     const live = sm.create("/x");                         // live (in the in-memory map)
     const spy = vi.spyOn(live.master, "notifyWorker");
-    sm.deliverWorkerNotification(live.id, "worker a — idle");
-    expect(spy).toHaveBeenCalledWith("worker a — idle");  // live → straight to the master
+    sm.deliverWorkerNotification(live.id, { label: "a", branch: "ra", status: "idle", tail: "" });
+    expect(spy).toHaveBeenCalledWith({ label: "a", branch: "ra", status: "idle", tail: "" });  // live → straight to the master
 
     // cold: a session row exists but is NOT in the live map (simulate by deleting from the map via a fresh manager over the same repos)
     repos.createSession({ id: "cold1", cwd: "/y" });
     const sm2 = makeSM(repos).sm;                          // fresh manager — "cold1" not loaded
-    sm2.deliverWorkerNotification("cold1", "worker b — failed");
-    expect(repos.pendingNotifications("cold1").map((p) => p.text)).toEqual(["worker b — failed"]); // persisted
+    sm2.deliverWorkerNotification("cold1", { label: "b", branch: "rb", status: "failed", tail: "" });
+    expect(repos.pendingNotifications("cold1").map((p) => JSON.parse(p.text).status)).toEqual(["failed"]); // persisted as JSON
     const loaded = sm2.get("cold1")!;                      // load → build() drains
     await loaded.master.idle();
     expect(repos.pendingNotifications("cold1")).toEqual([]); // drained

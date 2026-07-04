@@ -6,7 +6,7 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { FleetOrchestrator, branchSlug } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
-import { WorkerNotifier } from "../../src/core/worker-notifier.js";
+import { WorkerNotifier, type WorkerNotification } from "../../src/core/worker-notifier.js";
 
 // Fake Worker that settles immediately. settleStatus mimics done/error.
 function fakeFactory(started: string[], settleStatus: "done" | "error" = "done") {
@@ -398,14 +398,14 @@ describe("FleetOrchestrator", () => {
 
   it("end-to-end: spawn(notify) → worker idles → home master is delivered one notification", async () => {
     const s = setup();                              // its fakeFactory worker settles to 'done' by default
-    const delivered: Array<[string, string]> = [];
-    new WorkerNotifier({ bus: s.bus, repos: s.repos, deliver: (sid, line) => delivered.push([sid, line]) }).start();
+    const delivered: Array<[string, WorkerNotification]> = [];
+    new WorkerNotifier({ bus: s.bus, repos: s.repos, deliver: (sid, n) => delivered.push([sid, n]) }).start();
     const { id } = await s.fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "do it", notify: true });
     await s.fleet.waitAllSettled();
     await new Promise((r) => setTimeout(r, 0));      // let the bus listener run
     expect(delivered).toHaveLength(1);
     expect(delivered[0]![0]).toBe("sA");             // routed to the home (master) session
-    expect(delivered[0]![1]).toContain("app");
+    expect(delivered[0]![1].label).toBe("app");
   });
 
   it("spawn with a task relabels at spawn (unchanged)", async () => {

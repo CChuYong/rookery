@@ -35,7 +35,7 @@ export function parseNotification(text: string): WorkerNotification {
 export interface WorkerNotifierDeps {
   bus: EventBus;
   repos: Repositories;
-  deliver: (sessionId: string, line: string) => void;
+  deliver: (sessionId: string, n: WorkerNotification) => void;
 }
 
 // Watches worker.status; when an armed worker settles, consumes its one-shot flag and hands a one-line summary to the home master.
@@ -47,8 +47,8 @@ export class WorkerNotifier {
       if (e.type !== "worker.status" || !SETTLED.has(e.status)) return;
       const arm = this.d.repos.consumeWorkerNotifyArmed(e.workerId); // atomic read+clear → safe against duplicate events
       if (!arm || !arm.armed) return;
-      const line = this.buildLine(e.workerId, e.status);
-      if (line) this.d.deliver(arm.sessionId, line);
+      const n = this.buildNotification(e.workerId, e.status);
+      if (n) this.d.deliver(arm.sessionId, n);
     });
   }
 
@@ -61,12 +61,12 @@ export class WorkerNotifier {
       if (!SETTLED.has(w.status)) continue;
       const arm = this.d.repos.consumeWorkerNotifyArmed(w.id);
       if (!arm || !arm.armed) continue;
-      const line = this.buildLine(w.id, w.status);
-      if (line) this.d.deliver(arm.sessionId, line);
+      const n = this.buildNotification(w.id, w.status);
+      if (n) this.d.deliver(arm.sessionId, n);
     }
   }
 
-  private buildLine(workerId: string, status: string): string | null {
+  private buildNotification(workerId: string, status: string): WorkerNotification | null {
     const w = this.d.repos.getWorker(workerId);
     if (!w) return null;
     let tail = "(no output)";
@@ -78,6 +78,6 @@ export class WorkerNotifier {
         if (p.role === "assistant" && typeof p.content === "string") { tail = p.content.slice(0, 500); break; }
       } catch { /* skip malformed */ }
     }
-    return `worker ${w.label} (${w.branch ?? workerId}) — ${status}\n  ${tail}`;
+    return { label: w.label, branch: w.branch ?? workerId, status, tail };
   }
 }

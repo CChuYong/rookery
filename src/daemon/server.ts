@@ -144,7 +144,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       };
     } });
   // Worker completion → wake the home master (notify mode). deliver routes to the live master or persists for a cold one.
-  const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, line) => sessions.deliverWorkerNotification(sessionId, line) });
+  const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, n) => sessions.deliverWorkerNotification(sessionId, n) });
   const stopNotifier = notifier.start();
   notifier.sweepSettled(); // arms stranded by the restart (rehydrate writes statuses with no bus events)
   // For slash-command/skill candidates — a one-time probe per cwd, cached (model is irrelevant, just init with a cheap model).

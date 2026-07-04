@@ -6,6 +6,7 @@ import type { QueryFn } from "./worker.js";
 import { MasterAgent } from "./master-agent.js";
 import type { TurnCapabilities } from "./master-agent.js";
 import type { FleetOrchestrator } from "./fleet-orchestrator.js";
+import { parseNotification, type WorkerNotification } from "./worker-notifier.js";
 
 // Home session (container) for workers spawned directly by the UI. Not exposed in the Sessions list.
 export const UI_FLEET_SESSION_KEY = "ui:fleet";
@@ -83,7 +84,7 @@ export class SessionManager {
     this.sessions.set(id, session);
     const pending = repos.pendingNotifications(id);
     if (pending.length > 0) {
-      for (const p of pending) master.notifyWorker(p.text); // delivered via notifyWorker — flushed immediately if the master is idle, else coalesced after the in-flight turn
+      for (const p of pending) master.notifyWorker(parseNotification(p.text)); // delivered via notifyWorker — flushed immediately if idle, else coalesced after the in-flight turn
       repos.deletePendingNotifications(id);
     }
     return session;
@@ -134,12 +135,12 @@ export class SessionManager {
     return this.build(row.id, row.cwd, row.sdk_session_id, row.external_key);
   }
 
-  // Live master → deliver immediately; cold (unloaded) session → persist and deliver on next load (build() drains).
-  deliverWorkerNotification(sessionId: string, line: string): void {
+  // Live master → deliver immediately; cold (unloaded) session → persist (as JSON) and deliver on next load (build() drains).
+  deliverWorkerNotification(sessionId: string, n: WorkerNotification): void {
     if (this.deleting.has(sessionId)) return; // mid-delete: the cascade sweeps the row anyway → don't park a line
     const live = this.sessions.get(sessionId); // NOTE: not get() — must not materialize a cold session here
-    if (live) { live.master.notifyWorker(line); return; }
-    this.deps.repos.addPendingNotification(sessionId, line);
+    if (live) { live.master.notifyWorker(n); return; }
+    this.deps.repos.addPendingNotification(sessionId, JSON.stringify(n));
   }
 
   // Aborts the in-progress master turn. Only targets live sessions (a session is always live while a turn is in progress) — otherwise no-op.
