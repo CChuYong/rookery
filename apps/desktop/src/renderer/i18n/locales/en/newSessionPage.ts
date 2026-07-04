@@ -1,6 +1,5 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "newSessionPage.eyebrow": "New session",
   "newSessionPage.title": "New session",
   "newSessionPage.defaultFolder": "Default folder",
   "newSessionPage.daemonDefaultFolder": "Daemon default folder",

@@ -65,7 +65,6 @@ export function NewSessionPage(p: {
   return (
     <>
       <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
-        <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("newSessionPage.eyebrow")}</span>
         <span className="font-semibold tracking-[-0.01em]">{t("newSessionPage.title")}</span>
         {p.onClose && (
           <button onClick={p.onClose} aria-label={t("common.close")} className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim">

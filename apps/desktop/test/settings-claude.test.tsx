@@ -35,7 +35,7 @@ describe("SettingsPage Claude tab", () => {
     render(<SettingsPage {...base} authStatus={null} />);
     fireEvent.click(screen.getByText("Claude"));
     expect(screen.getByText("확인 중…")).toBeInTheDocument();
-    expect(screen.queryByText("인증이 감지되지 않았습니다. ANTHROPIC_API_KEY를 설정하거나 터미널에서 claude login을 실행하세요.")).toBeNull();
+    expect(screen.queryByText("인증이 감지되지 않았어요. ANTHROPIC_API_KEY를 설정하거나 터미널에서 claude login을 실행하세요.")).toBeNull();
     expect(screen.queryByText("인증 없음")).toBeNull(); // no confident "none" method label while unknown
   });
 
