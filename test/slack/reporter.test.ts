@@ -368,6 +368,8 @@ describe("threadAlert", () => {
     await r.threadAlert("> 🧵 alert · <https://x|open>");
     const streamed = rec.streams.flatMap(texts).join("");
     expect(streamed).toContain("> 🧵 alert · <https://x|open>");
+    // blank-line isolated both sides so the blockquote can't bleed into the surrounding prose (Slack quotes until a blank line)
+    expect(streamed).toContain("\n\n> 🧵 alert · <https://x|open>\n\n");
     expect(rec.posts).toEqual([]); // woven in, not a separate post
   });
 

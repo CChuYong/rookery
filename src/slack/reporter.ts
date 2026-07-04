@@ -85,7 +85,9 @@ export class SlackThreadReporter {
   // post (avoids append lazily opening an orphaned streaming bubble outside a turn). Used by the worker→Slack relay.
   threadAlert(markdown: string): Promise<void> {
     this.tail = this.tail.then(async () => {
-      if (this.streamer) { await this.flushProse(); await this.append({ markdown_text: `\n${markdown}\n` }, 0, { unfurl: false }); }
+      // Wrap in BLANK lines: a Slack blockquote (">") keeps quoting every following line until a blank line, so a single
+      // trailing "\n" would let the master's next prose bleed into the quote. "\n\n…\n\n" isolates it as its own paragraph.
+      if (this.streamer) { await this.flushProse(); await this.append({ markdown_text: `\n\n${markdown}\n\n` }, 0, { unfurl: false }); }
       else { await this.post(markdown, { unfurl: false }); }
     }).catch((err) => {
       process.stderr.write(`[rookery] slack reporter threadAlert error: ${String(err)}\n`);
