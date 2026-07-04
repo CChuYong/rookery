@@ -5,6 +5,7 @@ import { useT } from "../i18n/provider.js";
 import { useWsStore, type Tab } from "../store/workspace.js";
 import { useTermStore } from "../store/terminals.js";
 import { useLayoutStore } from "../store/layout.js";
+import { useDockPanelsStore, hideableKindsFor, type HideableKind } from "../store/dock-panels.js";
 import { defaultPanels, terminalSeedHeight, isTerminalGroupCollapsed, TERMINAL_EXPANDED_HEIGHT } from "./default-template.js";
 import { fixedPanelId, editorPanelId, panelIdForTab, tabIdForPanel, conversationAgentKindPatch, type FixedKind } from "./panel-ids.js";
 import { fixedPanelTitle } from "./panel-titles.js";
@@ -14,6 +15,7 @@ import "./dockview-theme.css";
 import "dockview-react/dist/styles/dockview.css";
 
 const EDITOR_PREFIX = "panel:editor:";
+const EMPTY_HIDDEN: HideableKind[] = []; // stable ref for the "no hidden panels" case
 
 type Disposable = { dispose(): void }; // dockview event subscriptions return one
 
@@ -58,6 +60,20 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
 
   const seed = (api: DockviewApi): void => {
     for (const sp of defaultPanels(agentKind)) addFixed(api, sp.kind, sp.anchor, sp.direction as Direction | undefined);
+  };
+
+  // Re-add a hidden fixed panel (audit #48) at its normal seed position when
+  // possible — e.g. terminal below the conversation, git stacked with files —
+  // instead of dropping it wherever dockview defaults an anchor-less addPanel
+  // to. Falls back to no anchor only if that reference panel is itself absent.
+  // In practice this never happens: hideableKindsFor lists "files" first, so by
+  // the time "git"/"nested" (both anchored on files) are processed in the same
+  // reconcile pass, files is already back; "terminal" anchors on the
+  // always-present conversation, so it's order-independent.
+  const reopen = (api: DockviewApi, kind: HideableKind): void => {
+    const spec = defaultPanels(agentKind).find((sp) => sp.kind === kind);
+    const anchor = spec?.anchor && api.getPanel(fixedPanelId(spec.anchor)) ? spec.anchor : undefined;
+    addFixed(api, kind, anchor, spec?.direction as Direction | undefined);
   };
 
   // Reconcile editor panels against the page's non-agent workspace tabs: add
@@ -122,15 +138,25 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       const patch = conversationAgentKindPatch(conv.params as { agentKind?: "master" | "worker" } | undefined, agentKind);
       if (patch) conv.api.updateParameters(patch);
     }
+    // Mirror actual panel presence into dockPanelsStore right after seed/restore
+    // (audit #48) — the restored dockview JSON is the real source of truth for
+    // "does this panel exist" (a panel closed in a previous session is simply
+    // absent from it and stays absent here); this just tells the header's
+    // restore toggles which fixed panels are currently hidden for this page.
+    useDockPanelsStore.getState().setHidden_(pageKey, hideableKindsFor(agentKind).filter((k) => !api.getPanel(fixedPanelId(k))));
     syncEditors(api);
     syncActive(api);
 
     const disposables: Disposable[] = [];
-    // User-closing a panel: editors → reflect in the workspace store; conversation → re-add (it must always exist).
+    // User-closing a panel: editors → reflect in the workspace store; conversation → re-add (it must always exist);
+    // any other fixed panel (Files/Git/Terminal/Nested) → mark it hidden so the header's restore toggle knows (audit #48).
     disposables.push(api.onDidRemovePanel((e) => {
       if (reconcilingRef.current || disposedRef.current) return;
       if (e.id === fixedPanelId("conversation")) { addFixed(api, "conversation"); return; }
-      if (e.id.startsWith(EDITOR_PREFIX)) useWsStore.getState().closeTab_(pageKey, e.id.slice(EDITOR_PREFIX.length));
+      if (e.id.startsWith(EDITOR_PREFIX)) { useWsStore.getState().closeTab_(pageKey, e.id.slice(EDITOR_PREFIX.length)); return; }
+      for (const kind of hideableKindsFor(agentKind)) {
+        if (e.id === fixedPanelId(kind)) { useDockPanelsStore.getState().hide_(pageKey, kind); break; }
+      }
     }));
     // Dock → store: clicking a dock tab makes it the workspace-active tab, so the FileTree highlight and any
     // store-driven consumers track the actually-focused panel. Fixed non-tab panels (files/git/terminal) are
@@ -171,10 +197,29 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       const panel = apiRef.current?.getPanel(fixedPanelId("terminal"));
       if (panel && isTerminalGroupCollapsed(panel.group.api.height)) panel.group.api.setSize({ height: TERMINAL_EXPANDED_HEIGHT });
     });
+    // Header-triggered show/hide (audit #48): the header's restored terminal/right-
+    // panel toggles don't touch the dockview API directly — they just flip
+    // dockPanelsStore, and this reconciles actual panel presence to match. It's
+    // symmetric with the onDidRemovePanel write above: a panel the USER closed via
+    // its own tab-X already wrote hide_ (and is already gone), so the branches
+    // below are no-ops for it (each checks actual presence before acting).
+    const unsubPanels = useDockPanelsStore.subscribe((state, prevState) => {
+      const api = apiRef.current;
+      if (!api || disposedRef.current) return;
+      const hidden = state.hiddenByPage[pageKey] ?? EMPTY_HIDDEN;
+      if (hidden === (prevState.hiddenByPage[pageKey] ?? EMPTY_HIDDEN)) return;
+      for (const kind of hideableKindsFor(agentKind)) {
+        const panel = api.getPanel(fixedPanelId(kind));
+        const shouldHide = hidden.includes(kind);
+        if (shouldHide && panel) { reconcilingRef.current = true; try { api.removePanel(panel); } finally { reconcilingRef.current = false; } }
+        else if (!shouldHide && !panel) reopen(api, kind);
+      }
+    });
     return () => {
       disposedRef.current = true;
       unsub();
       unsubTerm();
+      unsubPanels();
       for (const d of disposablesRef.current) d.dispose();
       disposablesRef.current = [];
       if (saveTimer.current) {

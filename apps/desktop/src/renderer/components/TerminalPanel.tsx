@@ -51,7 +51,11 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
       <div className="relative min-h-0 flex-1">
         {group.activeTabId
           ? <div className="absolute inset-0 p-1.5"><TerminalView id={group.activeTabId} onExit={onExit} /></div>
-          : <div className="flex h-full items-center justify-center text-[12px] text-muted">{t("terminalPanel.emptyHint")}</div>}
+          // Worker pages pass subId (and cwd=undefined — main resolves the worktree
+          // path from ROOKERY_HOME+subId, see App.tsx), so the hint should say
+          // "worktree" instead of the master-oriented "session's working folder"
+          // (audit #49b).
+          : <div className="flex h-full items-center justify-center text-[12px] text-muted">{subId ? t("terminalPanel.emptyHintWorker") : t("terminalPanel.emptyHint")}</div>}
       </div>
     </div>
   );

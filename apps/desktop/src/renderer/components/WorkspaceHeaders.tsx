@@ -9,6 +9,9 @@ import { OpenInAppMenu } from "./OpenInAppMenu.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
 import { useT } from "../i18n/provider.js";
+import { useDockPanelsStore, isHidden, isGroupOpen, rightGroupKindsFor, type HideableKind } from "../store/dock-panels.js";
+
+const EMPTY_HIDDEN: HideableKind[] = []; // stable ref for the "nothing hidden yet" case
 
 // Latest stats for the worker header — subscribes to workerLogs and renders via MetricsView.
 const EMPTY: LogItem[] = [];
@@ -19,18 +22,36 @@ function WorkerMetrics({ workerId }: { workerId: string }): JSX.Element | null {
 }
 
 // Shared right-side toggles for the worker/session header (open in other app + terminal bottom panel + right panel). The right toggle only shows when a page exists.
-function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd, dock }: {
+function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd, dock, agentKind = "master" }: {
   termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void;
-  subId?: string | null; cwd?: string; dock?: boolean;
+  subId?: string | null; cwd?: string; dock?: boolean; agentKind?: "master" | "worker";
 }): JSX.Element {
   const t = useT();
   const btn = (active: boolean): string => cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", active ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim");
+  // In dockable mode the terminal/right panel are dockview panels, not the legacy
+  // open/rightOpen booleans — restore the toggle affordance dock mode used to hide
+  // entirely (audit #48) by reading/driving dockPanelsStore instead, so a hidden
+  // fixed panel has a way back. "Right panel" toggles Files·Git·(worker) Nested as
+  // one group, matching the pre-dock single right-sidebar toggle.
+  const hidden = useDockPanelsStore((s) => (termPageKey ? s.hiddenByPage[termPageKey] ?? EMPTY_HIDDEN : EMPTY_HIDDEN));
+  const rightGroupKinds = rightGroupKindsFor(agentKind);
+  const dockTerminalOpen = !isHidden(hidden, "terminal");
+  const dockRightOpen = isGroupOpen(hidden, rightGroupKinds);
   return (
     <>
       <OpenInAppMenu subId={subId} cwd={cwd} />
-      {/* In dockable mode the terminal + right panel are dockview panels, so their toggles are hidden here (their visibility is managed by the dock). */}
       {!dock && <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>}
       {!dock && termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
+      {dock && termPageKey && (
+        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(dockTerminalOpen)}>
+          <SquareTerminal size={14} />
+        </button>
+      )}
+      {dock && termPageKey && (
+        <button onClick={() => useDockPanelsStore.getState().toggleGroup_(termPageKey, rightGroupKinds)} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(dockRightOpen)}>
+          <PanelRight size={14} />
+        </button>
+      )}
     </>
   );
 }
@@ -61,7 +82,7 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
       <div className="no-drag ml-auto flex shrink-0 items-center gap-1">
         <WorkerMetrics workerId={worker.id} />
         <CheckpointMenu fetchCheckpoints={onFetchCheckpoints} onRestore={onRestore} />
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} dock={dock} />
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} dock={dock} agentKind="worker" />
       </div>
     </div>
   );
@@ -86,7 +107,7 @@ export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPag
         </span>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2.5">
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} />
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} agentKind="master" />
         {sessionId && <SessionMetrics sessionId={sessionId} />}
       </div>
     </div>

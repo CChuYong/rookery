@@ -14,7 +14,12 @@ export function fixedPanelTitle(kind: FixedKind, t: TFunc, agentKind: "master" |
     case "conversation": return agentKind === "worker" ? t("app.worker") : t("app.master");
     case "files": return t("rightSidebar.segmentFiles");
     case "git": return "Git"; // not localized — a proper noun, same treatment as RightSidebar's segment label
-    case "terminal": return t("workspaceHeaders.terminalTitle");
+    // A dedicated short key, NOT workspaceHeaders.terminalTitle ("Terminal (bottom
+    // panel)") — that verbose copy was written for the fixed pre-dock header toggle
+    // tooltip, and a dockview tab can be dragged anywhere, so "(bottom panel)" lies
+    // about its position and stands out next to one-word siblings like "Files"/"Git"
+    // (audit #49a). terminalTitle is kept as-is for the header toggle tooltip.
+    case "terminal": return t("workspaceHeaders.terminalTab");
     case "nested": return t("rightSidebar.segmentWorker");
   }
 }

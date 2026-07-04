@@ -43,7 +43,13 @@ export function RookeryTab(props: IDockviewPanelHeaderProps): JSX.Element {
   const label = params.kind === "editor" ? title : fixedPanelTitle(params.kind, t, params.kind === "conversation" ? params.agentKind : undefined);
   const tooltip = params.kind === "editor" ? editorTooltip(params.tabId) : undefined;
   const Icon = iconFor(params);
-  const closable = params.kind === "editor"; // fixed panels are move/split-only, never closed (prevents footguns)
+  // Every panel except the pinned conversation can be closed (audit #48): closing
+  // a fixed panel (Files/Git/Terminal/Nested) HIDES it — WorkspaceDock mirrors the
+  // removal into dockPanelsStore, and the header's restored terminal/right-panel
+  // toggles (WorkspaceHeaders.tsx) re-add it the same way a fresh page seeds it.
+  // The conversation panel stays non-closable — it's the primary view, and
+  // WorkspaceDock's onDidRemovePanel guard re-adds it if it's ever removed anyway.
+  const closable = params.kind !== "conversation";
   // Dirty-tab close guard (audit #44) — same TabCloseConfirm the legacy TabBar's X routes
   // through, so a dockview-closed editor tab is guarded identically. Only file tabs carry
   // a dirty flag (diff/commit tabs are read-only and close without confirmation).

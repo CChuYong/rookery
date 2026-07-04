@@ -4,4 +4,5 @@ export default {
   "terminalPanel.closeTerminal": "Close terminal",
   "terminalPanel.newTerminal": "New terminal",
   "terminalPanel.emptyHint": "Press ＋ to open a terminal — it starts in the session's working folder.",
+  "terminalPanel.emptyHintWorker": "Press ＋ to open a terminal — it starts in the worker's worktree.",
 } satisfies Catalog;

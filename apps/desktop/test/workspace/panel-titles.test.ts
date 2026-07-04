@@ -18,8 +18,14 @@ describe("fixedPanelTitle", () => {
   });
   it("maps the other fixed kinds regardless of agentKind", () => {
     expect(fixedPanelTitle("files", t)).toBe("rightSidebar.segmentFiles");
-    expect(fixedPanelTitle("terminal", t)).toBe("workspaceHeaders.terminalTitle");
     expect(fixedPanelTitle("nested", t)).toBe("rightSidebar.segmentWorker");
+  });
+  // audit #49a: the dock TAB label uses a dedicated short key, not the verbose
+  // workspaceHeaders.terminalTitle ("Terminal (bottom panel)") — that copy is
+  // still correct for the header toggle button's tooltip, just not for a
+  // draggable dock tab sitting next to one-word siblings like "Files"/"Git".
+  it("uses the short terminalTab key for the terminal panel, not the verbose terminalTitle", () => {
+    expect(fixedPanelTitle("terminal", t)).toBe("workspaceHeaders.terminalTab");
   });
   it("git is a literal, non-localized label (a proper noun)", () => {
     expect(fixedPanelTitle("git", t)).toBe("Git");
