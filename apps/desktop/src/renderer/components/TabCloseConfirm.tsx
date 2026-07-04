@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
@@ -25,7 +26,13 @@ export function TabCloseConfirm({ tabTitle, onDiscard, onCancel }: { tabTitle: s
   const discardAndClose = (): void => { onDiscard(); dismiss(); };
   useModalKeys(dismiss, discardAndClose);
   useFocusTrap(panelRef);
-  return (
+  // Portal to <body>: RookeryTab renders this from inside a dockview tab header, whose
+  // ancestor carries a CSS transform — which would trap `position: fixed` to that header
+  // (the dialog rendered as a bar in the top tab strip instead of a centered overlay,
+  // audit #44 final-review clipping). document.body has no transformed ancestor, so
+  // fixed positioning resolves against the viewport for BOTH the dockview and legacy
+  // TabBar call sites. Same idiom as ContextMenu.tsx.
+  return createPortal(
     <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
       <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("tabBar.unsavedTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
         <div className="mb-1.5 text-[14px] font-semibold">{t("tabBar.unsavedTitle")}</div>
@@ -35,6 +42,7 @@ export function TabCloseConfirm({ tabTitle, onDiscard, onCancel }: { tabTitle: s
           <button onClick={discardAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("tabBar.discardClose")}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
