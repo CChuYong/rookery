@@ -12,8 +12,10 @@ import { GitChanges } from "./GitChanges.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { useTreeVersion } from "../lib/useTreeVersion.js";
 import { useWorkRoot } from "../lib/useWorkRoot.js";
-import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
+import { Segment, type SegmentItem } from "../ui/segment.js";
 import { useT } from "../i18n/provider.js";
+
+type SegmentKey = "files" | "git" | "worker";
 
 type Nested = { id: string; label: string; items: LogItem[] };
 
@@ -33,14 +35,13 @@ const EMPTY_LOG: LogItem[] = [];
 
 export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath }: { open: boolean; pageKey: string; subId: string | null; cwd?: string; activeTabPath: string | null }): JSX.Element {
   const t = useT();
-  const SEGMENTS = [
-    { key: "files" as const, icon: Files, label: t("rightSidebar.segmentFiles") },
-    { key: "git" as const, icon: GitBranch, label: "Git" },
-    { key: "worker" as const, icon: Bot, label: t("rightSidebar.segmentWorker") },
+  const SEGMENTS: Array<SegmentItem<SegmentKey>> = [
+    { value: "files", icon: Files, label: t("rightSidebar.segmentFiles"), title: t("rightSidebar.segmentFiles") },
+    { value: "git", icon: GitBranch, label: "Git", title: "Git" },
+    { value: "worker", icon: Bot, label: t("rightSidebar.segmentWorker"), title: t("rightSidebar.segmentWorker") },
   ];
   const segment = useWsStore((s) => s.right.segment);
   const setSegment = useWsStore((s) => s.setSegment_);
-  const seg = useSegmentIndicator(segment, []); // coral underline that slides between Files|Git|Worker
   // Computes the nested agent panels via its own subscription (moves the high-frequency nested/workerLogs reads out of App). No subId means empty panels.
   const nested = useStore((st) => (subId ? st.nested[subId] ?? EMPTY_NESTED : EMPTY_NESTED));
   const workerLog = useStore((st) => (subId ? st.workerLogs[subId] ?? EMPTY_LOG : EMPTY_LOG));
@@ -79,27 +80,14 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath }: { ope
         {/* Empty bar matching the main-area header height (h-11) — aligns the segment tab line to the same height as the main-area TabBar (consistent hierarchy).
             Color matches the top of the main area (<main bg-ink>) with bg-ink. */}
         <div className="drag h-11 shrink-0 border-b border-line bg-ink" />
-        <div ref={seg.containerRef} role="tablist" className="relative flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
-          {seg.rect && (
-            <div
-              className="pointer-events-none absolute bottom-0 h-[2px] rounded-full bg-accent transition-[left,width] duration-200 ease-out motion-reduce:transition-none"
-              style={{ left: seg.rect.left, width: seg.rect.width }}
-            />
-          )}
-          {SEGMENTS.map((s) => (
-            <button
-              key={s.key}
-              data-seg={s.key}
-              role="tab"
-              aria-selected={segment === s.key}
-              onClick={() => setSegment(s.key)}
-              title={s.label}
-              className={cn("flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors", segment === s.key ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg-dim")}
-            >
-              <s.icon size={13} /> {s.label}
-            </button>
-          ))}
-        </div>
+        <Segment
+          items={SEGMENTS}
+          value={segment}
+          onChange={setSegment}
+          variant="pill"
+          className="h-8 shrink-0 gap-1 border-b border-line px-2"
+          itemClassName="py-1 font-medium"
+        />
         {/* Replay rise-in on each segment switch (key=segment) — confirms that the visually similar dense panel actually changed. */}
         <div key={segment} className="rise-in min-h-0 flex-1 overflow-y-auto">
           {segment === "files" && (ready ? <FileTree root={root!} pageKey={pageKey} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback)}

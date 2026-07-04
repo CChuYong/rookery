@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import { Button } from "../ui/button.js";
 import { UpdateSettings } from "./UpdateSettings.js";
 import { Input, Select } from "../ui/input.js";
+import { Segment, type SegmentItem } from "../ui/segment.js";
 import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
@@ -64,11 +65,11 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     if (dir) setF((cur) => ({ ...cur, defaultSessionCwd: dir }));
   };
 
-  const tabs: Array<{ key: Tab; label: string }> = [
-    { key: "general", label: t("settings.tabGeneral") },
-    { key: "slack", label: "Slack" },
-    { key: "claude", label: "Claude" },
-    { key: "integration", label: t("settings.integrations") },
+  const tabs: Array<SegmentItem<Tab>> = [
+    { value: "general", label: t("settings.tabGeneral") },
+    { value: "slack", label: "Slack" },
+    { value: "claude", label: "Claude" },
+    { value: "integration", label: t("settings.integrations") },
   ];
 
   return (
@@ -83,36 +84,14 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-6 py-6">
           {/* tab bar */}
-          <div
-            role="tablist"
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-              e.preventDefault();
-              const keys = tabs.map((x) => x.key);
-              const i = keys.indexOf(tab);
-              const next = e.key === "ArrowRight" ? keys[(i + 1) % keys.length]! : keys[(i - 1 + keys.length) % keys.length]!;
-              setTab(next);
-              e.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus();
-            }}
-            className="mb-6 flex items-center gap-1 border-b border-line"
-          >
-            {tabs.map((tb) => (
-              <button
-                key={tb.key}
-                role="tab"
-                data-tab={tb.key}
-                aria-selected={tab === tb.key}
-                tabIndex={tab === tb.key ? 0 : -1}
-                onClick={() => setTab(tb.key)}
-                className={cn(
-                  "-mb-px border-b-2 px-3 py-2 text-[12px] font-medium transition-colors",
-                  tab === tb.key ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg-dim",
-                )}
-              >
-                {tb.label}
-              </button>
-            ))}
-          </div>
+          <Segment
+            items={tabs}
+            value={tab}
+            onChange={setTab}
+            variant="underline"
+            className="mb-6 gap-1 border-b border-line"
+            itemClassName="px-3 py-2 text-[12px] font-medium"
+          />
 
           <div key={tab} role="tabpanel" className="rise-in">
             {tab === "general" && (

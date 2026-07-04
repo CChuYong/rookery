@@ -7,7 +7,7 @@ import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { baseName } from "../lib/path.js";
-import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
+import { Segment, type SegmentItem } from "../ui/segment.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -38,46 +38,22 @@ const SOURCE_LABEL_KEY: Record<SourceKind, string> = {
 };
 
 // Source segment (tab-in-tab). Present sources = peer tabs (with counts). 'All' is not a peer but a "show everything",
-// so it sits after a divider + smaller, dimmer text (no count) to drop it down one level in the hierarchy.
+// so it's a secondary tier item — it sits after a divider + smaller, dimmer text (no count) and outside the
+// sliding indicator's tracking, to drop it down one level in the hierarchy (Segment's underline variant, audit #52).
 function SourceSegment(p: { sources: Array<Exclude<SourceKind, "all">>; counts: Record<SourceKind, number>; current: SourceKind; onPick: (k: SourceKind) => void; t: TFunc }): JSX.Element {
-  const seg = useSegmentIndicator(p.current, [p.sources.length]); // coral underline sliding across the source tabs
+  const items: Array<SegmentItem<SourceKind>> = [
+    ...p.sources.map((k) => ({ value: k, label: p.t(SOURCE_LABEL_KEY[k]), count: p.counts[k] })),
+    { value: "all" as const, label: p.t("sessions.sourceAll"), tier: "secondary" as const },
+  ];
   return (
-    <div ref={seg.containerRef} role="tablist" className="relative flex items-center gap-1 px-2 pb-1.5 pt-1">
-      {seg.rect && (
-        <div
-          className="pointer-events-none absolute bottom-0.5 h-[2px] rounded-full bg-accent transition-[left,width] duration-200 ease-out motion-reduce:transition-none"
-          style={{ left: seg.rect.left, width: seg.rect.width }}
-        />
-      )}
-      {p.sources.map((k) => (
-        <button
-          key={k}
-          data-seg={k}
-          role="tab"
-          aria-selected={p.current === k}
-          onClick={() => p.onPick(k)}
-          className={cn(
-            "rounded-md px-2 py-0.5 text-[11px] transition-colors",
-            p.current === k ? "bg-accent/15 text-fg" : "text-muted hover:bg-raised hover:text-fg-dim",
-          )}
-        >
-          {p.t(SOURCE_LABEL_KEY[k])}
-          <span className="ml-1 text-fg-dim/50">{p.counts[k]}</span>
-        </button>
-      ))}
-      <span className="mx-0.5 h-3 w-px shrink-0 bg-line/60" aria-hidden />
-      <button
-        role="tab"
-        aria-selected={p.current === "all"}
-        onClick={() => p.onPick("all")}
-        className={cn(
-          "rounded px-1.5 py-0.5 text-[10px] transition-colors",
-          p.current === "all" ? "text-fg-dim" : "text-fg-dim/40 hover:text-fg-dim",
-        )}
-      >
-        {p.t("sessions.sourceAll")}
-      </button>
-    </div>
+    <Segment
+      items={items}
+      value={p.current}
+      onChange={p.onPick}
+      variant="underline"
+      className="gap-1 px-2 pb-1.5 pt-1"
+      indicatorClassName="bottom-0.5"
+    />
   );
 }
 

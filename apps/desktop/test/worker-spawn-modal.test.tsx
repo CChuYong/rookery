@@ -29,7 +29,7 @@ function renderModal(searchSource = vi.fn().mockResolvedValue(items)) {
 // Scoped to the results listbox: the model/effort/permission <Select>s also render native <option>s that
 // otherwise collide with getByRole("option") queries.
 async function openGithubResults() {
-  fireEvent.click(screen.getByRole("button", { name: "GitHub" }));
+  fireEvent.click(screen.getByRole("tab", { name: "GitHub" })); // Segment mode item (audit #52: role="tab", not "button")
   const input = screen.getByPlaceholderText("이슈·PR 검색 (이 레포)");
   fireEvent.focus(input);
   await waitFor(() => expect(within(screen.getByRole("listbox")).getAllByRole("option")).toHaveLength(2));

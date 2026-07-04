@@ -8,7 +8,7 @@ import { useStore } from "../store/store.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
-import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
+import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
 import type { SourceItem, SourceProviderId } from "@daemon/core/source-intake.js";
@@ -48,14 +48,13 @@ export function WorkerSpawnModal(p: {
 
   const githubOk = !!p.integrations?.github.available;
   const linearOk = !!(p.integrations?.linear.configured && p.integrations.linear.valid !== false);
-  const MODES: Array<{ key: Mode; label: string; enabled: boolean; hint?: string }> = [
-    { key: "direct", label: t("workerSpawnModal.modeDirect"), enabled: true },
-    { key: "github", label: "GitHub", enabled: githubOk, hint: t("workerSpawnModal.githubHint") },
-    { key: "linear", label: "Linear", enabled: linearOk, hint: t("workerSpawnModal.linearHint") },
+  const MODES: Array<SegmentItem<Mode>> = [
+    { value: "direct", label: t("workerSpawnModal.modeDirect") },
+    { value: "github", label: "GitHub", disabled: !githubOk, title: githubOk ? undefined : t("workerSpawnModal.githubHint") },
+    { value: "linear", label: "Linear", disabled: !linearOk, title: linearOk ? undefined : t("workerSpawnModal.linearHint") },
   ];
   const sourceMode = mode === "github" || mode === "linear";
   const dropdownOpen = focused && (searching || results.length > 0 || q.trim().length > 0);
-  const seg = useSegmentIndicator(mode); // bg pill that slides over the mode segments
 
   useEffect(() => {
     if (!sourceMode || !p.searchSource || selected) return;
@@ -103,30 +102,14 @@ export function WorkerSpawnModal(p: {
         <div className="mb-3 font-mono text-[11px] text-muted">repo · {p.repo}</div>
 
         {/* Source mode — write directly / GitHub issues·PRs / Linear tickets */}
-        <div ref={seg.containerRef} className="relative mb-3 flex gap-1 rounded-[var(--radius)] border border-line bg-ink/40 p-1">
-          {seg.rect && (
-            <div
-              className="pointer-events-none absolute inset-y-1 rounded-[6px] bg-raised shadow-sm transition-[left,width] duration-200 ease-out motion-reduce:transition-none"
-              style={{ left: seg.rect.left, width: seg.rect.width }}
-            />
-          )}
-          {MODES.map((m) => (
-            <button
-              key={m.key}
-              data-seg={m.key}
-              disabled={!m.enabled}
-              title={m.enabled ? undefined : m.hint}
-              onClick={() => switchMode(m.key)}
-              className={cn(
-                "relative z-10 flex-1 rounded-[6px] px-2 py-1.5 text-[12px] font-medium transition-colors",
-                mode === m.key ? "text-fg" : "text-muted hover:text-fg-dim",
-                !m.enabled && "cursor-not-allowed opacity-40 hover:text-muted",
-              )}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <Segment
+          items={MODES}
+          value={mode}
+          onChange={switchMode}
+          variant="pill"
+          className="mb-3 gap-1 rounded-[var(--radius)] border border-line bg-ink/40 p-1"
+          itemClassName="flex-1 justify-center py-1.5 text-[12px] font-medium"
+        />
 
         <div className="flex flex-col gap-2">
           <div className="flex gap-2">

@@ -8,6 +8,7 @@ import { GIT_TONE } from "../lib/gitTone.js";
 import { GitHistory } from "./GitHistory.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { Textarea } from "../ui/input.js";
+import { Segment } from "../ui/segment.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
@@ -147,13 +148,17 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
       </div>
 
       {/* Changes | History tabs */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1">
-        {(["changes", "history"] as const).map((tb) => (
-          <button key={tb} onClick={() => setTab(tb)} className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors", tab === tb ? "bg-raised text-fg" : "text-muted hover:text-fg-dim")}>
-            {tb === "changes" ? t("gitChanges.tabChanges") : t("gitChanges.tabHistory")}
-          </button>
-        ))}
-      </div>
+      <Segment<"changes" | "history">
+        items={[
+          { value: "changes", label: t("gitChanges.tabChanges") },
+          { value: "history", label: t("gitChanges.tabHistory") },
+        ]}
+        value={tab}
+        onChange={setTab}
+        variant="pill"
+        className="shrink-0 gap-1 border-b border-line px-2 py-1"
+        itemClassName="font-medium"
+      />
 
       {/* rise-in crossfade when switching between the Changes ⇄ History tabs */}
       <div key={tab} className="flex min-h-0 flex-1 flex-col rise-in">
