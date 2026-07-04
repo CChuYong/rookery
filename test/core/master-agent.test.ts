@@ -607,6 +607,7 @@ describe("MasterAgent", () => {
     expect(notices.map((n) => n.code)).toEqual(["notice.workerDone", "notice.workerFailed"]);
     expect(notices.map((n) => n.params?.label)).toEqual(["app", "web"]);
     expect(notices.every((n) => !n.text?.includes("<worker-notification>"))).toBe(true);
+    expect(events.some((e) => e.type === "master.message")).toBe(false); // the notice turn is not a user message
   });
 
   it("persists the lines as pending_notifications rows when the flush turn throws (durable re-queue, not in-memory) — spec §6", async () => {

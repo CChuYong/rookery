@@ -231,7 +231,7 @@ export class MasterAgent {
     this.turnChain = result.catch(() => {});
     // User activity is a natural retry point for stranded notification rows: re-inject them through
     // notifyWorker so they flush as one coalesced notice turn AFTER this user turn.
-    for (const line of this.drainPersistedNotifications()) this.notifyWorker(line);
+    for (const n of this.drainPersistedNotifications()) this.notifyWorker(n);
     return result;
   }
 
