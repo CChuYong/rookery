@@ -3,9 +3,7 @@ import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal } from "lucide-react
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { baseName } from "../lib/path.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
@@ -337,8 +335,11 @@ function SessionsImpl(p: {
       )}
 
       {confirm && (
-        <DeleteConfirm
-          name={confirm.name}
+        <ConfirmDialog
+          title={t("sessions.deleteTitle")}
+          body={<><span className="text-fg-dim">{confirm.name}</span> {t("sessions.deleteBody")}</>}
+          confirmLabel={t("common.delete")}
+          variant="danger"
           onCancel={() => setConfirm(null)}
           onConfirm={() => p.onDelete?.(confirm.id)}
         />
@@ -349,31 +350,6 @@ function SessionsImpl(p: {
 
 export const Sessions = memo(SessionsImpl);
 Sessions.displayName = "Sessions";
-
-// Destructive delete confirm. Extracted so it mounts/unmounts with the `confirm` state → useDismissTransition resets per open
-// and the dialog plays a symmetric enter/exit (the old inline version cut out instantly). Escape/cancel button cancel; Cancel is autofocused (safe default).
-function DeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }): JSX.Element {
-  const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
-  useModalKeys(dismiss, confirmAndClose);
-  useFocusTrap(panelRef);
-  return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("sessions.deleteTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1.5 text-[14px] font-semibold">{t("sessions.deleteTitle")}</div>
-        <p className="text-[12.5px] leading-relaxed text-muted">
-          <span className="text-fg-dim">{name}</span> {t("sessions.deleteBody")}
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("common.delete")}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function ArchivedSection({ items, render }: { items: Session[]; render: (s: Session) => JSX.Element }): JSX.Element {
   const t = useT();

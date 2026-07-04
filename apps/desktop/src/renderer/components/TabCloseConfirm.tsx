@@ -1,16 +1,15 @@
-import { useRef } from "react";
-import { createPortal } from "react-dom";
-import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 
 // Shared dirty-tab close confirm (audit #44) — the ONE dialog used by BOTH the
 // legacy TabBar's X and the dockview RookeryTab's close, so unsaved-edit loss
-// is guarded identically no matter which tab chrome is active. Structure copied
-// from the quick-wins AutomationDeleteConfirm/RepoRemoveConfirm (overlay + panel
-// + useModalKeys/useFocusTrap + autofocused Cancel).
+// is guarded identically no matter which tab chrome is active. A thin wrapper
+// around the shared ConfirmDialog (audit #73) — it already portals to
+// document.body (the reason this component needed to, in the first place:
+// RookeryTab renders it from inside a dockview tab header whose ancestor
+// carries a CSS transform, which would trap `position: fixed` to that header —
+// the dialog would render as a bar in the top tab strip instead of a centered
+// overlay, audit #44 final-review clipping).
 //
 // Discard-only (no Save button): Monaco's save command (`MonacoEditor.tsx`) is
 // local to the mounted editor instance with no tab-id-addressable hook exposed
@@ -21,28 +20,14 @@ import { useFocusTrap } from "../lib/useFocusTrap.js";
 // action, not a save option.
 export function TabCloseConfirm({ tabTitle, onDiscard, onCancel }: { tabTitle: string; onDiscard: () => void; onCancel: () => void }): JSX.Element {
   const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  const discardAndClose = (): void => { onDiscard(); dismiss(); };
-  useModalKeys(dismiss, discardAndClose);
-  useFocusTrap(panelRef);
-  // Portal to <body>: RookeryTab renders this from inside a dockview tab header, whose
-  // ancestor carries a CSS transform — which would trap `position: fixed` to that header
-  // (the dialog rendered as a bar in the top tab strip instead of a centered overlay,
-  // audit #44 final-review clipping). document.body has no transformed ancestor, so
-  // fixed positioning resolves against the viewport for BOTH the dockview and legacy
-  // TabBar call sites. Same idiom as ContextMenu.tsx.
-  return createPortal(
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("tabBar.unsavedTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1.5 text-[14px] font-semibold">{t("tabBar.unsavedTitle")}</div>
-        <p className="text-[12.5px] leading-relaxed text-muted">{t("tabBar.unsavedBody", { name: tabTitle })}</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <button onClick={discardAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("tabBar.discardClose")}</button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <ConfirmDialog
+      title={t("tabBar.unsavedTitle")}
+      body={t("tabBar.unsavedBody", { name: tabTitle })}
+      confirmLabel={t("tabBar.discardClose")}
+      variant="danger"
+      onConfirm={onDiscard}
+      onCancel={onCancel}
+    />
   );
 }

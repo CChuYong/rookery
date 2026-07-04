@@ -11,6 +11,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu.js";
 import { flatten, ancestorDirs, parentDir, fuzzyFilter, type Entry, type Row } from "../lib/filetree-model.js";
 import { Input } from "../ui/input.js";
 import { Button } from "../ui/button.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { toast } from "../store/toasts.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
@@ -269,7 +270,14 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
         <NameDialog title={nameDialogTitle(nameDialog.kind)} initial={nameDialog.initial} onSubmit={(name) => void submitName(name)} onCancel={() => setNameDialog(null)} />
       )}
       {trashTarget && (
-        <TrashConfirm name={trashTarget.name} onConfirm={() => void confirmTrash()} onCancel={() => setTrashTarget(null)} />
+        <ConfirmDialog
+          title={t("common.delete")}
+          body={t("fileTree.confirmTrash", { name: trashTarget.name })}
+          confirmLabel={t("common.delete")}
+          variant="danger"
+          onConfirm={() => void confirmTrash()}
+          onCancel={() => setTrashTarget(null)}
+        />
       )}
     </div>
   );
@@ -290,29 +298,10 @@ function NameDialog({ title, initial, onSubmit, onCancel }: { title: string; ini
         <div className="text-[13px] font-semibold">{title}</div>
         <Input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <div className="flex justify-end gap-2">
-          <button onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
+          {/* audit #73 — was a raw button (rounded-lg 8px) beside the Button-based confirm (--radius 10px); promoted
+              to Button so the pair no longer visibly mismatch in height/rounding. */}
+          <Button variant="outline" size="sm" onClick={dismiss}>{t("common.cancel")}</Button>
           <Button variant="primary" size="sm" onClick={submit}>{t("common.confirm")}</Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// In-app trash confirm — replaces window.confirm. Cancel autofocused (safe default).
-function TrashConfirm({ name, onConfirm, onCancel }: { name: string; onConfirm: () => void; onCancel: () => void }): JSX.Element {
-  const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
-  useModalKeys(dismiss, confirmAndClose);
-  useFocusTrap(panelRef);
-  return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("common.delete")} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <p className="text-[12.5px] leading-relaxed text-muted">{t("fileTree.confirmTrash", { name })}</p>
-        <div className="flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("common.delete")}</button>
         </div>
       </div>
     </div>

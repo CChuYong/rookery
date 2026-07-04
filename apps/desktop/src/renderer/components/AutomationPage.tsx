@@ -5,13 +5,11 @@ import type { ActionVars } from "@daemon/core/automation-action.js";
 import { useT } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
 import { Button } from "../ui/button.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { cn } from "../lib/cn.js";
 import { referencedVars } from "../lib/automation-vars.js";
 import { RunAutomationDialog } from "./RunAutomationDialog.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
 
 // Resolved Slack id → display name maps (audit #51). Missing entries fall back to the raw id — this is the
 // pre-existing behavior, so a slow/failed/disconnected resolution never blocks or breaks the card.
@@ -163,35 +161,15 @@ export function AutomationPage(p: {
         />
       )}
       {confirmDelete && (
-        <AutomationDeleteConfirm
-          name={confirmDelete.name}
+        <ConfirmDialog
+          title={t("automationPage.deleteConfirmTitle")}
+          body={t("automationPage.deleteConfirmBody", { name: confirmDelete.name })}
+          confirmLabel={t("common.delete")}
+          variant="danger"
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => p.onDelete(confirmDelete.id)}
         />
       )}
     </>
-  );
-}
-
-// Destructive delete confirm (no undo). Extracted so it mounts/unmounts with `confirmDelete` → useDismissTransition
-// resets per open and plays a symmetric enter/exit; Escape/cancel button cancel; Cancel autofocused (safe default).
-function AutomationDeleteConfirm({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }): JSX.Element {
-  const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
-  useModalKeys(dismiss, confirmAndClose);
-  useFocusTrap(panelRef);
-  return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("automationPage.deleteConfirmTitle")} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1.5 text-[14px] font-semibold">{t("automationPage.deleteConfirmTitle")}</div>
-        <p className="text-[12.5px] leading-relaxed text-muted">{t("automationPage.deleteConfirmBody", { name })}</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1.5 text-[12.5px] font-medium text-fg hover:bg-fail">{t("common.delete")}</button>
-        </div>
-      </div>
-    </div>
   );
 }

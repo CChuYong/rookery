@@ -13,6 +13,11 @@ const button = cva(
         ghost: "text-fg-dim hover:bg-raised hover:text-fg",
         outline: "border border-line text-fg-dim hover:bg-raised hover:text-fg hover:border-fg-dim/40",
         danger: "text-fail/80 hover:bg-fail/10 hover:text-fail",
+        // Solid destructive action (audit #73) — distinct from `danger` above (which stays the existing
+        // subtle ghost-style used by Composer's Stop / InteractionCard's Deny) so those two callers are
+        // untouched. This is the "primary, but red" counterpart used for ConfirmDialog's destructive confirm.
+        dangerSolid:
+          "bg-fail/90 text-fg hover:bg-fail shadow-[0_1px_0_rgba(255,255,255,0.08)_inset] disabled:bg-raised disabled:text-muted disabled:opacity-100",
         chip: "border border-line/80 text-fg-dim hover:border-accent/40 hover:text-fg",
       },
       size: {

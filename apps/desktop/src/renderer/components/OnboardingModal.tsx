@@ -1,8 +1,9 @@
 import { useId, useRef, useState } from "react";
-import { Sparkles, Bot, Users, Brain, ArrowRight, Loader2 } from "lucide-react";
+import { Sparkles, Bot, Users, Brain, ArrowRight } from "lucide-react";
 import { useT } from "../i18n/provider.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { Button } from "../ui/button.js";
 
 // First-run onboarding (shown after the data-consent gate, before the app proper): a short welcome + a
 // concept screen explaining rookery's master / worker-fleet / memory model. onFinish persists onboardingDone
@@ -36,8 +37,12 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
   useFocusTrap(panelRef);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="rise-in mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-8 shadow-2xl">
+    // audit #72 — overlay/panel classes aligned with the rest of the modal system (bg-black/55 backdrop-blur-sm +
+    // the dialog-in entrance, replacing the one-off rise-in). No exit animation is wired here (no
+    // useDismissTransition) — Escape/Skip/Get-started all resolve through onFinish, which unmounts this at the
+    // App.tsx mount site once onboardingDone is persisted.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-8 shadow-2xl motion-safe:animate-[dialog-in_160ms_ease-out]">
         {step === 0 ? (
           <div className="flex flex-col items-center text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent"><Sparkles size={22} /></div>
@@ -66,14 +71,13 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
             <button disabled={busy} onClick={() => void finish()} className="rounded-md px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-fg-dim disabled:opacity-50">{t("onboarding.skip")}</button>
             {step > 0 && <button disabled={busy} onClick={() => setStep(step - 1)} className="rounded-md px-3 py-1.5 text-[12px] text-fg-dim transition-colors hover:bg-raised disabled:opacity-50">{t("onboarding.back")}</button>}
             {step < last ? (
-              <button autoFocus disabled={busy} onClick={() => setStep(step + 1)} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-70">
+              <Button variant="primary" size="sm" autoFocus disabled={busy} onClick={() => setStep(step + 1)}>
                 {t("onboarding.next")} <ArrowRight size={13} />
-              </button>
+              </Button>
             ) : (
-              <button autoFocus disabled={busy} aria-busy={busy || undefined} onClick={() => void finish()} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-70">
-                {busy && <Loader2 size={13} className="animate-spin motion-reduce:hidden" aria-hidden />}
+              <Button variant="primary" size="sm" autoFocus loading={busy} onClick={() => void finish()}>
                 {t("onboarding.getStarted")}
-              </button>
+              </Button>
             )}
           </div>
         </div>

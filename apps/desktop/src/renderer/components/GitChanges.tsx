@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { RefreshCw, Plus, Minus, RotateCcw, GitBranch, ArrowUp, ArrowDown, UploadCloud, Loader2 } from "lucide-react";
+import { RefreshCw, Plus, Minus, RotateCcw, GitBranch, ArrowUp, ArrowDown, UploadCloud } from "lucide-react";
 import { useWsStore } from "../store/workspace.js";
 import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
@@ -9,9 +9,8 @@ import { GitHistory } from "./GitHistory.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { Textarea } from "../ui/input.js";
 import { Segment } from "../ui/segment.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { Button } from "../ui/button.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { useT } from "../i18n/provider.js";
 
 type Change = { path: string; x: string; y: string; added: number; deleted: number };
@@ -200,15 +199,16 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
               rows={2}
               className="w-full resize-none"
             />
-            <button
+            <Button
+              variant="primary"
+              size="sm"
+              className="mt-1.5 w-full"
               onClick={() => void commit()}
-              disabled={busy || !msg.trim() || staged.length === 0}
-              aria-busy={busy || undefined}
-              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md bg-accent/90 px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted"
+              disabled={!msg.trim() || staged.length === 0}
+              loading={busy}
             >
-              {busy && <Loader2 size={13} className="animate-spin motion-reduce:hidden" aria-hidden />}
               {t("gitChanges.commit")}{staged.length ? ` ${staged.length}` : ""}
-            </button>
+            </Button>
           </div>
         </>
       ) : (
@@ -218,42 +218,22 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
       )}
       </div>
 
-      {/* Revert confirmation */}
+      {/* Revert confirmation (audit #73 — now the shared ConfirmDialog, portaled to document.body like every other
+          migrated confirm; previously this one alone stayed `absolute` within the panel, which is why it needed
+          its own z-10 scoping — the portal removes that constraint, so it now centers over the whole app like the
+          rest instead of being clipped to the Git panel's bounds). */}
       {confirm && (
-        <RevertConfirm
-          name={basename(confirm.path)}
-          untracked={confirm.untracked}
+        <ConfirmDialog
+          title={t("gitChanges.revertTitle")}
+          body={(confirm.untracked ? t("gitChanges.revertDescUntracked") : t("gitChanges.revertDescTracked"))
+            .split("{name}")
+            .flatMap((part, i) => (i === 0 ? [part] : [<span key={i} className="text-fg-dim">{basename(confirm.path)}</span>, part]))}
+          confirmLabel={t("gitChanges.revert")}
+          variant="danger"
           onCancel={() => setConfirm(null)}
           onConfirm={() => { const c = confirm; void act(() => window.rookery.ws.gitDiscard(root, c.path, c.untracked)); }}
         />
       )}
-    </div>
-  );
-}
-
-// Destructive revert confirm. Extracted so it mounts/unmounts with `confirm` → useDismissTransition resets per open and plays a
-// symmetric enter/exit; Escape/cancel button cancel; Cancel autofocused (safe default). Stays absolute within the panel (z-10).
-function RevertConfirm({ name, untracked, onCancel, onConfirm }: { name: string; untracked: boolean; onCancel: () => void; onConfirm: () => void }): JSX.Element {
-  const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
-  useModalKeys(dismiss, confirmAndClose);
-  useFocusTrap(panelRef);
-  return (
-    <div className={cn("absolute inset-0 z-10 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("gitChanges.revertTitle")} className={cn("w-full rounded-xl border border-line bg-surface p-4", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1 text-[13px] font-semibold">{t("gitChanges.revertTitle")}</div>
-        <p className="text-[12px] leading-relaxed text-muted">
-          {(untracked ? t("gitChanges.revertDescUntracked") : t("gitChanges.revertDescTracked"))
-            .split("{name}")
-            .flatMap((part, i) => (i === 0 ? [part] : [<span key={i} className="text-fg-dim">{name}</span>, part]))}
-        </p>
-        <div className="mt-3 flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1 text-[12px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <button onClick={confirmAndClose} className="rounded-lg bg-fail/90 px-3 py-1 text-[12px] font-medium text-fg hover:bg-fail">{t("gitChanges.revert")}</button>
-        </div>
-      </div>
     </div>
   );
 }
