@@ -5,6 +5,8 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { editorTooltip, type PanelParams } from "./panel-ids.js";
 import { fixedPanelTitle } from "./panel-titles.js";
+import { useWsStore } from "../store/workspace.js";
+import { TabCloseConfirm } from "../components/TabCloseConfirm.js";
 
 // Custom dockview tab matching the app's TabBar aesthetic (per-kind icon, coral
 // for the conversation, hover-reveal close on editor tabs only). Active/inactive
@@ -42,20 +44,38 @@ export function RookeryTab(props: IDockviewPanelHeaderProps): JSX.Element {
   const tooltip = params.kind === "editor" ? editorTooltip(params.tabId) : undefined;
   const Icon = iconFor(params);
   const closable = params.kind === "editor"; // fixed panels are move/split-only, never closed (prevents footguns)
+  // Dirty-tab close guard (audit #44) — same TabCloseConfirm the legacy TabBar's X routes
+  // through, so a dockview-closed editor tab is guarded identically. Only file tabs carry
+  // a dirty flag (diff/commit tabs are read-only and close without confirmation).
+  const dirty = useWsStore((s) => {
+    if (params.kind !== "editor") return false;
+    const tab = s.byPage[params.pageKey]?.tabs.find((tb) => tb.id === params.tabId);
+    return tab?.kind === "file" && tab.dirty;
+  });
+  const [confirming, setConfirming] = useState(false);
   return (
-    <div className="rk-tab group flex h-full items-center gap-1.5 px-2 text-[11.5px] font-medium select-none">
-      <Icon size={12} className={cn("shrink-0", params.kind === "conversation" ? "text-accent" : "text-muted")} />
-      <span title={tooltip} className="max-w-[168px] truncate">{label}</span>
-      {closable && (
-        <button
-          onMouseDown={(e) => e.stopPropagation()} /* don't start a tab drag when clicking close */
-          onClick={(e) => { e.stopPropagation(); api.close(); }}
-          aria-label={t("tabBar.closeTab")}
-          className="ml-0.5 rounded p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-        >
-          <X size={11} />
-        </button>
+    <>
+      <div className="rk-tab group flex h-full items-center gap-1.5 px-2 text-[11.5px] font-medium select-none">
+        <Icon size={12} className={cn("shrink-0", params.kind === "conversation" ? "text-accent" : "text-muted")} />
+        <span title={tooltip} className="max-w-[168px] truncate">{label}</span>
+        {closable && (
+          <button
+            onMouseDown={(e) => e.stopPropagation()} /* don't start a tab drag when clicking close */
+            onClick={(e) => { e.stopPropagation(); if (dirty) setConfirming(true); else api.close(); }}
+            aria-label={t("tabBar.closeTab")}
+            className="ml-0.5 rounded p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+          >
+            <X size={11} />
+          </button>
+        )}
+      </div>
+      {confirming && (
+        <TabCloseConfirm
+          tabTitle={label}
+          onDiscard={() => api.close()}
+          onCancel={() => setConfirming(false)}
+        />
       )}
-    </div>
+    </>
   );
 }

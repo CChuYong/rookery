@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { MessageSquare, FileText, GitCompare, GitCommitHorizontal, X } from "lucide-react";
-import { useWsStore } from "../store/workspace.js";
+import { useWsStore, type Tab } from "../store/workspace.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
 import { editorTooltip } from "../workspace/panel-ids.js";
+import { TabCloseConfirm } from "./TabCloseConfirm.js";
 
 export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: string }): JSX.Element {
   const t = useT();
@@ -12,6 +14,14 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
   const closeTab = useWsStore((s) => s.closeTab_);
   const tabs = pageRec?.tabs ?? [{ id: "agent", kind: "agent" as const }];
   const active = pageRec?.activeTabId ?? "agent";
+  // Dirty tabs (audit #44) route through the shared TabCloseConfirm instead of closing immediately;
+  // clean tabs keep the old no-dialog close. `confirming` is a snapshot so the dialog's exit
+  // animation survives the tab already having been removed from `tabs` on Discard.
+  const [confirming, setConfirming] = useState<{ id: string; title: string } | null>(null);
+  const requestClose = (tab: Tab): void => {
+    if (tab.kind === "file" && tab.dirty) setConfirming({ id: tab.id, title: tab.title });
+    else closeTab(pageKey, tab.id);
+  };
   // Coral underline that slides beneath the active tab.
   const { containerRef, rect } = useSegmentIndicator(active, [tabs.length]);
   return (
@@ -34,11 +44,18 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
               {dirty && <span className="dot-pop h-1.5 w-1.5 rounded-full bg-fg-dim" />}
             </button>
             {tab.kind !== "agent" && (
-              <button onClick={() => closeTab(pageKey, tab.id)} aria-label={t("tabBar.closeTab")} className="text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={11} /></button>
+              <button onClick={() => requestClose(tab)} aria-label={t("tabBar.closeTab")} className="text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={11} /></button>
             )}
           </div>
         );
       })}
+      {confirming && (
+        <TabCloseConfirm
+          tabTitle={confirming.title}
+          onDiscard={() => closeTab(pageKey, confirming.id)}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
     </div>
   );
 }
