@@ -1,9 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SlackStatus } from "@daemon/core/events.js";
 import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { Button } from "../ui/button.js";
 import { UpdateSettings } from "./UpdateSettings.js";
 import { Input, Select } from "../ui/input.js";
@@ -42,6 +42,22 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const [slackApp, setSlackApp] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const models = useStore((s) => s.models); // live model list (initialized from the static fallback if none)
+
+  // Slack on/off toggle: the request is fire-and-forget from here, so between the click and the daemon's slack.status
+  // event landing (prop change) the button showed no feedback at all (audit #53). `busy` covers that window; a fallback
+  // timer clears it even if no status event ever arrives (e.g. the request itself rejects) so the button can't get stuck.
+  const [slackToggleBusy, setSlackToggleBusy] = useState(false);
+  const slackToggleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setSlackToggleBusy(false);
+    if (slackToggleTimer.current) { clearTimeout(slackToggleTimer.current); slackToggleTimer.current = null; }
+  }, [p.slack]);
+  useEffect(() => () => { if (slackToggleTimer.current) clearTimeout(slackToggleTimer.current); }, []);
+  const handleSlackToggle = (): void => {
+    setSlackToggleBusy(true);
+    p.onSlackToggle(p.slack === "off");
+    slackToggleTimer.current = setTimeout(() => setSlackToggleBusy(false), 6000);
+  };
   const dirty = JSON.stringify(f) !== JSON.stringify(p.settings);
   const allowAll = f.slackAllowAll === "1";
   const refuseReply = f.slackRefuseReply === "1";
@@ -173,11 +189,13 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     {p.slack === "up" ? t("settings.slackUp") : p.slack === "connecting" ? t("settings.slackConnecting") : p.slack === "error" ? t("settings.slackError") : p.slack === "off" ? t("settings.slackOff") : t("settings.slackNoToken")}
                   </span>
                   <button
-                    onClick={() => p.onSlackToggle(p.slack === "off")}
-                    disabled={p.slack === "unconfigured"}
-                    className={cn("ml-auto rounded-full px-3 py-1 text-[11px] font-medium transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97] motion-reduce:active:scale-100 disabled:opacity-40",
+                    onClick={handleSlackToggle}
+                    disabled={p.slack === "unconfigured" || slackToggleBusy}
+                    aria-busy={slackToggleBusy || undefined}
+                    className={cn("ml-auto flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97] motion-reduce:active:scale-100 disabled:opacity-40",
                       p.slack === "off" ? "border border-line text-muted hover:border-accent/40" : "bg-accent/15 text-accent hover:bg-accent/25")}
                   >
+                    {slackToggleBusy && <Loader2 size={11} className="animate-spin" aria-hidden />}
                     {p.slack === "off" ? t("settings.toggleOn") : t("settings.toggleOff")}
                   </button>
                 </div>

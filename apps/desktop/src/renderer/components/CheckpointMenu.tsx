@@ -2,13 +2,27 @@ import { useEffect, useState } from "react";
 import { History, Loader2 } from "lucide-react";
 import { Button } from "../ui/button.js";
 import { SkeletonRows } from "./Skeleton.js";
-import { useT } from "../i18n/provider.js";
+import { useT, useLocale } from "../i18n/provider.js";
+import type { TFunc } from "../i18n/provider.js";
+import type { Locale } from "../i18n/types.js";
+import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 
 export interface Checkpoint { seq: number; sha: string; createdAt: string }
 
-function hhmm(iso: string): string {
+// Time-only hh:mm made cross-midnight turns look out of order (Turn 1 the evening before could read later than
+// Turn 2 the next afternoon — audit #80). Reuse the same relative-time convention as AssistantMessage/GitHistory/
+// Sessions: within 7 days it's monotonic relative text ("3h ago"), beyond that an absolute date — both unambiguous
+// regardless of day boundaries, and both already localized (no new i18n keys needed).
+function checkpointTimeLabel(iso: string, now: number, t: TFunc, locale: Locale): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(d.getTime())) return "";
+  const ts = d.getTime();
+  const rel = relativeTime(ts, now);
+  if (!rel) return absoluteDate(ts, now, locale);
+  if (rel.unit === "now") return t("relativeTime.justNow");
+  if (rel.unit === "m") return t("relativeTime.minutesAgo", { n: rel.value });
+  if (rel.unit === "h") return t("relativeTime.hoursAgo", { n: rel.value });
+  return t("relativeTime.daysAgo", { n: rel.value });
 }
 
 // Per-worker-turn checkpoint restore menu. Fetches on open; on item click, confirms then restores.
@@ -20,6 +34,7 @@ export function CheckpointMenu({
   onRestore: (seq: number) => Promise<void>;
 }): JSX.Element {
   const t = useT();
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Checkpoint[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -88,7 +103,7 @@ export function CheckpointMenu({
               >
                 <span className="font-mono">{t("checkpointMenu.turn", { turn: c.seq + 1 })}</span>
                 <span className="flex shrink-0 items-center gap-1 text-[10.5px] text-muted">
-                  {restoring === c.seq ? <Loader2 size={11} className="animate-spin" aria-hidden /> : armed === c.seq ? t("checkpointMenu.confirmRestore") : hhmm(c.createdAt)}
+                  {restoring === c.seq ? <Loader2 size={11} className="animate-spin" aria-hidden /> : armed === c.seq ? t("checkpointMenu.confirmRestore") : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
                 </span>
               </button>
             ))}

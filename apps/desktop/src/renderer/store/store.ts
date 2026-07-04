@@ -41,6 +41,10 @@ interface Store extends AppState {
   slack: SlackStatus;
   usage: UsageSnapshot | null;
   setUsage: (usage: UsageSnapshot) => void;
+  // Set once usage.get has failed repeatedly with nothing loaded yet — lets UsagePanel show an explicit
+  // "couldn't load" hint instead of staying blank forever (audit #55). Cleared by the next successful setUsage.
+  usageLoadFailed: boolean;
+  setUsageLoadFailed: (v: boolean) => void;
   settings: SettingsValues | null;
   setSettings: (settings: SettingsValues) => void;
   // List of available models (live from the daemon's models.list, or the static fallback). Shared by the settings, spawn, and session model pickers.
@@ -143,7 +147,9 @@ export const useStore = create<Store>((set, get) => ({
   daemonNote: null,
   slack: "connecting",
   usage: null,
-  setUsage: (usage) => set({ usage }),
+  setUsage: (usage) => set({ usage, usageLoadFailed: false }),
+  usageLoadFailed: false,
+  setUsageLoadFailed: (v) => set({ usageLoadFailed: v }),
   settings: null,
   setSettings: (settings) => set({ settings }),
   models: [...MODELS], // Initialize with the static fallback (no flicker) → swapped to live when models.list arrives

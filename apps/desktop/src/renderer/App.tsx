@@ -73,6 +73,7 @@ let startTimer: ReturnType<typeof setTimeout> | null = null; // DSK-10: fallback
 
 // Poll the usage snapshot. Fast (4s) before data arrives, slow (45s) once it does — lightweight since it only reads the cache.
 function pollUsage(c: WsClient): void {
+  let failCount = 0; // consecutive usage.get failures — used to gate the "couldn't load" hint below
   const schedule = (ms: number) => {
     if (usageTimer) clearTimeout(usageTimer);
     usageTimer = setTimeout(tick, ms);
@@ -81,11 +82,18 @@ function pollUsage(c: WsClient): void {
     void c
       .request({ type: "usage.get" })
       .then((r) => {
+        failCount = 0;
         useStore.getState().setUsage(r.usage);
         const ready = !!(r.usage && (r.usage.pct || r.usage.today));
         schedule(ready ? 45000 : 4000);
       })
-      .catch(() => schedule(8000));
+      .catch(() => {
+        failCount++;
+        // Only surface the failure hint after a few consecutive misses — a single blip during startup/reconnect
+        // shouldn't flash an error (audit #55: sustained failure should say so instead of staying silently blank).
+        if (failCount >= 3) useStore.getState().setUsageLoadFailed(true);
+        schedule(8000);
+      });
   };
   tick();
 }
@@ -132,6 +140,7 @@ type AppSelected = Pick<
   | "attention"
   | "sessionAttention"
   | "usage"
+  | "usageLoadFailed"
   | "automations"
   | "automationsLoaded"
   | "automationsLoadFailed"
@@ -170,6 +179,7 @@ export function App(): JSX.Element {
         attention: st.attention,
         sessionAttention: st.sessionAttention,
         usage: st.usage,
+        usageLoadFailed: st.usageLoadFailed,
         integrations: st.integrations,
         authStatus: st.authStatus,
         automations: st.automations,
@@ -936,7 +946,7 @@ export function App(): JSX.Element {
             ) : (
               <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
-            <UsagePanel usage={s.usage} />
+            <UsagePanel usage={s.usage} loadFailed={s.usageLoadFailed} />
             {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
             <div className="flex flex-wrap items-center gap-3 px-1 py-0.5 font-mono text-[11px] text-muted">
               <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`daemon · ${daemonStatusText}`}>
@@ -987,12 +997,14 @@ export function App(): JSX.Element {
             onSave={saveSettings}
             onClose={closeOverlay}
             slack={s.slack}
-            onSlackToggle={(enabled) => { void client?.request({ type: "slack.set", enabled }); }}
+            onSlackToggle={(enabled) => { void client?.request({ type: "slack.set", enabled }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }}
             integrations={s.integrations}
             authStatus={s.authStatus}
             onSaveLinearKey={(key) => {
+              // Reuse toast.keySaved (already used by the sibling Slack-tokens/Anthropic-key saves below) — the
+              // Linear key card doesn't otherwise change on screen until integrations.status round-trips (audit #54).
               void client?.request({ type: "settings.set", settings: { linearApiKey: key } })
-                .then(() => client?.request({ type: "integrations.status" }))
+                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "integrations.status" }); })
                 .then((r) => { if (r) useStore.getState().setIntegrations({ github: r.github, linear: r.linear }); })
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
             }}
