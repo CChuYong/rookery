@@ -215,3 +215,24 @@ describe("RepoTree fallback-label disambiguating subline (audit #46)", () => {
     expect(screen.queryByText("방금")).toBeNull();
   });
 });
+
+// Audit #50: the tree's status tag is a deliberate colorblind-safe abbreviation (kept short — "ORPH"), but it must
+// carry the SAME full-word label as the header StatusBadge via its title, so the two never disagree.
+describe("RepoTree status tag full-word title (audit #50)", () => {
+  it("shows the short colorblind tag but titles it with the full localized state name", () => {
+    const orphanedWorker = { ...worker, id: "w3", status: "orphaned" };
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[orphanedWorker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    const tag = screen.getByText("ORPH");
+    expect(tag).toHaveAttribute("title", "유실됨"); // same full word the header StatusBadge shows for this status
+  });
+});

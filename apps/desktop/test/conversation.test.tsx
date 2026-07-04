@@ -40,7 +40,8 @@ describe("MessageList", () => {
 describe("StatusBadge", () => {
   it("styles the orphaned status distinctly (not the default fallback)", () => {
     const { container } = render(<StatusBadge status="orphaned" />);
-    expect(screen.getByText("orphaned")).toBeInTheDocument();
+    // "유실됨" is the localized (ko fallback, no provider) full word for "orphaned" (audit #50) — no longer the raw token.
+    expect(screen.getByText("유실됨")).toBeInTheDocument();
     expect(container.querySelector(".text-nochg")).toBeTruthy(); // orphaned-specific tone (not the default fallback)
   });
 });

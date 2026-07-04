@@ -1,9 +1,11 @@
 import { Loader2 } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useJustEnded } from "../lib/useJustEnded.js";
-import { toneClass, railClass, isLive, isProvisioning } from "../lib/status.js";
+import { toneClass, railClass, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
+import { useT } from "../i18n/provider.js";
 
 export function StatusBadge({ status }: { status: string }): JSX.Element {
+  const t = useT();
   // status-flash fires once only on the running→terminal transition. It does not fire on history
   // replay where the component mounts already in a terminal state (useJustEnded is false at mount).
   const justEnded = useJustEnded(status === "running");
@@ -27,7 +29,7 @@ export function StatusBadge({ status }: { status: string }): JSX.Element {
           )}
         />
       )}
-      {status}
+      {t(statusLabelKey(status))}
     </span>
   );
 }

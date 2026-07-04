@@ -31,12 +31,30 @@ describe("StatusBadge status-flash (falling-edge)", () => {
   it("flashes the dot once on running→done", () => {
     const { rerender } = render(<StatusBadge status="running" />);
     rerender(<StatusBadge status="done" />);
-    const dot = screen.getByText("done").querySelector("span")!;
+    // "완료" is the localized (ko fallback, no provider) full word for "done" — see i18n/locales/ko/status.ts.
+    const dot = screen.getByText("완료").querySelector("span")!;
     expect(dot.className).toContain("status-flash");
   });
 
   it("does NOT flash when mounted already-terminal (history replay)", () => {
     const dot = render(<StatusBadge status="done" />).container.querySelector("span > span")!;
     expect(dot.className).not.toContain("status-flash");
+  });
+});
+
+// Audit #50: the header badge used to render the raw machine token (e.g. "orphaned") while the tree tag showed a
+// cryptic abbreviation ("ORPH") — inconsistent AND untranslated. StatusBadge must now go through the shared
+// statusLabelKey label source instead of echoing the raw status prop.
+describe("StatusBadge localization (audit #50)", () => {
+  it("renders the localized full word for orphaned, not the raw status token", () => {
+    render(<StatusBadge status="orphaned" />);
+    expect(screen.getByText("유실됨")).toBeInTheDocument();
+    expect(screen.queryByText("orphaned")).not.toBeInTheDocument();
+  });
+
+  it("renders the localized full word for running, not the raw status token", () => {
+    render(<StatusBadge status="running" />);
+    expect(screen.getByText("실행 중")).toBeInTheDocument();
+    expect(screen.queryByText("running")).not.toBeInTheDocument();
   });
 });

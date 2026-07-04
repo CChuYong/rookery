@@ -9,6 +9,14 @@ const TAG: Record<string, string> = {
   provisioning: "PREP", running: "RUN", idle: "IDLE", failed: "ERR", error: "ERR",
   stopped: "STOP", orphaned: "ORPH", done: "DONE",
 };
+// i18n key for a status's full-word display label (status.running/idle/stopped/done/error/failed/orphaned/provisioning) —
+// the one label source shared by StatusBadge (header) and RepoTree's tree tag, so they can never say different words
+// for the same worker (audit #50: tree showed 'ORPH' while the header showed 'orphaned'). TAG above stays as the
+// colorblind-safe short alt-channel; this is the accessible full word for text/title.
+const LABEL_KEY: Record<string, string> = {
+  provisioning: "status.provisioning", running: "status.running", idle: "status.idle", failed: "status.failed", error: "status.error",
+  stopped: "status.stopped", orphaned: "status.orphaned", done: "status.done",
+};
 // Full chip tone (border/bg/text) for the StatusBadge — kept here so status→color lives in one file (dot = railClass + led-live).
 const TONE: Record<string, string> = {
   running: "text-run bg-run/12 border-run/25",
@@ -25,6 +33,7 @@ const TONE: Record<string, string> = {
 export const railClass = (s: string): string => RAIL[s] ?? "bg-stop";
 export const toneClass = (s: string): string => TONE[s] ?? "text-muted bg-raised border-line";
 export const statusTag = (s: string): string => TAG[s] ?? s.slice(0, 5).toUpperCase();
+export const statusLabelKey = (s: string): string => LABEL_KEY[s] ?? `status.${s}`;
 export const isLive = (s: string): boolean => s === "running";
 // Spawn in flight — its worktree is still being created. Rendered with a spinner instead of the LED dot.
 export const isProvisioning = (s: string): boolean => s === "provisioning";

@@ -3,7 +3,7 @@ import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreH
 import { useStore } from "../store/store.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
-import { railClass, statusTag, isLive, isProvisioning } from "../lib/status.js";
+import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
 import { baseName } from "../lib/path.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { ContextMenu } from "../components/ContextMenu.js";
@@ -146,7 +146,10 @@ function RepoTreeImpl(p: {
             {fallback && <WorkerActivity workerId={sub.id} />}
           </span>
           <WorkerCost workerId={sub.id} />
-          <span className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted">{statusTag(sub.status)}</span>
+          {/* colorblind-safe short tag stays as the visible glyph (rail/dot alt-channel), but the title carries the
+              full localized word — same label source as the header StatusBadge, so tree and header never disagree
+              (audit #50: tree used to say 'ORPH' while the header said 'orphaned'). */}
+          <span title={t(statusLabelKey(sub.status))} className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted">{statusTag(sub.status)}</span>
           {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}
           {p.attention?.[sub.id] && !active && (
             <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
