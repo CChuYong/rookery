@@ -1,9 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { RepoTree } from "../src/renderer/views/RepoTree.js";
+import { useStore } from "../src/renderer/store/store.js";
+import type { LogItem } from "../src/renderer/store/reduce.js";
 
 const repo = { name: "app", path: "/code/app", description: "", base: null };
 const worker = { id: "w1", label: "worker1", repoPath: "/code/app", status: "idle", branch: "rookery/w1", model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null };
+// Still on the spawn-time repo-name placeholder (fleet-tools.ts spawns with label: repo.name) — never upgraded by
+// the daemon's async task-summary relabel. This is the "wall of identical labels" case (audit #46).
+const fallbackWorker = { id: "w2", label: "app", repoPath: "/code/app", status: "idle", branch: "rookery/w2", model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null };
 
 describe("RepoTree repo-header affordances (audit #3, #19)", () => {
   it("spawn (+) and remove (trash) buttons are focusable — not display:none — and expose their aria-labels", () => {
@@ -157,5 +162,56 @@ describe("RepoTree worker-row overflow '⋯' button (audit #45)", () => {
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     fireEvent.click(screen.getByText("포크"));
     expect(onForkSub).toHaveBeenCalledWith("w1");
+  });
+});
+
+describe("RepoTree fallback-label disambiguating subline (audit #46)", () => {
+  beforeEach(() => useStore.setState({ workerLogs: {} }));
+
+  it("a worker still on the repo-name placeholder shows a relative-time subline once its log has loaded", () => {
+    useStore.setState({ workerLogs: { w2: [{ kind: "message", role: "assistant", content: "hi", ts: Date.now() } as LogItem] } });
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[fallbackWorker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    expect(screen.getByText("방금")).toBeInTheDocument();
+  });
+
+  it("a fallback-labeled worker whose log hasn't loaded yet shows no subline (no fetch is triggered)", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[fallbackWorker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    expect(screen.queryByText("방금")).toBeNull();
+  });
+
+  it("a worker with a real (non-repo-name) label stays single-line even with recent activity", () => {
+    useStore.setState({ workerLogs: { w1: [{ kind: "message", role: "assistant", content: "hi", ts: Date.now() } as LogItem] } });
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[worker] as never} // worker.label = "worker1" ≠ repo.name "app" → not a fallback
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+      />,
+    );
+    expect(screen.queryByText("방금")).toBeNull();
   });
 });

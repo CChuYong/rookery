@@ -1,17 +1,62 @@
 import { memo, useState, useRef } from "react";
 import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreHorizontal } from "lucide-react";
-import type { FleetRow } from "../store/reduce.js";
+import { useStore } from "../store/store.js";
+import type { FleetRow, LogItem } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
 import { railClass, statusTag, isLive, isProvisioning } from "../lib/status.js";
+import { baseName } from "../lib/path.js";
+import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
 import { WorkerCost, FleetBurn } from "../components/WorkerCost.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
-import { useT } from "../i18n/provider.js";
+import { useT, useLocale } from "../i18n/provider.js";
 
 type Repo = { name: string; path: string; description: string; base: string | null };
+
+// A worker's label started life as its repo name (the spawn-time placeholder, see fleet-tools.ts) and was never
+// upgraded by the daemon's async task-summary relabel (worker.label) — i.e. it's still the repo/folder fallback,
+// not a real title. This is what makes sibling workers under one repo read as a wall of identical labels (audit #46).
+function isFallbackLabel(sub: FleetRow, repoNameByPath: Map<string, string>): boolean {
+  const repoName = repoNameByPath.get(sub.repoPath);
+  return repoName !== undefined ? sub.label === repoName : sub.label === baseName(sub.repoPath);
+}
+
+// Last message timestamp already present in this worker's log — only filled in for a worker that's been viewed at
+// least once this session (worker.history) or is actively streaming over the live @all channel (same opportunistic
+// coverage as WorkerCost's cost figure below). No fetch is triggered for rows that haven't been opened yet.
+function lastActivityTs(items: LogItem[]): number | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "message" && it.ts) return it.ts;
+  }
+  return null;
+}
+
+const EMPTY_LOG: LogItem[] = [];
+
+// Disambiguating subline for a fleet row still on its spawn-time repo-name label (audit #46) — a dim relative-time
+// line under the label. Subscribes narrowly to just this one worker's log (mirrors WorkerCost's per-row live read)
+// so activity elsewhere in the fleet doesn't re-render every row; renders nothing until a timestamp is available.
+function WorkerActivity({ workerId }: { workerId: string }): JSX.Element | null {
+  const t = useT();
+  const locale = useLocale();
+  const ts = useStore((s) => lastActivityTs(s.workerLogs[workerId] ?? EMPTY_LOG));
+  if (ts === null) return null;
+  // Within 7 days, relative time (i18n); beyond that, absolute date. Same convention as GitHistory's
+  // commitDateLabel / AssistantMessage's timeLabel.
+  const now = Date.now();
+  const rel = relativeTime(ts, now);
+  const label = !rel
+    ? absoluteDate(ts, now, locale)
+    : rel.unit === "now" ? t("relativeTime.justNow")
+    : rel.unit === "m" ? t("relativeTime.minutesAgo", { n: rel.value })
+    : rel.unit === "h" ? t("relativeTime.hoursAgo", { n: rel.value })
+    : t("relativeTime.daysAgo", { n: rel.value });
+  return <span className="truncate text-[10px] leading-tight text-muted/70">{label}</span>;
+}
 
 function RepoTreeImpl(p: {
   repos: Repo[];
@@ -47,6 +92,7 @@ function RepoTreeImpl(p: {
   if (spawnSeedRef.current === null && p.fleet.length > 0) spawnSeedRef.current = new Set(p.fleet.map((f) => f.id));
   const isFreshSpawn = (id: string): boolean => spawnSeedRef.current !== null && !spawnSeedRef.current.has(id);
   const knownPaths = new Set(p.repos.map((r) => r.path));
+  const repoNameByPath = new Map(p.repos.map((r) => [r.path, r.name])); // for detecting the repo-name label fallback (audit #46)
   const live = p.fleet.filter((f) => !f.archived); // archived workers are hidden from the tree
   const archived = p.fleet.filter((f) => f.archived);
   // Fleet-at-scale filter — by label + an "only active" toggle. Groups auto-open while filtering so matches surface.
@@ -76,6 +122,10 @@ function RepoTreeImpl(p: {
         </div>
       );
     }
+    // Only rows still on the spawn-time repo-name placeholder get the disambiguating subline — a real (auto- or
+    // user-)generated label is already distinguishing. WorkerActivity itself is opportunistic (see lastActivityTs):
+    // it renders nothing until this worker's log has been loaded, so a never-viewed worker shows no subline yet.
+    const fallback = isFallbackLabel(sub, repoNameByPath);
     return (
       <div key={sub.id} className={cn("group relative", isFreshSpawn(sub.id) && "rise-in")}>
         <button
@@ -91,7 +141,10 @@ function RepoTreeImpl(p: {
           {isProvisioning(sub.status)
             ? <Loader2 size={11} className="shrink-0 animate-spin text-accent" />
             : isLive(sub.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
-          <span className={cn("min-w-0 flex-1 truncate", p.attention?.[sub.id] && !active && "font-semibold text-fg")}>{sub.label}</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className={cn("truncate", p.attention?.[sub.id] && !active && "font-semibold text-fg")}>{sub.label}</span>
+            {fallback && <WorkerActivity workerId={sub.id} />}
+          </span>
           <WorkerCost workerId={sub.id} />
           <span className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted">{statusTag(sub.status)}</span>
           {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}

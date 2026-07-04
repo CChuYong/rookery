@@ -8,8 +8,10 @@ import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { baseName } from "../lib/path.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
-import { useT } from "../i18n/provider.js";
+import { relativeTime, absoluteDate } from "../lib/relative-time.js";
+import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
+import type { Locale } from "../i18n/types.js";
 
 type Session = { id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean };
 type SourceKind = "all" | "ui" | "slack" | "automation";
@@ -131,6 +133,20 @@ function groupByAutomation(sessions: Session[], automations: AutomationLite[], t
 }
 
 const sessName = (s: Session): string => s.label || baseName(s.cwd) || s.id;
+// A session has no explicit title → its name fell back to the cwd folder (or id). This is what makes the sidebar a
+// wall of identical labels (audit #46, e.g. 'clover-space' x6) when several sessions share a working directory.
+const isFallbackNamed = (s: Session): boolean => !s.label;
+
+// Turn last-activity into a label that follows the app locale. Within 7 days, relative time (i18n); beyond that,
+// absolute date. Same convention as GitHistory's commitDateLabel / AssistantMessage's timeLabel.
+function activityLabel(ts: number, now: number, t: TFunc, locale: Locale): string {
+  const rel = relativeTime(ts, now);
+  if (!rel) return absoluteDate(ts, now, locale);
+  if (rel.unit === "now") return t("relativeTime.justNow");
+  if (rel.unit === "m") return t("relativeTime.minutesAgo", { n: rel.value });
+  if (rel.unit === "h") return t("relativeTime.hoursAgo", { n: rel.value });
+  return t("relativeTime.daysAgo", { n: rel.value });
+}
 
 function SessionsImpl(p: {
   sessions: Session[];
@@ -151,6 +167,7 @@ function SessionsImpl(p: {
   onFilter?: (f: SourceFilter) => void;
 }): JSX.Element {
   const t = useT();
+  const locale = useLocale();
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
@@ -193,6 +210,8 @@ function SessionsImpl(p: {
   const Row = (s: Session): JSX.Element => {
     const name = sessName(s);
     const isActive = s.id === p.activeId;
+    // Only rows without an explicit title get the disambiguating subline — a real title is already distinguishing.
+    const fallbackNamed = isFallbackNamed(s);
     if (renaming?.id === s.id) {
       return (
         <div key={s.id} className="px-1 py-1">
@@ -223,7 +242,12 @@ function SessionsImpl(p: {
           <span className={cn("absolute left-0.5 top-2 bottom-2 w-[2.5px] rounded-full transition-colors duration-200", isActive ? "bg-accent" : s.status === "active" ? "bg-pr/70" : "bg-stop")} />
           {/* master turn in progress = live pulse (same signature as the worker tree) */}
           {p.running?.[s.id] && <span title={t("sessions.workingDot")} className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
-          <span className={cn("min-w-0 flex-1 truncate", p.attention?.[s.id] && !isActive && "font-semibold text-fg")}>{name}</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className={cn("truncate", p.attention?.[s.id] && !isActive && "font-semibold text-fg")}>{name}</span>
+            {/* fallback-named row (no explicit title) → a dim relative-time subline breaks the wall of identical
+                folder-name labels (audit #46, secondary-text scope; auto-title from the first message is deferred). */}
+            {fallbackNamed && <span className="truncate text-[10.5px] leading-tight text-muted/70">{activityLabel(new Date(s.lastActivity).getTime(), Date.now(), t, locale)}</span>}
+          </span>
           {/* right-side indicators (badge/unread) yield space to the action buttons on hover. The badge only shows in 'All' (tabs already indicate the source). */}
           {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><OriginBadge origin={s.origin} /></span>}
           {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0" />}

@@ -210,3 +210,17 @@ describe("Sessions initial load failure (audit #14)", () => {
     expect(screen.queryByText("목록을 불러오지 못했어요")).toBeNull();
   });
 });
+
+describe("Sessions fallback-name disambiguating subline (audit #46)", () => {
+  it("a fallback-named session (no explicit title) shows a dim relative-time subline", () => {
+    render(<Sessions sessions={[mk({ id: "s1", cwd: "/code/app" })] as never} activeId={null} onSelect={() => {}} />);
+    expect(screen.getByText("app")).toBeInTheDocument(); // name came from baseName(cwd)
+    expect(screen.getByText("방금")).toBeInTheDocument(); // lastActivity = now → 'just now'
+  });
+
+  it("a session with an explicit title stays single-line (no subline noise)", () => {
+    render(<Sessions sessions={[mk({ id: "s1", label: "My Title" })] as never} activeId={null} onSelect={() => {}} />);
+    expect(screen.getByText("My Title")).toBeInTheDocument();
+    expect(screen.queryByText("방금")).toBeNull();
+  });
+});
