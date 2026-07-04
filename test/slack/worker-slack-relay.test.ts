@@ -5,7 +5,7 @@ import type { SlackClient, ThreadTarget } from "../../src/slack/types.js";
 import type { CoreEvent, WorkerEventData } from "../../src/core/events.js";
 
 function fakeClient() {
-  const posts: Array<{ channel: string; thread_ts?: string; text: string }> = [];
+  const posts: Array<{ channel: string; thread_ts?: string; text: string; unfurl_links?: boolean; unfurl_media?: boolean }> = [];
   const appends: Array<{ markdown_text?: string }> = [];
   const state = { permalinks: 0 };
   const client: SlackClient = {
@@ -70,6 +70,9 @@ describe("WorkerSlackRelay", () => {
     expect(f.posts[1]!.channel).toBe("Cmaster");
     expect(f.posts[1]!.thread_ts).toBe("m1");
     expect(f.posts[1]!.text).toContain("https://slack/C-relay/ts1");
+    // the permalink is our own worker thread → suppress Slack's preview card
+    expect(f.posts[1]!.unfurl_links).toBe(false);
+    expect(f.posts[1]!.unfurl_media).toBe(false);
   });
 
   it("feeds a tracked worker's assistant message into its thread reporter", async () => {

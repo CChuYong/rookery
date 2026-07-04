@@ -24,7 +24,8 @@ export interface SlackClient {
   chat: {
     // thread_ts optional → omit it to post a top-level (root) message; the returned ts threads replies + builds a permalink.
     // text is the fallback/notification; blocks (optional) carry rich layout (e.g. the worker-relay root card).
-    postMessage(args: { channel: string; thread_ts?: string; text: string; blocks?: unknown[] }): Promise<{ ts?: string }>;
+    // unfurl_links/unfurl_media (optional) → set false to suppress Slack's link/media preview cards (e.g. bot meta messages that carry a permalink).
+    postMessage(args: { channel: string; thread_ts?: string; text: string; blocks?: unknown[]; unfurl_links?: boolean; unfurl_media?: boolean }): Promise<{ ts?: string }>;
     getPermalink(args: { channel: string; message_ts: string }): Promise<{ permalink?: string }>;
   };
 }

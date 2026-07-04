@@ -93,7 +93,8 @@ export class WorkerSlackRelay {
       try {
         const permalink = await this.deps.client.chat.getPermalink({ channel, message_ts: rootTs }).then((r) => r.permalink).catch(() => undefined);
         if (permalink) {
-          await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: `🧵 Worker \`${e.label || e.workerId}\` started — follow: ${permalink}` });
+          // unfurl off: this is a bot meta message whose only URL is the worker-thread permalink — a preview card of our own thread is noise.
+          await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: `🧵 Worker \`${e.label || e.workerId}\` started — follow: ${permalink}`, unfurl_links: false, unfurl_media: false });
         }
       } catch (err) {
         process.stderr.write(`[rookery] worker-slack-relay link post failed: ${String(err)}\n`);
