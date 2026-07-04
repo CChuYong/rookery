@@ -18,7 +18,7 @@
 
 공수 분포: **S 70건 · M 11건** (L 없음). 인벤토리는 심각도 high→low, 같은 심각도 안에서는 공수 S→M 순으로 정렬했다.
 
-**진행 상태**: Quick wins #1~#41은 브랜치 `uiux/quick-wins`(2026-07-03)에서, medium #42~#52는 브랜치 `uiux/medium-wave`(2026-07-04)에서 전량 구현·main 머지 완료됐다. medium 중 일부는 렌더러 범위로 스코핑됐다(#46 자동 제목 생성·#47 워커→세션 역링크는 데몬 변경이라 후속으로 연기). 남은 것: low #53~#81, 라이브 시각검증(dockview hide/reopen·Segment 수렴), 연기된 후속 항목.
+**진행 상태**: 전 81건이 3개 웨이브로 구현·main 머지 완료됐다 — Quick wins #1~#41 (`uiux/quick-wins`, 2026-07-03), medium #42~#52 (`uiux/medium-wave`, 2026-07-04), low #53~#81 (`uiux/low-wave`, 2026-07-04). 일부는 렌더러 범위로 스코핑됐다(#46 자동 제목 생성·#47 워커→세션 역링크는 데몬 변경이라 후속으로 연기). 남은 것: 라이브 시각검증(dockview hide/reopen·Segment 수렴·ConfirmDialog 포털·사이드바 밀도·eyebrow 리듬 등 jsdom 불가 항목), 연기된 후속(#46 자동 제목·#47 역링크·#49 이중탭바·ko 어조 잔여 등 데몬/별도 sweep).
 
 **High 3건**
 - **#1** 마스터 세션 전송 실패가 무피드백으로 사라지고 pending 버블·composer가 영구 고착 (`App.tsx` fire-and-forget vs 이미 고쳐진 `subSend` 비대칭)
