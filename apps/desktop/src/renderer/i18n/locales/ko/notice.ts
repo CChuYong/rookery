@@ -9,4 +9,7 @@ export default {
   "notice.requiresAction": "⏸ 입력/승인 필요",
   "notice.interrupted": "⏹ 중단됨",
   "notice.turnCap": "턴 한도 도달 (maxTurns={max}, num_turns={turns}) — 세션 중단을 고려하세요.",
+  "notice.workerDone": "✅ 워커 {label} 완료",
+  "notice.workerFailed": "⚠️ 워커 {label} 실패",
+  "notice.workerStopped": "⏹ 워커 {label} 종료",
 } satisfies Catalog;

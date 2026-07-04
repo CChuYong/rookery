@@ -6,6 +6,32 @@ import type { Repositories } from "../persistence/repositories.js";
 // terminal failure (so an armed master is told even when the work failed, instead of waiting forever for an idle).
 const SETTLED = new Set(["idle", "done", "error", "failed", "stopped", "orphaned"]);
 
+// A settled worker's notification payload. Structured (not a preformatted string) so the master can build BOTH the
+// model prompt line (formatNotificationLine) AND a clean localized display notice (buildWorkerNotice) from it.
+export interface WorkerNotification {
+  label: string;
+  branch: string; // w.branch ?? workerId
+  status: string; // idle | done | error | failed | stopped | orphaned
+  tail: string;   // last assistant text (≤500 chars) — for the model prompt only, never shown in the chip
+}
+
+// The single model-prompt line for a settled worker (same wording the old buildLine produced).
+export function formatNotificationLine(n: WorkerNotification): string {
+  return `worker ${n.label} (${n.branch}) — ${n.status}\n  ${n.tail}`;
+}
+
+// Parse a persisted pending-notification row back into structured form. Legacy rows (plain strings written by an
+// older build) fail JSON.parse or lack fields → wrapped as a done-bucket notice carrying the raw text as its tail.
+export function parseNotification(text: string): WorkerNotification {
+  try {
+    const o = JSON.parse(text) as Partial<WorkerNotification>;
+    if (o && typeof o.label === "string" && typeof o.status === "string") {
+      return { label: o.label, branch: o.branch ?? "", status: o.status, tail: o.tail ?? "" };
+    }
+  } catch { /* legacy plain-string row → fall through */ }
+  return { label: "", branch: "", status: "done", tail: text };
+}
+
 export interface WorkerNotifierDeps {
   bus: EventBus;
   repos: Repositories;

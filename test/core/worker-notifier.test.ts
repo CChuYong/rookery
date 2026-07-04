@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
-import { WorkerNotifier } from "../../src/core/worker-notifier.js";
+import { WorkerNotifier, formatNotificationLine, parseNotification, type WorkerNotification } from "../../src/core/worker-notifier.js";
 
 function h() {
   const repos = new Repositories(openDb(":memory:"), () => "t");
@@ -105,5 +105,21 @@ describe("shutdown parking (arm survives to the next boot)", () => {
     expect(repos.getWorker("w1")!.notify_armed).toBe(1); // arm preserved in the DB
     notifier.sweepSettled(); // next boot
     expect(delivered).toHaveLength(1);
+  });
+});
+
+describe("worker-notification helpers", () => {
+  const n: WorkerNotification = { label: "app", branch: "rookery/w1", status: "idle", tail: "did the thing" };
+
+  it("formatNotificationLine reproduces the model-prompt line", () => {
+    expect(formatNotificationLine(n)).toBe("worker app (rookery/w1) — idle\n  did the thing");
+  });
+
+  it("parseNotification round-trips a serialized notification", () => {
+    expect(parseNotification(JSON.stringify(n))).toEqual(n);
+  });
+
+  it("parseNotification falls back for a legacy plain-string row", () => {
+    expect(parseNotification("worker app (b) — idle")).toEqual({ label: "", branch: "", status: "done", tail: "worker app (b) — idle" });
   });
 });
