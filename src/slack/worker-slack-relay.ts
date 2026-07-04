@@ -102,6 +102,9 @@ export class WorkerSlackRelay {
         const ce = workerEventToCoreEvent(ev.data, ev.sessionId);
         if (ce) reporter.onEvent(ce);
       }
+      // Stop buffering NOW (atomic with the flush — no await between) so events arriving during the alert round-trip
+      // below route straight to the registered reporter instead of being buffered into an entry the finally then clears.
+      this.spawnBuffer.delete(e.workerId);
       // Link the worker thread back into the master's Slack thread — BEST-EFFORT: a failed link post must not
       // disable the relay for this worker (registration above already happened regardless of this outcome).
       try {

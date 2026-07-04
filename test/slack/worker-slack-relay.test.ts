@@ -135,6 +135,21 @@ describe("WorkerSlackRelay", () => {
     expect(delivered.indexOf("first")).toBeLessThan(delivered.indexOf("second"));
   });
 
+  it("delivers a worker.event that arrives during the alert round-trip (not dropped)", async () => {
+    const f = fakeClient();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const relay = new WorkerSlackRelay(makeDeps(f.client, { alert: async () => { await gate; return true; } }));
+    relay.onEvent(spawn());
+    // let onSpawned run past the root post + registration + flush, up to the blocked alert
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    // this event arrives while alert() is awaiting — must go straight to the registered reporter, not a cleared buffer
+    relay.onEvent(workerEvent({ kind: "message", role: "assistant", content: "during-alert" }));
+    release();
+    await relay.idle();
+    expect(f.appends.some((a) => a.markdown_text === "during-alert")).toBe(true);
+  });
+
   it("a failed master-thread link post does not disable the relay for that worker (audit #19)", async () => {
     const posts: Array<{ channel: string; thread_ts?: string; text: string }> = [];
     const appends: Array<{ markdown_text?: string }> = [];
