@@ -1043,6 +1043,12 @@ export function App(): JSX.Element {
               onEdit={(job) => setEditJob(job)}
               onNew={() => setEditJob("new")}
               onViewSessions={(id) => { s.setSessionFilter({ source: "automation", automationId: id }); navigate({ overlay: null, showRepos: false }); }}
+              onResolveSlackRefs={(channels, users) => {
+                // Best-effort (audit #51): no client, a disconnected/unconfigured Slack adapter, or any daemon-side lookup
+                // failure all resolve to empty maps — AutomationPage's own fallback then keeps showing the raw ids.
+                const req = client?.request({ type: "automation.resolveSlackRefs", channels, users });
+                return req ? req.then((r) => ({ channels: r.channels ?? {}, users: r.users ?? {} }), () => ({ channels: {}, users: {} })) : Promise.resolve({ channels: {}, users: {} });
+              }}
             />
           )
         ) : s.daemon === "down" ? (

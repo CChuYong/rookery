@@ -73,6 +73,80 @@ it("shows a slack trigger badge summarizing the filters", () => {
   expect(screen.getByText(/"deploy"/)).toBeInTheDocument();
 });
 
+// ─── Slack id → name resolution (audit #51) ────────────────────────────────
+
+it("without onResolveSlackRefs, the raw Slack channel id is shown (no regression, matches Slack-off fallback)", () => {
+  render(<AutomationPage automations={[slackJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByText(/#C123/)).toBeInTheDocument();
+});
+
+it("resolves a Slack channel id to its name and renders '#name' once the resolution lands", async () => {
+  const onResolveSlackRefs = vi.fn((channels: string[], users: string[]) =>
+    Promise.resolve({ channels: Object.fromEntries(channels.map((c) => [c, "general"])), users: Object.fromEntries(users.map((u) => [u, "clover"])) }),
+  );
+  render(
+    <AutomationPage
+      automations={[slackJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+      onResolveSlackRefs={onResolveSlackRefs}
+    />,
+  );
+  expect(onResolveSlackRefs).toHaveBeenCalledWith(["C123"], []);
+  await waitFor(() => expect(screen.getByText(/#general/)).toBeInTheDocument());
+  expect(screen.queryByText(/#C123/)).toBeNull();
+});
+
+it("keeps showing the raw id when onResolveSlackRefs rejects (disconnected/unconfigured Slack — no crash)", async () => {
+  const onResolveSlackRefs = vi.fn(() => Promise.reject(new Error("disconnected")));
+  render(
+    <AutomationPage
+      automations={[slackJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+      onResolveSlackRefs={onResolveSlackRefs}
+    />,
+  );
+  await waitFor(() => expect(onResolveSlackRefs).toHaveBeenCalled());
+  expect(screen.getByText(/#C123/)).toBeInTheDocument();
+});
+
+it("does not re-request an id it has already resolved, even if the automations array is re-rendered", async () => {
+  const onResolveSlackRefs = vi.fn((channels: string[]) => Promise.resolve({ channels: Object.fromEntries(channels.map((c) => [c, "general"])), users: {} }));
+  const { rerender } = render(
+    <AutomationPage
+      automations={[slackJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+      onResolveSlackRefs={onResolveSlackRefs}
+    />,
+  );
+  await waitFor(() => expect(screen.getByText(/#general/)).toBeInTheDocument());
+  // Re-render with a new array/object reference for the same rule (e.g. an unrelated lastStatus refresh) —
+  // the effect re-runs (new automations reference) but the per-id cache must suppress a duplicate request.
+  rerender(
+    <AutomationPage
+      automations={[{ ...slackJob }]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+      onResolveSlackRefs={onResolveSlackRefs}
+    />,
+  );
+  expect(onResolveSlackRefs).toHaveBeenCalledTimes(1);
+});
+
 it("shows empty state with no jobs", () => {
   render(<AutomationPage automations={[]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
   expect(screen.getByText("예약된 작업이 없어요.")).toBeInTheDocument();

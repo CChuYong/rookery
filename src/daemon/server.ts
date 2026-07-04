@@ -35,6 +35,7 @@ import { SlackInteractionBridge, makeSlackCanUseTool, parseSlackThreadKey } from
 import { makeSlackCapabilities } from "../slack/capabilities.js";
 import { makeHolder } from "../slack/holder.js";
 import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
+import type { SlackRefResolver } from "../slack/name-resolver.js";
 import { InteractionRegistry } from "../core/interaction-registry.js";
 import { createScheduleToolsServer, SCHEDULE_SERVER_NAME, SCHEDULE_TOOL_NAMES } from "../tools/schedule-tools.js";
 import type { SlackHandle } from "../slack/app.js";
@@ -123,6 +124,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const bridgeHolder = makeHolder<SlackInteractionBridge>();
   const threadReaderHolder = makeHolder<SlackThreadReader>();
   const reporterHolder = makeHolder<(sessionId: string, externalKey: string) => void>();
+  const nameResolverHolder = makeHolder<SlackRefResolver>();
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
   const sessions = new SessionManager({ repos, bus, queryFn, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
@@ -246,10 +248,19 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       clearThreadReader: (r) => threadReaderHolder.clearIf(r),
       setReporterFor: (fn) => { if (fn) reporterHolder.set(fn); },
       clearReporterFor: (fn) => reporterHolder.clearIf(fn),
+      setNameResolver: (r) => { if (r) nameResolverHolder.set(r); },
+      clearNameResolver: (r) => nameResolverHolder.clearIf(r),
       resolveThread: (id) => parseSlackThreadKey(repos.getSession(id)?.external_key ?? null), onMessage: slackTrigger }),
     emit: (status) => bus.emit({ type: "slack.status", sessionId: ALL_CHANNEL, status }),
   });
   void slack.boot();
+  // automation.resolveSlackRefs backing function (audit #51): no resolver (Slack unconfigured/off/disconnected) or any
+  // lookup failure both degrade to empty maps — never rejects, never blocks automation.list (a separate request).
+  const resolveSlackRefs = async (channels: string[], users: string[]) => {
+    const resolver = nameResolverHolder.get();
+    if (!resolver) return { channels: {}, users: {} };
+    try { return await resolver.resolve(channels, users); } catch { return { channels: {}, users: {} }; }
+  };
 
   const httpServer = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/health") {
@@ -298,7 +309,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });

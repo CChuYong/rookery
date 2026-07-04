@@ -4,6 +4,7 @@ import type { SlackClient, SlackFile, ThreadTarget } from "./types.js";
 import type { FileDownloader } from "./file-download.js";
 import type { SlackInteractionBridge } from "./interaction.js";
 import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
+import type { SlackRefResolver } from "./name-resolver.js";
 import { ThreadRegistry } from "./thread-registry.js";
 import { SlackThreadReporter } from "./reporter.js";
 import { t, type Locale } from "../core/i18n.js";
@@ -34,12 +35,16 @@ export interface SlackDeps {
   // Register reporter-ensure (sessionId+external_key → guarantee that thread's reporter) into the daemon holder at connection time (null when disconnected).
   // Called by the dispatcher right before firing → headless turns (wakeup, etc.) of Slack sessions are also delivered to the thread without a human message.
   setReporterFor?: (fn: ((sessionId: string, externalKey: string) => void) | null) => void;
+  // Register the channel/user name resolver (conversations.info/users.info) into the daemon holder at connection time
+  // (null when disconnected). Backs the automation.resolveSlackRefs request (audit #51 — human-readable rule cards).
+  setNameResolver?: (r: SlackRefResolver | null) => void;
   // Owner-scoped release counterparts of the set* holders above: stop() passes ITS OWN instance, and the daemon
   // clears the holder only if it still points at that instance. Without this, a late stop() from a superseded
   // connection (start-timeout → retry succeeded → stale start resolves late) nulls the LIVE connection's holders.
   clearBridge?: (b: SlackInteractionBridge) => void;
   clearThreadReader?: (r: SlackThreadReader) => void;
   clearReporterFor?: (fn: (sessionId: string, externalKey: string) => void) => void;
+  clearNameResolver?: (r: SlackRefResolver) => void;
   // Slack message trigger source handler — routes app.message events to the automation dispatcher.
   // ts/threadTs/team are passed to the action as template variables ({{ts}}/{{threadTs}}/{{team}}).
   onMessage?: (e: { channel: string; userId?: string; text: string; ts?: string; threadTs?: string; team?: string }) => Promise<void>;

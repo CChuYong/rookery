@@ -8,7 +8,7 @@ import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { Connection } from "../../src/daemon/connection.js";
-import type { ClientSocket, AutomationProvider } from "../../src/daemon/connection.js";
+import type { ClientSocket, AutomationProvider, SlackRefResolverFn } from "../../src/daemon/connection.js";
 import { InteractionRegistry } from "../../src/core/interaction-registry.js";
 import { Settings } from "../../src/core/settings.js";
 import { loadConfig } from "../../src/config.js";
@@ -824,5 +824,51 @@ describe("Connection automation routes", () => {
     const conn = new Connection(socket, sm, bus, fleet, repos); // no automations provider
     await conn.handleRaw(JSON.stringify({ type: "automation.list", reqId: "q4" }));
     expect(sent.at(-1)).toMatchObject({ type: "error", reqId: "q4" });
+  });
+});
+
+// audit #51 — automation rule cards resolve raw Slack channel/user ids to names. This request is best-effort and must
+// never surface as an "error" reply: no injected resolver (Slack unconfigured/off/disconnected) and a rejecting
+// resolver (e.g. an API error mid-lookup) both degrade to empty maps, letting the renderer fall back to the raw id.
+describe("Connection automation.resolveSlackRefs", () => {
+  function makeConn(resolveSlackRefs?: SlackRefResolverFn): { conn: Connection; sent: any[] } {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet });
+    const sent: any[] = [];
+    const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
+    const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, resolveSlackRefs);
+    return { conn, sent };
+  }
+
+  it("returns resolved names via the injected resolver", async () => {
+    const { conn, sent } = makeConn(async (channels, users) => ({
+      channels: Object.fromEntries(channels.map((c) => [c, "general"])),
+      users: Object.fromEntries(users.map((u) => [u, "clover"])),
+    }));
+    await conn.handleRaw(JSON.stringify({ type: "automation.resolveSlackRefs", reqId: "q1", channels: ["C1"], users: ["U1"] }));
+    expect(sent.at(-1)).toMatchObject({ type: "automation.resolveSlackRefs.result", reqId: "q1", channels: { C1: "general" }, users: { U1: "clover" } });
+  });
+
+  it("returns empty maps when no resolver is injected (Slack unconfigured/off) — no crash, no error reply", async () => {
+    const { conn, sent } = makeConn(undefined);
+    await conn.handleRaw(JSON.stringify({ type: "automation.resolveSlackRefs", reqId: "q2", channels: ["C1"], users: ["U1"] }));
+    expect(sent.at(-1)).toEqual({ type: "automation.resolveSlackRefs.result", reqId: "q2", channels: {}, users: {} });
+  });
+
+  it("returns empty maps when the injected resolver rejects (disconnected client / API error)", async () => {
+    const { conn, sent } = makeConn(async () => { throw new Error("disconnected"); });
+    await conn.handleRaw(JSON.stringify({ type: "automation.resolveSlackRefs", reqId: "q3", channels: ["C1"], users: [] }));
+    expect(sent.at(-1)).toEqual({ type: "automation.resolveSlackRefs.result", reqId: "q3", channels: {}, users: {} });
+  });
+
+  it("defaults channels/users to empty arrays when the request omits them", async () => {
+    const calls: Array<{ channels: string[]; users: string[] }> = [];
+    const { conn, sent } = makeConn(async (channels, users) => { calls.push({ channels, users }); return { channels: {}, users: {} }; });
+    await conn.handleRaw(JSON.stringify({ type: "automation.resolveSlackRefs", reqId: "q4" }));
+    expect(calls).toEqual([{ channels: [], users: [] }]);
+    expect(sent.at(-1)).toMatchObject({ type: "automation.resolveSlackRefs.result", reqId: "q4" });
   });
 });

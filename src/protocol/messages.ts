@@ -135,6 +135,9 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     vars: z.object({ message: z.string(), channel: z.string(), user: z.string(), ts: z.string(), threadTs: z.string(), team: z.string() }).partial().optional(),
   }),
   z.object({ type: z.literal("automation.set_enabled"), reqId: z.string(), id: z.string(), enabled: z.boolean() }),
+  // Best-effort Slack channel/user id → display name resolution for automation rule cards (audit #51). Never blocks
+  // automation.list; on any failure or a disconnected/unconfigured Slack adapter, ids are simply omitted from the result.
+  z.object({ type: z.literal("automation.resolveSlackRefs"), reqId: z.string(), channels: z.array(z.string()).optional(), users: z.array(z.string()).optional() }),
 ]);
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -185,7 +188,8 @@ export type ServerMessage =
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
   | { type: "automation.list.result"; reqId: string; automations: Automation[] }
-  | { type: "automation.result"; reqId: string; automation: Automation };
+  | { type: "automation.result"; reqId: string; automation: Automation }
+  | { type: "automation.resolveSlackRefs.result"; reqId: string; channels: Record<string, string>; users: Record<string, string> };
 
 // Request (a request that gets a response via reqId) type → response ServerMessage mapping — **single source**.
 // Must be 1:1 with the reply types in the daemon's connection.ts (when adding a new request, add it here too → WsClient.request stays type-safe).
@@ -241,6 +245,7 @@ export interface RequestResultMap {
   "automation.set_enabled": Extract<ServerMessage, { type: "automation.result" }>;
   "automation.delete": Extract<ServerMessage, { type: "fleet.ack" }>;
   "automation.run": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "automation.resolveSlackRefs": Extract<ServerMessage, { type: "automation.resolveSlackRefs.result" }>;
 }
 
 export type RequestType = keyof RequestResultMap;

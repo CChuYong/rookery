@@ -69,6 +69,11 @@ export interface AutomationProvider {
   runNow(id: string, vars?: ActionVars): Promise<void>;
 }
 
+// Best-effort Slack id → name resolution for automation.resolveSlackRefs (audit #51). Always resolves — when Slack is
+// unconfigured/off/disconnected or any lookup fails, the injected function is expected to return empty maps rather
+// than reject, so the renderer's raw-id fallback is the only failure mode a client ever sees.
+export type SlackRefResolverFn = (channels: string[], users: string[]) => Promise<{ channels: Record<string, string>; users: Record<string, string> }>;
+
 export interface ClientSocket {
   send(data: string): void;
 }
@@ -90,6 +95,7 @@ export class Connection {
     private readonly models?: ModelsProvider,
     private readonly interactions?: InteractionResponder,
     private readonly automations?: AutomationProvider,
+    private readonly resolveSlackRefs?: SlackRefResolverFn,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -526,6 +532,14 @@ export class Connection {
         await this.automations.runNow(msg.id, msg.vars ?? {});
         this.bus.emit({ type: "automation.changed", sessionId: ALL_CHANNEL });
         this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "run", id: msg.id });
+        return;
+      }
+      case "automation.resolveSlackRefs": {
+        // Best-effort and never blocks automation.list: no resolver (Slack unconfigured/off) → empty maps, same as any lookup failure.
+        const resolved = this.resolveSlackRefs
+          ? await this.resolveSlackRefs(msg.channels ?? [], msg.users ?? []).catch(() => ({ channels: {}, users: {} }))
+          : { channels: {}, users: {} };
+        this.reply({ type: "automation.resolveSlackRefs.result", reqId: msg.reqId, channels: resolved.channels, users: resolved.users });
         return;
       }
     }

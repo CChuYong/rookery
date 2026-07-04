@@ -8,6 +8,7 @@ import { makeFileDownloader } from "./file-download.js";
 import { SlackInteractionBridge, INTERACTION_ACTION_RE } from "./interaction.js";
 import { redactOnReaction } from "./redaction.js";
 import { makeSlackThreadReader } from "./thread-reader.js";
+import { makeSlackRefResolver } from "./name-resolver.js";
 import { WorkerSlackRelay } from "./worker-slack-relay.js";
 import { FLEET_CHANNEL } from "../core/events.js";
 import { isTriggerableMessage, extractSlackText, type RawSlackMessage } from "./message-text.js";
@@ -174,6 +175,11 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
   const threadReader = makeSlackThreadReader(app.client as unknown as Parameters<typeof makeSlackThreadReader>[0]);
   deps.setThreadReader?.(threadReader);
 
+  // Register the channel/user name resolver (conversations.info/users.info) on the daemon holder → backs
+  // automation.resolveSlackRefs (audit #51). Its cache lives for this connection only (reconnect → fresh resolver).
+  const nameResolver = makeSlackRefResolver(app.client as unknown as Parameters<typeof makeSlackRefResolver>[0]);
+  deps.setNameResolver?.(nameResolver);
+
   // Register reporter-ensure on the daemon holder → the dispatcher calls it right before firing, so that headless turns of a Slack session (wakeup, etc.)
   // also get a subscribed reporter delivering to the thread without a human message (prevents lost firings before the first message after restart/reconnect).
   const reporterFor = (sessionId: string, externalKey: string) =>
@@ -203,6 +209,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       if (deps.clearBridge) deps.clearBridge(bridge); else deps.setBridge?.(null);
       if (deps.clearThreadReader) deps.clearThreadReader(threadReader); else deps.setThreadReader?.(null);
       if (deps.clearReporterFor) deps.clearReporterFor(reporterFor); else deps.setReporterFor?.(null);
+      if (deps.clearNameResolver) deps.clearNameResolver(nameResolver); else deps.setNameResolver?.(null);
       unsubWorkerRelay();
       void workerRelay.dispose();
       registry.disposeAll();

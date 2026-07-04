@@ -13,15 +13,24 @@ import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 
+// Resolved Slack id → display name maps (audit #51). Missing entries fall back to the raw id — this is the
+// pre-existing behavior, so a slow/failed/disconnected resolution never blocks or breaks the card.
+export interface SlackRefNames {
+  channels: Record<string, string>;
+  users: Record<string, string>;
+}
+const EMPTY_SLACK_NAMES: SlackRefNames = { channels: {}, users: {} };
+
 // Trigger badge text — for cron, the cron expression; for slack, a filter summary (channels/keyword, or "slack: all" when empty).
-function triggerBadge(trigger: AutomationTrigger, t: TFunc): string {
+// channel/user ids are rendered as their resolved name when known (names), otherwise the raw id (unchanged from before #51).
+function triggerBadge(trigger: AutomationTrigger, t: TFunc, names: SlackRefNames = EMPTY_SLACK_NAMES): string {
   if (trigger.kind === "cron") return `${trigger.cron} · ${trigger.timezone}`;
   // 'once' (agent self-wakeup) is not sent to the UI list by the backend, but handle it for union safety.
   if (trigger.kind === "once") return `once · ${trigger.runAt}`;
   const parts: string[] = [];
-  if (trigger.channels?.length) parts.push(`#${trigger.channels.join(",#")}`);
+  if (trigger.channels?.length) parts.push(trigger.channels.map((id) => `#${names.channels[id] ?? id}`).join(","));
   if (trigger.keyword) parts.push(`"${trigger.keyword}"`);
-  if (trigger.fromUsers?.length) parts.push(`@${trigger.fromUsers.join(",@")}`);
+  if (trigger.fromUsers?.length) parts.push(trigger.fromUsers.map((id) => `@${names.users[id] ?? id}`).join(","));
   return parts.length ? `slack: ${parts.join(" ")}` : t("automationPage.slackAll");
 }
 
@@ -37,8 +46,34 @@ export function AutomationPage(p: {
   onEdit: (job: Automation) => void;
   onNew: () => void;
   onViewSessions?: (id: string) => void; // Jump to this automation's run sessions (history) — Sessions automation filter.
+  // Best-effort Slack channel/user id → name resolution (audit #51). Absent (e.g. tests) → cards keep showing raw ids,
+  // matching the daemon's own fallback when Slack is unconfigured/off/disconnected or a lookup fails.
+  onResolveSlackRefs?: (channels: string[], users: string[]) => Promise<SlackRefNames>;
 }): JSX.Element {
   const t = useT();
+  // Resolved-name cache for the lifetime of this page mount — ids already requested (resolved or not) are never
+  // re-requested just because the automations list re-rendered (e.g. after a toggle/lastStatus update).
+  const [slackNames, setSlackNames] = useState<SlackRefNames>(EMPTY_SLACK_NAMES);
+  const requested = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!p.onResolveSlackRefs) return;
+    const channelIds = new Set<string>();
+    const userIds = new Set<string>();
+    for (const a of p.automations) {
+      if (a.trigger.kind !== "slack") continue;
+      for (const c of a.trigger.channels ?? []) channelIds.add(c);
+      for (const u of a.trigger.fromUsers ?? []) userIds.add(u);
+    }
+    const channels = [...channelIds].filter((id) => !requested.current.has(`c:${id}`));
+    const users = [...userIds].filter((id) => !requested.current.has(`u:${id}`));
+    if (!channels.length && !users.length) return;
+    for (const id of channels) requested.current.add(`c:${id}`);
+    for (const id of users) requested.current.add(`u:${id}`);
+    // Best-effort, never blocks the card list: on rejection the ids above stay unresolved → raw-id fallback in triggerBadge.
+    p.onResolveSlackRefs(channels, users)
+      .then((res) => setSlackNames((prev) => ({ channels: { ...prev.channels, ...res.channels }, users: { ...prev.users, ...res.users } })))
+      .catch(() => {});
+  }, [p.automations, p.onResolveSlackRefs]);
   const [runTarget, setRunTarget] = useState<Automation | null>(null);
   // Delete is destructive (no undo) — gate the trash icon behind a confirm dialog (audit #20), mirroring the
   // session/worker delete-confirm pattern (Sessions.tsx/RepoTree.tsx).
@@ -103,7 +138,7 @@ export function AutomationPage(p: {
                       {a.corrupt && <span className="shrink-0 rounded-full border border-fail px-1.5 py-0.5 text-[10px] text-fail">{t("automationPage.corrupt")}</span>}
                     </div>
                     <div className="mt-0.5 truncate font-mono text-[11px] text-muted">
-                      {triggerBadge(a.trigger, t)}
+                      {triggerBadge(a.trigger, t, slackNames)}
                       {a.trigger.kind === "cron" && <> · {t("automationPage.nextRun")}: {a.nextRunAt ?? t("automationPage.never")}</>}
                     </div>
                   </div>
