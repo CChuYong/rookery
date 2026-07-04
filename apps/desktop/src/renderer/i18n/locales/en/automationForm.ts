@@ -1,5 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "automationForm.eyebrow": "Automation",
   "automationForm.sectionExecution": "Model / Execution",
   "automationForm.model": "Model",
   "automationForm.effort": "Effort",

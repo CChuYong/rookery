@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { X } from "lucide-react";
 import type { Automation, AutomationInput, AutomationTrigger, AutomationAction } from "@daemon/persistence/repositories.js";
 import { useT } from "../i18n/provider.js";
 import { Button } from "../ui/button.js";
-import { Input } from "../ui/input.js";
+import { Input, Select } from "../ui/input.js";
 import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand } from "./PromptEditor.js";
 import type { BrowseResult } from "../types/rookery.js";
@@ -133,28 +134,27 @@ export function AutomationForm(p: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Header bar */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
+      {/* Header bar — matches the overlay-header pattern shared by SettingsPage/AutomationPage/NewSessionPage
+          (drag h-11 px-5 + mono eyebrow + lucide X close); Cancel/Save moved to a body-bottom footer, mirroring
+          SettingsPage's Save placement (audit #75). */}
+      <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
+        <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">
+          {t("automationForm.eyebrow")}
+        </span>
+        <span className="font-semibold tracking-[-0.01em]">
+          {p.job === "new" ? t("automationModal.titleNew") : t("automationModal.titleEdit")}
+        </span>
         <button
           type="button"
-          className="flex items-center justify-center rounded p-1 text-fg-dim hover:bg-line/40"
           onClick={p.onClose}
           aria-label={t("common.close")}
+          className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim"
         >
-          ←
+          <X size={16} />
         </button>
-        <h2 className="flex-1 text-[14px] font-semibold">
-          {p.job === "new" ? t("automationModal.titleNew") : t("automationModal.titleEdit")}
-        </h2>
-        <Button variant="ghost" size="sm" onClick={p.onClose}>
-          {t("common.cancel")}
-        </Button>
-        <Button variant="primary" size="sm" loading={saving} disabled={!valid} onClick={() => { void submit(); }}>
-          {t("common.save")}
-        </Button>
       </div>
 
-      {/* Inline submit error (audit #4) — shown right under the header/Save row so a failed save (e.g. invalid cron) is
+      {/* Inline submit error (audit #4) — shown right under the header so a failed save (e.g. invalid cron) is
           visible without scrolling the body. */}
       {submitError && (
         <p className="shrink-0 border-b border-line bg-fail/12 px-4 py-2 text-[12px] text-fail">{submitError}</p>
@@ -188,14 +188,15 @@ export function AutomationForm(p: {
 
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationModal.triggerType")}</span>
-              <select
-                className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+              <Select
+                size="md"
+                className="w-full"
                 value={triggerKind}
                 onChange={(e) => setTriggerKind(e.target.value as "cron" | "slack")}
               >
                 <option value="cron">{t("automationModal.triggerCron")}</option>
                 <option value="slack">{t("automationModal.triggerSlack")}</option>
-              </select>
+              </Select>
             </label>
 
             {triggerKind === "cron" ? (
@@ -246,8 +247,9 @@ export function AutomationForm(p: {
             {/* Model select */}
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationForm.model")}</span>
-              <select
-                className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+              <Select
+                size="md"
+                className="w-full"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
@@ -255,22 +257,23 @@ export function AutomationForm(p: {
                 {models.map((m) => (
                   <option key={m.id} value={m.id}>{m.label}</option>
                 ))}
-              </select>
+              </Select>
             </label>
 
             {/* Effort select — shown only when a model is selected and effortSupported */}
             {model && effortSupported(model) && (
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] text-fg-dim">{t("automationForm.effort")}</span>
-                <select
-                  className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+                <Select
+                  size="md"
+                  className="w-full"
                   value={effort}
                   onChange={(e) => setEffort(e.target.value)}
                 >
                   {EFFORTS.map((e) => (
                     <option key={e} value={e}>{t(effortLabelKey(e))}</option>
                   ))}
-                </select>
+                </Select>
               </label>
             )}
 
@@ -278,8 +281,9 @@ export function AutomationForm(p: {
             <div className="flex flex-col gap-1">
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] text-fg-dim">{t("automationForm.permissionMode")}</span>
-                <select
-                  className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+                <Select
+                  size="md"
+                  className="w-full"
                   value={permissionMode}
                   onChange={(e) => setPermissionMode(e.target.value)}
                   aria-label={t("automationForm.permissionMode")}
@@ -287,11 +291,11 @@ export function AutomationForm(p: {
                   {permModes.map((pm) => (
                     <option key={pm} value={pm}>{permLabel(pm, t)}</option>
                   ))}
-                </select>
+                </Select>
               </label>
-              {/* inline bypassPermissions warning */}
+              {/* inline bypassPermissions warning — theme run token, not raw Tailwind yellow (audit #79) */}
               {permissionMode === "bypassPermissions" && (
-                <p className="text-[11px] text-yellow-500/80" data-testid="bypass-warning">
+                <p className="text-[11px] text-run/90" data-testid="bypass-warning">
                   {t("automationForm.bypassWarning")}
                 </p>
               )}
@@ -321,14 +325,15 @@ export function AutomationForm(p: {
 
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationModal.actionType")}</span>
-              <select
-                className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+              <Select
+                size="md"
+                className="w-full"
                 value={actionKind}
                 onChange={(e) => setActionKind(e.target.value as "master" | "worker")}
               >
                 <option value="master">{t("automationPage.typeMaster")}</option>
                 <option value="worker">{t("automationPage.typeWorker")}</option>
-              </select>
+              </Select>
             </label>
 
             {actionKind === "master" ? (
@@ -357,22 +362,24 @@ export function AutomationForm(p: {
                 </label>
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] text-fg-dim">{t("automationModal.sessionMode")}</span>
-                  <select
-                    className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+                  <Select
+                    size="md"
+                    className="w-full"
                     value={sessionMode}
                     onChange={(e) => setSessionMode(e.target.value as "reuse" | "fresh")}
                   >
                     <option value="reuse">{t("automationModal.sessionReuse")}</option>
                     <option value="fresh">{t("automationModal.sessionFresh")}</option>
-                  </select>
+                  </Select>
                 </label>
               </>
             ) : (
               <>
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] text-fg-dim">{t("automationModal.repo")}</span>
-                  <select
-                    className="h-9 rounded-[var(--radius)] border border-line bg-ink/60 px-2.5 text-[13px]"
+                  <Select
+                    size="md"
+                    className="w-full"
                     value={repo}
                     onChange={(e) => setRepo(e.target.value)}
                   >
@@ -381,7 +388,7 @@ export function AutomationForm(p: {
                         {r.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <div className="flex flex-col gap-1">
                   <span className="text-[12px] text-fg-dim">{t("automationModal.task")}</span>
@@ -403,10 +410,20 @@ export function AutomationForm(p: {
             )}
 
             {triggerKind === "slack" && actionKind === "master" && (
-              <p className="text-[11px] text-yellow-500/80">{t("automationModal.slackMasterCaution")}</p>
+              <p className="text-[11px] text-run/90">{t("automationModal.slackMasterCaution")}</p>
             )}
             <p className="text-[11px] text-muted">{t("automationModal.templateHint")}</p>
           </section>
+
+          {/* Save row — body-bottom, matching SettingsPage's Save placement (audit #75) */}
+          <div className="flex items-center justify-end gap-2 border-t border-line pt-4">
+            <Button variant="ghost" size="sm" onClick={p.onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="primary" size="sm" loading={saving} disabled={!valid} onClick={() => { void submit(); }}>
+              {t("common.save")}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

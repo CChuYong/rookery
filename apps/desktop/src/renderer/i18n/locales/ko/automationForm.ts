@@ -1,5 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "automationForm.eyebrow": "자동화",
   "automationForm.sectionExecution": "모델 / 실행",
   "automationForm.model": "모델",
   "automationForm.effort": "effort",
