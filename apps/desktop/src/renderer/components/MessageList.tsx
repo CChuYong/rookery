@@ -5,7 +5,7 @@ import { ToolGroup } from "./ToolGroup.js";
 import { InteractionCard } from "./InteractionCard.js";
 import type { InteractionAnswer } from "./InteractionCard.js";
 import { AssistantMessage } from "./AssistantMessage.js";
-import { MentionText } from "./MentionText.js";
+import { UserMarkdown } from "./Markdown.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { cn } from "../lib/cn.js";
 import { railClass, statusTag, statusLabelKey, isLive } from "../lib/status.js";
@@ -104,9 +104,10 @@ function MessageListImpl({
         rows.push(
           <div
             key={i}
-            className="max-w-[80%] self-end whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl rounded-br-md bg-accent px-3.5 py-2.5 text-[13.5px] leading-relaxed text-accent-ink shadow-[0_1px_10px_-3px_color-mix(in_srgb,var(--color-accent)_40%,transparent)]"
+            className="max-w-[80%] self-end [overflow-wrap:anywhere] rounded-2xl rounded-br-md bg-accent px-3.5 py-2.5 text-[13.5px] leading-relaxed text-accent-ink shadow-[0_1px_10px_-3px_color-mix(in_srgb,var(--color-accent)_40%,transparent)]"
           >
-            <MentionText text={it.content} tone="bubble" />
+            {/* markdown on the bubble (remarkBreaks keeps casual newlines; rehypeMentions keeps @file chips) */}
+            <UserMarkdown content={it.content} />
           </div>,
         );
       } else {
