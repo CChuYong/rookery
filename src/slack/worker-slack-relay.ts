@@ -13,7 +13,7 @@ export interface WorkerRelayDeps {
   resolveThread: (sessionId: string) => ThreadTarget | null; // master's Slack thread, or null if the session isn't Slack-origin
   getLocale?: () => Locale;
   // Route a one-line alert into the master thread's reporter (in-stream when a turn is open, else a threaded post).
-  // Returns true when a master reporter was found and the alert delivered; false → the relay posts it itself.
+  // Returns true when a master reporter was found (delivery is best-effort inside the reporter); false → the relay posts it itself.
   alert?: (sessionId: string, markdown: string) => Promise<boolean>;
 }
 
@@ -92,8 +92,18 @@ export class WorkerSlackRelay {
       const root = await this.deps.client.chat.postMessage({ channel, text: fallback, blocks });
       const rootTs = root.ts;
       if (!rootTs) return; // can't thread/permalink without a ts
+      // Register the reporter + flush the spawn buffer FIRST — this must not be gated on the alert below (a slow or
+      // stuck alert round-trip would otherwise delay registration and risk overflowing spawnBuffer for a chatty worker).
+      // master.userId → recipient_user_id, required for chat.startStream to stream in a regular (non-assistant) channel.
+      const reporter = new SlackThreadReporter(this.deps.client, { channel, threadTs: rootTs, team: master.team, userId: master.userId }, this.deps.getLocale);
+      this.workers.set(e.workerId, reporter);
+      // Flush events that raced the spawn round-trips, in arrival order.
+      for (const ev of this.spawnBuffer.get(e.workerId) ?? []) {
+        const ce = workerEventToCoreEvent(ev.data, ev.sessionId);
+        if (ce) reporter.onEvent(ce);
+      }
       // Link the worker thread back into the master's Slack thread — BEST-EFFORT: a failed link post must not
-      // skip the registration below (it used to disable the relay for this worker entirely).
+      // disable the relay for this worker (registration above already happened regardless of this outcome).
       try {
         const permalink = await this.deps.client.chat.getPermalink({ channel, message_ts: rootTs }).then((r) => r.permalink).catch(() => undefined);
         if (permalink) {
@@ -109,14 +119,6 @@ export class WorkerSlackRelay {
         }
       } catch (err) {
         process.stderr.write(`[rookery] worker-slack-relay link post failed: ${String(err)}\n`);
-      }
-      // master.userId → recipient_user_id, required for chat.startStream to stream in a regular (non-assistant) channel.
-      const reporter = new SlackThreadReporter(this.deps.client, { channel, threadTs: rootTs, team: master.team, userId: master.userId }, this.deps.getLocale);
-      this.workers.set(e.workerId, reporter);
-      // Flush events that raced the spawn round-trips, in arrival order.
-      for (const ev of this.spawnBuffer.get(e.workerId) ?? []) {
-        const ce = workerEventToCoreEvent(ev.data, ev.sessionId);
-        if (ce) reporter.onEvent(ce);
       }
     } finally {
       this.spawnBuffer.delete(e.workerId); // every exit path: stop buffering (direct delivery or out-of-scope drop)

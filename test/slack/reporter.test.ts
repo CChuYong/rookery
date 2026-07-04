@@ -384,4 +384,17 @@ describe("threadAlert", () => {
     expect(posts[0]!.unfurl_links).toBe(false);
     expect(posts[0]!.unfurl_media).toBe(false);
   });
+
+  it("does not pollute streamedText — the terminal master.message is still delivered whole", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), target);
+    r.onEvent(ev.toolStart("t1", "spawn_worker")); // open the stream
+    await r.idle();
+    await r.threadAlert("> 🧵 alert · <https://x|open>");
+    r.onEvent(ev.msg("the full assistant answer")); // terminal message, no prior deltas → must send in full
+    await r.idle();
+    const streamed = rec.streams.flatMap(texts).join("");
+    expect(streamed).toContain("> 🧵 alert · <https://x|open>"); // the alert appeared
+    expect(streamed).toContain("the full assistant answer");     // the real message was NOT dropped
+  });
 });

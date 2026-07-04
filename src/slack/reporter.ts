@@ -85,7 +85,7 @@ export class SlackThreadReporter {
   // post (avoids append lazily opening an orphaned streaming bubble outside a turn). Used by the worker→Slack relay.
   threadAlert(markdown: string): Promise<void> {
     this.tail = this.tail.then(async () => {
-      if (this.streamer) { await this.flushProse(); await this.append({ markdown_text: `\n${markdown}\n` }); }
+      if (this.streamer) { await this.flushProse(); await this.append({ markdown_text: `\n${markdown}\n` }, 0, { unfurl: false }); }
       else { await this.post(markdown, { unfurl: false }); }
     }).catch((err) => {
       process.stderr.write(`[rookery] slack reporter threadAlert error: ${String(err)}\n`);
@@ -104,7 +104,7 @@ export class SlackThreadReporter {
     });
   }
 
-  private async append(payload: AppendPayload, depth = 0): Promise<void> {
+  private async append(payload: AppendPayload, depth = 0, opts?: { unfurl?: boolean }): Promise<void> {
     if (!this.streamer) this.streamer = this.openStream();
     try {
       await this.streamer.append(payload);
@@ -117,17 +117,17 @@ export class SlackThreadReporter {
       // Don't retry — truncate the text to the byte budget and send it as a regular post.
       if (code === "msg_too_long") {
         const t = payloadFallbackText(payload);
-        if (t) await this.post(t);
+        if (t) await this.post(t, opts);
         return;
       }
       // message_not_in_streaming_state: recoverable by reopening the stream → retry a limited number of times.
       if (code === "message_not_in_streaming_state" && depth < 2) {
-        await this.append(payload, depth + 1);
+        await this.append(payload, depth + 1, opts);
         return;
       }
       // Otherwise (or retries exhausted): flush via a regular post so at least the text isn't lost (summarize if task-only).
       const t = payloadFallbackText(payload);
-      if (t) await this.post(t);
+      if (t) await this.post(t, opts);
     }
   }
 
