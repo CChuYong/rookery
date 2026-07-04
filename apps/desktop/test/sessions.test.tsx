@@ -73,6 +73,24 @@ describe("Sessions pin + hover actions", () => {
   });
 });
 
+describe("Sessions overflow '⋯' button (audit #45)", () => {
+  it("is reachable by role/name and opens the same menu as right-click (Rename/Fork visible)", () => {
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onDelete={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    const moreBtn = screen.getByRole("button", { name: "더보기" });
+    fireEvent.click(moreBtn);
+    expect(screen.getByText("이름 변경")).toBeInTheDocument();
+    expect(screen.getByText("포크")).toBeInTheDocument();
+  });
+
+  it("clicking a menu item opened via '⋯' invokes the corresponding callback", () => {
+    const onFork = vi.fn();
+    render(<Sessions activeId={null} onSelect={() => {}} onFork={onFork} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByText("포크"));
+    expect(onFork).toHaveBeenCalledWith("s1");
+  });
+});
+
 describe("Sessions source segmentation + automation grouping", () => {
   it("shows a 3-way origin badge (ui / slack / auto)", () => {
     render(<Sessions activeId={null} onSelect={() => {}} sessions={[

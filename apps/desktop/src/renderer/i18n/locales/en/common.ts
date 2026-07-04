@@ -11,6 +11,7 @@ export default {
   "common.connect": "Connect",
   "common.connected": "Connected",
   "common.retry": "Retry",
+  "common.moreActions": "More actions",
   "common.effortLow": "Low",
   "common.effortMedium": "Medium",
   "common.effortHigh": "High",

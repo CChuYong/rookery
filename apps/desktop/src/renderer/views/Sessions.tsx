@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { ChevronRight, Archive, Pin, Trash2 } from "lucide-react";
+import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
@@ -228,29 +228,37 @@ function SessionsImpl(p: {
           {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><OriginBadge origin={s.origin} /></span>}
           {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0" />}
         </button>
-        {/* hover actions (Pin / delete) — a 'sibling' of the main button (no nested buttons), absolutely positioned on the right. Shown only on group-hover. */}
-        {(p.onPin || p.onDelete) && (
-          <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-            {p.onPin && (
-              <button
-                title={s.pinned ? t("sessions.unpin") : t("sessions.pin")}
-                onClick={(e) => { e.stopPropagation(); p.onPin!(s.id, !s.pinned); }}
-                className={cn("rounded p-1 hover:bg-line/60", s.pinned ? "text-accent" : "text-muted hover:text-fg-dim")}
-              >
-                <Pin size={13} className={s.pinned ? "fill-current" : ""} />
-              </button>
-            )}
-            {p.onDelete && (
-              <button
-                title={t("common.delete")}
-                onClick={(e) => { e.stopPropagation(); setConfirm({ id: s.id, name }); }}
-                className="rounded p-1 text-muted hover:bg-line/60 hover:text-fail"
-              >
-                <Trash2 size={13} />
-              </button>
-            )}
-          </div>
-        )}
+        {/* hover actions (Pin / More / delete) — a 'sibling' of the main button (no nested buttons), absolutely positioned on the right. Shown only on group-hover/focus.
+            The '⋯' opens the SAME right-click menu, but reachable by left-click/Enter (audit #45: the menu was previously right-click-only, and macOS has no
+            context-menu key for keyboard users). It's always rendered (unlike Pin/Delete) since it also carries Rename/Fork/Archive. */}
+        <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          {p.onPin && (
+            <button
+              title={s.pinned ? t("sessions.unpin") : t("sessions.pin")}
+              onClick={(e) => { e.stopPropagation(); p.onPin!(s.id, !s.pinned); }}
+              className={cn("rounded p-1 hover:bg-line/60", s.pinned ? "text-accent" : "text-muted hover:text-fg-dim")}
+            >
+              <Pin size={13} className={s.pinned ? "fill-current" : ""} />
+            </button>
+          )}
+          {p.onDelete && (
+            <button
+              title={t("common.delete")}
+              onClick={(e) => { e.stopPropagation(); setConfirm({ id: s.id, name }); }}
+              className="rounded p-1 text-muted hover:bg-line/60 hover:text-fail"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+          <button
+            title={t("common.moreActions")}
+            aria-label={t("common.moreActions")}
+            onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4 }); }}
+            className="rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+          >
+            <MoreHorizontal size={13} />
+          </button>
+        </div>
       </div>
     );
   };

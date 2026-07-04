@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { RepoTree } from "../src/renderer/views/RepoTree.js";
 
 const repo = { name: "app", path: "/code/app", description: "", base: null };
+const worker = { id: "w1", label: "worker1", repoPath: "/code/app", status: "idle", branch: "rookery/w1", model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null };
 
 describe("RepoTree repo-header affordances (audit #3, #19)", () => {
   it("spawn (+) and remove (trash) buttons are focusable — not display:none — and expose their aria-labels", () => {
@@ -113,5 +114,48 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
       />,
     );
     expect(screen.getByText(/\+ 버튼으로 워커를 스폰할 수 있어요/)).toBeInTheDocument();
+  });
+});
+
+describe("RepoTree worker-row overflow '⋯' button (audit #45)", () => {
+  it("is reachable by role/name and opens the same menu as right-click (Rename/Fork visible)", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[worker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+        onRenameSub={vi.fn()}
+        onForkSub={vi.fn()}
+        onArchiveSub={vi.fn()}
+        onDeleteSub={vi.fn()}
+      />,
+    );
+    const moreBtn = screen.getByRole("button", { name: "더보기" });
+    fireEvent.click(moreBtn);
+    expect(screen.getByText("이름 변경")).toBeInTheDocument();
+    expect(screen.getByText("포크")).toBeInTheDocument();
+  });
+
+  it("clicking a menu item opened via '⋯' invokes the corresponding callback", () => {
+    const onForkSub = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[worker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+        onForkSub={onForkSub}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByText("포크"));
+    expect(onForkSub).toHaveBeenCalledWith("w1");
   });
 });

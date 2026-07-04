@@ -1,5 +1,5 @@
 import { memo, useState, useRef } from "react";
-import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2 } from "lucide-react";
+import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreHorizontal } from "lucide-react";
 import type { FleetRow } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
 import { railClass, statusTag, isLive, isProvisioning } from "../lib/status.js";
@@ -77,29 +77,39 @@ function RepoTreeImpl(p: {
       );
     }
     return (
-      <button
-        key={sub.id}
-        onClick={() => p.onSelectSub(sub.id)}
-        onContextMenu={(e) => { e.preventDefault(); setMenu({ id: sub.id, x: e.clientX, y: e.clientY }); }}
-        className={cn(
-          "relative flex items-center gap-1.5 rounded-md py-1.5 pl-3 pr-2 text-left text-[12px] transition-colors",
-          active ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised hover:text-fg",
-          isFreshSpawn(sub.id) && "rise-in",
-        )}
-      >
-        {/* left channel rail = result status (color), dot = live pulse (running only), spinner = provisioning (worktree being created) */}
-        <span className={cn("absolute left-0.5 top-1.5 bottom-1.5 w-[2.5px] rounded-full transition-colors duration-200", active ? "bg-accent" : railClass(sub.status))} />
-        {isProvisioning(sub.status)
-          ? <Loader2 size={11} className="shrink-0 animate-spin text-accent" />
-          : isLive(sub.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
-        <span className={cn("min-w-0 flex-1 truncate", p.attention?.[sub.id] && !active && "font-semibold text-fg")}>{sub.label}</span>
-        <WorkerCost workerId={sub.id} />
-        <span className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted">{statusTag(sub.status)}</span>
-        {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}
-        {p.attention?.[sub.id] && !active && (
-          <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
-        )}
-      </button>
+      <div key={sub.id} className={cn("group relative", isFreshSpawn(sub.id) && "rise-in")}>
+        <button
+          onClick={() => p.onSelectSub(sub.id)}
+          onContextMenu={(e) => { e.preventDefault(); setMenu({ id: sub.id, x: e.clientX, y: e.clientY }); }}
+          className={cn(
+            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-3 pr-2 text-left text-[12px] transition-colors",
+            active ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised hover:text-fg",
+          )}
+        >
+          {/* left channel rail = result status (color), dot = live pulse (running only), spinner = provisioning (worktree being created) */}
+          <span className={cn("absolute left-0.5 top-1.5 bottom-1.5 w-[2.5px] rounded-full transition-colors duration-200", active ? "bg-accent" : railClass(sub.status))} />
+          {isProvisioning(sub.status)
+            ? <Loader2 size={11} className="shrink-0 animate-spin text-accent" />
+            : isLive(sub.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
+          <span className={cn("min-w-0 flex-1 truncate", p.attention?.[sub.id] && !active && "font-semibold text-fg")}>{sub.label}</span>
+          <WorkerCost workerId={sub.id} />
+          <span className="shrink-0 font-mono text-[8.5px] tracking-wide text-muted">{statusTag(sub.status)}</span>
+          {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}
+          {p.attention?.[sub.id] && !active && (
+            <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
+          )}
+        </button>
+        {/* overflow '⋯' — worker rows previously had zero hover actions and the menu was right-click-only (audit #45; macOS
+            has no context-menu key for keyboard users). Opens the SAME menu, reachable by left-click/Enter, positioned at the button. */}
+        <button
+          title={t("common.moreActions")}
+          aria-label={t("common.moreActions")}
+          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: sub.id, x: r.left, y: r.bottom + 4 }); }}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+        >
+          <MoreHorizontal size={13} />
+        </button>
+      </div>
     );
   };
 
