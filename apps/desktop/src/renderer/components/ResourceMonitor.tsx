@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Cpu, RefreshCw } from "lucide-react";
 import type { ResourceSnapshot, ResourceBucket } from "../types/rookery.js";
 import { fmtBytes } from "../format.js";
@@ -27,7 +27,7 @@ function Row({ label, bucket, indent }: { label: string; bucket: ResourceBucket;
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="eyebrow text-[8.5px] uppercase tracking-[0.12em] text-muted/70">{label}</span>
+      <span className="eyebrow eyebrow-sm uppercase text-muted/70">{label}</span>
       <span className="font-mono text-[12px] text-fg-dim">{value}</span>
     </div>
   );
@@ -46,6 +46,8 @@ export function ResourceMonitor({
 }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
   const toggle = (): void => {
     setOpen((v) => {
       onOpenChange?.(!v);
@@ -56,6 +58,21 @@ export function ResourceMonitor({
     setOpen(false);
     onOpenChange?.(false);
   };
+  // Escape closes the popover (audit #61 — mirrors OpenInAppMenu's Escape handling; previously outside-click was
+  // the only way out).
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close/onOpenChange are recreated every render; open alone gates (re)bind
+  }, [open]);
+  // Move focus inside on open — the Refresh button when present, otherwise the panel itself (audit #61: previously
+  // opening left focus on the trigger button, so keyboard users had no way to tell the popover had opened).
+  useEffect(() => {
+    if (!open) return;
+    (refreshRef.current ?? panelRef.current)?.focus();
+  }, [open]);
 
   const label = snapshot ? fmtBytes(snapshot.memBytes) : "—";
   // Hotness = the worse of CPU / RAM-share. ≥70 amber, ≥90 red + led-live so a saturated host pulses coral right in the chrome.
@@ -84,8 +101,10 @@ export function ResourceMonitor({
           {/* Close on outside click */}
           <div className="fixed inset-0 z-40" onClick={close} />
           <div
+            ref={panelRef}
+            tabIndex={-1}
             className={cn(
-              "absolute z-50 w-[300px] rounded-xl border border-line bg-surface p-1.5 shadow-2xl",
+              "absolute z-50 w-[300px] rounded-xl border border-line bg-surface p-1.5 shadow-2xl focus:outline-none",
               collapsed ? "left-full top-0 ml-2" : "left-0 top-full mt-1",
             )}
           >
@@ -93,6 +112,7 @@ export function ResourceMonitor({
               <span className="text-[12px] font-semibold tracking-[-0.01em]">{t("resourceMonitor.resources")}</span>
               {onRefresh && (
                 <button
+                  ref={refreshRef}
                   type="button"
                   aria-label={t("common.refresh")}
                   onClick={onRefresh}

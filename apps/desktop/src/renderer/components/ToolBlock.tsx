@@ -85,13 +85,13 @@ export function ToolBlock({
         <div className="space-y-2 border-t border-line px-3 py-2">
           {input && (
             <div>
-              <div className="mb-1 text-[9.5px] uppercase tracking-wide text-muted">input</div>
+              <div className="mb-1 eyebrow-sm uppercase text-muted">input</div>
               <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-fg-dim">{input}</pre>
             </div>
           )}
           {result && (
             <div>
-              <div className="mb-1 text-[9.5px] uppercase tracking-wide text-muted">result</div>
+              <div className="mb-1 eyebrow-sm uppercase text-muted">result</div>
               <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-fg-dim">{result}</pre>
             </div>
           )}

@@ -5,6 +5,7 @@ export default {
   "workspaceHeaders.terminalTab": "Terminal",
   "workspaceHeaders.rightPanelAria": "Right panel",
   "workspaceHeaders.rightPanelTitle": "Files · Changes · Nested agents",
+  "workspaceHeaders.resetLayout": "Reset layout",
   "workspaceHeaders.slackReadOnly": "slack · read-only",
   "workspaceHeaders.working": "Working",
   "workspaceHeaders.openTicket": "Open ticket",

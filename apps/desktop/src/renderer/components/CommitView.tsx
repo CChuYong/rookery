@@ -51,7 +51,7 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
 
       <div className="flex min-h-0 flex-1">
       <div className="flex w-56 shrink-0 flex-col overflow-y-auto border-r border-line py-1">
-        <div className="eyebrow px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-wide text-muted">{t("commitView.changedFiles", { count: files.length })}</div>
+        <div className="eyebrow px-2.5 pb-1 pt-1.5 eyebrow-sm uppercase text-muted">{t("commitView.changedFiles", { count: files.length })}</div>
         {files.map((f) => (
           <button
             key={f.path}

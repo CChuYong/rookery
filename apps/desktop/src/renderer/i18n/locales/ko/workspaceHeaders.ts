@@ -5,6 +5,7 @@ export default {
   "workspaceHeaders.terminalTab": "터미널",
   "workspaceHeaders.rightPanelAria": "우측 패널",
   "workspaceHeaders.rightPanelTitle": "파일·변경·중첩 에이전트",
+  "workspaceHeaders.resetLayout": "레이아웃 초기화",
   "workspaceHeaders.slackReadOnly": "slack · 보기 전용",
   "workspaceHeaders.working": "작업 중",
   "workspaceHeaders.openTicket": "티켓 열기",

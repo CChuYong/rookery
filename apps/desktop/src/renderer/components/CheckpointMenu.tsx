@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { History, Loader2 } from "lucide-react";
 import { Button } from "../ui/button.js";
 import { SkeletonRows } from "./Skeleton.js";
@@ -40,6 +41,7 @@ export function CheckpointMenu({
   const [loadError, setLoadError] = useState(false);
   const [armed, setArmed] = useState<number | null>(null);
   const [restoring, setRestoring] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Shared by the initial open-fetch and the error state's retry button.
   const load = (): void => {
@@ -61,6 +63,22 @@ export function CheckpointMenu({
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [open]);
+  // Focus the first turn on open (audit #60 — reuses ContextMenu's precedent). Items load async (fetchCheckpoints
+  // fires on toggle), so this re-runs once `items` actually arrives, not just on the `open` transition.
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+  }, [open, items]);
+  // ArrowUp/Down roving across turns (audit #60 — same logic as ContextMenu.tsx).
+  const onMenuKeyDown = (e: ReactKeyboardEvent): void => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const btns = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    if (btns.length === 0) return;
+    const idx = btns.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === "ArrowDown" ? (idx + 1) % btns.length : (idx - 1 + btns.length) % btns.length;
+    btns[next]?.focus();
+  };
 
   return (
     <div className="relative">
@@ -70,7 +88,7 @@ export function CheckpointMenu({
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div role="menu" className="menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl">
+          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl">
             <div className="px-2 py-1 text-[10.5px] leading-relaxed text-muted">
               {t("checkpointMenu.hint")}
             </div>

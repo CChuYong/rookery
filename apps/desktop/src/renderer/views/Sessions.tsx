@@ -198,7 +198,7 @@ function SessionsImpl(p: {
               else if (e.key === "Escape") setRenaming(null);
             }}
             onBlur={() => { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }}
-            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1.5 text-[13px] text-fg outline-none"
+            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-[12.5px] text-fg outline-none"
           />
         </div>
       );
@@ -209,11 +209,12 @@ function SessionsImpl(p: {
           onClick={() => p.onSelect(s.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: s.id, x: e.clientX, y: e.clientY }); }}
           className={cn(
-            "relative flex w-full items-center gap-2 rounded-lg py-2 pl-3 pr-2.5 text-left text-[13px] transition-colors",
+            // Row scale shared with RepoTree.tsx (audit #76) — one sidebar-list token set for both tabs.
+            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-3 pr-2.5 text-left text-[12.5px] transition-colors",
             isActive ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised hover:text-fg",
           )}
         >
-          <span className={cn("absolute left-0.5 top-2 bottom-2 w-[2.5px] rounded-full transition-colors duration-200", isActive ? "bg-accent" : s.status === "active" ? "bg-pr/70" : "bg-stop")} />
+          <span className={cn("absolute left-0.5 top-1.5 bottom-1.5 w-[2.5px] rounded-full transition-colors duration-200", isActive ? "bg-accent" : s.status === "active" ? "bg-pr/70" : "bg-stop")} />
           {/* master turn in progress = live pulse (same signature as the worker tree) */}
           {p.running?.[s.id] && <span title={t("sessions.workingDot")} className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
           <span className="flex min-w-0 flex-1 flex-col">
@@ -284,7 +285,7 @@ function SessionsImpl(p: {
 
       {pinnedItems.length > 0 && (
         <div>
-          <div className="eyebrow flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-muted">
+          <div className="eyebrow flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 eyebrow-sm font-medium uppercase text-muted">
             <Pin size={10} className="shrink-0 fill-current opacity-70" />
             <span>{t("sessions.pinnedSection")}</span>
           </div>
@@ -301,7 +302,7 @@ function SessionsImpl(p: {
           )}
           {groupByAutomation(rest, p.automations ?? [], t).map((g) => (
             <div key={g.ref}>
-              <div className="eyebrow flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-muted">
+              <div className="eyebrow flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 eyebrow-sm font-medium uppercase text-muted">
                 <span className="min-w-0 truncate normal-case tracking-normal">{g.name}</span>
                 <span className="shrink-0 text-fg-dim/50">{t("sessions.runs", { count: g.items.length })}</span>
               </div>
@@ -312,7 +313,7 @@ function SessionsImpl(p: {
       ) : (
         groupByDay(rest, t).map((g) => (
           <div key={g.key}>
-            <div className="eyebrow px-2.5 pb-1 pt-2.5 text-[10.5px] font-medium uppercase tracking-[0.12em] text-muted">{g.label}</div>
+            <div className="eyebrow px-2.5 pb-1 pt-2.5 eyebrow-sm font-medium uppercase text-muted">{g.label}</div>
             {g.items.map(Row)}
           </div>
         ))
@@ -356,7 +357,7 @@ function ArchivedSection({ items, render }: { items: Session[]; render: (s: Sess
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-1">
-      <button onClick={() => setOpen((v) => !v)} className="eyebrow flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 text-[10.5px] font-medium uppercase tracking-[0.12em] text-muted hover:text-fg-dim">
+      <button onClick={() => setOpen((v) => !v)} className="eyebrow flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 eyebrow-sm font-medium uppercase text-muted hover:text-fg-dim">
         <ChevronRight size={11} className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-90")} />
         <Archive size={11} /> {t("sessions.archivedSection", { count: items.length })}
       </button>

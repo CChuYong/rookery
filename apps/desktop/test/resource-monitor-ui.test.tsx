@@ -62,3 +62,31 @@ describe("ResourceMonitor", () => {
     expect(screen.queryByText("Desktop App")).toBeNull();
   });
 });
+
+// audit #61: the popover used to close only on outside click and never moved focus inside.
+describe("ResourceMonitor keyboard/focus (audit #61)", () => {
+  beforeEach(() => { usePrefsStore.setState({ localePref: "system" }); });
+
+  it("moves focus to the Refresh button on open", () => {
+    const onRefresh = vi.fn();
+    renderEn(<ResourceMonitor snapshot={snap} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByRole("button", { name: "Refresh" })).toHaveFocus();
+  });
+
+  it("falls back to focusing the panel when there is no Refresh handler", () => {
+    renderEn(<ResourceMonitor snapshot={snap} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Desktop App").closest("div.absolute")).toHaveFocus();
+  });
+
+  it("closes on Escape", () => {
+    const onOpenChange = vi.fn();
+    renderEn(<ResourceMonitor snapshot={snap} onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Desktop App")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText("Desktop App")).toBeNull();
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+});

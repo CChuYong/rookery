@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Folder, X, AlertTriangle } from "lucide-react";
+import { Folder, X, AlertTriangle, FolderGit2 } from "lucide-react";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import { Composer } from "./Composer.js";
 import type { SlashCommand } from "./Composer.js";
@@ -29,6 +29,7 @@ export function NewSessionPage(p: {
   authStatus?: AuthStatus | null; // first-run guard: when method === "none" the SDK can't run, so warn before the user sends
   onOpenSettings?: () => void;
   defaultFolder?: string; // configured default session cwd (settings.defaultSessionCwd) — shown when no folder is picked
+  onRegisterRepo?: () => void; // opens RepoModal (audit #58) — shown in the empty-repo state in place of the (hidden) repo picker
 }): JSX.Element {
   const t = useT();
   const [cwd, setCwd] = useState("");
@@ -114,7 +115,7 @@ export function NewSessionPage(p: {
             onDraftChange={onDraftChange}
           />
 
-          {p.repos.length > 0 && (
+          {p.repos.length > 0 ? (
             <div className="flex flex-col items-center gap-2">
               <p className="text-[11px] text-muted">{t("newSessionPage.pickRepoFolder")}</p>
               <div className="flex flex-wrap justify-center gap-1.5">
@@ -131,6 +132,22 @@ export function NewSessionPage(p: {
                 ))}
               </div>
             </div>
+          ) : (
+            // Empty-repo CTA (audit #58) — the repo picker used to just vanish here, leaving a blank space below
+            // the composer with no hint that registering a repo is the prerequisite for spawning workers.
+            p.onRegisterRepo && (
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line px-5 py-4 text-center">
+                <FolderGit2 size={18} className="text-muted" />
+                <p className="text-[12.5px] font-medium text-fg-dim">{t("newSessionPage.noReposTitle")}</p>
+                <p className="max-w-[320px] text-[11.5px] leading-relaxed text-muted">{t("newSessionPage.noReposBody")}</p>
+                <button
+                  onClick={p.onRegisterRepo}
+                  className="mt-1 flex items-center gap-1.5 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:border-accent/40 hover:text-fg-dim"
+                >
+                  <Folder size={12} /> {t("newSessionPage.registerRepo")}
+                </button>
+              </div>
+            )
           )}
         </div>
       </div>

@@ -108,3 +108,30 @@ describe("OpenInAppMenu failure feedback (#11)", () => {
     expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 });
+
+// audit #59: the icon+chevron split button was unlabeled — add a short text label.
+describe("OpenInAppMenu label (audit #59)", () => {
+  it("shows a short 'Open in' text label next to the chevron", async () => {
+    render(<OpenInAppMenu />);
+    await waitFor(() => expect(screen.getByText("열기")).toBeInTheDocument());
+  });
+});
+
+// audit #60: role=menu but no initial focus / arrow roving — ContextMenu's precedent reused here.
+describe("OpenInAppMenu keyboard nav (audit #60)", () => {
+  it("focuses the first app in the dropdown on open", async () => {
+    render(<OpenInAppMenu />);
+    fireEvent.click(screen.getByLabelText("다른 앱 선택"));
+    await waitFor(() => expect(screen.getByText("VS Code").closest('[role="menuitemradio"]')).toHaveFocus());
+  });
+
+  it("ArrowDown/ArrowUp roves between apps", async () => {
+    render(<OpenInAppMenu />);
+    fireEvent.click(screen.getByLabelText("다른 앱 선택"));
+    await waitFor(() => expect(screen.getByText("VS Code").closest('[role="menuitemradio"]')).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowDown" });
+    expect(screen.getByText("Cursor").closest('[role="menuitemradio"]')).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowUp" });
+    expect(screen.getByText("VS Code").closest('[role="menuitemradio"]')).toHaveFocus();
+  });
+});

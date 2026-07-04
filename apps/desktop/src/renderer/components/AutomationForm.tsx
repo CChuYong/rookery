@@ -166,7 +166,7 @@ export function AutomationForm(p: {
 
           {/* ── Basic section */}
           <section className="flex flex-col gap-3">
-            <h3 className="eyebrow text-[12px] font-semibold uppercase tracking-wide text-fg-dim">{t("automationModal.sectionBasic")}</h3>
+            <h3 className="eyebrow eyebrow-sm font-semibold uppercase text-fg-dim">{t("automationModal.sectionBasic")}</h3>
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationModal.name")}</span>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -184,7 +184,7 @@ export function AutomationForm(p: {
 
           {/* ── Trigger section */}
           <section className="flex flex-col gap-3">
-            <h3 className="eyebrow text-[12px] font-semibold uppercase tracking-wide text-fg-dim">{t("automationModal.sectionTrigger")}</h3>
+            <h3 className="eyebrow eyebrow-sm font-semibold uppercase text-fg-dim">{t("automationModal.sectionTrigger")}</h3>
 
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationModal.triggerType")}</span>
@@ -242,7 +242,7 @@ export function AutomationForm(p: {
 
           {/* ── Model / Execution section (Task 4) */}
           <section className="flex flex-col gap-3">
-            <h3 className="eyebrow text-[12px] font-semibold uppercase tracking-wide text-fg-dim">{t("automationForm.sectionExecution")}</h3>
+            <h3 className="eyebrow eyebrow-sm font-semibold uppercase text-fg-dim">{t("automationForm.sectionExecution")}</h3>
 
             {/* Model select */}
             <label className="flex flex-col gap-1">
@@ -321,7 +321,7 @@ export function AutomationForm(p: {
 
           {/* ── Action section */}
           <section className="flex flex-col gap-3">
-            <h3 className="eyebrow text-[12px] font-semibold uppercase tracking-wide text-fg-dim">{t("automationModal.sectionAction")}</h3>
+            <h3 className="eyebrow eyebrow-sm font-semibold uppercase text-fg-dim">{t("automationModal.sectionAction")}</h3>
 
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationModal.actionType")}</span>

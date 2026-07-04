@@ -123,7 +123,7 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
   };
 
   const SectionHead = ({ label, n, action }: { label: string; n: number; action?: JSX.Element }): JSX.Element => (
-    <div className="eyebrow flex items-center gap-1 px-2.5 pb-0.5 pt-2 text-[10.5px] uppercase tracking-wide text-muted">
+    <div className="eyebrow flex items-center gap-1 px-2.5 pb-0.5 pt-2 eyebrow-sm uppercase text-muted">
       <span>{label} {n}</span>
       {action && <span className="ml-auto">{action}</span>}
     </div>

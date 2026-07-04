@@ -157,6 +157,14 @@ body {
    from the active locale in i18n/provider.) Specificity 0,2,0 > the Tailwind utilities it overrides. */
 :lang(ko) .eyebrow { text-transform: none; letter-spacing: normal; }
 
+/* Shared section-microlabel scale (audit #77) — promotes the size/tracking pair that most call sites had already
+   converged on by accident (Sessions.tsx) into one utility, so new eyebrow-role labels (section/group headers,
+   stat captions) don't reinvent one of the six ad-hoc sizes (8.5/9.5/10/10.5/11/12px) that had accumulated. Pair
+   with the existing `.eyebrow` class (uppercase + this tracking) where the label should also get the ko reset
+   above; used standalone where uppercase isn't wanted. Distinct from the 9px/0.16em top-of-overlay header eyebrow
+   (WorkspaceHeaders/NewSessionPage/AutomationForm) — that tier was already internally consistent and untouched. */
+.eyebrow-sm { font-size: 10.5px; letter-spacing: 0.12em; }
+
 @media (prefers-reduced-motion: reduce) {
   .led-live, .sheen::after, .caret-live, .md-streaming > *:last-child::after, .md-streaming .tok-new, .breathe { animation: none; }
   .animate-bounce, .animate-pulse, .animate-spin { animation: none !important; }

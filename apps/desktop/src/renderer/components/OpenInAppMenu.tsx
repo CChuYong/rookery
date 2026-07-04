@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChevronDown, AppWindow, Folder, SquareTerminal, Code, Check } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
@@ -28,6 +29,7 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
   const [open, setOpen] = useState(false);
   const [apps, setApps] = useState<DetectedApp[] | null>(null);
   const [selId, setSelId] = useState<string | null>(() => localStorage.getItem(LS_KEY));
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Detect the app list once on mount (so the left button icon renders right away). Install state rarely changes.
   useEffect(() => { void window.rookery.apps.list().then(setApps).catch(() => setApps([])); }, []);
@@ -38,6 +40,22 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [open]);
+  // Focus the first app on open (audit #60 — reuses ContextMenu's precedent). `apps` is already fetched on mount
+  // in the common case, but this also covers opening before that fetch resolves.
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"]')?.focus();
+  }, [open, apps]);
+  // ArrowUp/Down roving across apps (audit #60 — same logic as ContextMenu.tsx).
+  const onMenuKeyDown = (e: ReactKeyboardEvent): void => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const btns = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+    if (btns.length === 0) return;
+    const idx = btns.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === "ArrowDown" ? (idx + 1) % btns.length : (idx - 1 + btns.length) % btns.length;
+    btns[next]?.focus();
+  };
 
   // Selected app: the saved value if it's in the installed list, otherwise the default (first list item = first editor in the catalog).
   const selected = apps && apps.length > 0 ? (apps.find((a) => a.id === selId) ?? apps[0]) : null;
@@ -75,15 +93,17 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
           aria-haspopup="menu"
           aria-expanded={open}
           title={t("openInAppMenu.selectOtherApp")}
-          className={cn("flex h-full w-[18px] items-center justify-center border-l border-line transition-colors", open ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
+          className={cn("flex h-full items-center gap-1 border-l border-line px-1.5 text-[10.5px] transition-colors", open ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
         >
+          {/* short text label (audit #59) — the icon+chevron split button used to be unlabeled and read as a stray glyph in the header */}
+          <span>{t("openInAppMenu.label")}</span>
           <ChevronDown size={11} />
         </button>
       </div>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div role="menu" className="menu-pop absolute right-0 top-7 z-40 max-h-80 w-52 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl">
+          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 top-7 z-40 max-h-80 w-52 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl">
             {apps === null && <div className="px-2 py-1.5 text-[12px] text-muted">{t("openInAppMenu.detectingApps")}</div>}
             {apps?.map((a) => (
               <button

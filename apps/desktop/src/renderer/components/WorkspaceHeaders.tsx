@@ -1,4 +1,4 @@
-import { SquareTerminal, PanelRight, Ticket } from "lucide-react";
+import { SquareTerminal, PanelRight, Ticket, RotateCcw } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { StatusBadge } from "./StatusBadge.js";
 import { CheckpointMenu } from "./CheckpointMenu.js";
@@ -10,6 +10,7 @@ import type { FleetRow, LogItem } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
 import { useT } from "../i18n/provider.js";
 import { useDockPanelsStore, isHidden, isGroupOpen, rightGroupKindsFor, type HideableKind } from "../store/dock-panels.js";
+import { useLayoutStore } from "../store/layout.js";
 
 const EMPTY_HIDDEN: HideableKind[] = []; // stable ref for the "nothing hidden yet" case
 
@@ -52,6 +53,14 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
       {dock && termPageKey && (
         <button onClick={() => useDockPanelsStore.getState().toggleGroup_(termPageKey, rightGroupKinds)} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(dockRightOpen)}>
           <PanelRight size={14} />
+        </button>
+      )}
+      {dock && termPageKey && (
+        // Reset layout (audit #57) — doesn't touch the dockview API directly, mirrors the toggles above: it
+        // just clears this page's saved layout, and WorkspaceDock reconciles by wiping+reseeding the live dock
+        // (its own store subscription — the actual dockview manipulation is covered by a live check).
+        <button onClick={() => useLayoutStore.getState().clear_(termPageKey)} aria-label={t("workspaceHeaders.resetLayout")} title={t("workspaceHeaders.resetLayout")} className={btn(false)}>
+          <RotateCcw size={13} />
         </button>
       )}
     </>

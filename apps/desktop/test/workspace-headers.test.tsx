@@ -4,6 +4,7 @@ import { WorkerHeader, SessionHeader } from "../src/renderer/components/Workspac
 import { I18nProvider } from "../src/renderer/i18n/provider.js";
 import { usePrefsStore } from "../src/renderer/store/prefs.js";
 import { useDockPanelsStore } from "../src/renderer/store/dock-panels.js";
+import { useLayoutStore, emptyLayoutState } from "../src/renderer/store/layout.js";
 
 const baseProps = {
   termPageKey: null, termPageOpen: false, rightOpen: false,
@@ -78,5 +79,32 @@ describe("HeaderControls dock-mode toggles (audit #48)", () => {
     render(<WorkerHeader {...baseProps} termPageKey="w1" dock worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: "rookery/a0", model: null } as never} />);
     fireEvent.click(screen.getByLabelText("우측 패널"));
     expect(useDockPanelsStore.getState().hiddenByPage.w1).toEqual(["files", "git", "nested"]);
+  });
+});
+
+// audit #57: the "Reset layout" header control only needs to clear this page's saved layout — the live
+// dockview wipe+reseed is WorkspaceDock's own layoutStore subscription (verified live, same as #48 above).
+describe("HeaderControls reset-layout button (audit #57)", () => {
+  beforeEach(() => { useLayoutStore.setState(emptyLayoutState()); });
+
+  it("is absent outside dock mode", () => {
+    render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" />);
+    expect(screen.queryByLabelText("레이아웃 초기화")).toBeNull();
+  });
+
+  it("SessionHeader (dock mode): clears only the current page's saved layout", () => {
+    useLayoutStore.getState().save_("p1", { grid: 1 });
+    useLayoutStore.getState().save_("other-page", { grid: 2 });
+    render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);
+    fireEvent.click(screen.getByLabelText("레이아웃 초기화"));
+    expect(useLayoutStore.getState().byPage.p1).toBeUndefined();
+    expect(useLayoutStore.getState().byPage["other-page"]).toEqual({ grid: 2 });
+  });
+
+  it("WorkerHeader (dock mode): reset button targets the worker's page key", () => {
+    useLayoutStore.getState().save_("w1", { grid: 1 });
+    render(<WorkerHeader {...baseProps} termPageKey="w1" dock worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: "rookery/a0", model: null } as never} />);
+    fireEvent.click(screen.getByLabelText("레이아웃 초기화"));
+    expect(useLayoutStore.getState().byPage.w1).toBeUndefined();
   });
 });

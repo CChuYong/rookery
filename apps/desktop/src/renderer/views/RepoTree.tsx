@@ -105,7 +105,7 @@ function RepoTreeImpl(p: {
     const active = sub.id === p.activeSubId;
     if (renaming?.id === sub.id) {
       return (
-        <div key={sub.id} className="px-1 py-0.5">
+        <div key={sub.id} className="px-1 py-1">
           <input
             autoFocus
             value={renaming.value}
@@ -115,7 +115,7 @@ function RepoTreeImpl(p: {
               else if (e.key === "Escape") setRenaming(null);
             }}
             onBlur={() => { p.onRenameSub?.(sub.id, renaming.value.trim() || sub.label); setRenaming(null); }}
-            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-[12px] text-fg outline-none"
+            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-[12.5px] text-fg outline-none"
           />
         </div>
       );
@@ -130,7 +130,8 @@ function RepoTreeImpl(p: {
           onClick={() => p.onSelectSub(sub.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: sub.id, x: e.clientX, y: e.clientY }); }}
           className={cn(
-            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-3 pr-2 text-left text-[12px] transition-colors",
+            // Row scale shared with Sessions.tsx (audit #76) — one sidebar-list token set for both tabs.
+            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-3 pr-2.5 text-left text-[12.5px] transition-colors",
             active ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised hover:text-fg",
           )}
         >
@@ -251,7 +252,7 @@ function RepoTreeImpl(p: {
 
       {archived.length > 0 && (
         <div className="mt-1">
-          <button onClick={() => setArchOpen((v) => !v)} className="eyebrow flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-[0.1em] text-muted hover:text-fg-dim">
+          <button onClick={() => setArchOpen((v) => !v)} className="eyebrow flex w-full items-center gap-1.5 px-2 py-1.5 text-left eyebrow-sm font-medium uppercase text-muted hover:text-fg-dim">
             <ChevronRight size={11} className={cn("transition-transform duration-200 ease-out", archOpen && "rotate-90")} />
             <Archive size={11} /> {t("repoTree.archive")} {archived.length}
           </button>

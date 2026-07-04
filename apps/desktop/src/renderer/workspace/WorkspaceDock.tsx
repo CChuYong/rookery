@@ -215,11 +215,27 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
         else if (!shouldHide && !panel) reopen(api, kind);
       }
     });
+    // Header-triggered "Reset layout" (audit #57): the header button doesn't touch the dockview API directly
+    // either — it just calls layoutStore.clear_(pageKey) (same shape as the dockPanelsStore toggles above), and
+    // this reconciles by wiping the live dock and reseeding the default template. Guarded on an actual
+    // saved->cleared transition for THIS page so mount time (already undefined) and other pages' clears don't
+    // spuriously fire.
+    const unsubLayout = useLayoutStore.subscribe((state, prevState) => {
+      const api = apiRef.current;
+      if (!api || disposedRef.current) return;
+      if (prevState.byPage[pageKey] === undefined || state.byPage[pageKey] !== undefined) return;
+      reconcilingRef.current = true;
+      try { api.clear(); seed(api); } finally { reconcilingRef.current = false; }
+      useDockPanelsStore.getState().setHidden_(pageKey, hideableKindsFor(agentKind).filter((k) => !api.getPanel(fixedPanelId(k))));
+      syncEditors(api);
+      syncActive(api);
+    });
     return () => {
       disposedRef.current = true;
       unsub();
       unsubTerm();
       unsubPanels();
+      unsubLayout();
       for (const d of disposablesRef.current) d.dispose();
       disposablesRef.current = [];
       if (saveTimer.current) {

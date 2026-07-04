@@ -100,3 +100,32 @@ describe("CheckpointMenu", () => {
     await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(2));
   });
 });
+
+// audit #60: role=menu but no initial focus / arrow roving — ContextMenu's precedent (first-item focus +
+// ArrowUp/Down roving) reused here.
+describe("CheckpointMenu keyboard nav (audit #60)", () => {
+  it("focuses the first turn once checkpoints load", async () => {
+    const fetchCheckpoints = vi.fn().mockResolvedValue([
+      { seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" },
+      { seq: 1, sha: "b", createdAt: "2026-06-20T10:05:00Z" },
+    ]);
+    render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 2")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("턴 1").closest('[role="menuitem"]')).toHaveFocus());
+  });
+
+  it("ArrowDown/ArrowUp roves between turns", async () => {
+    const fetchCheckpoints = vi.fn().mockResolvedValue([
+      { seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" },
+      { seq: 1, sha: "b", createdAt: "2026-06-20T10:05:00Z" },
+    ]);
+    render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 1").closest('[role="menuitem"]')).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowDown" });
+    expect(screen.getByText("턴 2").closest('[role="menuitem"]')).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowUp" });
+    expect(screen.getByText("턴 1").closest('[role="menuitem"]')).toHaveFocus();
+  });
+});
