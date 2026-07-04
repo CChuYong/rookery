@@ -420,12 +420,12 @@ describe("ConversationPane pending bubbles", () => {
     useStore.setState({ pendingBySession: { s1: [{ clientMsgId: "c1", text: "대기메시지" }] } } as any);
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} />);
     expect(screen.getByText("대기메시지")).toBeInTheDocument();
-    expect(screen.getByText("대기 중")).toBeInTheDocument(); // pendingBadge (ko fallback)
+    expect(screen.getByText("전송 대기")).toBeInTheDocument(); // pendingBadge (ko fallback)
   });
 
   it("renders no pending bubbles when pending is empty for that conversation", () => {
     useStore.setState({ pendingBySession: {} } as any);
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} />);
-    expect(screen.queryByText("대기 중")).toBeNull();
+    expect(screen.queryByText("전송 대기")).toBeNull();
   });
 });

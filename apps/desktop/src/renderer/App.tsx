@@ -194,6 +194,17 @@ export function App(): JSX.Element {
   // "mission control is online" beat — flash the dot the instant it reaches up (falling edge of "not up"). Keeps led-live.
   const daemonJustUp = useJustEnded(s.daemon !== "up");
   const slackJustUp = useJustEnded(s.slack !== "up");
+  // Status-footer suffix words (audit #65) — localized so ko doesn't leak raw English enum values.
+  // Daemon: covers every DaemonStatus union member ("up" | "down" | "starting").
+  const daemonStatusText = s.daemon === "up" ? t("app.daemonUp") : s.daemon === "starting" ? t("app.daemonStarting") : t("app.daemonDown");
+  // Slack: reuses the Settings page's own SlackStatus labels so the two surfaces read identically.
+  // Covers every SlackStatus union member ("up" | "connecting" | "error" | "off" | "unconfigured").
+  const slackStatusText =
+    s.slack === "up" ? t("settings.slackUp")
+    : s.slack === "connecting" ? t("settings.slackConnecting")
+    : s.slack === "error" ? t("settings.slackError")
+    : s.slack === "off" ? t("settings.slackOff")
+    : t("settings.slackNoToken");
   const closeOverlay = () => navigate({ overlay: null });
   const [repoModal, setRepoModal] = useState(false);
   const [spawnRepo, setSpawnRepo] = useState<string | null>(null);
@@ -928,13 +939,13 @@ export function App(): JSX.Element {
             <UsagePanel usage={s.usage} />
             {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
             <div className="flex flex-wrap items-center gap-3 px-1 py-0.5 font-mono text-[11px] text-muted">
-              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`daemon · ${s.daemon}`}>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`daemon · ${daemonStatusText}`}>
                 <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.daemon === "up" ? "bg-pr led-live" : s.daemon === "starting" ? "bg-run led-live" : "bg-fail", daemonJustUp && "status-flash")} />
-                <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {s.daemon}</span>}</span>
+                <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {daemonStatusText}</span>}</span>
               </span>
-              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`slack · ${s.slack}`}>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`slack · ${slackStatusText}`}>
                 <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.slack === "up" ? "bg-pr led-live" : s.slack === "connecting" ? "bg-run led-live" : s.slack === "error" ? "bg-fail" : "bg-stop", slackJustUp && "status-flash")} />
-                <span>slack{s.slack !== "up" && <span className="text-fg-dim"> · {s.slack}</span>}</span>
+                <span>slack{s.slack !== "up" && <span className="text-fg-dim"> · {slackStatusText}</span>}</span>
               </span>
               {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
                   shouldn't require switching to the Sessions tab first. */}

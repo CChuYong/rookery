@@ -15,8 +15,8 @@ export default {
   "gitChanges.commitPlaceholderEmpty": "스테이지된 변경을 커밋…",
   "gitChanges.commit": "커밋",
   "gitChanges.revertTitle": "변경 되돌리기",
-  "gitChanges.revertDescUntracked": "{name}의 파일을 삭제합니다. 되돌릴 수 없어요.",
-  "gitChanges.revertDescTracked": "{name}의 변경을 HEAD로 되돌립니다. 되돌릴 수 없어요.",
+  "gitChanges.revertDescUntracked": "{name}의 파일을 삭제해요. 되돌릴 수 없어요.",
+  "gitChanges.revertDescTracked": "{name}의 변경을 HEAD로 되돌려요. 되돌릴 수 없어요.",
   "gitChanges.tabChanges": "변경",
   "gitChanges.tabHistory": "기록",
 } satisfies Catalog;
