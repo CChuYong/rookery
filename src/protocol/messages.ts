@@ -154,6 +154,8 @@ export interface WorkerRow {
   permissionMode?: string | null; // SDK permission mode (bypassPermissions | plan). Optional for back-compat; the desktop defaults it to bypassPermissions when absent.
   ticketKey?: string | null; // spawn-source ticket/issue identifier (ENG-123, #456). Header shortcut button. The daemon always sends it (may be null).
   ticketUrl?: string | null;
+  lastActivityTs?: number; // ms epoch of the worker's last message event (fleet.list snapshot); absent if it has none
+  costUsd?: number;        // cumulative $ from the worker's last result event; absent if it never completed a turn
 }
 
 // Integration connection status (on-demand pull). github=gh auth, linear=key present + viewer verification.

@@ -417,3 +417,31 @@ describe("notify-armed + pending notifications", () => {
     expect(repos.getWorker("w1")!.permission_mode).toBe("plan");
   });
 });
+
+describe("workerActivityAndCost", () => {
+  it("returns each worker's last message ts (ms) and its max cumulative cost; omits absent metrics and event-less workers", () => {
+    let cur = "2026-01-01T00:00:00.000Z";
+    const repos = new Repositories(openDb(":memory:"), () => cur);
+    repos.createSession({ id: "s", cwd: "/x" });
+
+    // w1: two messages + two results (cumulative cost grows)
+    repos.createWorker({ id: "w1", sessionId: "s", repoPath: "/r", label: "app", worktreePath: "/wt1", branch: "b1" });
+    cur = "2026-01-01T00:00:01.000Z"; repos.addWorkerEvent({ workerId: "w1", seq: 0, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "hi" }) });
+    cur = "2026-01-01T00:00:02.000Z"; repos.addWorkerEvent({ workerId: "w1", seq: 1, type: "result", payloadJson: JSON.stringify({ kind: "result", costUsd: 0.5 }) });
+    cur = "2026-01-01T00:00:03.000Z"; repos.addWorkerEvent({ workerId: "w1", seq: 2, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "more" }) });
+    cur = "2026-01-01T00:00:04.000Z"; repos.addWorkerEvent({ workerId: "w1", seq: 3, type: "result", payloadJson: JSON.stringify({ kind: "result", costUsd: 1.25 }) });
+
+    // w2: a message only (no result → no cost)
+    repos.createWorker({ id: "w2", sessionId: "s", repoPath: "/r", label: "b", worktreePath: "/wt2", branch: "b2" });
+    cur = "2026-01-01T00:00:05.000Z"; repos.addWorkerEvent({ workerId: "w2", seq: 0, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "x" }) });
+
+    // w3: no events at all
+    repos.createWorker({ id: "w3", sessionId: "s", repoPath: "/r", label: "c", worktreePath: "/wt3", branch: "b3" });
+
+    const m = repos.workerActivityAndCost();
+    expect(m.get("w1")).toEqual({ lastActivityTs: Date.parse("2026-01-01T00:00:03.000Z"), costUsd: 1.25 });
+    expect(m.get("w2")!.lastActivityTs).toBe(Date.parse("2026-01-01T00:00:05.000Z"));
+    expect(m.get("w2")!.costUsd).toBeUndefined();
+    expect(m.has("w3")).toBe(false);
+  });
+});

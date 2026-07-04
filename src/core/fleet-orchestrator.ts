@@ -644,7 +644,8 @@ export class FleetOrchestrator {
     if (timer) clearTimeout(timer);
   }
 
-  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null }> {
+  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number }> {
+    const metrics = this.deps.repos.workerActivityAndCost(); // one indexed batched query for the whole fleet
     return this.deps.repos
       .listAllWorkers()
       .map((r) => ({
@@ -659,6 +660,7 @@ export class FleetOrchestrator {
         archived: !!r.archived_at, // archived or not — the UI splits into tree/archive
         ticketKey: r.ticket_key,
         ticketUrl: r.ticket_url,
+        ...(metrics.get(r.id) ?? {}), // lastActivityTs / costUsd from worker_events (absent when the worker has neither)
       }))
       .filter((x) => (filter?.status ? x.status === filter.status : true))
       .filter((x) => (filter?.repoPath ? x.repoPath === filter.repoPath : true));

@@ -699,6 +699,16 @@ describe("FleetOrchestrator", () => {
     expect(repos.getWorker("fk1")).toBeUndefined(); // no ghost row
   });
 
+  it("list() carries lastActivityTs + costUsd from the worker's events", () => {
+    const { repos, fleet } = setup();
+    repos.createWorker({ id: "wX", sessionId: "sA", repoPath: "/r", label: "app", worktreePath: "/wt/wX", branch: "b" });
+    repos.addWorkerEvent({ workerId: "wX", seq: 0, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "hi" }) });
+    repos.addWorkerEvent({ workerId: "wX", seq: 1, type: "result", payloadJson: JSON.stringify({ kind: "result", costUsd: 2.5 }) });
+    const row = fleet.list().find((w) => w.id === "wX")!;
+    expect(row.costUsd).toBe(2.5);
+    expect(typeof row.lastActivityTs).toBe("number");
+  });
+
 });
 
 describe("FleetOrchestrator rehydrate (restart recovery)", () => {

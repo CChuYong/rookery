@@ -264,6 +264,32 @@ export class Repositories {
     return row?.payload_json;
   }
 
+  // worker_id → { lastActivityTs?, costUsd? } for the WHOLE fleet in one indexed GROUP BY pass (idx_worker_events).
+  // lastActivityTs = ms of the last 'message' event (created_at is ISO → MAX is latest, Date.parse → ms, matching the
+  // renderer). costUsd = the last 'result' event's cumulative total (non-decreasing → MAX). Absent metric = no such event;
+  // a worker with neither is omitted from the map.
+  workerActivityAndCost(): Map<string, { lastActivityTs?: number; costUsd?: number }> {
+    const rows = this.db
+      .prepare(
+        "SELECT worker_id AS id, " +
+          "MAX(CASE WHEN type = 'message' THEN created_at END) AS last_msg, " +
+          "MAX(CASE WHEN type = 'result' THEN json_extract(payload_json, '$.costUsd') END) AS cost_usd " +
+          "FROM worker_events GROUP BY worker_id",
+      )
+      .all() as Array<{ id: string; last_msg: string | null; cost_usd: number | null }>;
+    const out = new Map<string, { lastActivityTs?: number; costUsd?: number }>();
+    for (const r of rows) {
+      const entry: { lastActivityTs?: number; costUsd?: number } = {};
+      if (r.last_msg != null) {
+        const ms = Date.parse(r.last_msg);
+        if (!Number.isNaN(ms)) entry.lastActivityTs = ms;
+      }
+      if (r.cost_usd != null) entry.costUsd = Number(r.cost_usd);
+      if (entry.lastActivityTs !== undefined || entry.costUsd !== undefined) out.set(r.id, entry);
+    }
+    return out;
+  }
+
   createWorker(input: {
     id: string;
     sessionId: string;
