@@ -3,7 +3,7 @@ import { ChevronRight, FileText, Boxes } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { baseName as basename } from "../lib/path.js";
 import { filePathOf } from "../lib/tool-file.js";
-import { spawnedWorkerId } from "../lib/tool-worker.js";
+import { spawnedWorkerId, workerIdFromInput } from "../lib/tool-worker.js";
 import { useJustEnded } from "../lib/useJustEnded.js";
 import { useT } from "../i18n/provider.js";
 import { Collapse } from "./Collapse.js";
@@ -26,7 +26,7 @@ export function ToolBlock({
   result?: string;
   elapsedSec?: number;
   onOpenFile?: (path: string) => void;
-  onSelectWorker?: (id: string) => void; // spawn_worker card → navigate to that worker's view (repo tab)
+  onSelectWorker?: (id: string) => void; // fleet tool card (spawn/send/status/diff/…) → navigate to that worker's view (repo tab)
   className?: string;
 }): JSX.Element {
   const t = useT();
@@ -37,8 +37,10 @@ export function ToolBlock({
   // dot-settle once only on the in_progress→complete transition (so the working→done beat reads off a persistent node).
   const justDone = useJustEnded(status === "in_progress");
   const filePath = filePathOf(input);
-  // Extract the worker id only from a non-error spawn_worker completion result (failure results have no id).
-  const workerId = err ? null : spawnedWorkerId(name, result);
+  // spawn_worker's id is only readable from a non-error completion result (failure results have no id);
+  // the other fleet cards (send_worker/get_worker_status/view_worker_diff/…) instead take the id as an
+  // input argument, available from the start regardless of outcome (audit #47).
+  const workerId = (err ? null : spawnedWorkerId(name, result)) ?? workerIdFromInput(name, input);
   return (
     <div className={cn("relative max-w-[80%] self-start overflow-hidden rounded-[var(--radius)] border border-line border-l-2 border-l-accent/70 bg-surface", status === "in_progress" && !err && "sheen", className)}>
       {/* Header: (toggle button) + (filename chip) + status — the chip is a sibling button separate from the toggle (avoids nested buttons) */}
