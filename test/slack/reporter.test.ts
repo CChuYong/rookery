@@ -153,7 +153,7 @@ describe("SlackThreadReporter (plan card)", () => {
     expect(cards.every((c) => c.status === "in_progress")).toBe(true); // progress must not finalize as complete
   });
 
-  it("renders master.notice as a subtle inline line (UX-7)", async () => {
+  it("renders master.notice as a blank-line-isolated blockquote (unified with worker alerts, UX-7)", async () => {
     const rec: Rec = { streams: [], posts: [] };
     const r = new SlackThreadReporter(fakeClient(rec), target);
     r.onEvent({ type: "master.notice", sessionId: "s1", text: "컨텍스트 압축 중…" });
@@ -163,6 +163,8 @@ describe("SlackThreadReporter (plan card)", () => {
     const md = texts(rec.streams[0]!).join("");
     expect(md).toContain("컨텍스트 압축 중…");
     expect(md).toContain("ℹ️");
+    // blockquote-prefixed + blank-line isolated so it can't bleed into surrounding prose
+    expect(md).toContain("\n\n> ℹ️ 컨텍스트 압축 중…\n\n");
   });
 
   it("logs a postMessage failure instead of silently swallowing it (UX-10)", async () => {

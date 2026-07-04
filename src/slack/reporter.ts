@@ -85,14 +85,20 @@ export class SlackThreadReporter {
   // post (avoids append lazily opening an orphaned streaming bubble outside a turn). Used by the worker→Slack relay.
   threadAlert(markdown: string): Promise<void> {
     this.tail = this.tail.then(async () => {
-      // Wrap in BLANK lines: a Slack blockquote (">") keeps quoting every following line until a blank line, so a single
-      // trailing "\n" would let the master's next prose bleed into the quote. "\n\n…\n\n" isolates it as its own paragraph.
-      if (this.streamer) { await this.flushProse(); await this.append({ markdown_text: `\n\n${markdown}\n\n` }, 0, { unfurl: false }); }
-      else { await this.post(markdown, { unfurl: false }); }
+      if (this.streamer) { await this.appendQuote(markdown); }
+      else { await this.post(markdown, { unfurl: false }); } // no live turn → standalone threaded post (avoids opening an orphan stream)
     }).catch((err) => {
       process.stderr.write(`[rookery] slack reporter threadAlert error: ${String(err)}\n`);
     });
     return this.tail;
+  }
+
+  // Append a blank-line-isolated blockquote (already "> …"-prefixed mrkdwn) into the live stream. A Slack blockquote keeps
+  // quoting every following line until a blank line, so "\n\n…\n\n" stops it bleeding into surrounding prose. unfurl off
+  // (these are meta/status lines, not link previews). Shared by threadAlert (worker-spawn) and master.notice (system alerts).
+  private async appendQuote(markdown: string): Promise<void> {
+    await this.flushProse();
+    await this.append({ markdown_text: `\n\n${markdown}\n\n` }, 0, { unfurl: false });
   }
 
   private openStream(): ChatStreamerLike {
@@ -313,10 +319,10 @@ export class SlackThreadReporter {
         return;
       }
       case "master.notice": {
-        // System notice (context compaction/retry/fallback, etc.) — a faint one-liner so a pause doesn't look like a 'hang'.
-        await this.flushProse();
+        // System notice (context compaction/retry/fallback, etc.) — a blockquote so a pause doesn't look like a 'hang',
+        // rendered like the worker alerts (unified "> …" style, blank-line isolated so it can't bleed into the prose).
         const txt = e.code ? t(this.getLocale(), e.code as I18nKey, e.params) : e.text;
-        await this.append({ markdown_text: `\n_ℹ️ ${txt}_\n` });
+        await this.appendQuote(`> ℹ️ ${txt}`);
         return;
       }
       case "worker.event": {
