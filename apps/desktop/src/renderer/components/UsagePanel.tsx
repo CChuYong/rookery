@@ -56,7 +56,7 @@ function UsagePanelImpl({ usage, loadFailed }: { usage: UsageSnapshot | null; lo
       {/* Always-rendered header: (a) names the number's scope so a fresh install's real global ccusage figures
           don't read as "this app already spent money" (audit #56), and (b) anchors the panel's height from the
           very first paint so pre-load/loaded states don't pop the sidebar layout (audit #55). */}
-      <div className="eyebrow flex items-center gap-1 px-2 pt-1 eyebrow-sm font-medium uppercase text-muted/80">
+      <div className="flex items-center gap-1 px-2 pt-1 text-[10.5px] text-muted">
         <span>{t("usagePanel.title")}</span>
         <Tooltip label={t("usagePanel.titleHint")} side="top">
           <Info size={11} tabIndex={0} aria-label={t("usagePanel.titleHint")} className="shrink-0 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-accent/50" />
