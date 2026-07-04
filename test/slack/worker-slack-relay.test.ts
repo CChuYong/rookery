@@ -21,7 +21,7 @@ function fakeClient() {
 const MASTER: ThreadTarget = { channel: "Cmaster", threadTs: "m1", team: "T1" };
 
 function makeDeps(client: SlackClient, over: Partial<WorkerRelayDeps> = {}): WorkerRelayDeps {
-  return { client, enabled: () => true, channel: () => "C-relay", resolveThread: () => MASTER, ...over };
+  return { client, enabled: () => true, channel: () => "C-relay", resolveThread: () => MASTER, alert: async () => true, ...over };
 }
 
 const spawn = (over: Partial<Extract<CoreEvent, { type: "worker.spawned" }>> = {}): CoreEvent =>
@@ -54,25 +54,38 @@ describe("WorkerSlackRelay", () => {
     expect(f.posts).toEqual([]);
   });
 
-  it("on spawn: posts a root message to the channel + a permalink into the master thread", async () => {
+  it("on spawn: posts a root card + weaves a blockquote alert into the master stream (no separate follow post)", async () => {
     const f = fakeClient();
-    const relay = new WorkerSlackRelay(makeDeps(f.client));
+    const alerts: Array<{ sessionId: string; md: string }> = [];
+    const relay = new WorkerSlackRelay(makeDeps(f.client, { alert: async (sessionId, md) => { alerts.push({ sessionId, md }); return true; } }));
     relay.onEvent(spawn());
     await relay.idle();
-    expect(f.posts).toHaveLength(2);
-    // root message → relay channel, no thread, carries label + repo leaf + task
+    // root card → relay channel; the follow notice is now an in-stream alert, NOT a separate post
+    expect(f.posts).toHaveLength(1);
     expect(f.posts[0]!.channel).toBe("C-relay");
     expect(f.posts[0]!.thread_ts).toBeUndefined();
-    expect(f.posts[0]!.text).toContain("app");
-    expect(f.posts[0]!.text).toContain("do x");
-    // link message → master thread, carries the permalink
     expect(f.state.permalinks).toBe(1);
-    expect(f.posts[1]!.channel).toBe("Cmaster");
-    expect(f.posts[1]!.thread_ts).toBe("m1");
-    expect(f.posts[1]!.text).toContain("https://slack/C-relay/ts1");
-    // the permalink is our own worker thread → suppress Slack's preview card
-    expect(f.posts[1]!.unfurl_links).toBe(false);
-    expect(f.posts[1]!.unfurl_media).toBe(false);
+    // the alert is a blockquote carrying the masked permalink, routed to the master session's reporter
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.sessionId).toBe("s1");
+    expect(alerts[0]!.md.startsWith("> ")).toBe(true);
+    expect(alerts[0]!.md).toContain("app"); // label
+    expect(alerts[0]!.md).toContain("https://slack/C-relay/ts1"); // permalink
+  });
+
+  it("falls back to a threaded post (unfurl off) when no master reporter is found", async () => {
+    const f = fakeClient();
+    const relay = new WorkerSlackRelay(makeDeps(f.client, { alert: async () => false }));
+    relay.onEvent(spawn());
+    await relay.idle();
+    expect(f.posts).toHaveLength(2); // root card + fallback follow post
+    const followed = f.posts[1]!;
+    expect(followed.channel).toBe("Cmaster");
+    expect(followed.thread_ts).toBe("m1");
+    expect(followed.text.startsWith("> ")).toBe(true);
+    expect(followed.text).toContain("https://slack/C-relay/ts1");
+    expect(followed.unfurl_links).toBe(false);
+    expect(followed.unfurl_media).toBe(false);
   });
 
   it("feeds a tracked worker's assistant message into its thread reporter", async () => {
@@ -137,7 +150,8 @@ describe("WorkerSlackRelay", () => {
         getPermalink: async (a) => ({ permalink: `https://slack/${a.channel}/${a.message_ts}` }),
       },
     };
-    const relay = new WorkerSlackRelay(makeDeps(client));
+    // Force the fallback-post branch (no reporter found) so the fake client's throw-on-master-channel is actually exercised.
+    const relay = new WorkerSlackRelay(makeDeps(client, { alert: async () => false }));
     relay.onEvent(spawn());
     await relay.idle();
     relay.onEvent(workerEvent({ kind: "message", role: "assistant", content: "still alive" }));

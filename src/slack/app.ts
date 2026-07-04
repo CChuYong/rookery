@@ -196,6 +196,10 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       return t ? { ...t, userId: recipientByThread.get(threadKeyOf(t)) } : null; // attach recipient_user_id so the relay can stream in a regular channel
     },
     getLocale: () => deps.slackConfig().locale,
+    alert: (sessionId, markdown) => {
+      const r = registry.get(sessionId);
+      return r ? r.threadAlert(markdown).then(() => true) : Promise.resolve(false);
+    },
   });
   const unsubWorkerRelay = deps.bus.subscribe(FLEET_CHANNEL, (e) => workerRelay.onEvent(e));
 

@@ -1,6 +1,7 @@
 import type { CoreEvent } from "../core/events.js";
 import type { SlackClient, ThreadTarget } from "./types.js";
 import type { Locale } from "../core/i18n.js";
+import { t, DEFAULT_LOCALE } from "../core/i18n.js";
 import { SlackThreadReporter } from "./reporter.js";
 import { workerEventToCoreEvent } from "./worker-event-to-core.js";
 import { basename } from "node:path";
@@ -11,6 +12,9 @@ export interface WorkerRelayDeps {
   channel: () => string; // workerSlackRelayChannel (trimmed; "" = off)
   resolveThread: (sessionId: string) => ThreadTarget | null; // master's Slack thread, or null if the session isn't Slack-origin
   getLocale?: () => Locale;
+  // Route a one-line alert into the master thread's reporter (in-stream when a turn is open, else a threaded post).
+  // Returns true when a master reporter was found and the alert delivered; false → the relay posts it itself.
+  alert?: (sessionId: string, markdown: string) => Promise<boolean>;
 }
 
 const TERMINAL = new Set(["stopped", "done", "error", "failed", "orphaned"]);
@@ -93,8 +97,15 @@ export class WorkerSlackRelay {
       try {
         const permalink = await this.deps.client.chat.getPermalink({ channel, message_ts: rootTs }).then((r) => r.permalink).catch(() => undefined);
         if (permalink) {
-          // unfurl off: this is a bot meta message whose only URL is the worker-thread permalink — a preview card of our own thread is noise.
-          await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: `🧵 Worker \`${e.label || e.workerId}\` started — follow: ${permalink}`, unfurl_links: false, unfurl_media: false });
+          const locale = this.deps.getLocale?.() ?? DEFAULT_LOCALE;
+          const label = e.label || e.workerId;
+          // masked link (no raw URL, no unfurl) as a "> " blockquote alert woven into the master's live stream
+          const blockquote = `> ${t(locale, "slack.workerStartedAlert", { label })} · <${permalink}|${t(locale, "slack.openThread")}>`;
+          const delivered = (await this.deps.alert?.(e.sessionId, blockquote)) ?? false;
+          if (!delivered) {
+            // no master reporter (edge — a spawning master normally has one): post it ourselves, unfurl off
+            await this.deps.client.chat.postMessage({ channel: master.channel, thread_ts: master.threadTs, text: blockquote, unfurl_links: false, unfurl_media: false });
+          }
         }
       } catch (err) {
         process.stderr.write(`[rookery] worker-slack-relay link post failed: ${String(err)}\n`);
