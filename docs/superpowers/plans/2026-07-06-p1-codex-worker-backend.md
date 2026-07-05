@@ -699,41 +699,43 @@ export interface CodexBackendDeps {
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
 
 // Unbounded async push-queue bridging notification callbacks into the stream's pull loop.
+// The waiter is a {resolve, reject} pair: fail() must REJECT a parked consumer — resolving it
+// with {done:true} (an earlier design) silently dropped the error, because the throw lives in
+// next()'s own body and a parked waiter never re-enters it.
 class EventChannel {
   private buffer: AgentEvent[] = [];
-  private waiter: ((r: IteratorResult<AgentEvent>) => void) | null = null;
+  private waiter: { resolve: (r: IteratorResult<AgentEvent>) => void; reject: (e: Error) => void } | null = null;
   private done = false;
   private error: Error | null = null;
 
   push(ev: AgentEvent): void {
     if (this.done) return;
-    if (this.waiter) { const w = this.waiter; this.waiter = null; w({ value: ev, done: false }); }
+    if (this.waiter) { const w = this.waiter; this.waiter = null; w.resolve({ value: ev, done: false }); }
     else this.buffer.push(ev);
   }
 
   fail(err: Error): void {
     if (this.done) return;
-    this.error = err;
-    this.end();
+    this.done = true;
+    if (this.waiter) { const w = this.waiter; this.waiter = null; w.reject(err); }
+    else this.error = err; // no parked consumer: stored, thrown after the buffer drains
   }
 
   end(): void {
-    if (this.done && !this.waiter) return;
+    if (this.done) return;
     this.done = true;
-    if (this.waiter) { const w = this.waiter; this.waiter = null; w({ value: undefined as never, done: true }); }
+    if (this.waiter) { const w = this.waiter; this.waiter = null; w.resolve({ value: undefined as never, done: true }); }
   }
 
   async next(): Promise<IteratorResult<AgentEvent>> {
     const buffered = this.buffer.shift();
-    if (buffered !== undefined) return { value: buffered, done: false };
+    if (buffered !== undefined) return { value: buffered, done: false }; // buffered events flush before any stored error
     if (this.done) {
       if (this.error) { const e = this.error; this.error = null; throw e; }
       return { value: undefined as never, done: true };
     }
-    return new Promise((resolve) => { this.waiter = resolve; });
+    return new Promise((resolve, reject) => { this.waiter = { resolve, reject }; });
   }
-
-  takeError(): Error | null { const e = this.error; this.error = null; return e; }
 }
 
 class CodexStream implements AgentStream {
