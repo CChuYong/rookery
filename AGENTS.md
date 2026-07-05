@@ -64,7 +64,7 @@ Commit trailer convention: `Co-Authored-By: Claude Opus 4.8 (1M context) <norepl
 This section is the always-loaded summary. For depth — turn lifecycles, the event/protocol/schema catalogs, and "how to add X" recipes — read the on-demand docs under [`docs/`](docs/README.md) (each cites its source files).
 
 ### Transport-agnostic core + a single composition root
-`src/core/` **never imports** WS/CLI/Slack/Electron. It is driven by domain commands and only emits `CoreEvent` through the `EventBus`. Every external boundary is an **injectable port + fake**: `QueryFn` (SDK `query()`), `GitOps` (`RealGitOps`/`FakeGitOps` — all git and gh shell-outs), `Repositories` (SQLite), `SlackClient`. **All wiring happens only in `startDaemon()` of `src/daemon/server.ts`.** Assemble new dependencies there; the core only receives them as interfaces.
+`src/core/` **never imports** WS/CLI/Slack/Electron. It is driven by domain commands and only emits `CoreEvent` through the `EventBus`. Every external boundary is an **injectable port + fake**: **AgentBackend** (provider-neutral agent port; `ClaudeBackend` adapts the SDK `query()` — the raw `QueryFn` remains only for Claude-specific aux paths: labeler, command probe), `GitOps` (`RealGitOps`/`FakeGitOps` — all git and gh shell-outs), `Repositories` (SQLite), `SlackClient`. **All wiring happens only in `startDaemon()` of `src/daemon/server.ts`.** Assemble new dependencies there; the core only receives them as interfaces.
 
 ### Master vs Worker — the spine of this codebase (don't confuse them)
 The input models are **different.**
@@ -161,7 +161,7 @@ An automation rule = a **trigger** (`cron` | `slack`) + an **action** (`master` 
 ## Testing
 
 - Tests mirror `src/**` 1:1 in `test/**`. Thanks to the DI ports, unit tests run **without a real SDK, git, or network**.
-- **`test/helpers/fake-query.ts` is the canonical way to mock the SDK `query()`** (`fakeQuery(script)`). To verify `query()` options (model/effort/systemPrompt/permissionMode), wrap the fake in a capturing closure (see `capture()` in `test/core/master-agent.test.ts`).
+- **`test/helpers/fake-query.ts` is the canonical way to mock the SDK `query()`** (`fakeQuery(script)`). To verify `query()` options (model/effort/systemPrompt/permissionMode), wrap the fake in a capturing closure (see `capture()` in `test/core/master-agent.test.ts`). `fakeBackend`/`fakeStreamingBackend` (fake-query driven through the real `ClaudeBackend`) is how Worker/Master tests inject the port; raw `fakeQuery` remains for adapter/aux tests.
   - ⚠️ **`fakeQuery` is finite** (end of script → generator terminates → the worker reaches `done`). **A real streaming SDK iterator only ends when the input is closed.** This gap hides happy-path lifecycle issues, so don't overtrust green tests as end-to-end evidence.
 - The DB is `openDb(":memory:")` + `new Repositories(db, now?)` (deterministic timestamps via an injected clock). git is the injected `FakeGitOps` (records calls); `RealGitOps` is verified separately against a temp repo (`fs.mkdtempSync`).
 - Background fleet flows are awaited with `FleetOrchestrator.waitAllSettled()`.

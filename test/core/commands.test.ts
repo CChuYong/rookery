@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { CommandCatalog } from "../../src/core/commands.js";
-import type { QueryFn } from "../../src/core/worker.js";
+import type { QueryFn } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
 describe("CommandCatalog", () => {

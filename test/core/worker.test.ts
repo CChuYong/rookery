@@ -5,7 +5,7 @@ import { EventBus } from "../../src/core/events.js";
 import type { CoreEvent } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
-import type { QueryFn } from "../../src/core/worker.js";
+import type { QueryFn } from "../../src/core/claude-backend.js";
 import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend } from "../helpers/fake-query.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 

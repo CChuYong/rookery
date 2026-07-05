@@ -1,5 +1,7 @@
 # 2026-07-05 — Codex backend: parity analysis & effort estimate
 
+> Status 2026-07-05+: **P0 (seam extraction) implemented** — `src/core/agent-backend.ts` (port) + `src/core/claude-backend.ts` (adapter); Worker/MasterAgent/SessionManager are SDK-import-free (guarded by `test/core/provider-neutral.test.ts`). P1 (Codex worker backend) not started.
+
 Scope: what it takes for rookery (built on the Claude Agent SDK) to also support **OpenAI Codex** as an agent backend — for workers first, optionally the master — with a seam designed for further providers later.
 
 Method: two parallel analysis agents (both fable) — **Track A** exhaustively inventoried Claude-SDK coupling in this codebase (15+ feature dimensions, file:line, propagation depth); **Track B** verified Codex's current capabilities against live docs (CLI 0.142.5 / `@openai/codex-sdk` 0.142.5 / app-server protocol, verified 2026-07-05). This doc is the synthesis: merged parity matrix → design decision → phased estimate. Full source matrices in the appendices.
