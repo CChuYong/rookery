@@ -6,7 +6,8 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/worker.js";
-import { fakeQuery, fakeStreamingQuery } from "../helpers/fake-query.js";
+import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend } from "../helpers/fake-query.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
 
 // Poll until the condition becomes true (throw on timeout) — for reproducing mid-turn timing.
 async function until(cond: () => boolean, ms = 1000): Promise<void> {
@@ -35,7 +36,7 @@ describe("Worker", () => {
         repos,
         bus,
         model: "test-model",
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "assistant", text: "working on it" },
           { type: "result", subtype: "success", total_cost_usd: 0.01, num_turns: 1, session_id: "sdk-1" },
         ]),
@@ -72,7 +73,7 @@ describe("Worker", () => {
         bus: new EventBus(),
         model: "m",
         // When a skill loads, the SDK injects the skill body as user-type text → not typed by a human.
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "user_text", text: "SKILL BODY: always use TDD" },
           { type: "assistant", text: "ok will do" },
           { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
@@ -98,7 +99,7 @@ describe("Worker", () => {
       sessionId: "s1",
       repoPath: "/r",
       label: "t",
-      deps: { repos, bus: new EventBus(), model: "m", queryFn: fakeQuery([]) },
+      deps: { repos, bus: new EventBus(), model: "m", backend: fakeBackend([]) },
     });
     agent.start("go");
     await agent.stop();
@@ -132,7 +133,7 @@ describe("Worker", () => {
         setModel: async () => {},
       });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: liveQuery } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(liveQuery) } });
 
     agent.start("go");
     await until(() => agent.status() === "idle"); // wait until the first turn ends and drops to idle
@@ -167,7 +168,7 @@ describe("Worker", () => {
         repos,
         bus: new EventBus(),
         model: "m",
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "assistant", text: "resumed reply" },
           { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
         ]),
@@ -197,7 +198,7 @@ describe("Worker", () => {
       label: "t",
       sdkSessionId: "sdk-1",
       // Streaming fake so resume() drops to idle and a later send() drives one more turn (+0.1 cost / +1 turn).
-      deps: { repos, bus, model: "m", queryFn: fakeStreamingQuery(() => [{ type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "sdk-1" }]) },
+      deps: { repos, bus, model: "m", backend: fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "sdk-1" }]) },
     });
     agent.resume();
     await until(() => agent.status() === "idle");
@@ -226,7 +227,7 @@ describe("Worker", () => {
         repos,
         bus,
         model: "m",
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "assistant", text: "nested working on it", parentToolUseId: "task-1" }, // nested Worker's text
           { type: "tool_use", id: "tn", name: "Read", parentToolUseId: "task-1" }, // nested Worker's tool
           { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
@@ -255,7 +256,7 @@ describe("Worker", () => {
       captured = input.options;
       return inner(input as Parameters<typeof inner>[0]);
     }) as typeof inner;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: qfn } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(qfn) } });
     agent.start("go");
     await agent.waitUntilSettled();
     expect(captured?.forwardSubagentText).toBe(true);
@@ -272,7 +273,7 @@ describe("Worker", () => {
         captured = input.options ?? {};
         return inner(input as Parameters<typeof inner>[0]);
       }) as typeof inner;
-      const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model, effort, queryFn: qfn } });
+      const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model, effort, backend: new ClaudeBackend(qfn) } });
       agent.start("go");
       await agent.waitUntilSettled();
       return captured.effort;
@@ -296,7 +297,7 @@ describe("Worker", () => {
         repos,
         bus: new EventBus(),
         model: "claude-opus-4-8",
-        queryFn: fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }], { onSetModel: (m) => setModelCalls.push(m) }),
+        backend: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }], { onSetModel: (m) => setModelCalls.push(m) }),
       },
     });
     agent.start("go");
@@ -329,7 +330,7 @@ describe("Worker", () => {
         bus: new EventBus(),
         model: "claude-opus-4-8",
         permissionMode: "plan",
-        queryFn: qfn,
+        backend: new ClaudeBackend(qfn),
       },
     });
     agent.start("go");
@@ -357,7 +358,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: throwingQuery } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(throwingQuery) } });
     agent.start("go");
     await new Promise((r) => setTimeout(r, 0)); // let consume start consuming the query
     await agent.stop();
@@ -382,7 +383,7 @@ describe("Worker", () => {
         bus,
         model: "test-model",
         onTurnStart,
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "assistant", text: "done" },
           { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
         ]),
@@ -421,7 +422,7 @@ describe("Worker", () => {
         bus,
         model: "test-model",
         onTurnStart,
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "assistant", text: "done" },
           { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
         ]),
@@ -445,7 +446,7 @@ describe("Worker", () => {
     // Not a streaming fake that ends only when input closes; instead it drops to idle and stays alive — so after start it goes idle and send is possible.
     const agent = new Worker({
       id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
-      deps: { repos, bus: new EventBus(), model: "m", onTurnStart, queryFn: fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]) },
+      deps: { repos, bus: new EventBus(), model: "m", onTurnStart, backend: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]) },
     });
     agent.start("go");
     await agent.waitUntilSettled();
@@ -461,7 +462,7 @@ describe("Worker", () => {
       sessionId: "s1",
       repoPath: "/r",
       label: "t",
-      deps: { repos, bus: new EventBus(), model: "m", queryFn: fakeQuery([]) },
+      deps: { repos, bus: new EventBus(), model: "m", backend: fakeBackend([]) },
     });
     agent.start("go");
     await agent.stop();
@@ -490,7 +491,7 @@ describe("Worker", () => {
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: gated } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated) } });
     agent.start("task");
     // Wait until turn0's assistant is recorded (= just before the gate).
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
@@ -528,7 +529,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: gated } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated) } });
     agent.start("task");
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
     agent.send("m1");
@@ -552,7 +553,7 @@ describe("Worker", () => {
     bus.subscribe("s1", (e) => events.push(e));
     const agent = new Worker({
       id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
-      deps: { repos, bus, model: "m", queryFn: fakeStreamingQuery((text) => [{ type: "assistant", text: `reply:${text}` }, { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]) },
+      deps: { repos, bus, model: "m", backend: fakeStreamingBackend((text) => [{ type: "assistant", text: `reply:${text}` }, { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]) },
     });
     agent.start("task");
     await until(() => agent.status() === "idle"); // turn0 ends → idle
@@ -571,7 +572,7 @@ describe("Worker", () => {
     bus.subscribe("s1", (e) => live.push(e));
     const agent = new Worker({
       id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
-      deps: { repos, bus, model: "m", queryFn: fakeQuery([
+      deps: { repos, bus, model: "m", backend: fakeBackend([
         { type: "thinking", text: "let me " },
         { type: "thinking", text: "reason" },
         { type: "assistant", text: "answer" },
@@ -602,7 +603,7 @@ describe("Worker", () => {
         repos,
         bus: new EventBus(),
         model: "m",
-        queryFn: fakeQuery([{ type: "system", text: "session init" }]),
+        backend: fakeBackend([{ type: "system", text: "session init" }]),
       },
     });
     agent.start("go");
@@ -628,7 +629,7 @@ describe("Worker", () => {
         repos,
         bus,
         model: "test-model",
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           // message_start gives us per-request usage (50000 input tokens)
           { type: "message_start", usage: { input_tokens: 50000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
           { type: "assistant", text: "working" },
@@ -669,7 +670,7 @@ describe("Worker", () => {
       captured = input.options ?? {};
       return inner(input as Parameters<typeof inner>[0]);
     }) as typeof inner;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: qfn } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(qfn) } });
     agent.start("go");
     await agent.waitUntilSettled();
     // Preserves the claude_code preset (not overriding/replacing it)
@@ -693,7 +694,7 @@ describe("Worker", () => {
       id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
       deps: {
         repos, bus, model: "m",
-        queryFn: fakeStreamingQuery((_text, turn) => [
+        backend: fakeStreamingBackend((_text, turn) => [
           { type: "assistant", text: `turn${turn}` },
           { type: "result", subtype: "success", total_cost_usd: 0.01, num_turns: turn === 0 ? 3 : 5, session_id: "sdk-1" },
         ]),
@@ -728,7 +729,7 @@ describe("Worker", () => {
       id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
       deps: {
         repos, bus: new EventBus(), model: "m",
-        queryFn: fakeQuery([
+        backend: fakeBackend([
           { type: "assistant", text: "done" },
           { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 100, session_id: "s" },
         ]),
@@ -771,7 +772,7 @@ describe("Worker", () => {
       });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", queryFn: gatedQuery } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gatedQuery) } });
     agent.start("task");
 
     // Wait until the assistant message is recorded (= turn0 is mid-flight at the gate)
@@ -836,7 +837,7 @@ describe("Worker", () => {
       });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", queryFn: gatedQuery } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gatedQuery) } });
     agent.start("task");
 
     // Wait until turn0's assistant is recorded (mid-turn)
@@ -890,7 +891,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: dyingQuery } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(dyingQuery) } });
     agent.start("go");
     await agent.waitUntilSettled();
     // Must be a terminal 'error' — otherwise the entry is a zombie (stuck idle, agent never cleared) and a follow-up send wedges it.
@@ -909,7 +910,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: initOnly } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(initOnly) } });
     agent.start("go");
     await agent.waitUntilSettled();
     expect(repos.getWorker("a1")?.sdk_session_id).toBe("wsdk-init-1"); // captured for resume even without a result
@@ -939,7 +940,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => { releaseGate(); }, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", queryFn: gatedQuery } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gatedQuery) } });
     agent.start("task");
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
     // mid-turn send → echo deferred + message buffered in the MessageQueue (the gen is parked at the gate, not pulling input)

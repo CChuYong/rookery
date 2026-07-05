@@ -3,7 +3,7 @@ import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
-import { fakeStreamingQuery } from "../helpers/fake-query.js";
+import { fakeStreamingBackend } from "../helpers/fake-query.js";
 
 // Poll until the condition becomes true (throw on timeout) — the streaming worker only settles to terminal, so idle is observed via status().
 async function until(cond: () => boolean, ms = 1000): Promise<void> {
@@ -22,11 +22,11 @@ describe("Worker lifecycle with a streaming query (real SDK fidelity)", () => {
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/wt", label: "x", worktreePath: "/wt", branch: "rookery/a1" });
     const bus = new EventBus();
-    const queryFn = fakeStreamingQuery((text, turn) => [
+    const backend = fakeStreamingBackend((text, turn) => [
       { type: "assistant", text: `reply ${turn}: ${text}` },
       { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: `sdk-${turn}` },
     ]);
-    const sub = new Worker({ id: "a1", sessionId: "s1", repoPath: "/wt", label: "x", deps: { repos, bus, queryFn, model: "m" } });
+    const sub = new Worker({ id: "a1", sessionId: "s1", repoPath: "/wt", label: "x", deps: { repos, bus, backend, model: "m" } });
 
     sub.start("do task");
     await until(() => sub.status() === "idle"); // first turn ends → idle (a finite fake would have become done)

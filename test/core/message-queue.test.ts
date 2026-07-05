@@ -3,9 +3,8 @@ import { MessageQueue } from "../../src/core/message-queue.js";
 
 async function collect(q: MessageQueue, max: number): Promise<string[]> {
   const out: string[] = [];
-  for await (const m of q) {
-    const content = m.message.content;
-    out.push(typeof content === "string" ? content : JSON.stringify(content));
+  for await (const text of q) {
+    out.push(text);
     if (out.length >= max) break;
   }
   return out;
@@ -18,7 +17,7 @@ describe("MessageQueue", () => {
     q.push("second");
     q.close();
     const got: string[] = [];
-    for await (const m of q) got.push(m.message.content as string);
+    for await (const text of q) got.push(text);
     expect(got).toEqual(["first", "second"]);
   });
 
@@ -31,16 +30,12 @@ describe("MessageQueue", () => {
     expect(await p).toEqual(["late"]);
   });
 
-  it("shapes messages as SDK user messages", async () => {
+  it("yields plain strings (provider-agnostic — the adapter wraps the SDK shape)", async () => {
     const q = new MessageQueue();
     q.push("hi");
     q.close();
     const first = (await q[Symbol.asyncIterator]().next()).value;
-    expect(first).toMatchObject({
-      type: "user",
-      message: { role: "user", content: "hi" },
-      parent_tool_use_id: null,
-    });
+    expect(first).toBe("hi");
   });
 
   it("ends iteration after close", async () => {
@@ -48,7 +43,17 @@ describe("MessageQueue", () => {
     q.push("only");
     q.close();
     const got: string[] = [];
-    for await (const m of q) got.push(m.message.content as string);
+    for await (const text of q) got.push(text);
     expect(got).toEqual(["only"]);
+  });
+
+  it("does not terminate the drain on an empty-string push (!== undefined guard)", async () => {
+    const q = new MessageQueue();
+    q.push("");
+    q.push("after-empty");
+    q.close();
+    const got: string[] = [];
+    for await (const text of q) got.push(text);
+    expect(got).toEqual(["", "after-empty"]);
   });
 });

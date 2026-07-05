@@ -3,6 +3,7 @@ import { ClaudeBackend, claudeUserMessages } from "../../src/core/claude-backend
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import type { AgentEvent, AgentStream } from "../../src/core/agent-backend.js";
 import { fakeQuery, fakeStreamingQuery } from "../helpers/fake-query.js";
+import { MessageQueue } from "../../src/core/message-queue.js";
 
 async function collect(stream: AgentStream): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
@@ -184,6 +185,19 @@ describe("ClaudeBackend.openSession", () => {
     release();
     await done; // generator ends only when input ends
     expect(seen.filter((e) => e.kind === "turn_end")).toHaveLength(2);
+  });
+
+  it("drives openSession from a MessageQueue: push after start reaches the SDK as a user message", async () => {
+    const texts: string[] = [];
+    const backend = new ClaudeBackend(fakeStreamingQuery((text) => { texts.push(text); return [
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]; }));
+    const queue = new MessageQueue();
+    const done = collect(backend.openSession(queue, baseOpts()));
+    queue.push("hello worker");
+    queue.close();
+    await done;
+    expect(texts).toEqual(["hello worker"]);
   });
 });
 

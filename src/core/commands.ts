@@ -1,4 +1,5 @@
-import type { QueryFn } from "./worker.js";
+import type { QueryFn } from "./claude-backend.js";
+import { claudeUserMessages } from "./claude-backend.js";
 import { MessageQueue } from "./message-queue.js";
 import type { SlashCommandInfo } from "./agent-backend.js";
 
@@ -54,7 +55,7 @@ export class CommandCatalog {
     const abort = new AbortController();
     try {
       const q = this.queryFn({
-        prompt: queue,
+        prompt: claudeUserMessages(queue),
         options: { cwd, model, permissionMode: "bypassPermissions", abortController: abort },
       }) as unknown as Probeable;
       // Background pump: the generator must be consumed for control responses (supportedCommands) to flow. Messages are discarded.

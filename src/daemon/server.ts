@@ -10,6 +10,7 @@ import { EventBus } from "../core/events.js";
 import { SessionManager } from "../core/session-manager.js";
 import type { QueryFn } from "../core/worker.js";
 import { RealGitOps } from "../core/git-ops.js";
+import { ClaudeBackend } from "../core/claude-backend.js";
 import type { Locale } from "../core/i18n.js";
 import { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import type { WorkerLike } from "../core/fleet-orchestrator.js";
@@ -66,6 +67,9 @@ export interface StartDaemonOptions {
 export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandle> {
   const { config } = opts;
   const queryFn: QueryFn = opts.queryFn ?? sdkQuery;
+  // Provider-neutral backend over the injected queryFn (P0 seam). CommandCatalog/makeLabeler stay on the raw
+  // queryFn deliberately — Claude-specific aux paths, gated per provider in P1.
+  const backend = new ClaudeBackend(queryFn);
   // Non-loopback binds send the token in plaintext over ws:// → fail-closed reject unless explicitly opted in (G-ORIGIN-AUTH).
   // Check before touching lock/DB so we fail fast without side effects.
   const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(config.host);
@@ -106,7 +110,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       label: o.label,
       // spawn override (UI) takes priority, otherwise fall back to the global default (Slack/master spawn).
       // permissionMode: absent → the Worker defaults to "bypassPermissions".
-      deps: { repos, bus, queryFn, model: o.model ?? settings.workerModel(), effort: o.effort ?? settings.workerEffort(), permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns },
+      deps: { repos, bus, backend, model: o.model ?? settings.workerModel(), effort: o.effort ?? settings.workerEffort(), permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns },
       sdkSessionId: o.sdkSessionId ?? null,
     });
   // Auto-generate labels (Haiku): workers right after spawn, masters from the first message. best-effort.

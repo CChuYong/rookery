@@ -1,16 +1,13 @@
-import type { query as sdkQuery, PermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentBackend, AgentStream } from "./agent-backend.js";
 import { MessageQueue } from "./message-queue.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
-import { extractText, extractToolUses, extractToolResults } from "./sdk-extract.js";
 import type { EventBus, WorkerEventData } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
-import { effortApplies, coerceEffort } from "./effort.js";
 import { truncateBytes } from "./truncate.js";
 import type { SlashCommandInfo } from "./commands.js";
-import { classifySystemPush } from "./system-push.js";
-import { turnContext } from "./result-telemetry.js";
 
-export type QueryFn = typeof sdkQuery;
+// Temporary back-compat re-export (removed in the final sweep): several modules still import QueryFn from here.
+export type { QueryFn } from "./claude-backend.js";
 
 // Instruction injected into every worker turn so it treats fenced <untrusted-...> content as data, not instructions.
 export const WORKER_FENCE_INSTRUCTION =
@@ -24,7 +21,7 @@ export type WorkerStatus = "running" | "idle" | "stopped" | "done" | "error";
 export interface WorkerDeps {
   repos: Repositories;
   bus: EventBus;
-  queryFn: QueryFn;
+  backend: AgentBackend;
   model: string;
   permissionMode?: string; // SDK permission mode at spawn time (defaults to "bypassPermissions"). Changeable live via setPermissionMode.
   effort?: string; // effort fixed at spawn time (falls back to SDK default if absent). Not passed for Haiku models.
@@ -63,7 +60,7 @@ export class Worker {
   private readonly thinking = new ThinkingCoalescer();
   private state: WorkerStatus = "running";
   private loop: Promise<void> = Promise.resolve();
-  private query?: ReturnType<QueryFn>;
+  private stream?: AgentStream;
   private sdkSessionId: string | null;
   private currentModel: string; // current model (changeable live via setModel). The query option holds the value at start time.
   private currentPermissionMode: string; // changeable live via setPermissionMode (query.setPermissionMode). Held value at start time.
@@ -129,7 +126,7 @@ export class Worker {
     this.currentModel = model;
     this.opts.deps.repos.setWorkerModel(this.opts.id, model);
     try {
-      await this.query?.setModel(model);
+      await this.stream?.setModel(model);
     } catch {
       /* the model value is still updated even if there's no live query or it fails (applied on the next resume) */
     }
@@ -140,7 +137,7 @@ export class Worker {
     this.currentPermissionMode = mode;
     this.opts.deps.repos.setWorkerPermissionMode(this.opts.id, mode);
     try {
-      await this.query?.setPermissionMode(mode as PermissionMode);
+      await this.stream?.setPermissionMode(mode);
     } catch {
       /* value still updated even if there's no live query or it fails (applied on next resume) */
     }
@@ -166,8 +163,7 @@ export class Worker {
   // list of slash commands/skills this session recognizes (built-in + project + plugin + skill). Fetched directly from the live query.
   async listCommands(): Promise<SlashCommandInfo[]> {
     try {
-      const cmds = (await this.query?.supportedCommands()) ?? [];
-      return cmds.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint, aliases: c.aliases }));
+      return (await this.stream?.supportedCommands()) ?? [];
     } catch {
       return [];
     }
@@ -183,7 +179,7 @@ export class Worker {
     this.queue.close();
     this.abort.abort();
     try {
-      await this.query?.interrupt();
+      await this.stream?.interrupt();
     } catch {
       /* best-effort */
     }
@@ -199,7 +195,7 @@ export class Worker {
     // during the await and the consume loop would shift() a deferred item as a ghost turn before we clear.
     const dropped = this.deferred.splice(0);
     try {
-      await this.query?.interrupt();
+      await this.stream?.interrupt();
     } catch {
       /* best-effort */
     }
@@ -265,114 +261,80 @@ export class Worker {
 
   private async consume(): Promise<void> {
     try {
-      this.query = this.opts.deps.queryFn({
-        prompt: this.queue,
-        options: {
-          cwd: this.opts.repoPath,
-          model: this.currentModel,
-          ...(effortApplies(this.currentModel) && coerceEffort(this.opts.deps.effort)
-            ? { effort: coerceEffort(this.opts.deps.effort) }
-            : {}), // omitted if Haiku-unsupported/unspecified
-          ...(effortApplies(this.currentModel) ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}), // show thinking summaries
-          permissionMode: this.currentPermissionMode as PermissionMode,
-          systemPrompt: { type: "preset", preset: "claude_code", append: WORKER_FENCE_INSTRUCTION },
-          includePartialMessages: true, // token-level delta streaming (message_delta)
-          forwardSubagentText: true, // also receive the native nested subagent's text/tool activity to show in UI panels
-          ...(this.sdkSessionId ? { resume: this.sdkSessionId } : {}),
-          abortController: this.abort,
-        },
+      this.stream = this.opts.deps.backend.openSession(this.queue, {
+        cwd: this.opts.repoPath,
+        model: this.currentModel,
+        effort: this.opts.deps.effort,
+        permissionMode: this.currentPermissionMode,
+        systemPromptAppend: WORKER_FENCE_INSTRUCTION,
+        resume: this.sdkSessionId,
+        abortController: this.abort,
       });
-      let lastReqContextTokens = 0;
-      for await (const msg of this.query) {
-        const type = (msg as { type?: string }).type;
-        // native nested subagent activity arrives with parent_tool_use_id set. Keep it separate from our own turn state/session/transcript.
-        const parentId = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id ?? null;
-        if (type === "stream_event") {
-          if (parentId) continue; // ignore the nested partial tokens (show in the panel only as completed messages) — prevents polluting the parent bubble
-          const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string; thinking?: string }; message?: { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } } } }).event;
-          if (ev?.type === "message_start") {
-            // track per-request context tokens for the current request (isomorphic to the master, master-agent.ts:251-253)
-            const mu = ev.message?.usage ?? {};
-            lastReqContextTokens = (mu.input_tokens ?? 0) + (mu.cache_read_input_tokens ?? 0) + (mu.cache_creation_input_tokens ?? 0);
-          } else if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && typeof ev.delta.text === "string") {
-            this.emit({ kind: "message_delta", text: ev.delta.text });
-          } else if (ev?.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && typeof ev.delta.thinking === "string") {
-            this.thinking.push(ev.delta.thinking); // accumulate → persisted coalesced at message/tool/turn boundaries
-            this.emit({ kind: "thinking_delta", text: ev.delta.thinking });
-          }
-          continue;
-        }
-        if (type === "assistant" || type === "user") {
-          if (parentId) {
+      for await (const ev of this.stream) {
+        if (ev.kind === "text_delta") {
+          this.emit({ kind: "message_delta", text: ev.text });
+        } else if (ev.kind === "thinking_delta") {
+          this.thinking.push(ev.text); // accumulate → persisted coalesced at message/tool/turn boundaries
+          this.emit({ kind: "thinking_delta", text: ev.text });
+        } else if (ev.kind === "message") {
+          if (ev.parentToolUseId) {
             // native nested subagent → live-only emit (no persistence), grouped by parentToolUseId.
-            const text = extractText(msg);
-            if (text.trim()) this.emitNested(parentId, { kind: "message", role: type, content: text });
-            for (const tu of extractToolUses(msg)) this.emitNested(parentId, { kind: "tool_use", id: tu.id, name: tu.name, input: truncate(safeJson(tu.input), 4000) });
-            for (const tr of extractToolResults(msg)) this.emitNested(parentId, { kind: "tool_result", id: tr.toolUseId, isError: tr.isError, content: truncate(tr.content, 4000) });
+            if (ev.text.trim()) this.emitNested(ev.parentToolUseId, { kind: "message", role: ev.role, content: ev.text });
             continue;
           }
-          this.flushThinking(); // persist this step's thinking summary as a single entry before message/tool (order: thinking → message/tool)
-          // the text of a user-type message is not human input but SDK-injected content (skill body/context/tool_result as text).
-          // same as the master (master-agent.ts): from user take only tool_result, and record text/tool_use only from assistant.
-          // real worker instructions are recorded separately by instruct()/send(), so there's no need to render user text here.
-          if (type === "assistant") {
-            const text = extractText(msg);
-            if (text.trim()) this.record({ kind: "message", role: "assistant", content: text });
-            for (const tu of extractToolUses(msg)) this.record({ kind: "tool_use", id: tu.id, name: tu.name, input: truncate(safeJson(tu.input), 4000) });
-          }
-          for (const tr of extractToolResults(msg)) this.record({ kind: "tool_result", id: tr.toolUseId, isError: tr.isError, content: truncate(tr.content, 4000) });
-        } else if (type === "system") {
-          if (parentId) continue; // ignore the native nested subagent's system messages
-          // Capture sdk_session_id from the init system message too (not only from `result`) — parity with the master:
-          // an interrupt/stream-end before the first result would otherwise leave it null and break resume after restart.
-          const sysSessionId = (msg as { session_id?: string }).session_id;
-          if (sysSessionId && sysSessionId !== this.sdkSessionId) {
-            this.sdkSessionId = sysSessionId;
-            this.opts.deps.repos.setWorkerSdkSessionId(this.opts.id, sysSessionId);
-          }
-          // classify the SDK's informational push: commands_changed → refresh the / list, compaction/retry/fallback → notice.
-          const push = classifySystemPush(msg);
-          if (push?.kind === "commands") {
-            this.opts.deps.bus.emit({ type: "commands.changed", sessionId: this.opts.sessionId, scopeId: this.opts.id, commands: push.commands });
+          this.flushThinking(); // persist this step's thinking summary before message/tool (order: thinking → message/tool)
+          // user-role text is provider-injected content (skill body/context), not human input — real worker
+          // instructions are recorded separately by start()/send(), so only assistant text is recorded here.
+          if (ev.role === "assistant" && ev.text.trim()) this.record({ kind: "message", role: "assistant", content: ev.text });
+        } else if (ev.kind === "tool_use") {
+          if (ev.parentToolUseId) {
+            this.emitNested(ev.parentToolUseId, { kind: "tool_use", id: ev.id, name: ev.name, input: truncate(safeJson(ev.input), 4000) });
             continue;
           }
-          if (push?.kind === "notice") {
-            this.record({ kind: "notice", text: push.text });
+          this.flushThinking();
+          this.record({ kind: "tool_use", id: ev.id, name: ev.name, input: truncate(safeJson(ev.input), 4000) });
+        } else if (ev.kind === "tool_result") {
+          if (ev.parentToolUseId) {
+            this.emitNested(ev.parentToolUseId, { kind: "tool_result", id: ev.toolUseId, isError: ev.isError, content: truncate(ev.content, 4000) });
             continue;
           }
-          // for system messages, the info is in the top-level text/subtype, not in .message.content.
-          const s = msg as { subtype?: string; text?: string };
-          this.record({ kind: "system", text: s.text ?? s.subtype ?? "system" });
-        } else if (type === "tool_progress") {
-          if (parentId) continue; // ignore the native nested subagent's progress
-          const tp = msg as { tool_use_id?: string; elapsed_time_seconds?: number };
-          if (tp.tool_use_id) this.emit({ kind: "tool_progress", id: tp.tool_use_id, elapsedSec: Math.round(tp.elapsed_time_seconds ?? 0) }); // live only (no persistence)
-        } else if (type === "result") {
-          if (parentId) continue; // the native nested subagent's result must not touch the parent's sdkSessionId/status
-          this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer, before result
-          const r = msg as { subtype?: string; total_cost_usd?: number; num_turns?: number; session_id?: string; duration_ms?: number; usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }; modelUsage?: Record<string, { contextWindow?: number }> };
-          if (r.session_id && r.session_id !== this.sdkSessionId) {
-            this.sdkSessionId = r.session_id;
-            this.opts.deps.repos.setWorkerSdkSessionId(this.opts.id, r.session_id); // for resume after restart
+          this.flushThinking();
+          this.record({ kind: "tool_result", id: ev.toolUseId, isError: ev.isError, content: truncate(ev.content, 4000) });
+        } else if (ev.kind === "session_id") {
+          // Captured early (init) AND at turn end — an interrupt before the first turn end must not break resume.
+          if (ev.sessionId !== this.sdkSessionId) {
+            this.sdkSessionId = ev.sessionId;
+            this.opts.deps.repos.setWorkerSdkSessionId(this.opts.id, ev.sessionId);
           }
-          this.cumCostUsd += r.total_cost_usd ?? 0;
-          this.cumTurns += r.num_turns ?? 0;
-          const { contextTokens, contextWindow } = turnContext(r, lastReqContextTokens);
+        } else if (ev.kind === "push") {
+          if (ev.push.kind === "commands") {
+            this.opts.deps.bus.emit({ type: "commands.changed", sessionId: this.opts.sessionId, scopeId: this.opts.id, commands: ev.push.commands });
+          } else {
+            this.record({ kind: "notice", text: ev.push.text });
+          }
+        } else if (ev.kind === "system_text") {
+          this.record({ kind: "system", text: ev.text });
+        } else if (ev.kind === "tool_progress") {
+          this.emit({ kind: "tool_progress", id: ev.toolUseId, elapsedSec: ev.elapsedSec }); // live only (no persistence)
+        } else if (ev.kind === "turn_end") {
+          this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
+          this.cumCostUsd += ev.costUsd;
+          this.cumTurns += ev.numTurns;
           this.record({
             kind: "result",
-            subtype: r.subtype ?? "unknown",
+            subtype: ev.subtype,
             costUsd: this.cumCostUsd,
             numTurns: this.cumTurns,
-            durationMs: r.duration_ms ?? 0,
-            contextTokens,
-            contextWindow,
+            durationMs: ev.durationMs,
+            contextTokens: ev.contextTokens,
+            contextWindow: ev.contextWindow,
           });
-          // maxTurns cap: compare directly against r.num_turns (the conversation-cumulative agentic turn count per send).
-          // Do NOT use cumTurns (double-counts across sends). null/undefined → unlimited.
+          // maxTurns cap: compare against ev.numTurns (the provider's conversation-cumulative agentic turn
+          // count per send). Do NOT use cumTurns (double-counts across sends). null/undefined → unlimited.
           const cap = this.opts.deps.maxTurns;
-          if (cap != null && (r.num_turns ?? 0) >= cap) {
-            this.record({ kind: "notice", text: `Turn cap reached (maxTurns=${cap}, num_turns=${r.num_turns ?? 0}) — stopping worker.` });
-            void this.query?.interrupt(); // void: NOT await — would deadlock inside the consume loop
+          if (cap != null && ev.numTurns >= cap) {
+            this.record({ kind: "notice", text: `Turn cap reached (maxTurns=${cap}, num_turns=${ev.numTurns}) — stopping worker.` });
+            void this.stream?.interrupt(); // void: NOT await — would deadlock inside the consume loop
             this.queue.close();
             this.abort.abort();
             this.transition("stopped");
@@ -384,7 +346,7 @@ export class Worker {
           const next = this.deferred.shift();
           if (next) {
             this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
-            this.queue.push(next.text); // release the held instruction to the SDK NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
+            this.queue.push(next.text); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
             this.record({ kind: "message", role: "user", content: next.text }, next.clientMsgId);
           } else if (this.state === "running") {
             // nothing deferred → wait (idle). The streaming session is alive and can receive further instructions.
@@ -393,16 +355,15 @@ export class Worker {
         }
       }
       this.flushThinking(); // persist the trailing thinking summary before the loop terminates naturally
-      // when the query loop terminates naturally (generator ends), done. (real streaming ends only on stop, becoming stopped)
+      // when the stream terminates naturally (generator ends), done. (real streaming ends only on stop, becoming stopped)
       if (this.state === "running" || this.state === "idle") this.transition("done");
     } catch (err) {
       // an abort caused by stop/discard is not an error — don't leave "Operation aborted" in the transcript.
-      // (a bug where, on shutdown, fleet.close aborts for flushing → showed up as a fake error at the end of an IDLE worker's transcript after restart)
       if (this.abort.signal.aborted) return;
       this.flushThinking(); // also persist the thinking summary up to right before the error (so it shows on restore)
       this.record({ kind: "error", message: String(err) });
       // A non-abort throw can arrive while the worker is running OR idle (turn ended, stream then dies). Both must go
-      // terminal — otherwise an idle worker is left a zombie (stuck 'idle', agent never cleared) and a follow-up send wedges it.
+      // terminal — otherwise an idle worker is left a zombie and a follow-up send wedges it.
       if (this.state === "running" || this.state === "idle") this.transition("error");
     }
   }
