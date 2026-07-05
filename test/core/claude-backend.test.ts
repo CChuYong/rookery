@@ -1,0 +1,152 @@
+import { describe, it, expect } from "vitest";
+import { ClaudeBackend, claudeUserMessages } from "../../src/core/claude-backend.js";
+import type { QueryFn } from "../../src/core/claude-backend.js";
+import type { AgentEvent, AgentStream } from "../../src/core/agent-backend.js";
+import { fakeQuery } from "../helpers/fake-query.js";
+
+async function collect(stream: AgentStream): Promise<AgentEvent[]> {
+  const out: AgentEvent[] = [];
+  for await (const ev of stream) out.push(ev);
+  return out;
+}
+
+// Raw message injector for shapes fakeQuery cannot produce (classified system pushes, nested system/result).
+function rawQuery(messages: unknown[]): QueryFn {
+  return ((_input: unknown) => {
+    async function* gen() { for (const m of messages) yield m; }
+    return Object.assign(gen(), { interrupt: async () => {} });
+  }) as unknown as QueryFn;
+}
+
+function baseOpts(over: Record<string, unknown> = {}) {
+  return { cwd: "/x", model: "claude-opus-4-8", effort: "high", permissionMode: "bypassPermissions", abortController: new AbortController(), ...over };
+}
+
+describe("ClaudeBackend.startTurn — event translation", () => {
+  it("translates text, tools, session id, and result telemetry", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      { type: "system", text: "init" },
+      { type: "message_start", usage: { input_tokens: 100, cache_read_input_tokens: 50 } },
+      { type: "thinking", text: "hmm" },
+      { type: "assistant", text: "hello" },
+      { type: "tool_use", id: "t1", name: "mcp__fleet__spawn_worker", input: { repo: "r" } },
+      { type: "tool_result", id: "t1", isError: false, content: "ok" },
+      { type: "result", subtype: "success", total_cost_usd: 0.5, num_turns: 2, session_id: "sdk-1", duration_ms: 10, modelUsage: { m: { contextWindow: 200000 } } },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events).toEqual([
+      { kind: "system_text", text: "init" },
+      { kind: "thinking_delta", text: "hmm" },
+      { kind: "message", role: "assistant", text: "hello", parentToolUseId: null },
+      { kind: "tool_use", id: "t1", name: "mcp__fleet__spawn_worker", input: { repo: "r" }, parentToolUseId: null },
+      { kind: "tool_result", toolUseId: "t1", isError: false, content: "ok", parentToolUseId: null },
+      { kind: "session_id", sessionId: "sdk-1" },
+      { kind: "turn_end", subtype: "success", costUsd: 0.5, numTurns: 2, durationMs: 10, contextTokens: 150, contextWindow: 200000 },
+    ]);
+  });
+
+  it("emits session_id EARLY from the init system message, before any turn end", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "init", session_id: "sdk-early" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-early" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events[0]).toEqual({ kind: "session_id", sessionId: "sdk-early" });
+    // init with no other classification also surfaces as system_text (subtype fallback)
+    expect(events[1]).toEqual({ kind: "system_text", text: "init" });
+  });
+
+  it("classifies system pushes (compact_boundary → notice push; commands_changed → commands push)", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 150000, post_tokens: 20000 } },
+      { type: "system", subtype: "commands_changed", commands: [{ name: "/x", description: "d" }] },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ kind: "push", push: { kind: "notice", code: "notice.compact" } });
+    expect(events[1]).toMatchObject({ kind: "push", push: { kind: "commands", commands: [{ name: "/x", description: "d" }] } });
+  });
+
+  it("forwards nested message/tool events with parentToolUseId, drops nested deltas/system/result", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "stream_event", parent_tool_use_id: "p1", event: { type: "content_block_delta", delta: { type: "text_delta", text: "nested-delta" } } },
+      { type: "assistant", parent_tool_use_id: "p1", message: { role: "assistant", content: [{ type: "text", text: "nested says hi" }] } },
+      { type: "system", parent_tool_use_id: "p1", subtype: "init", session_id: "nested-sdk" },
+      { type: "result", parent_tool_use_id: "p1", subtype: "success", total_cost_usd: 9, num_turns: 9, session_id: "nested-sdk" },
+      { type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "sdk-1" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events).toEqual([
+      { kind: "message", role: "assistant", text: "nested says hi", parentToolUseId: "p1" },
+      { kind: "session_id", sessionId: "sdk-1" },
+      { kind: "turn_end", subtype: "success", costUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
+    ]);
+  });
+
+  it("forwards user-role text as a message event (consumers decide to skip it)", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      { type: "user_text", text: "sdk-injected context" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events[0]).toEqual({ kind: "message", role: "user", text: "sdk-injected context", parentToolUseId: null });
+  });
+});
+
+describe("ClaudeBackend — option assembly", () => {
+  // Capture the exact SDK-level input the adapter builds (this suite is the adapter's option spec).
+  function capture(script: Parameters<typeof fakeQuery>[0]) {
+    let input: { prompt?: unknown; options?: Record<string, unknown> } = {};
+    const inner = fakeQuery(script);
+    const fn = ((i: typeof input) => { input = i; return inner(i as Parameters<QueryFn>[0]); }) as unknown as QueryFn;
+    return { fn, input: () => input };
+  }
+  const RESULT = [{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" } as const];
+
+  it("startTurn: preset+append, effort gating, resume, tool passthrough, no forwardSubagentText", async () => {
+    const cap = capture(RESULT);
+    const backend = new ClaudeBackend(cap.fn);
+    const mcp = { fleet: { marker: true } };
+    const canUse = () => {};
+    await collect(backend.startTurn("hi", {
+      ...baseOpts({ resume: "sdk-old", systemPromptAppend: "EXTRA" }),
+      mcpServers: mcp, allowedTools: ["a", "b"], disallowedTools: ["CronCreate"], canUseTool: canUse,
+    }));
+    const o = cap.input().options!;
+    expect(cap.input().prompt).toBe("hi");
+    expect(o.model).toBe("claude-opus-4-8");
+    expect(o.effort).toBe("high");
+    expect(o.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(o.systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: "EXTRA" });
+    expect(o.permissionMode).toBe("bypassPermissions");
+    expect(o.includePartialMessages).toBe(true);
+    expect(o.resume).toBe("sdk-old");
+    expect(o.mcpServers).toBe(mcp);
+    expect(o.allowedTools).toEqual(["a", "b"]);
+    expect(o.disallowedTools).toEqual(["CronCreate"]);
+    expect(o.canUseTool).toBe(canUse);
+    expect(o.forwardSubagentText).toBeUndefined();
+  });
+
+  it("omits effort AND thinking for Haiku models; omits resume when absent", async () => {
+    const cap = capture(RESULT);
+    const backend = new ClaudeBackend(cap.fn);
+    await collect(backend.startTurn("hi", baseOpts({ model: "claude-haiku-4-5" })));
+    const o = cap.input().options!;
+    expect(o.effort).toBeUndefined();
+    expect(o.thinking).toBeUndefined();
+    expect(o.resume).toBeUndefined();
+  });
+});
+
+describe("claudeUserMessages", () => {
+  it("wraps each input string into the minimal SDKUserMessage shape", async () => {
+    async function* strings() { yield "one"; yield "two"; }
+    const out: unknown[] = [];
+    for await (const m of claudeUserMessages(strings())) out.push(m);
+    expect(out).toEqual([
+      { type: "user", message: { role: "user", content: "one" }, parent_tool_use_id: null },
+      { type: "user", message: { role: "user", content: "two" }, parent_tool_use_id: null },
+    ]);
+  });
+});
