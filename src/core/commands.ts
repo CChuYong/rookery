@@ -1,13 +1,9 @@
 import type { QueryFn } from "./worker.js";
 import { MessageQueue } from "./message-queue.js";
+import type { SlashCommandInfo } from "./agent-backend.js";
 
-// A single slash command/skill (the serializable part of the SDK SlashCommand).
-export interface SlashCommandInfo {
-  name: string;
-  description: string;
-  argumentHint?: string;
-  aliases?: string[];
-}
+// Re-exported from the port module (neutral vocabulary) — existing importers keep this path.
+export type { SlashCommandInfo } from "./agent-backend.js";
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000; // commands rarely change — 5-minute cache
 const PROBE_TIMEOUT_MS = 8000;
