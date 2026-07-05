@@ -29,7 +29,7 @@
 - Test: `test/core/codex/codex-client.test.ts`
 
 **Interfaces:**
-- Produces (later tasks rely on these exact names): `CodexTransport { write(line), onLine(cb), onExit(cb), kill() }`, `CodexSpawn = (opts: { env?: NodeJS.ProcessEnv }) => CodexTransport`, `realCodexSpawn(bin: () => string, apiKey: () => string | undefined): CodexSpawn`, `CodexClient` with `request(method, params): Promise<unknown>`, `notify(method, params)`, `respond(id, result)`, `respondError(id, code, message)`, `onNotification(cb: (method: string, params: unknown) => void)`, `onServerRequest(cb: (id: number | string, method: string, params: unknown) => void)`, `onClosed(cb: (err?: Error) => void)`, `close()`; protocol types below.
+- Produces (later tasks rely on these exact names): `CodexTransport { write(line), onLine(cb), onExit(cb), kill() }`, `CodexSpawn = (opts: { env?: NodeJS.ProcessEnv }) => CodexTransport`, `realCodexSpawn(bin: () => string): CodexSpawn`, `CodexClient` with `request(method, params): Promise<unknown>`, `notify(method, params)`, `respond(id, result)`, `respondError(id, code, message)`, `onNotification(cb: (method: string, params: unknown) => void)`, `onServerRequest(cb: (id: number | string, method: string, params: unknown) => void)`, `onClosed(cb: (err?: Error) => void)`, `close()`; protocol types below.
 
 - [ ] **Step 1: Create `src/core/codex/codex-protocol.ts`**:
 
@@ -122,13 +122,16 @@ export interface CodexTransport {
 export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv }) => CodexTransport;
 
 // Real transport: one `codex app-server` child per session, newline-delimited JSON-RPC on stdio.
-// `bin`/`apiKey` are resolvers (Settings-backed) so runtime changes apply to new sessions.
-export function realCodexSpawn(bin: () => string, apiKey: () => string | undefined): CodexSpawn {
+// `bin` is a resolver (Settings-backed) so runtime changes apply to new sessions.
+// AUTH NOTE (verified against rust-v0.142.5 app-server/src/lib.rs:493): the app-server does NOT
+// read CODEX_API_KEY from env (that only works for `codex exec`). Auth comes from
+// $CODEX_HOME/auth.json (`codex login` / `codex login --with-api-key`). An in-app API-key setting
+// would need CODEX_HOME redirection + `account/login/start` provisioning — deferred to P1.5.
+export function realCodexSpawn(bin: () => string): CodexSpawn {
   return ({ env }) => {
-    const key = apiKey();
     const child = nodeSpawn(bin(), ["app-server"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...env, ...(key ? { CODEX_API_KEY: key } : {}) },
+      env: { ...process.env, ...env },
     });
     const lineCbs: Array<(line: string) => void> = [];
     const exitCbs: Array<(info: { code: number | null; message?: string }) => void> = [];
@@ -810,13 +813,16 @@ class CodexStream implements AgentStream {
         const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
         const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
         const modeOverride = this.overrideMode ? mapPermissionMode(this.overrideMode) : null;
-        await client.request("turn/start", {
+        const turnRes = (await client.request("turn/start", {
           threadId,
           input,
           ...(this.overrideModel ? { model: this.overrideModel } : {}),
           ...(mapEffort(this.opts.effort) ? { effort: mapEffort(this.opts.effort) } : {}),
           ...(modeOverride ? { approvalPolicy: modeOverride.approvalPolicy, sandboxPolicy: sandboxPolicyFor(modeOverride.sandbox) } : {}),
-        });
+        })) as { turn?: { id?: string } };
+        // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
+        // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
+        if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
         await turnEnded; // resolves on turn/completed (any status) or client close
       }
     } finally {
@@ -1112,10 +1118,10 @@ Read each file before editing — line anchors below are approximate; match on c
 
 - [ ] **Step 5: fleet-tools.** In `src/tools/fleet-tools.ts`: `spawn_worker` input schema gains `provider: z.enum(["claude", "codex"]).optional().describe("Agent backend for this worker (default claude). codex = OpenAI Codex via app-server.")`; pass through to `fleet.spawn`. `FLEET_TOOL_NAMES` unchanged (no new tool). Update the tool's description string mentioning the provider option in one sentence. Add/extend a fleet-tools test asserting the param reaches `fleet.spawn`.
 
-- [ ] **Step 6: Settings.** In `src/core/settings.ts` (read the file; follow the existing accessor + secret patterns exactly):
-  - `codexApiKey(): string | undefined` — DB-first, env `CODEX_API_KEY` fallback, registered as a WRITE-ONLY secret exactly like `anthropicApiKey` (never echoed via settings.get).
+- [ ] **Step 6: Settings.** In `src/core/settings.ts` (read the file; follow the existing accessor patterns exactly):
   - `codexWorkerModel(): string` — default `"gpt-5.5"`.
   - `codexBin(): string` — default `"codex"`.
+  (No `codexApiKey` in P1 — the app-server ignores `CODEX_API_KEY` env; auth relies on the user's `~/.codex/auth.json` via `codex login`. An in-app key needs CODEX_HOME redirection + `account/login/start` provisioning — P1.5.)
   Add settings tests following the file's existing test patterns (`test/core/settings.test.ts`).
 
 - [ ] **Step 7: Server wiring.** In `src/daemon/server.ts`:
@@ -1129,8 +1135,9 @@ after the existing `const backend = new ClaudeBackend(queryFn);`:
 
 ```ts
   // Backend registry (P1): workers pick by provider; the master stays on Claude.
+  // Codex auth = the user's ~/.codex/auth.json (`codex login`) — see codex-transport.ts AUTH NOTE.
   const codexBackend = new CodexBackend({
-    spawn: realCodexSpawn(() => settings.codexBin(), () => settings.codexApiKey()),
+    spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
   });
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
@@ -1158,7 +1165,7 @@ after the existing `const backend = new ClaudeBackend(queryFn);`:
 - [ ] **Step 1: Extend the neutrality gate.** Add `"src/core/codex/codex-backend.ts"`, `"src/core/codex/codex-client.ts"`, `"src/core/codex/codex-protocol.ts"`, `"src/core/codex/codex-vocab.ts"` to `NEUTRAL_FILES` (the Codex adapter must never import the Claude SDK).
 - [ ] **Step 2: AGENTS.md** — two surgical edits:
   - In the Fleet section, after the spawn sentence, add: `Workers can run on either backend: `spawn_worker`/`worker.spawn` take `provider: "claude" | "codex"` (default claude); codex workers run via a per-worker `codex app-server` child (`src/core/codex/`, protocol pinned to CLI 0.142.5 — regenerate types with `codex app-server generate-ts` on bumps). The master remains Claude-only (P2).`
-  - In the environment-variables table, add a row: `| `CODEX_API_KEY` | (none) | Codex worker auth fallback — the settings (DB) `codexApiKey` takes priority; without either, the child uses `~/.codex/auth.json` (ChatGPT plan) |`
+  - In the "Fragile conventions / pitfalls" section add one bullet: `**Codex worker auth** rides on the user's `~/.codex/auth.json` (`codex login`) — the app-server child does NOT read `CODEX_API_KEY` (verified against rust-v0.142.5); an in-app key setting is P1.5 (CODEX_HOME redirection + account/login/start).`
 - [ ] **Step 3: Parity doc** — update the status blockquote: `P1 (Codex worker backend) implemented 2026-07-06 — see docs/2026-07-06-p1-codex-worker-backend.md; desktop provider UX, per-turn pricing, and the Codex master remain open (P1.5/P2/P3).`
 - [ ] **Step 4: Full gates** — `npm run typecheck && npm test && npm run build` → all green.
 - [ ] **Step 5: Commit** — `git add -A && git commit -m "docs(codex): P1 status + provider docs; extend neutrality gate to codex adapter" -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"`

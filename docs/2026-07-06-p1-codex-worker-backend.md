@@ -101,7 +101,8 @@ Cost: `src/core/codex/codex-pricing.ts` — `costUsd(model, usageDelta): number`
 - `WorkerFactory` opts + `Entry` + `FleetOrchestrator.spawn/materialize/rehydrate` carry `provider` through; `subFactory` (server.ts) picks the backend from the registry.
 - **Fork routing**: `FleetDeps.forkSession` signature gains a provider argument: `(provider: string, sdkSessionId: string, opts?) => Promise<{sessionId}>`; server injects a router (claude → SDK `forkSession`, codex → ephemeral-child `thread/fork`). `SessionManager` fork (master) is untouched.
 - Protocol: `worker.spawn` client message + `spawn_worker` fleet tool gain optional `provider: "claude"|"codex"` (zod enum, default claude); `WorkerRow.provider` optional string (renderer untouched, back-compat).
-- Settings: `codexApiKey` (write-only secret; env fallback `CODEX_API_KEY`), `codexWorkerModel` (default `"gpt-5.5"`), `codexBin` (default `"codex"`, resolved via PATH). Codex workers' model default = `settings.codexWorkerModel()` when spawn has no model override; ChatGPT-plan auth (`~/.codex/auth.json`) works implicitly when no API key is set — the child inherits it.
+- Settings: `codexWorkerModel` (default `"gpt-5.5"`), `codexBin` (default `"codex"`, resolved via PATH). Codex workers' model default = `settings.codexWorkerModel()` when spawn has no model override.
+- **Auth (amended after source verification)**: the app-server child does **not** read `CODEX_API_KEY` from env (`rust-v0.142.5` `app-server/src/lib.rs:493` constructs AuthManager with `enable_codex_api_key_env: false` — that env var only works for `codex exec`/SDK). Auth rides on `$CODEX_HOME/auth.json`, i.e. the user's `codex login` (ChatGPT plan or `--with-api-key`). An in-app `codexApiKey` setting is **deferred to P1.5**: it requires pointing workers at a rookery-managed `CODEX_HOME` and provisioning via the `account/login/start {type:"apiKey"}` RPC (mutating the user's global auth.json from the daemon was rejected as invasive).
 
 ## Error semantics (parity table)
 
@@ -120,9 +121,20 @@ Cost: `src/core/codex/codex-pricing.ts` — `costUsd(model, usageDelta): number`
 - Fleet plumbing tests: provider column round-trip, spawn/rehydrate with provider, fork routing per provider, spawn_worker provider param.
 - **Live smoke (controller-run, post-implementation)**: real `codex app-server` in a temp git repo — spawn a codex worker, one trivial turn, interrupt, resume-after-kill. Not part of `npm test`.
 
+## Behavioral facts confirmed against pinned source (rust-v0.142.5, via protocol research)
+
+- `turn/completed` fires exactly once per turn for ALL terminal states (`completed`/`interrupted`/`failed`) — settlement can key on it + child exit alone. On failure, an `error` notification precedes it; **`error {willRetry:true}` is transient** (server auto-retries, turn continues) — informational notice only, never terminal.
+- Handshake ordering is strict: `initialize` → response → `initialized` notification → everything else.
+- Thread notifications are per-connection via auto-subscribe on `thread/start`/`thread/resume` (one child per worker ⇒ automatic). `thread/read` does not subscribe.
+- No shutdown RPC exists; rollouts persist incrementally, so kill + `thread/resume` is the sanctioned recovery path. Graceful stop = `turn/interrupt` → await turn/completed → SIGTERM.
+- The `turn/start` response vs `turn/started` notification ordering is undocumented — the adapter tracks the active turn id from BOTH.
+- Wire-format traps (docs' examples are wrong; schema is right): `approvalPolicy` and `thread/start.sandbox` are kebab-case strings; the per-turn `sandboxPolicy` object's `type` tag is camelCase; `codexErrorInfo` values are camelCase.
+- Everything the worker loop needs is on the STABLE surface (`experimentalApi:false`); `collaborationMode`, `dynamicTools`, granular approvals, `thread/turns/list` are gated.
+
 ## Risks
 
-- 0.x churn: protocol module pinned to 0.142.5 with the generator command documented; tolerant decode for unknowns.
+- 0.x churn: protocol module pinned to 0.142.5 with the generator command documented; tolerant decode for unknowns. (`on-failure` approval value is already removed on Codex main — we never emit it.)
+- `thread/start` with a `cwd` under workspace-write/danger marks that project **trusted in the user's `~/.codex/config.toml`** (side effect) — worktree paths will accumulate trust entries; cosmetic, note for P1.5 cleanup.
 - `ReasoningEffort` is a free string in the schema — mapping table is best-effort; invalid values surface as turn failures (recoverable path).
 - Approval `"granular"` variants unhandled by design (we only emit the string enums).
 - Codex-native subagent (`features.multi_agent`, default on) traffic on child threads is dropped — transcripts show only the parent thread. Acceptable for P1; note in docs.
