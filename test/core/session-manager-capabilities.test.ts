@@ -6,6 +6,7 @@ import { SessionManager } from "../../src/core/session-manager.js";
 import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
 // Verifies the injected makeCapabilities flows all the way into the master's query options (per-source dynamic capability wiring).
@@ -20,7 +21,7 @@ function base() {
     captured = input.options ?? {};
     return inner(input as Parameters<typeof inner>[0]);
   }) as typeof inner;
-  return { repos, bus, fleet, queryFn, opts: () => captured };
+  return { repos, bus, fleet, queryFn, backend: new ClaudeBackend(queryFn), opts: () => captured };
 }
 
 describe("SessionManager makeCapabilities wiring", () => {
@@ -34,7 +35,7 @@ describe("SessionManager makeCapabilities wiring", () => {
         : undefined;
     };
     let n = 0;
-    const sm = new SessionManager({ repos: b.repos, bus: b.bus, queryFn: b.queryFn, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
+    const sm = new SessionManager({ repos: b.repos, bus: b.bus, backend: b.backend, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
     const s = sm.getOrCreateByKey("slack:T:C:1.0", "/work");
     await s.master.runTurn("hi");
     expect(seen).toContainEqual({ key: "slack:T:C:1.0", id: "s0" });
@@ -48,7 +49,7 @@ describe("SessionManager makeCapabilities wiring", () => {
     const makeCapabilities = (externalKey: string | null) =>
       externalKey?.startsWith("slack:") ? () => ({ systemPromptAppend: "CAP_MARKER" }) : undefined;
     let n = 0;
-    const sm = new SessionManager({ repos: b.repos, bus: b.bus, queryFn: b.queryFn, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
+    const sm = new SessionManager({ repos: b.repos, bus: b.bus, backend: b.backend, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
     const s = sm.create("/work"); // no externalKey (ui/cli)
     await s.master.runTurn("hi");
     const o = b.opts() as { systemPrompt?: { append?: string }; allowedTools?: string[] };

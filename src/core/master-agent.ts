@@ -1,6 +1,4 @@
-import type { CanUseTool, PermissionMode, McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
-import type { QueryFn } from "./worker.js";
-import { extractText, extractToolUses, extractToolResults } from "./sdk-extract.js";
+import type { AgentBackend, ProviderMcpServer, ProviderPermissionCallback } from "./agent-backend.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
 import type { EventBus, CoreEvent } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
@@ -8,17 +6,14 @@ import type { FleetOrchestrator } from "./fleet-orchestrator.js";
 import { createMemoryToolsServer, MEMORY_TOOL_NAMES } from "../tools/memory-tools.js";
 import { createRepoToolsServer, REPO_TOOL_NAMES } from "../tools/repo-tools.js";
 import { createFleetToolsServer, FLEET_TOOL_NAMES } from "../tools/fleet-tools.js";
-import { effortApplies, coerceEffort } from "./effort.js";
-import { classifySystemPush } from "./system-push.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { truncateBytes } from "./truncate.js";
-import { turnContext } from "./result-telemetry.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
 
 export interface MasterAgentDeps {
   repos: Repositories;
   bus: EventBus;
-  queryFn: QueryFn;
+  backend: AgentBackend;
   model: () => string; // Resolved per turn → a Settings model change is reflected even in a live (cached) session.
   effort: () => string; // Global default effort. Used when there is no per-turn override.
   name: () => string; // The value the master uses as its own name in the system prompt. Resolved per turn (Settings changes apply immediately).
@@ -27,7 +22,7 @@ export interface MasterAgentDeps {
   summarizeLabel?: (text: string) => Promise<string | null>;
   // Callback to obtain approval/question (AskUserQuestion) before a tool runs (session-bound, usually the daemon routes it to Slack).
   // If not injected, it is not passed to query = current auto-allow. Under bypassPermissions only tools with an ask rule actually invoke it (may stay dormant).
-  canUseTool?: CanUseTool;
+  canUseTool?: ProviderPermissionCallback;
   // Per-source (per-session) dynamic capability. Resolved per turn → adds/removes tools and system prompt on top of base (memory/repos/fleet).
   // If not injected, identical to current behavior. The daemon injects it via makeCapabilities keyed by externalKey (slack:, etc.).
   capabilities?: () => TurnCapabilities;
@@ -35,7 +30,7 @@ export interface MasterAgentDeps {
 
 // Per-source turn capability that adds (+) or removes (−) on top of base. The core knows only this shape; the daemon (server.ts) decides what to put in.
 export interface TurnCapabilities {
-  mcpServers?: Record<string, McpSdkServerConfigWithInstance>; // "+" additional MCP servers
+  mcpServers?: Record<string, ProviderMcpServer>; // "+" additional MCP servers
   allowedTools?: string[]; // "+" additional exposed tool names (mcp__server__tool format)
   systemPromptAppend?: string; // "+" system prompt fragment (recommend keeping it fixed within a session — stable cache prefix)
   denyTools?: string[]; // "−" tool names to remove from the base allowlist
@@ -270,13 +265,13 @@ export class MasterAgent {
 
   private async doTurn(userText: string, override?: TurnOverride, opts?: { notices?: DisplayNotice[] }): Promise<void> {
     if (this.closing) throw new Error("session closed"); // teardown started: reject before any DB write / SDK call (avoids racing the row cascade)
-    const { repos, bus, queryFn, fleet } = this.opts.deps;
+    const { repos, bus, fleet } = this.opts.deps;
     // Per-turn override (UI) takes precedence; otherwise the global default (Slack/default entry point).
     // Treat empty/whitespace strings as "unspecified" — with only `??`, model:'' would be passed to query() as an empty model and the SDK would fail.
     const model = override?.model?.trim() || this.opts.deps.model();
     const effort = override?.effort?.trim() || this.opts.deps.effort();
     // Per-session permission mode (re-evaluated each turn). Unspecified → current bypassPermissions. The protocol enum guarantees value validity.
-    const permissionMode = (override?.permissionMode?.trim() || "bypassPermissions") as PermissionMode;
+    const permissionMode = override?.permissionMode?.trim() || "bypassPermissions";
     const clientMsgId = override?.clientMsgId;
     const sessionId = this.opts.sessionId;
     // Per-source dynamic capability (resolved per turn). If not injected, an empty object → base unchanged (current).
@@ -304,133 +299,87 @@ export class MasterAgent {
         // Auto-generate a label from the first message (run concurrently so it doesn't block the response, finalized with await at the end of the turn).
         labelDone = this.maybeLabel(userText);
       }
-      const q = queryFn({
-        prompt: userText,
-        options: {
-          cwd: this.opts.cwd,
-          model,
-          abortController: abort, // Abort signal — abort() from stop()
-          ...(effortApplies(model) && coerceEffort(effort) ? { effort: coerceEffort(effort) } : {}), // Haiku doesn't support effort → omit
-          ...(effortApplies(model) ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}), // Show thinking summary (omitted by default)
-          // A headless daemon has no TTY to approve permission prompts, so the master also auto-approves.
-          // (Same as the worker. Security note: only in a trusted environment.)
-          permissionMode, // Per-session choice (default bypassPermissions). With default etc., canUseTool is called per tool and the approval card activates.
-          // Approval/question callback (when injected). bypass only falls through tools with an ask rule, so it's safe even if not injected/dormant.
-          ...(this.opts.deps.canUseTool ? { canUseTool: this.opts.deps.canUseTool } : {}),
-          includePartialMessages: true, // Token-level delta streaming (agent.message.delta)
-          // base system prompt + per-source fragment ("+"). The fragment is fixed within a session so it doesn't disturb the cache prefix.
-          systemPrompt: { type: "preset", preset: "claude_code", append: this.buildSystemPrompt() + (caps.systemPromptAppend ? `\n\n${caps.systemPromptAppend}` : "") },
-          ...(this.sdkSessionId ? { resume: this.sdkSessionId } : {}),
-          // base (memory/repos/fleet) + per-source additional servers ("+"). On key collision, caps wins.
-          mcpServers: {
-            memory: createMemoryToolsServer(repos),
-            repos: createRepoToolsServer(repos),
-            fleet: createFleetToolsServer(fleet, repos, sessionId),
-            ...caps.mcpServers,
-          },
-          // base + per-source additions ("+"), then remove denyTools ("−"). AskUserQuestion only when there is a canUseTool handler (without one, bypass auto-resolves it with an empty answer, which is confusing).
-          allowedTools: baseAllowed.filter((t) => !deny.has(t)),
-          // Remove native harness schedule tools — in headless they don't fire (leftover files/no-op) and get confused with our schedule_* MCP tools,
-          // so drop them from the model context entirely and instead expose our tools driven by the schedule capability (daemon-injected).
-          disallowedTools: NATIVE_SCHEDULE_TOOLS,
+      const stream = this.opts.deps.backend.startTurn(userText, {
+        cwd: this.opts.cwd,
+        model,
+        abortController: abort, // Abort signal — abort() from stop()
+        effort,
+        // A headless daemon has no TTY to approve permission prompts, so the master also auto-approves.
+        // (Same as the worker. Security note: only in a trusted environment.)
+        permissionMode, // Per-session choice (default bypassPermissions). With default etc., canUseTool is called per tool and the approval card activates.
+        // Approval/question callback (when injected). bypass only falls through tools with an ask rule, so it's safe even if not injected/dormant.
+        ...(this.opts.deps.canUseTool ? { canUseTool: this.opts.deps.canUseTool } : {}),
+        // base system prompt + per-source fragment ("+"). The fragment is fixed within a session so it doesn't disturb the cache prefix.
+        systemPromptAppend: this.buildSystemPrompt() + (caps.systemPromptAppend ? `\n\n${caps.systemPromptAppend}` : ""),
+        resume: this.sdkSessionId,
+        // base (memory/repos/fleet) + per-source additional servers ("+"). On key collision, caps wins.
+        mcpServers: {
+          memory: createMemoryToolsServer(repos),
+          repos: createRepoToolsServer(repos),
+          fleet: createFleetToolsServer(fleet, repos, sessionId),
+          ...caps.mcpServers,
         },
+        // base + per-source additions ("+"), then remove denyTools ("−").
+        allowedTools: baseAllowed.filter((t) => !deny.has(t)),
+        // Remove native harness schedule tools — headless no-ops that confuse with our schedule_* MCP tools.
+        disallowedTools: NATIVE_SCHEDULE_TOOLS,
       });
-      this.currentQuery = q; // Handle to interrupt from stop()
+      this.currentQuery = stream; // Handle to interrupt from stop()
 
-      // Current context occupancy = the per-request usage of the "last model call". result.usage accumulates across multiple calls
-      // within a turn (cache-prefix re-reads can exceed the window → 100%+), so it's unsuitable for computing %. Refresh on each message_start.
-      let lastReqContextTokens = 0;
-      for await (const msg of q) {
-        const type = (msg as { type?: string }).type;
-        // Native nested-subagent traffic (the master's own Task tool) carries parent_tool_use_id. It is NOT the
-        // master's own activity: recording it persisted the subagent's internal tool churn as first-class
-        // master.tool/message events and prematurely flushed the coalesced thinking. The nested concept is
-        // live-only and per-worker (the master has no nested panel) — skip entirely (parity with worker.ts).
-        const parentId = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id ?? null;
-        if (parentId) continue;
-        if (type === "stream_event") {
-          // When includePartialMessages is on, partial token deltas arrive as stream_event → flow the text/thinking deltas.
-          const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string; thinking?: string }; message?: { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } } } }).event;
-          if (ev?.type === "message_start") {
-            const mu = ev.message?.usage ?? {};
-            lastReqContextTokens = (mu.input_tokens ?? 0) + (mu.cache_read_input_tokens ?? 0) + (mu.cache_creation_input_tokens ?? 0);
-          } else if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && typeof ev.delta.text === "string") {
-            bus.emit({ type: "master.message.delta", sessionId, delta: ev.delta.text });
-          } else if (ev?.type === "content_block_delta" && ev.delta?.type === "thinking_delta" && typeof ev.delta.thinking === "string") {
-            this.thinking.push(ev.delta.thinking); // Accumulate → persisted coalesced when the answer/tool starts
-            bus.emit({ type: "master.thinking.delta", sessionId, delta: ev.delta.thinking });
+      for await (const ev of stream) {
+        if (ev.kind === "text_delta") {
+          bus.emit({ type: "master.message.delta", sessionId, delta: ev.text });
+        } else if (ev.kind === "thinking_delta") {
+          this.thinking.push(ev.text); // Accumulate → persisted coalesced when the answer/tool starts
+          bus.emit({ type: "master.thinking.delta", sessionId, delta: ev.text });
+        } else if (ev.kind === "message") {
+          // Nested Task traffic is not the master's own activity (live-only, per-worker concept — the master
+          // has no nested panel); user-role text is provider-injected content, not the master's transcript.
+          if (ev.parentToolUseId || ev.role !== "assistant") continue;
+          this.flushThinking(); // Persist this step's thinking summary before the answer/tool (order: thinking → message/tool)
+          repos.addMessage({ sessionId, role: "assistant", content: ev.text }); // messages table (last_activity)
+          this.recordEvent({ type: "master.message", sessionId, role: "assistant", content: ev.text });
+        } else if (ev.kind === "tool_use") {
+          if (ev.parentToolUseId) continue;
+          this.flushThinking();
+          this.recordEvent({ type: "master.tool", sessionId, toolId: ev.id, name: prettyToolName(ev.name), phase: "start", input: toolInputText(ev.input) });
+        } else if (ev.kind === "tool_result") {
+          if (ev.parentToolUseId) continue;
+          this.recordEvent({ type: "master.tool", sessionId, toolId: ev.toolUseId, name: "", phase: "end", ok: !ev.isError, result: truncate(ev.content, 2000) });
+        } else if (ev.kind === "session_id") {
+          // Captured early (init) AND at turn end — a Stop before the very first turn end must not lose context.
+          if (ev.sessionId !== this.sdkSessionId) {
+            this.sdkSessionId = ev.sessionId;
+            repos.setSdkSessionId(sessionId, ev.sessionId);
           }
-          continue;
-        }
-        if (type === "assistant") {
-          this.flushThinking(); // Persist this step's thinking summary as a single entry before the answer/tool (order: thinking → message/tool)
-          const content = extractText(msg);
-          if (content) {
-            repos.addMessage({ sessionId, role: "assistant", content }); // messages table (last_activity)
-            this.recordEvent({ type: "master.message", sessionId, role: "assistant", content });
-          }
-          for (const tu of extractToolUses(msg)) {
-            this.recordEvent({ type: "master.tool", sessionId, toolId: tu.id, name: prettyToolName(tu.name), phase: "start", input: toolInputText(tu.input) });
-          }
-        } else if (type === "user") {
-          for (const tr of extractToolResults(msg)) {
-            this.recordEvent({ type: "master.tool", sessionId, toolId: tr.toolUseId, name: "", phase: "end", ok: !tr.isError, result: truncate(tr.content, 2000) });
-          }
-        } else if (type === "system") {
-          // Capture sdk_session_id from the init system message too (not only from `result`) — otherwise a Stop/interrupt
-          // before the very first result leaves it null, and the next turn starts a brand-new SDK session with no context.
-          const sysSessionId = (msg as { session_id?: string }).session_id;
-          if (sysSessionId && sysSessionId !== this.sdkSessionId) {
-            this.sdkSessionId = sysSessionId;
-            repos.setSdkSessionId(sessionId, sysSessionId);
-          }
-          // Classify SDK informational push: commands_changed → refresh the / list, compaction/retry/fallback → notice.
-          const push = classifySystemPush(msg);
-          if (push?.kind === "commands") {
-            bus.emit({ type: "commands.changed", sessionId, scopeId: sessionId, commands: push.commands });
-          } else if (push?.kind === "notice") {
-            this.recordEvent({ type: "master.notice", sessionId, text: push.text, code: push.code, params: push.params });
+        } else if (ev.kind === "push") {
+          if (ev.push.kind === "commands") {
+            bus.emit({ type: "commands.changed", sessionId, scopeId: sessionId, commands: ev.push.commands });
           } else {
-            // A system message carries info in its top-level text/subtype (extractText can't read it).
-            const s = msg as { subtype?: string; text?: string };
-            bus.emit({ type: "master.system", sessionId, text: s.text ?? s.subtype ?? "system" });
+            this.recordEvent({ type: "master.notice", sessionId, text: ev.push.text, code: ev.push.code, params: ev.push.params });
           }
-        } else if (type === "tool_progress") {
-          const tp = msg as { tool_use_id?: string; elapsed_time_seconds?: number };
-          if (tp.tool_use_id) bus.emit({ type: "master.tool", sessionId, toolId: tp.tool_use_id, name: "", phase: "progress", elapsedSec: Math.round(tp.elapsed_time_seconds ?? 0) });
-        } else if (type === "result") {
-          const r = msg as {
-            subtype?: string;
-            total_cost_usd?: number;
-            num_turns?: number;
-            session_id?: string;
-            duration_ms?: number;
-            usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
-            modelUsage?: Record<string, { contextWindow?: number }>;
-          };
-          if (r.session_id) {
-            this.sdkSessionId = r.session_id;
-            repos.setSdkSessionId(sessionId, r.session_id);
-          }
-          // Prefer the last request's usage (message_start). If not received (e.g. streaming unused), fall back to the accumulated value.
-          const { contextTokens, contextWindow } = turnContext(r, lastReqContextTokens);
-          // Carry cumulative cost/turns for the session (context tokens/window are the current turn's values — not accumulated).
-          this.cumCostUsd += r.total_cost_usd ?? 0;
-          this.cumTurns += r.num_turns ?? 0;
+        } else if (ev.kind === "system_text") {
+          bus.emit({ type: "master.system", sessionId, text: ev.text });
+        } else if (ev.kind === "tool_progress") {
+          bus.emit({ type: "master.tool", sessionId, toolId: ev.toolUseId, name: "", phase: "progress", elapsedSec: ev.elapsedSec });
+        } else if (ev.kind === "turn_end") {
+          // Carry cumulative cost/turns for the session (context tokens/window are the current turn's values).
+          this.cumCostUsd += ev.costUsd;
+          this.cumTurns += ev.numTurns;
           this.recordEvent({
             type: "master.result",
             sessionId,
-            subtype: r.subtype ?? "unknown",
+            subtype: ev.subtype,
             costUsd: this.cumCostUsd,
             numTurns: this.cumTurns,
-            durationMs: r.duration_ms ?? 0,
-            contextTokens,
-            contextWindow,
+            durationMs: ev.durationMs,
+            contextTokens: ev.contextTokens,
+            contextWindow: ev.contextWindow,
           });
-          // maxTurns: warning-only for master (no abort). Decision ②.
+          // maxTurns: warning-only for master (no abort).
           const masterCap = override?.maxTurns;
-          if (masterCap != null && (r.num_turns ?? 0) >= masterCap) {
-            const params = { max: masterCap, turns: r.num_turns ?? 0 };
+          if (masterCap != null && ev.numTurns >= masterCap) {
+            const params = { max: masterCap, turns: ev.numTurns };
             this.recordEvent({ type: "master.notice", sessionId, code: "notice.turnCap", params, text: t(DEFAULT_LOCALE, "notice.turnCap", params) });
           }
         }

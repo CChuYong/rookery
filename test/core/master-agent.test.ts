@@ -7,6 +7,7 @@ import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { MasterAgent } from "../../src/core/master-agent.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
 function deps(queryFn: ReturnType<typeof fakeQuery>) {
@@ -15,7 +16,7 @@ function deps(queryFn: ReturnType<typeof fakeQuery>) {
   const bus = new EventBus();
   const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-  return { repos, bus, fleet, queryFn, model: () => "m", effort: () => "high", name: () => "rookery" };
+  return { repos, bus, fleet, queryFn, backend: new ClaudeBackend(queryFn), model: () => "m", effort: () => "high", name: () => "rookery" };
 }
 
 // Option-capturing wrapper: intercepts the options passed to queryFn.
@@ -25,7 +26,7 @@ function capture(d: ReturnType<typeof deps>): { d: ReturnType<typeof deps>; opts
     captured = input.options ?? {};
     return d.queryFn(input as Parameters<typeof d.queryFn>[0]);
   }) as typeof d.queryFn;
-  return { d: { ...d, queryFn: wrapped }, opts: () => captured };
+  return { d: { ...d, queryFn: wrapped, backend: new ClaudeBackend(wrapped) }, opts: () => captured };
 }
 
 // Build a MasterAgent with a fakeQuery that records the query() prompt + a bus subscription that records events.
@@ -36,7 +37,7 @@ function makeMaster(hooks?: { onPrompt?: (p: string) => void; onEvent?: (e: Core
     if (typeof input?.prompt === "string" && hooks?.onPrompt) hooks.onPrompt(input.prompt);
     return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
   }) as typeof base.queryFn;
-  const d = { ...base, queryFn: wrapped };
+  const d = { ...base, queryFn: wrapped, backend: new ClaudeBackend(wrapped) };
   if (hooks?.onEvent) d.bus.subscribe("s1", hooks.onEvent);
   const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
   return { master, bus: d.bus, d };
@@ -130,7 +131,7 @@ describe("MasterAgent", () => {
       }
       return Object.assign(gen(), { interrupt: async () => { interrupted = true; }, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as typeof base.queryFn;
-    const d = { ...base, queryFn: blocking };
+    const d = { ...base, queryFn: blocking, backend: new ClaudeBackend(blocking) };
     const events: CoreEvent[] = [];
     d.bus.subscribe("s1", (e) => events.push(e));
     const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
@@ -271,7 +272,7 @@ describe("MasterAgent", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as typeof base.queryFn;
-    const d = { ...base, queryFn: blocking };
+    const d = { ...base, queryFn: blocking, backend: new ClaudeBackend(blocking) };
     const calls: string[] = [];
     const orig = d.repos.setSessionStatus.bind(d.repos);
     d.repos.setSessionStatus = (id: string, status: string) => { calls.push(`${id}:${status}`); orig(id, status); };
@@ -717,7 +718,7 @@ describe("MasterAgent", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {}, setPermissionMode: async () => {} });
     }) as ReturnType<typeof fakeQuery>;
-    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...d, queryFn } });
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...d, queryFn, backend: new ClaudeBackend(queryFn) } });
     await master.runTurn("first message");
     expect(master.getSdkSessionId()).toBe("sdk-init-1");
     expect(d.repos.getSession("s1")?.sdk_session_id).toBe("sdk-init-1"); // persisted for resume after restart
@@ -734,7 +735,7 @@ describe("MasterAgent", () => {
         if (call === 1) throw new Error("api down"); // first flush turn dies before streaming
         return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
       }) as typeof base.queryFn;
-      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped, backend: new ClaudeBackend(wrapped) } });
 
       master.notifyWorker({ label: "A", branch: "ra", status: "idle", tail: "" });
       await master.idle();
@@ -755,7 +756,7 @@ describe("MasterAgent", () => {
         if (typeof input?.prompt === "string") prompts.push(input.prompt);
         return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
       }) as typeof base.queryFn;
-      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped, backend: new ClaudeBackend(wrapped) } });
       base.repos.addPendingNotification("s1", "worker A settled"); // stranded by a previous failed flush
 
       await master.runTurn("hello");
@@ -782,7 +783,7 @@ describe("MasterAgent", () => {
         }
         return Object.assign(gen(), { interrupt: async () => {}, close: () => {} });
       }) as unknown as typeof base.queryFn;
-      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped, backend: new ClaudeBackend(wrapped) } });
 
       const turnA = master.runTurn("first");
       const turnB = master.runTurn("second"); // queued behind A
@@ -802,7 +803,7 @@ describe("MasterAgent", () => {
         if (typeof input?.prompt === "string") prompts.push(input.prompt);
         return base.queryFn(input as Parameters<typeof base.queryFn>[0]);
       }) as typeof base.queryFn;
-      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped } });
+      const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, queryFn: wrapped, backend: new ClaudeBackend(wrapped) } });
       await master.close();
       master.notifyWorker({ label: "w", branch: "rw", status: "idle", tail: "" });
       await master.idle();

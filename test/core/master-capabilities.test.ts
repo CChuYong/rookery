@@ -8,6 +8,7 @@ import { FakeGitOps } from "../../src/core/git-ops.js";
 import { MasterAgent } from "../../src/core/master-agent.js";
 import type { TurnCapabilities } from "../../src/core/master-agent.js";
 import { createMemoryToolsServer } from "../../src/tools/memory-tools.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
 function deps(capabilities?: () => TurnCapabilities) {
@@ -17,7 +18,7 @@ function deps(capabilities?: () => TurnCapabilities) {
   const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   const queryFn = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]);
-  return { repos, bus, fleet, queryFn, model: () => "m", effort: () => "high", name: () => "rookery", capabilities };
+  return { repos, bus, fleet, queryFn, backend: new ClaudeBackend(queryFn), model: () => "m", effort: () => "high", name: () => "rookery", capabilities };
 }
 
 // Capture wrapper that intercepts the options passed into query().
@@ -27,7 +28,7 @@ function capture(d: ReturnType<typeof deps>) {
     captured = input.options ?? {};
     return d.queryFn(input as Parameters<typeof d.queryFn>[0]);
   }) as typeof d.queryFn;
-  return { d: { ...d, queryFn: wrapped }, opts: () => captured };
+  return { d: { ...d, queryFn: wrapped, backend: new ClaudeBackend(wrapped) }, opts: () => captured };
 }
 
 async function runWith(capabilities?: () => TurnCapabilities) {

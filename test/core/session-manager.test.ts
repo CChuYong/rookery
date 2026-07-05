@@ -6,7 +6,8 @@ import { SessionManager, AUTOMATION_FLEET_SESSION_KEY } from "../../src/core/ses
 import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
-import { fakeQuery } from "../helpers/fake-query.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
+import { fakeQuery, fakeBackend } from "../helpers/fake-query.js";
 
 function manager() {
   // Use deterministic, monotonically increasing timestamps to pin down created_at ordering (removes reliance on the implicit id tiebreaker).
@@ -20,7 +21,7 @@ function manager() {
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   let n = 0;
   const sm = new SessionManager(
-    { repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet },
+    { repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet },
     () => `s${n++}`,
   );
   return { repos, bus, sm };
@@ -39,7 +40,7 @@ function makeSM(sharedRepos?: Repositories) {
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   let n = 0;
   const sm = new SessionManager(
-    { repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet },
+    { repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet },
     () => `s${n++}`,
   );
   return { repos, bus, sm };
@@ -110,7 +111,7 @@ describe("SessionManager", () => {
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt" });
     let n = 0;
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet }, () => `s${n++}`);
     const s = sm.create("/work");
     const { id: wid } = await fleet.spawn({ homeSessionId: s.id, repoPath: "/code", label: "w", task: "t" });
     await fleet.waitAllSettled();
@@ -147,7 +148,7 @@ describe("SessionManager", () => {
       },
     };
     const sm = new SessionManager(
-      { repos, bus, queryFn, masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
+      { repos, bus, backend: new ClaudeBackend(queryFn), masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
       () => "s0",
     );
     const session = sm.create("/x");
@@ -171,7 +172,7 @@ describe("SessionManager", () => {
       delete: async (_id: string) => { await gate; },
     };
     const sm = new SessionManager(
-      { repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
+      { repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
       () => "s0",
     );
     const session = sm.create("/x");
@@ -194,7 +195,7 @@ describe("SessionManager", () => {
     const forkCalls: Array<{ id: string; title?: string }> = [];
     const forkSession = async (sdkSessionId: string, opts?: { title?: string }) => { forkCalls.push({ id: sdkSessionId, title: opts?.title }); return { sessionId: "forked-uuid" }; };
     let n = 0;
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
     const orig = sm.create("/work/repo"); // s0
     repos.setSdkSessionId(orig.id, "orig-sdk");
     repos.setSessionLabel(orig.id, "My session");
@@ -218,7 +219,7 @@ describe("SessionManager", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet, forkSession: async () => ({ sessionId: "x" }) }, () => "s0");
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet, forkSession: async () => ({ sessionId: "x" }) }, () => "s0");
     const orig = sm.create("/work");
     await expect(sm.fork(orig.id)).rejects.toThrow(/nothing to fork/);
   });
@@ -234,7 +235,7 @@ describe("SessionManager", () => {
     const base = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk" }]);
     const queryFn = ((input: { options?: { canUseTool?: unknown } }) => { captured = input.options?.canUseTool; return (base as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
     const makeCanUseTool = (extKey: string | null, sid: string) => { calls.push([extKey, sid]); return extKey?.startsWith("slack:") ? sentinel : undefined; };
-    const sm = new SessionManager({ repos, bus, queryFn, masterModel: "m", fleet, makeCanUseTool }, () => "s0");
+    const sm = new SessionManager({ repos, bus, backend: new ClaudeBackend(queryFn), masterModel: "m", fleet, makeCanUseTool }, () => "s0");
     const session = sm.getOrCreateByKey("slack:T1:C1:1.0", "/x");
     await session.master.runTurn("hi");
     expect(calls).toContainEqual(["slack:T1:C1:1.0", "s0"]); // called with the session's externalKey
@@ -254,7 +255,7 @@ describe("SessionManager", () => {
     const queryFn = ((input: { options?: { canUseTool?: unknown } }) => { captured = input.options?.canUseTool; return (base as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
     const makeCanUseTool = () => sentinel; // the registry returns a BLOCKING handler for ANY session
     let n = 0;
-    const sm = new SessionManager({ repos, bus, queryFn, masterModel: "m", fleet, makeCanUseTool }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backend: new ClaudeBackend(queryFn), masterModel: "m", fleet, makeCanUseTool }, () => `s${n++}`);
     // fresh automation session: keyless but origin-tagged (deriveOrigin(externalKey) alone would miss it → must key on stored origin)
     const auto = sm.create("/au", { origin: "automation", originRef: "a1" });
     await auto.master.runTurn("do it");
@@ -298,7 +299,7 @@ describe("SessionManager", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "m", fleet });
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "m", fleet });
     sm.getOrCreateByKey(AUTOMATION_FLEET_SESSION_KEY, "/x");
     expect(sm.list().some((s) => s.cwd === "/x")).toBe(false);
   });

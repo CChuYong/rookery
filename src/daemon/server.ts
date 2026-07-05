@@ -8,7 +8,7 @@ import { openDb } from "../persistence/db.js";
 import { Repositories } from "../persistence/repositories.js";
 import { EventBus } from "../core/events.js";
 import { SessionManager } from "../core/session-manager.js";
-import type { QueryFn } from "../core/worker.js";
+import type { QueryFn } from "../core/claude-backend.js";
 import { RealGitOps } from "../core/git-ops.js";
 import { ClaudeBackend } from "../core/claude-backend.js";
 import type { Locale } from "../core/i18n.js";
@@ -131,7 +131,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const nameResolverHolder = makeHolder<SlackRefResolver>();
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
-  const sessions = new SessionManager({ repos, bus, queryFn, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
+  const sessions = new SessionManager({ repos, bus, backend, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
     forkSession: (id, opts) => sdkForkSession(id, opts), // SDK session fork (eager) for SessionManager.fork
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +

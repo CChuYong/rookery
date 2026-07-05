@@ -1,4 +1,4 @@
-import type { QueryFn } from "./worker.js";
+import type { QueryFn } from "./claude-backend.js";
 import { extractText } from "./sdk-extract.js";
 
 // Auto-generate worker labels: summarize a task into a single short label line using a cheap model (Haiku).

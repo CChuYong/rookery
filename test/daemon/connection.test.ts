@@ -12,7 +12,7 @@ import type { ClientSocket, AutomationProvider, SlackRefResolverFn } from "../..
 import { InteractionRegistry } from "../../src/core/interaction-registry.js";
 import { Settings } from "../../src/core/settings.js";
 import { loadConfig } from "../../src/config.js";
-import { fakeQuery } from "../helpers/fake-query.js";
+import { fakeBackend } from "../helpers/fake-query.js";
 
 function setup() {
   const repos = new Repositories(openDb(":memory:"));
@@ -24,7 +24,7 @@ function setup() {
     {
       repos,
       bus,
-      queryFn: fakeQuery([
+      backend: fakeBackend([
         { type: "assistant", text: "ack" },
         { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
       ]),
@@ -65,7 +65,7 @@ function makeConn(sent: any[], overrides: { fleet?: FleetOverride }): Connection
     {
       repos,
       bus,
-      queryFn: fakeQuery([
+      backend: fakeBackend([
         { type: "assistant", text: "ack" },
         { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
       ]),
@@ -88,7 +88,7 @@ function makeConnWithBus(sent: any[]): { conn: Connection; bus: EventBus } {
     {
       repos,
       bus,
-      queryFn: fakeQuery([
+      backend: fakeBackend([
         { type: "assistant", text: "ack" },
         { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
       ]),
@@ -112,7 +112,7 @@ describe("Connection", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet }, () => "s1");
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet }, () => "s1");
     const reg = new InteractionRegistry(bus);
     const sent: string[] = [];
     const socket: ClientSocket = { send: (d) => sent.push(d) };
@@ -228,7 +228,7 @@ describe("Connection", () => {
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
     let n = 0;
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet }, () => `s${n++}`);
     const socket: ClientSocket = { send: (d) => sent.push(d) };
     const models = { list: async () => [{ id: "x-model", displayName: "X Model" }] };
     const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, models);
@@ -374,7 +374,7 @@ describe("Connection v2 routes", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const realFleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet: realFleet }, () => "sess-1");
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet: realFleet }, () => "sess-1");
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
     const conn = new Connection(socket, sm, bus, realFleet, repos);
@@ -408,7 +408,7 @@ describe("Connection v2 routes", () => {
     const factory2 = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const bus2 = new EventBus();
     const fleet2 = new FleetOrchestrator({ repos: repos2, bus: bus2, git: new FakeGitOps(), factory: factory2, worktreesDir: "/wt" });
-    const sm2 = new SessionManager({ repos: repos2, bus: bus2, queryFn: fakeQuery([]), masterModel: "mm", fleet: fleet2 }, () => "sess-2");
+    const sm2 = new SessionManager({ repos: repos2, bus: bus2, backend: fakeBackend([]), masterModel: "mm", fleet: fleet2 }, () => "sess-2");
     const conn2 = new Connection({ send: (d: string) => sent2.push(JSON.parse(d) as unknown) }, sm2, bus2, fleet2, repos2);
     repos2.createSession({ id: "sess-2", cwd: "/w" });
     repos2.addSessionEvent({ sessionId: "sess-2", seq: 0, type: "master.system", payloadJson: JSON.stringify({ type: "master.system", sessionId: "sess-2", text: "ok" }) });
@@ -527,7 +527,7 @@ describe("Connection settings", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet });
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet });
     const config = loadConfig({});
     const settings = new Settings(repos, config);
     const sent: any[] = [];
@@ -656,7 +656,7 @@ function makeConnWith(sent: any[], opts: { settings?: Settings; source?: unknown
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   let n = 0;
   const sm = new SessionManager(
-    { repos, bus, queryFn: fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]), masterModel: "mm", fleet },
+    { repos, bus, backend: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]), masterModel: "mm", fleet },
     () => `s${n++}`,
   );
   const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
@@ -717,7 +717,7 @@ describe("Connection automation routes", () => {
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
     let n = 0;
     const sm = new SessionManager(
-      { repos, bus, queryFn: fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]), masterModel: "mm", fleet },
+      { repos, bus, backend: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]), masterModel: "mm", fleet },
       () => `s${n++}`,
     );
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
@@ -819,7 +819,7 @@ describe("Connection automation routes", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet });
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet });
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
     const conn = new Connection(socket, sm, bus, fleet, repos); // no automations provider
     await conn.handleRaw(JSON.stringify({ type: "automation.list", reqId: "q4" }));
@@ -836,7 +836,7 @@ describe("Connection automation.resolveSlackRefs", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, queryFn: fakeQuery([]), masterModel: "mm", fleet });
+    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet });
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
     const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, resolveSlackRefs);

@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import type { Repositories } from "../persistence/repositories.js";
 import type { EventBus } from "./events.js";
-import type { QueryFn } from "./worker.js";
+import type { AgentBackend, ProviderPermissionCallback } from "./agent-backend.js";
 import { MasterAgent } from "./master-agent.js";
 import type { TurnCapabilities } from "./master-agent.js";
 import type { FleetOrchestrator } from "./fleet-orchestrator.js";
@@ -27,14 +26,14 @@ export type ForkFn = (sdkSessionId: string, opts?: { title?: string }) => Promis
 export interface SessionManagerDeps {
   repos: Repositories;
   bus: EventBus;
-  queryFn: QueryFn;
+  backend: AgentBackend;
   masterModel: string | (() => string); // string or runtime-settings resolver
   masterEffort?: string | (() => string); // global default effort resolver (defaults to "high" if unspecified)
   masterName?: string | (() => string); // bot name resolver (defaults to "rookery" if unspecified)
   fleet: FleetOrchestrator;
   summarizeLabel?: (text: string) => Promise<string | null>; // auto-generate the session label from the first message (Haiku)
   // Builds an approval/question (canUseTool) callback from the session's externalKey (daemon routes it to the Slack thread). auto-allow if not injected/undefined.
-  makeCanUseTool?: (externalKey: string | null, sessionId: string) => CanUseTool | undefined;
+  makeCanUseTool?: (externalKey: string | null, sessionId: string) => ProviderPermissionCallback | undefined;
   // Builds a per-source dynamic capability resolver from the session's externalKey (slack: etc.) (assembled by the daemon). base only if not injected/undefined.
   makeCapabilities?: (externalKey: string | null, sessionId: string) => (() => TurnCapabilities) | undefined;
   // Forks a session's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
@@ -63,7 +62,7 @@ export class SessionManager {
   }
 
   private build(id: string, cwd: string, sdkSessionId: string | null, externalKey: string | null): Session {
-    const { repos, bus, queryFn, masterModel, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
+    const { repos, bus, backend, masterModel, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
     // Pass the resolver through as-is → MasterAgent resolves it per turn (Settings changes are reflected in cached sessions).
     const model = typeof masterModel === "function" ? masterModel : () => masterModel;
     const effort = typeof masterEffort === "function" ? masterEffort : () => masterEffort ?? "high";
@@ -78,7 +77,7 @@ export class SessionManager {
       sessionId: id,
       cwd,
       sdkSessionId,
-      deps: { repos, bus, queryFn, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities },
+      deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities },
     });
     const session: Session = { id, cwd, master };
     this.sessions.set(id, session);
