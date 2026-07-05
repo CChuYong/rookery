@@ -79,6 +79,10 @@ All events are filtered to our `threadId` (child threads from Codex-native subag
 
 **`numTurns` synthesis (the port's most fragile contract, per P0 final review):** a per-session counter incremented on every `turn/completed`, reported cumulatively — matching Claude's conversation-cumulative `num_turns` semantics that the Worker's maxTurns cap compares against. On resume, the counter re-seeds from the Worker's persisted last result (`numTurns`) — wait: the Worker re-seeds its own `cumTurns` display value, but the cap compares `ev.numTurns` directly, so the adapter seeds its counter from `opts` — **decision: the adapter counts turns within its own process lifetime and adds an offset the backend cannot know; instead CodexBackend accepts `resumeTurnOffset` — NO.** Keep it simple and correct: the adapter counter starts at 0 per stream; after a daemon restart the cap effectively resets for the resumed session. Claude behaves the same way today (a fresh `resume:` query's `num_turns` restarts from that send). Documented; contract test asserts monotonic cumulativity within one stream.
 
+**Granularity caveat (final review M2):** Codex `numTurns` counts `turn/completed` events (1 per user send), while Claude's `num_turns` counts agentic assistant loops *within* a send — so a Codex maxTurns cap can only **under-fire** (never false-trip). Currently unreachable in practice: `maxTurns` is settable only via automations, which are Claude-only in P1. Revisit (synthesize from item counts) before automations or the spawn surface gain `provider`.
+
+**Sandbox network note (final review M3, open):** spawn-time `workspace-write` (string form) leaves network access to the user's codex config default, while a live `setPermissionMode` re-applies it as the object form pinned `networkAccess: true` — same rookery mode, different network exposure by path. Needs a product decision (align to config-default vs always-on); deferred to P1.5.
+
 ## Vocabulary mappings (single module `src/core/codex/codex-vocab.ts`)
 
 | rookery permissionMode | approvalPolicy | sandbox |
