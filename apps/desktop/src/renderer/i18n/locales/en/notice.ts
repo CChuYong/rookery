@@ -12,4 +12,5 @@ export default {
   "notice.workerDone": "✅ Worker {label} done",
   "notice.workerFailed": "⚠️ Worker {label} failed",
   "notice.workerStopped": "⏹ Worker {label} stopped",
+  "notice.codexError": "Codex error: {message}",
 } satisfies Catalog;

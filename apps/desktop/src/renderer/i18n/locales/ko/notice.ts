@@ -12,4 +12,5 @@ export default {
   "notice.workerDone": "✅ 워커 {label} 완료",
   "notice.workerFailed": "⚠️ 워커 {label} 실패",
   "notice.workerStopped": "⏹ 워커 {label} 종료",
+  "notice.codexError": "Codex 오류: {message}",
 } satisfies Catalog;
