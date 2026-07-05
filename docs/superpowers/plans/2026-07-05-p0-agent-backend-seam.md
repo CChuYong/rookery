@@ -603,6 +603,7 @@ git commit -m "test(core): lock ClaudeBackend openSession streaming + control de
 
 **Files:**
 - Modify: `src/core/message-queue.ts` (yield strings), `src/core/worker.ts` (consume AgentStream; drop SDK/QueryFn), `src/core/commands.ts` (wrap probe queue; QueryFn import path), `test/helpers/fake-query.ts` (QueryFn path + `fakeBackend`/`fakeStreamingBackend`), `test/core/message-queue.test.ts`, `test/core/worker.test.ts`, `test/core/worker-lifecycle.test.ts`
+- Modify (scope amendment, discovered during execution): `src/daemon/server.ts` — the `WorkerDeps.queryFn → backend` rename breaks `subFactory`'s direct `new Worker({deps:{queryFn}})` call, so the minimal composition-root fix moves INTO this task: add `import { ClaudeBackend }`, `const backend = new ClaudeBackend(queryFn);` after the queryFn line, and swap `queryFn,` → `backend,` in subFactory's Worker deps only. (Task 5 Step 4 shrinks accordingly: it no longer adds the import/backend/subFactory parts.)
 - These move together because the `MessageQueue` element-type flip breaks worker.ts and commands.ts simultaneously.
 
 **Interfaces:**
@@ -975,15 +976,7 @@ The `catch`/`finally` blocks are unchanged (`this.currentQuery = stream` already
 
 - [ ] **Step 3: `src/core/session-manager.ts`.** Replace `import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";` and `import type { QueryFn } from "./worker.js";` with `import type { AgentBackend, ProviderPermissionCallback } from "./agent-backend.js";`. In `SessionManagerDeps`: `queryFn: QueryFn;` → `backend: AgentBackend;` and `makeCanUseTool?: (...) => CanUseTool | undefined;` → `makeCanUseTool?: (externalKey: string | null, sessionId: string) => ProviderPermissionCallback | undefined;`. In `build()`: destructure `backend` instead of `queryFn` and pass `deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities }`. `ForkFn` stays exactly as-is (it is already provider-neutral; per-provider fork routing is a P1 concern).
 
-- [ ] **Step 4: `src/daemon/server.ts`.** Change `import type { QueryFn } from "../core/worker.js";` → `import type { QueryFn } from "../core/claude-backend.js";` and add `import { ClaudeBackend } from "../core/claude-backend.js";`. After line 68 (`const queryFn: QueryFn = opts.queryFn ?? sdkQuery;`) add:
-
-```ts
-  // Provider-neutral backend over the injected queryFn (P0 seam). CommandCatalog/makeLabeler stay on the raw
-  // queryFn deliberately — Claude-specific aux paths, gated per provider in P1.
-  const backend = new ClaudeBackend(queryFn);
-```
-
-In `subFactory`, replace `queryFn,` with `backend,` inside the Worker deps object. In the `new SessionManager({...})` call, replace `queryFn,` with `backend,`. `CommandCatalog(queryFn, ...)` and `makeLabeler(queryFn)` are unchanged.
+- [ ] **Step 4: `src/daemon/server.ts`.** (Amended: the `ClaudeBackend` import, the `const backend = new ClaudeBackend(queryFn);` line, and the subFactory `queryFn,`→`backend,` swap landed in Task 4.) Remaining here: change `import type { QueryFn } from "../core/worker.js";` → `import type { QueryFn } from "../core/claude-backend.js";` and, in the `new SessionManager({...})` call, replace `queryFn,` with `backend,`. `CommandCatalog(queryFn, ...)` and `makeLabeler(queryFn)` are unchanged.
 
 - [ ] **Step 5: `src/core/labeler.ts`** — change `import type { QueryFn } from "./worker.js";` → `from "./claude-backend.js"` (behavior unchanged; it is a deliberate raw-QueryFn aux path).
 
