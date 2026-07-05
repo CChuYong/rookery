@@ -71,6 +71,14 @@ describe("Repositories", () => {
     expect(w.ticket_url).toBe("https://l/ENG-1");
   });
 
+  it("createWorker: provider round-trips ('codex' explicit, 'claude' default)", () => {
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "t", provider: "codex" });
+    expect(repos.getWorker("w1")!.provider).toBe("codex");
+    repos.createWorker({ id: "w2", sessionId: "s1", repoPath: "/r", label: "t" });
+    expect(repos.getWorker("w2")!.provider).toBe("claude");
+  });
+
   it("persists worker max_turns and effort (restart budget guard, audit #9)", () => {
     const repos = new Repositories(openDb(":memory:"), () => "t");
     repos.createSession({ id: "s1", cwd: "/x" });

@@ -146,6 +146,11 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     db.exec("ALTER TABLE workers ADD COLUMN max_turns INTEGER");
     db.exec("ALTER TABLE workers ADD COLUMN effort TEXT");
   },
+  (db) => {
+    // workers.provider: which AgentBackend runs this worker ("claude" | "codex"). Default keeps
+    // every pre-existing row on the Claude backend.
+    db.exec("ALTER TABLE workers ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'");
+  },
 ];
 
 export function currentVersion(db: DB): number {

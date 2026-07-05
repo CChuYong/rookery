@@ -2,7 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 // Byte-transport port under the Codex JSON-RPC client. Real impl spawns `codex app-server`;
-// tests inject a scripted fake (test/helpers/fake-codex-transport.ts).
+// tests inject a scripted fake (test/helpers/fake-codex.ts).
 export interface CodexTransport {
   write(line: string): void;
   onLine(cb: (line: string) => void): void;

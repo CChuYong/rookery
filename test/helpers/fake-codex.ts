@@ -19,9 +19,9 @@ export interface FakeCodexServerOpts {
   dieAfterTurns?: number;    // simulate process death after N completed turns
 }
 
-// Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start,
-// replays the responder's steps as notifications, then turn/completed (unless the step list
-// ends the turn itself). Handles initialize/thread lifecycle with canned responses.
+// Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
+// responder's steps, emitting turn/completed only when a step ends the turn; a never-ending step list
+// leaves the turn open (for interrupt/abort tests). Handles initialize/thread lifecycle with canned responses.
 export function fakeCodexSpawn(
   responder: (text: string, turn: number) => CodexStep[],
   opts: FakeCodexServerOpts = {},

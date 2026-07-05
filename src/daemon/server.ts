@@ -11,6 +11,8 @@ import { SessionManager } from "../core/session-manager.js";
 import type { QueryFn } from "../core/claude-backend.js";
 import { RealGitOps } from "../core/git-ops.js";
 import { ClaudeBackend } from "../core/claude-backend.js";
+import { CodexBackend } from "../core/codex/codex-backend.js";
+import { realCodexSpawn } from "../core/codex/codex-transport.js";
 import type { Locale } from "../core/i18n.js";
 import { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import type { WorkerLike } from "../core/fleet-orchestrator.js";
@@ -102,20 +104,37 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const git = new RealGitOps();
   const settings = new Settings(repos, config);
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
-  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number }): WorkerLike =>
+  // Backend registry (P1): workers pick by provider; the master stays on Claude.
+  // Codex auth = the user's ~/.codex/auth.json (`codex login`) — see codex-transport.ts AUTH NOTE.
+  const codexBackend = new CodexBackend({
+    spawn: realCodexSpawn(() => settings.codexBin()),
+    defaultModel: () => settings.codexWorkerModel(),
+  });
+  const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
+  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; provider?: string }): WorkerLike =>
     new Worker({
       id: o.id,
       sessionId: o.sessionId,
       repoPath: o.repoPath,
       label: o.label,
       // spawn override (UI) takes priority, otherwise fall back to the global default (Slack/master spawn).
-      // permissionMode: absent → the Worker defaults to "bypassPermissions".
-      deps: { repos, bus, backend, model: o.model ?? settings.workerModel(), effort: o.effort ?? settings.workerEffort(), permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns },
+      // permissionMode: absent → the Worker defaults to "bypassPermissions". backend/model are picked by provider (default claude).
+      deps: {
+        repos, bus,
+        backend: workerBackends[o.provider ?? "claude"] ?? backend,
+        model: o.model ?? (o.provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
+        effort: o.effort ?? settings.workerEffort(),
+        permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns,
+      },
       sdkSessionId: o.sdkSessionId ?? null,
     });
   // Auto-generate labels (Haiku): workers right after spawn, masters from the first message. best-effort.
   const summarizeLabel = makeLabeler(queryFn);
-  const fleet = new FleetOrchestrator({ repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel, forkSession: (id, opts) => sdkForkSession(id, opts) });
+  const fleet = new FleetOrchestrator({
+    repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel,
+    // Fork routing by provider: codex forks via an ephemeral app-server child (CodexBackend.forkSession); claude keeps the SDK's own forkSession.
+    forkSession: (provider, id, opts) => (provider === "codex" ? codexBackend.forkSession(id) : sdkForkSession(id, opts)),
+  });
   // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
   // clean up running/idle zombies to orphaned. (Live conversations can't be revived — the SDK session dies with the process.)
   fleet.rehydrate();

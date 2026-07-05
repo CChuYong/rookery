@@ -15,6 +15,8 @@ describe("Settings", () => {
       workerModel: config.workerModel,
       masterEffort: config.masterEffort,
       workerEffort: config.workerEffort,
+      codexWorkerModel: "gpt-5.5",
+      codexBin: "codex",
       slackCwd: process.cwd(),
       slackAllowedUsers: "",
       slackAllowAll: "0",
@@ -28,6 +30,18 @@ describe("Settings", () => {
       workerSlackRelayChannel: "",
       slackLocale: "ko",
     });
+  });
+
+  it("codexWorkerModel/codexBin: settings-only defaults, overridable, clear to default", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.codexWorkerModel()).toBe("gpt-5.5");
+    expect(s.codexBin()).toBe("codex");
+    s.apply({ codexWorkerModel: "gpt-5.5-mini", codexBin: "/usr/local/bin/codex" });
+    expect(s.codexWorkerModel()).toBe("gpt-5.5-mini");
+    expect(s.codexBin()).toBe("/usr/local/bin/codex");
+    s.apply({ codexWorkerModel: null, codexBin: null });
+    expect(s.codexWorkerModel()).toBe("gpt-5.5");
+    expect(s.codexBin()).toBe("codex");
   });
 
   it("slackLocale: defaults to ko, overridable, clears to default", () => {

@@ -73,14 +73,14 @@ describe("FleetOrchestrator", () => {
     const bus = new EventBus();
     const git = new FakeGitOps({ checkpointSha: "snap0" });
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
-    const forkCalls: Array<{ id: string; title?: string }> = [];
-    const forkSession = async (sdkSessionId: string, opts?: { title?: string }) => { forkCalls.push({ id: sdkSessionId, title: opts?.title }); return { sessionId: "forked-uuid" }; };
+    const forkCalls: Array<{ provider: string; id: string; title?: string }> = [];
+    const forkSession = async (provider: string, sdkSessionId: string, opts?: { title?: string }) => { forkCalls.push({ provider, id: sdkSessionId, title: opts?.title }); return { sessionId: "forked-uuid" }; };
     const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk0" });
 
     const { id } = await fleet.fork("src");
 
     expect(id).toBe("fk0");
-    expect(forkCalls).toEqual([{ id: "src-sdk", title: "build feature (fork)" }]); // forked from the src SDK session
+    expect(forkCalls).toEqual([{ provider: "claude", id: "src-sdk", title: "build feature (fork)" }]); // forked from the src SDK session (default provider = claude)
     expect(git.calls).toContain("checkpoint /wt/src refs/rookery/fork/fk0"); // snapshot the source's full state
     expect(git.calls).toContain("addWorktree /repo /wt/fk0 rookery/fk0 rookery/src"); // branch from the src's HEAD
     expect(git.calls).toContain("restoreCheckpoint /wt/fk0 snap0"); // overlay uncommitted state
@@ -100,6 +100,39 @@ describe("FleetOrchestrator", () => {
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "x" }), exists: () => true });
     await expect(fleet.fork("src")).rejects.toThrow(/nothing to fork/);
+  });
+
+  it("spawn with provider:'codex' threads it to the factory and persists it on the DB row", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    let captured: { provider?: string } = {};
+    const factory = (o: { provider?: string }): WorkerLike => {
+      captured = o;
+      return { start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "done", waitUntilSettled: async () => {} };
+    };
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b" }), factory, worktreesDir: "/wt", idgen: () => "a0" });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t", provider: "codex" });
+    await fleet.waitAllSettled();
+    expect(captured.provider).toBe("codex");
+    expect(repos.getWorker(id)!.provider).toBe("codex");
+  });
+
+  it("fork() of a codex worker calls forkSession('codex', ...) and the fork inherits the provider", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", provider: "codex" });
+    repos.setWorkerSdkSessionId("src", "src-thread");
+    const git = new FakeGitOps({ checkpointSha: "snap0" });
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    const forkCalls: Array<{ provider: string; id: string }> = [];
+    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, id: sdkSessionId }); return { sessionId: "forked-thread" }; };
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk9" });
+
+    const { id } = await fleet.fork("src");
+
+    expect(forkCalls).toEqual([{ provider: "codex", id: "src-thread" }]);
+    expect(repos.getWorker(id)!.provider).toBe("codex");
   });
 
   it("passes spawn-time model/effort override to the factory", async () => {

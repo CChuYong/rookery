@@ -7,6 +7,10 @@ import { resolveLocale } from "./i18n.js";
 export const DEFAULT_MASTER_NAME = "rookery";
 export const DEFAULT_USAGE_REFRESH_MS = 120000;
 export const DEFAULT_SLACK_REFUSAL = "Sorry, you're not authorized to use this bot."; // default refusal reply for non-allowed users
+// Codex worker backend defaults (P1, settings-only — no env/config fallback, unlike workerModel/workerEffort).
+// No codexApiKey: the app-server ignores CODEX_API_KEY env; auth relies on the user's ~/.codex/auth.json (`codex login`).
+export const DEFAULT_CODEX_WORKER_MODEL = "gpt-5.5";
+export const DEFAULT_CODEX_BIN = "codex";
 
 // Settings that can be changed at runtime. Use the value stored in the DB (settings table) if present, otherwise the config/hardcoded default.
 // All kept as strings (parsing happens on the consumer side) → keeps SettingsPatch/the protocol simple. Slack tokens are secret, so they're not here (separate setter).
@@ -16,6 +20,8 @@ export interface SettingsValues {
   workerModel: string;
   masterEffort: string;
   workerEffort: string;
+  codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-5.5".
+  codexBin: string; // codex CLI binary/path used to spawn `codex app-server` (settings-only). default "codex".
   slackCwd: string; // cwd for Slack-originated sessions (settings-only, defaults to process.cwd())
   slackAllowedUsers: string; // user ids allowed to get responses (comma-separated, settings-only)
   slackAllowAll: string; // "1" allows everyone (settings-only, fail-closed default "0")
@@ -60,6 +66,14 @@ export class Settings {
 
   workerEffort(): string {
     return this.repos.getSetting("workerEffort") ?? this.config.workerEffort;
+  }
+
+  codexWorkerModel(): string {
+    return this.repos.getSetting("codexWorkerModel") ?? DEFAULT_CODEX_WORKER_MODEL;
+  }
+
+  codexBin(): string {
+    return this.repos.getSetting("codexBin") ?? DEFAULT_CODEX_BIN;
   }
 
   // Linear API key (integration secret). Kept out of SettingsValues to isolate it from being echoed via settings.result.
@@ -158,6 +172,8 @@ export class Settings {
       workerModel: this.workerModel(),
       masterEffort: this.masterEffort(),
       workerEffort: this.workerEffort(),
+      codexWorkerModel: this.codexWorkerModel(),
+      codexBin: this.codexBin(),
       slackCwd: this.slackCwd(),
       slackAllowedUsers: this.slackAllowedUsers(),
       slackAllowAll: this.slackAllowAll(),

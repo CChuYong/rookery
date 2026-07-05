@@ -34,6 +34,7 @@ export type WorkerFactory = (opts: {
   permissionMode?: string; // SDK permission mode at spawn time (falls back to the Worker default "bypassPermissions"). Changeable live.
   onTurnStart?: () => void; // called right before each turn starts — for checkpointing
   maxTurns?: number; // per-result turn cap passed through to Worker
+  provider?: string; // which AgentBackend runs this worker ('claude' | 'codex'). Fixed once running.
 }) => WorkerLike;
 
 export interface FleetDeps {
@@ -47,8 +48,9 @@ export interface FleetDeps {
   // automatic label generation (usually Haiku). If present, asynchronously upgrades the placeholder label to a better one right after spawn.
   // best-effort: on null/throw, keeps the placeholder. If absent, does not update the label.
   summarizeLabel?: (task: string) => Promise<string | null>;
-  // Forks a worker's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
-  forkSession?: (sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
+  // Forks a worker's SDK conversation into a new branch, routed by the source worker's provider
+  // (e.g. "claude" → SDK forkSession, "codex" → CodexBackend.forkSession). Absent → fork() is unavailable.
+  forkSession?: (provider: string, sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
 }
 
 interface Entry {
@@ -65,6 +67,7 @@ interface Entry {
   permissionMode?: string; // persisted current permission mode → on resume, materialize with the same mode (restart consistency)
   maxTurns?: number; // persisted per-result turn cap → materialize restores it (the unattended runaway guard)
   effort?: string; // persisted spawn-time effort override → materialize restores it
+  provider?: string; // which AgentBackend runs this worker ('claude' | 'codex') → materialize/fork restore it
   resumeSessionId?: string; // if present, "resumable but not yet started (lazy)" state — materialize on first send/await
   pendingLabel?: boolean; // task-less spawn: relabel from the first send() message (not from spawn)
 }
@@ -119,7 +122,7 @@ export class FleetOrchestrator {
 
   // lazy resume: on first send/await, actually start the SDK session (factory+resume) → register the flow.
   private materialize(id: string, e: Entry): WorkerLike {
-    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, onTurnStart: () => this.checkpoint(id) });
+    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, onTurnStart: () => this.checkpoint(id) });
     agent.resume();
     e.agent = agent;
     e.resumeSessionId = undefined;
@@ -169,6 +172,7 @@ export class FleetOrchestrator {
         permissionMode: row.permission_mode ?? undefined,
         maxTurns: row.max_turns ?? undefined,
         effort: row.effort ?? undefined,
+        provider: row.provider ?? undefined,
         resumeSessionId,
       });
     }
@@ -177,7 +181,7 @@ export class FleetOrchestrator {
   // the returned Promise resolves after worktree provisioning finishes (agent boot = SDK session start continues asynchronously).
   // → at return time the worktree exists on disk, so the renderer's root resolution (explorer/diff) points at the worktree on the first try.
   // there is no concurrent-worker cap (removed) — spawn is never rejected.
-  async spawn(input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number }): Promise<{ id: string }> {
+  async spawn(input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; provider?: string }): Promise<{ id: string }> {
     const id = this.idgen();
     // if there is a ticket, name the branch from its key (rookery/<slug>), with a short suffix only on collision. Otherwise rookery/<id>.
     const slug = input.ticketKey ? branchSlug(input.ticketKey) : "";
@@ -209,7 +213,8 @@ export class FleetOrchestrator {
     const branch = `rookery/${newId}`;
     const worktreePath = path.join(this.deps.worktreesDir, newId);
     const label = `${src.label} (fork)`;
-    const { sessionId: forkedUuid } = await this.deps.forkSession(src.sdk_session_id, { title: label });
+    const provider = src.provider ?? "claude";
+    const { sessionId: forkedUuid } = await this.deps.forkSession(provider, src.sdk_session_id, { title: label });
     // Snapshot the source worktree's full state (tracked + untracked) → overlay it onto the fork so uncommitted work carries over.
     let snapSha: string | null = null;
     try { snapSha = await this.deps.git.checkpoint(src.worktree_path, `refs/rookery/fork/${newId}`); } catch { snapSha = null; }
@@ -220,7 +225,8 @@ export class FleetOrchestrator {
       await this.deps.git.addWorktree(src.repo_path, worktreePath, branch, src.branch ?? src.base ?? "HEAD");
       if (snapSha) { try { await this.deps.git.restoreCheckpoint(worktreePath, snapSha); } catch { /* best-effort: committed state still present */ } }
       // Persist the new worker (diff base = the source's base, so the fork's diff shows the same body of work).
-      this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined });
+      // The fork inherits the source's provider — a codex worker's fork must also run on codex.
+      this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined, provider });
       this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
       if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
       if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
@@ -232,7 +238,7 @@ export class FleetOrchestrator {
       this.entries.set(newId, {
         homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
         status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
-        maxTurns: src.max_turns ?? undefined, effort: src.effort ?? undefined,
+        maxTurns: src.max_turns ?? undefined, effort: src.effort ?? undefined, provider,
         resumeSessionId: forkedUuid,
       });
       this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
@@ -249,7 +255,7 @@ export class FleetOrchestrator {
 
   private async run(
     id: string,
-    input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number },
+    input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; provider?: string },
     branch: string,
     worktreePath: string,
     signalReady: () => void,
@@ -272,6 +278,7 @@ export class FleetOrchestrator {
         base: input.base,
         ticketKey: input.ticketKey,
         ticketUrl: input.ticketUrl,
+        provider: input.provider,
       });
       if (input.notify) this.deps.repos.setWorkerNotifyArmed(id, true);
       if (input.maxTurns != null) repos.setWorkerMaxTurns(id, input.maxTurns);
@@ -307,7 +314,7 @@ export class FleetOrchestrator {
         return;
       }
       signalReady(); // worktree provisioned → spawn() can return (the rest of boot continues)
-      const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns });
+      const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns, provider: input.provider });
       const entry: Entry = {
         agent,
         homeSessionId: input.homeSessionId,
@@ -319,6 +326,7 @@ export class FleetOrchestrator {
         permissionMode: input.permissionMode, // remember so a later resume (materialize) restores the same mode
         maxTurns: input.maxTurns, // remember so a later resume (materialize) restores the runaway guard
         effort: input.effort, // remember so a later resume (materialize) restores the effort override
+        provider: input.provider, // remember so a later resume (materialize) restores the same backend
         pendingLabel: !input.task, // task-less spawn: relabel from the first send() message instead
       };
       this.entries.set(id, entry);
@@ -644,7 +652,7 @@ export class FleetOrchestrator {
     if (timer) clearTimeout(timer);
   }
 
-  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number }> {
+  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number }> {
     const metrics = this.deps.repos.workerActivityAndCost(); // one indexed batched query for the whole fleet
     return this.deps.repos
       .listAllWorkers()
@@ -657,6 +665,7 @@ export class FleetOrchestrator {
         branch: r.branch,
         model: r.model,
         permissionMode: r.permission_mode, // SDK permission mode (bypassPermissions | plan) — the worker composer's live selector reads this
+        provider: r.provider, // which AgentBackend runs this worker ('claude' | 'codex')
         archived: !!r.archived_at, // archived or not — the UI splits into tree/archive
         ticketKey: r.ticket_key,
         ticketUrl: r.ticket_url,

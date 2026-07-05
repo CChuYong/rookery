@@ -47,6 +47,28 @@ export function formatTranscript(events: Array<{ seq: number; type: string; payl
   return (dropped > 0 ? `…(${dropped} older event${dropped === 1 ? "" : "s"} truncated)\n` : "") + kept.join("\n");
 }
 
+// Extracted from the spawn_worker tool() handler so it's directly callable from tests (mirrors schedule-tools.ts's *Impl convention).
+export async function spawnWorkerImpl(
+  fleet: FleetOrchestrator,
+  repos: Repositories,
+  homeSessionId: string,
+  args: { repo: string; task: string; base?: string; model?: string; effort?: string; provider?: "claude" | "codex"; notify?: boolean },
+): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  const repo = repos.getRepoByName(args.repo);
+  if (!repo) return errorText(`unknown repo '${args.repo}'. Register it first or call list_repos.`);
+  const base = args.base ?? repo.base ?? undefined;
+  if (base !== undefined && !isSafeGitRef(base)) {
+    return errorText(`invalid base ref '${base}'. Use a plain branch name, tag, or commit SHA (no spaces or leading '-').`);
+  }
+  try {
+    // model/effort are only set when explicitly requested — otherwise undefined → fleet.spawn launches with the global defaults.
+    const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, effort: args.effort, provider: args.provider, notify: args.notify });
+    return text(`Spawned ${id} in '${repo.name}' (worktree branch rookery/${id}).${args.notify ? " You'll be notified when it finishes." : ""}`);
+  } catch (err) {
+    return errorText(`spawn failed: ${String(err)}`);
+  }
+}
+
 export function createFleetToolsServer(
   fleet: FleetOrchestrator,
   repos: Repositories,
@@ -55,30 +77,18 @@ export function createFleetToolsServer(
   const spawn = tool(
     "spawn_worker",
     "Spawn a worktree-isolated worker to work on a task in a REGISTERED repo (by name). It runs autonomously, then idles awaiting further instructions. Observe it (view_worker_transcript / get_worker_status / view_worker_diff), steer it (send_worker), and tell it to commit & open a PR itself when the work is ready. " +
-      "Leave `model` and `effort` UNSET so the worker uses the configured default — only pass them when the user has explicitly asked for a specific model or reasoning effort for this worker.",
+      "Leave `model` and `effort` UNSET so the worker uses the configured default — only pass them when the user has explicitly asked for a specific model or reasoning effort for this worker. " +
+      "Pass `provider` only when the user explicitly wants this worker on a specific agent backend (default claude).",
     {
       repo: z.string().describe("Registered repo name (see list_repos)."),
       task: z.string(),
       base: z.string().optional(),
       model: z.string().optional().describe("Override the worker model ONLY when the user explicitly requested a specific model; otherwise omit to use the default."),
       effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max) ONLY when the user explicitly requested it; otherwise omit to use the default."),
+      provider: z.enum(["claude", "codex"]).optional().describe("Agent backend for this worker (default claude). codex = OpenAI Codex via app-server."),
       notify: z.boolean().optional().describe("When true, you are notified once this worker finishes this dispatch (goes idle) or fails — your turn can end and you'll be woken with the result. One-shot: re-arm with send_worker notify:true."),
     },
-    async (args) => {
-      const repo = repos.getRepoByName(args.repo);
-      if (!repo) return errorText(`unknown repo '${args.repo}'. Register it first or call list_repos.`);
-      const base = args.base ?? repo.base ?? undefined;
-      if (base !== undefined && !isSafeGitRef(base)) {
-        return errorText(`invalid base ref '${base}'. Use a plain branch name, tag, or commit SHA (no spaces or leading '-').`);
-      }
-      try {
-        // model/effort are only set when explicitly requested — otherwise undefined → fleet.spawn launches with the global defaults.
-        const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, effort: args.effort, notify: args.notify });
-        return text(`Spawned ${id} in '${repo.name}' (worktree branch rookery/${id}).${args.notify ? " You'll be notified when it finishes." : ""}`);
-      } catch (err) {
-        return errorText(`spawn failed: ${String(err)}`);
-      }
-    },
+    async (args) => spawnWorkerImpl(fleet, repos, homeSessionId, args),
   );
 
   const send = tool(

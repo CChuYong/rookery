@@ -37,6 +37,7 @@ export interface WorkerRow {
   permission_mode: string; // 'bypassPermissions' | 'plan' — the worker's SDK permission mode (spawn-set, live-changeable)
   max_turns: number | null; // per-result turn cap (the unattended runaway guard). NULL = unlimited.
   effort: string | null; // spawn-time effort override. NULL = global default.
+  provider: string; // which AgentBackend runs this worker ('claude' | 'codex'). Spawn-set, fixed for the worker's lifetime.
   archived_at: string | null;
   notify_armed: number; // 0/1 — one-shot "notify the home master when I next settle"
   created_at: string;
@@ -300,15 +301,16 @@ export class Repositories {
     base?: string;
     ticketKey?: string;
     ticketUrl?: string;
+    provider?: string;
   }): WorkerRow {
     const ts = this.now();
     this.db
       .prepare(
         // Born 'provisioning': the row is inserted before `git worktree add` runs, so the UI can show the worker while a large
         // repo's worktree is still being created. The orchestrator reconciles it to running/idle once the agent boots.
-        "INSERT INTO workers(id, session_id, repo_path, label, status, worktree_path, branch, base, ticket_key, ticket_url, created_at, updated_at) VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO workers(id, session_id, repo_path, label, status, worktree_path, branch, base, ticket_key, ticket_url, provider, created_at, updated_at) VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(input.id, input.sessionId, input.repoPath, input.label, input.worktreePath ?? null, input.branch ?? null, input.base ?? null, input.ticketKey ?? null, input.ticketUrl ?? null, ts, ts);
+      .run(input.id, input.sessionId, input.repoPath, input.label, input.worktreePath ?? null, input.branch ?? null, input.base ?? null, input.ticketKey ?? null, input.ticketUrl ?? null, input.provider ?? "claude", ts, ts);
     return this.getWorker(input.id)!;
   }
 

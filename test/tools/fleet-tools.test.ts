@@ -5,7 +5,7 @@ import { EventBus } from "../../src/core/events.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
-import { createFleetToolsServer, FLEET_SERVER_NAME, FLEET_TOOL_NAMES, formatTranscript } from "../../src/tools/fleet-tools.js";
+import { createFleetToolsServer, FLEET_SERVER_NAME, FLEET_TOOL_NAMES, formatTranscript, spawnWorkerImpl } from "../../src/tools/fleet-tools.js";
 
 function fleet() {
   const repos = new Repositories(openDb(":memory:"));
@@ -28,6 +28,17 @@ describe("fleet tools", () => {
     expect(FLEET_TOOL_NAMES).toContain("mcp__fleet__send_worker");
     // 'Control' tool: abort the worker's current turn while keeping the session (then redirect via send_worker).
     expect(FLEET_TOOL_NAMES).toContain("mcp__fleet__interrupt_worker");
+  });
+
+  it("spawn_worker's provider param reaches fleet.spawn and persists on the worker row", async () => {
+    const { repos, fo } = fleet();
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const out = await spawnWorkerImpl(fo, repos, "s1", { repo: "app", task: "do it", provider: "codex" });
+    await fo.waitAllSettled();
+    expect(out.isError).toBeFalsy();
+    const workers = repos.listAllWorkers();
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.provider).toBe("codex");
   });
 });
 
