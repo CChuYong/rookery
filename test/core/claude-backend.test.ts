@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ClaudeBackend, claudeUserMessages } from "../../src/core/claude-backend.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import type { AgentEvent, AgentStream } from "../../src/core/agent-backend.js";
-import { fakeQuery } from "../helpers/fake-query.js";
+import { fakeQuery, fakeStreamingQuery } from "../helpers/fake-query.js";
 
 async function collect(stream: AgentStream): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
@@ -148,5 +148,66 @@ describe("claudeUserMessages", () => {
       { type: "user", message: { role: "user", content: "one" }, parent_tool_use_id: null },
       { type: "user", message: { role: "user", content: "two" }, parent_tool_use_id: null },
     ]);
+  });
+});
+
+describe("ClaudeBackend.openSession", () => {
+  it("wraps string input into SDKUserMessage and sets forwardSubagentText", async () => {
+    let captured: { prompt?: unknown; options?: Record<string, unknown> } = {};
+    const inner = fakeStreamingQuery((text) => [
+      { type: "assistant", text: `echo:${text}` },
+      { type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "sdk-w" },
+    ]);
+    const fn = ((i: typeof captured) => { captured = i; return inner(i as Parameters<QueryFn>[0]); }) as unknown as QueryFn;
+    const backend = new ClaudeBackend(fn);
+    async function* input() { yield "task one"; }
+    const events = await collect(backend.openSession(input(), baseOpts()));
+    expect((captured.options as Record<string, unknown>).forwardSubagentText).toBe(true);
+    expect(events).toEqual([
+      { kind: "message", role: "assistant", text: "echo:task one", parentToolUseId: null },
+      { kind: "session_id", sessionId: "sdk-w" },
+      { kind: "turn_end", subtype: "success", costUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
+    ]);
+  });
+
+  it("stays alive across turns and ends when the input closes (streaming lifecycle)", async () => {
+    const backend = new ClaudeBackend(fakeStreamingQuery((text, turn) => [
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: turn + 1, session_id: "sdk-w" },
+    ]));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    async function* input() { yield "t1"; await gate; yield "t2"; }
+    const seen: AgentEvent[] = [];
+    const done = (async () => { for await (const ev of backend.openSession(input(), baseOpts())) seen.push(ev); })();
+    // first turn flows without closing the stream
+    while (seen.filter((e) => e.kind === "turn_end").length < 1) await new Promise((r) => setTimeout(r, 1));
+    release();
+    await done; // generator ends only when input ends
+    expect(seen.filter((e) => e.kind === "turn_end")).toHaveLength(2);
+  });
+});
+
+describe("ClaudeStream controls", () => {
+  it("delegates setModel/setPermissionMode/supportedCommands to the query object", async () => {
+    const calls: string[] = [];
+    const backend = new ClaudeBackend(fakeQuery(
+      [{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }],
+      { commands: [{ name: "/c", description: "d", argumentHint: "h", aliases: ["/a"] }], onSetModel: (m) => calls.push(`model:${m}`), onSetPermissionMode: (m) => calls.push(`mode:${m}`) },
+    ));
+    const stream = backend.startTurn("hi", baseOpts());
+    await stream.setModel("claude-sonnet-5");
+    await stream.setPermissionMode("default");
+    expect(await stream.supportedCommands()).toEqual([{ name: "/c", description: "d", argumentHint: "h", aliases: ["/a"] }]);
+    expect(calls).toEqual(["model:claude-sonnet-5", "mode:default"]);
+    await collect(stream);
+  });
+
+  it("resolves (does not throw) when the underlying session lacks a control", async () => {
+    const backend = new ClaudeBackend(rawQuery([]));
+    const stream = backend.startTurn("hi", baseOpts());
+    await expect(stream.setModel("m")).resolves.toBeUndefined();
+    await expect(stream.setPermissionMode("default")).resolves.toBeUndefined();
+    await expect(stream.supportedCommands()).resolves.toEqual([]);
+    await collect(stream);
   });
 });
