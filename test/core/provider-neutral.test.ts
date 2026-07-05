@@ -16,6 +16,10 @@ const NEUTRAL_FILES = [
   "src/core/agent-backend.ts",
   "src/core/fleet-orchestrator.ts",
   "src/core/events.ts",
+  "src/core/codex/codex-backend.ts",
+  "src/core/codex/codex-client.ts",
+  "src/core/codex/codex-protocol.ts",
+  "src/core/codex/codex-vocab.ts",
 ];
 
 describe("provider-neutral core (P0 seam)", () => {

@@ -98,7 +98,7 @@ describe("FleetOrchestrator", () => {
     repos.createSession({ id: "home", cwd: "/x" });
     repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "x", worktreePath: "/wt/src", branch: "rookery/src" });
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
-    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "x" }), exists: () => true });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt", forkSession: async (_provider: string, _id: string, _opts?: { title?: string }) => ({ sessionId: "x" }), exists: () => true });
     await expect(fleet.fork("src")).rejects.toThrow(/nothing to fork/);
   });
 
@@ -725,7 +725,7 @@ describe("FleetOrchestrator", () => {
     repos.createWorker({ id: "a0", sessionId: "sA", repoPath: "/repo", label: "build", worktreePath: "/wt/a0", branch: "rookery/a0", base: "origin/main" });
     repos.setWorkerSdkSessionId("a0", "src-sdk");
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
-    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "forked-uuid" }), exists: () => true, idgen: () => "fk1" });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", forkSession: async (_provider: string, _id: string, _opts?: { title?: string }) => ({ sessionId: "forked-uuid" }), exists: () => true, idgen: () => "fk1" });
     await expect(fleet.fork("a0")).rejects.toThrow(/worktree add failed/);
     expect(git.calls).toContain("checkpoint /wt/a0 refs/rookery/fork/fk1"); // the snapshot ref WAS pinned before the throw
     expect(git.calls).toContain("removeCheckpointRefs /repo fk1"); // and fork reclaimed it (nothing else ever could)
