@@ -760,7 +760,12 @@ class CodexStream implements AgentStream {
     this.started = true;
     const pump = this.pump()
       .then(() => this.channel.end())
-      .catch((err: unknown) => this.channel.fail(err instanceof Error ? err : new Error(String(err))));
+      .catch((err: unknown) => {
+        // A user stop/abort closes the client mid-request; the resulting rejection is not a
+        // failure — end silently (Claude parity: worker's abort.signal.aborted check).
+        if (this.opts.abortController.signal.aborted) this.channel.end();
+        else this.channel.fail(err instanceof Error ? err : new Error(String(err)));
+      });
     try {
       while (true) {
         const r = await this.channel.next();
@@ -778,14 +783,20 @@ class CodexStream implements AgentStream {
     const transport = this.deps.spawn({});
     const client = new CodexClient(transport);
     this.client = client;
+    let clientClosed = false;
+    let resolveClientClosed: () => void = () => {};
+    const clientClosedP = new Promise<void>((resolve) => { resolveClientClosed = resolve; });
     const onAbort = () => client.close();
     abort.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      // A dying child fails the channel (worker → terminal error) unless we are aborting (silent end — parity with Claude).
       client.onClosed((err) => {
+        clientClosed = true;
         if (this.turnDone) { const d = this.turnDone; this.turnDone = null; d(); }
+        // Unexpected child death fails the stream (worker → terminal error). A DELIBERATE close
+        // (stop/abort or pump teardown) must NOT end the channel here: pump's own settlement does —
+        // otherwise a pump error unwinding through finally{close()} is masked by an early clean end.
         if (err && !abort.signal.aborted) this.channel.fail(err);
-        else this.channel.end();
+        resolveClientClosed();
       });
       client.onNotification((method, params) => this.handleNotification(method, params));
       client.onServerRequest((id, method) => this.handleServerRequest(id, method));
@@ -808,8 +819,14 @@ class CodexStream implements AgentStream {
       this.threadId = threadId;
       this.channel.push({ kind: "session_id", sessionId: threadId }); // early — port contract (resume after restart)
 
-      for await (const text of this.input) {
-        if (abort.signal.aborted) return;
+      const inputIt = this.input[Symbol.asyncIterator]();
+      while (true) {
+        if (abort.signal.aborted || clientClosed) return;
+        // Race the next input against client close — otherwise a stop/abort while the queue is
+        // still open would leave pump parked on input forever and hang the stream's final await.
+        const r = await Promise.race([inputIt.next(), clientClosedP.then(() => null)]);
+        if (r === null || r.done) return;
+        const text = r.value;
         const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
         const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
         const modeOverride = this.overrideMode ? mapPermissionMode(this.overrideMode) : null;
@@ -828,6 +845,7 @@ class CodexStream implements AgentStream {
     } finally {
       abort.signal.removeEventListener("abort", onAbort);
       client.close();
+      resolveClientClosed(); // safety: never leave the race parked even if onClosed didn't fire
     }
   }
 
