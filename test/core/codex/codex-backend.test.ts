@@ -97,3 +97,103 @@ describe("CodexBackend.openSession — translation", () => {
     expect(() => b.startTurn("hi", baseOpts() as never)).toThrow(/not supported/);
   });
 });
+
+describe("CodexBackend — controls and edges", () => {
+  it("interrupt routes turn/interrupt with the ACTIVE turn id and yields subtype interrupted", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const { backend: b, requests } = backend(() => [{ kind: "agentDelta", text: "working…" }]); // turn never self-ends
+    const q = new MessageQueue(); q.push("long task");
+    const stream = b.openSession(q, baseOpts());
+    const seen: AgentEvent[] = [];
+    const done = (async () => { for await (const ev of stream) { seen.push(ev); if (ev.kind === "text_delta") release(); if (ev.kind === "turn_end") { q.close(); } } })();
+    await gate;
+    await stream.interrupt();
+    await done;
+    const intr = requests.find((r) => r.method === "turn/interrupt");
+    expect(intr?.params).toEqual({ threadId: "th-1", turnId: "turn-0" });
+    expect(seen.at(-1)).toMatchObject({ kind: "turn_end", subtype: "interrupted" });
+  });
+
+  it("interrupt with no active turn is a resolved no-op (no request sent)", async () => {
+    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const stream = b.openSession(q, baseOpts());
+    await collect(stream);
+    await expect(stream.interrupt()).resolves.toBeUndefined();
+    expect(requests.some((r) => r.method === "turn/interrupt")).toBe(false);
+  });
+
+  it("setModel/setPermissionMode apply as overrides on the NEXT turn/start", async () => {
+    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("t1");
+    const stream = b.openSession(q, baseOpts());
+    const seen: AgentEvent[] = [];
+    const done = (async () => {
+      for await (const ev of stream) {
+        seen.push(ev);
+        if (ev.kind === "turn_end" && (ev as { numTurns: number }).numTurns === 1) {
+          await stream.setModel("gpt-5.5-mini");
+          await stream.setPermissionMode("plan");
+          q.push("t2"); q.close();
+        }
+      }
+    })();
+    await done;
+    const turnStarts = requests.filter((r) => r.method === "turn/start");
+    expect(turnStarts[0]!.params).not.toHaveProperty("sandboxPolicy");
+    expect(turnStarts[1]!.params).toMatchObject({ model: "gpt-5.5-mini", approvalPolicy: "never", sandboxPolicy: { type: "readOnly", networkAccess: false } });
+  });
+
+  it("unexpected approval request → declined + transcript notice, turn still completes", async () => {
+    const { backend: b } = backend(() => [{ kind: "requestApproval", id: "c9" }, { kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    expect(events.some((e) => e.kind === "push" && (e as { push: { text: string } }).push.text.includes("declined unexpected approval"))).toBe(true);
+    expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
+  });
+
+  it("abort mid-session ends the stream silently (no throw) — Claude parity", async () => {
+    const abortController = new AbortController();
+    const { backend: b } = backend(() => [{ kind: "agentDelta", text: "…" }]); // turn never ends
+    const q = new MessageQueue(); q.push("x");
+    const stream = b.openSession(q, baseOpts({ abortController }));
+    const seen: AgentEvent[] = [];
+    const done = (async () => { for await (const ev of stream) { seen.push(ev); if (ev.kind === "text_delta") abortController.abort(); } })();
+    await expect(done).resolves.toBeUndefined();
+  });
+
+  it("supportedCommands resolves [] and forkSession returns the forked thread id", async () => {
+    const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const stream = b.openSession(q, baseOpts());
+    await collect(stream);
+    await expect(stream.supportedCommands()).resolves.toEqual([]);
+    await expect(b.forkSession("th-1")).resolves.toEqual({ sessionId: "th-1-fork" });
+  });
+
+  it("a stale turn/completed (id ≠ active turn id) is dropped: exactly one turn_end, numTurns:1", async () => {
+    const { backend: b } = backend(() => [{ kind: "staleTurnEnd" }, { kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    const turnEnds = events.filter((e) => e.kind === "turn_end");
+    expect(turnEnds).toHaveLength(1);
+    expect(turnEnds[0]).toMatchObject({ numTurns: 1 });
+  });
+
+  it("abort while pump is parked on the open (unclosed) input queue ends without throwing or hanging", async () => {
+    const abortController = new AbortController();
+    const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("t1"); // queue stays OPEN — never closed
+    const stream = b.openSession(q, baseOpts({ abortController }));
+    const seen: AgentEvent[] = [];
+    const done = (async () => {
+      for await (const ev of stream) {
+        seen.push(ev);
+        if (ev.kind === "turn_end") abortController.abort();
+      }
+    })();
+    await expect(done).resolves.toBeUndefined();
+    expect(seen.some((e) => e.kind === "turn_end")).toBe(true);
+  });
+});

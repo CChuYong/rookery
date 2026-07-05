@@ -10,7 +10,8 @@ export type CodexStep =
   | { kind: "tokenUsage"; last: { inputTokens: number; cachedInputTokens?: number }; contextWindow?: number }
   | { kind: "errorNote"; message: string }
   | { kind: "requestApproval"; id: string } // emits a server→client commandExecution approval request
-  | { kind: "turnEnd"; status?: "completed" | "interrupted" | "failed"; durationMs?: number; errorMessage?: string };
+  | { kind: "turnEnd"; status?: "completed" | "interrupted" | "failed"; durationMs?: number; errorMessage?: string }
+  | { kind: "staleTurnEnd" }; // emits turn/completed for a DIFFERENT (stale) turn id — pins the activeTurnId correlation guard
 
 export interface FakeCodexServerOpts {
   threadId?: string;
@@ -37,6 +38,7 @@ export function fakeCodexSpawn(
     let exitCb: (i: { code: number | null; message?: string }) => void = () => {};
     let killed = false;
     let turnCount = 0;
+    let currentTurnId: string | null = null; // the most recently turn/start-ed turn's id — turn/interrupt targets THIS, not a recomputed/advanced counter
     const send = (o: unknown) => { if (!killed) queueMicrotask(() => { if (!killed) lineCb(JSON.stringify(o)); }); };
     const transport: CodexTransport = {
       onLine: (cb) => { lineCb = cb; },
@@ -67,11 +69,13 @@ export function fakeCodexSpawn(
         }
         if (msg.method === "turn/interrupt") {
           send({ id: msg.id, result: {} });
-          send({ method: "turn/completed", params: { threadId, turn: { id: `turn-${turnCount}`, status: "interrupted", durationMs: 5 } } });
+          send({ method: "turn/completed", params: { threadId, turn: { id: currentTurnId ?? `turn-${turnCount}`, status: "interrupted", durationMs: 5 } } });
+          turnCount++; // the interrupted turn is now done — the next turn/start gets a fresh id
           return;
         }
         if (msg.method === "turn/start") {
           const turnId = `turn-${turnCount}`;
+          currentTurnId = turnId;
           send({ id: msg.id, result: { turn: { id: turnId, status: "inProgress" } } });
           send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress" } } });
           const input = (msg.params?.input as Array<{ text?: string }> | undefined) ?? [];
@@ -93,16 +97,23 @@ export function fakeCodexSpawn(
               send({ method: "error", params: { threadId, turnId, error: { message: step.message }, willRetry: false } });
             } else if (step.kind === "requestApproval") {
               send({ id: 9000 + turnCount, method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: step.id } });
+            } else if (step.kind === "staleTurnEnd") {
+              send({ method: "turn/completed", params: { threadId, turn: { id: "turn-STALE", status: "completed" } } });
             } else if (step.kind === "turnEnd") {
               ended = true;
               send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: step.status ?? "completed", durationMs: step.durationMs ?? 0, ...(step.errorMessage ? { error: { message: step.errorMessage } } : {}) } } });
             }
           }
-          if (!ended) send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", durationMs: 0 } } });
-          turnCount++;
-          if (opts.dieAfterTurns != null && turnCount >= opts.dieAfterTurns) {
-            killed = true;
-            queueMicrotask(() => exitCb({ code: 1, message: "simulated crash" }));
+          // A responder that never scripts an ending step (agentDelta-only, "turn never self-ends")
+          // deliberately leaves the turn open server-side — no phantom auto-complete — until an
+          // explicit turn/interrupt (or the session's abort) ends it. Only a real completion here
+          // advances turnCount, so a still-open turn can't race ahead of interrupt()/abort().
+          if (ended) {
+            turnCount++;
+            if (opts.dieAfterTurns != null && turnCount >= opts.dieAfterTurns) {
+              killed = true;
+              queueMicrotask(() => exitCb({ code: 1, message: "simulated crash" }));
+            }
           }
           return;
         }

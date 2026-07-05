@@ -14,7 +14,6 @@ export interface CodexBackendDeps {
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
 
 // Unbounded async push-queue bridging notification callbacks into the stream's pull loop.
-// Unbounded async push-queue bridging notification callbacks into the stream's pull loop.
 // The waiter is a {resolve, reject} pair: fail() must REJECT a parked consumer — resolving it
 // with {done:true} (an earlier design) silently dropped the error, because the throw lives in
 // next()'s own body and a parked waiter never re-enters it.
@@ -235,6 +234,9 @@ class CodexStream implements AgentStream {
     }
     if (method === "turn/completed") {
       const turn = p?.turn;
+      // Correlate to the active turn: a duplicate/late completion must not inflate numTurns,
+      // emit a phantom turn_end, or settle the NEXT turn's turnDone early.
+      if (this.activeTurnId && turn?.id && turn.id !== this.activeTurnId) return;
       this.activeTurnId = null;
       if (turn?.status === "failed" && turn.error?.message) {
         this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexError", params: { message: turn.error.message }, text: t(DEFAULT_LOCALE, "notice.codexError", { message: turn.error.message }) } });
