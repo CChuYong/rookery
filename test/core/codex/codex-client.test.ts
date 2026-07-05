@@ -62,8 +62,21 @@ describe("CodexClient", () => {
     c.notify("initialized", {});
     expect(JSON.parse(written[0]!)).toEqual({ jsonrpc: "2.0", method: "initialized", params: {} });
     let closed = 0;
-    c.onClosed(() => closed++);
-    exit(0); exit(0);
+    let closedArg: Error | undefined | "unset" = "unset";
+    c.onClosed((e) => { closed++; closedArg = e; });
+    exit(1, "boom"); exit(1, "boom");
     expect(closed).toBe(1);
+    expect(closedArg).toBeInstanceOf(Error);
+  });
+
+  it("deliberate close() fires onClosed with undefined and rejects pending", async () => {
+    const { transport } = loopback();
+    const c = new CodexClient(transport);
+    let closedArg: Error | undefined | "unset" = "unset";
+    c.onClosed((e) => { closedArg = e; });
+    const p = c.request("thread/start", {});
+    c.close();
+    await expect(p).rejects.toThrow(/closed/);
+    expect(closedArg).toBeUndefined();
   });
 });
