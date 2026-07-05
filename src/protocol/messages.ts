@@ -105,6 +105,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       masterName: z.string().nullable().optional(), // Bot name. null/empty string → delete key → fall back to the default (rookery).
       masterModel: z.string().nullable().optional(),
       workerModel: z.string().nullable().optional(),
+      codexWorkerModel: z.string().nullable().optional(), // codex worker default model (settings-only)
+      codexBin: z.string().nullable().optional(), // codex CLI binary/path used to spawn `codex app-server`
       masterEffort: effortField,
       workerEffort: effortField,
       slackCwd: z.string().nullable().optional(), // Slack session cwd

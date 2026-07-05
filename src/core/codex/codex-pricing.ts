@@ -1,5 +1,8 @@
 import type { CodexTokenUsageBreakdown } from "./codex-protocol.js";
 
+// NOTE: inputTokens is INCLUSIVE of cachedInputTokens (OpenAI convention) — the subtraction below
+// yields uncached input. An exclusive-input provider would double-discount; keep this comment when
+// filling rates.
 // Per-model $/1M-token rates. Deliberately EMPTY in P1: hardcoding stale prices is worse
 // than reporting 0 (the desktop cost UI treats 0/absent gracefully; global usage comes from
 // ccusage's Codex support). Fill in P1.5 when we commit to a maintained table.

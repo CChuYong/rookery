@@ -30,11 +30,15 @@ export function realCodexSpawn(bin: () => string): CodexSpawn {
     rl.on("line", (line) => { for (const cb of lineCbs) cb(line); });
     let stderrTail = "";
     child.stderr.on("data", (d: Buffer) => { stderrTail = (stderrTail + d.toString()).slice(-2000); });
+    // Writing to stdin in the window after the child dies but before 'exit' fires raises an
+    // async 'error' (EPIPE) on the stream — without a listener that is an UNCAUGHT exception
+    // that kills the whole daemon. The exit callback already reports the death; swallow here.
+    child.stdin.on("error", () => {});
     // spawn failure (ENOENT etc.) surfaces as 'error', not 'exit' — funnel both into onExit.
     child.on("error", (err) => { for (const cb of exitCbs) cb({ code: null, message: String(err) }); });
     child.on("exit", (code) => { for (const cb of exitCbs) cb({ code, message: stderrTail || undefined }); });
     return {
-      write: (line) => { try { child.stdin.write(line + "\n"); } catch { /* dying child — exit cb reports */ } },
+      write: (line) => { try { child.stdin.write(line + "\n", () => {}); } catch { /* dying child — exit cb reports */ } },
       onLine: (cb) => { lineCbs.push(cb); },
       onExit: (cb) => { exitCbs.push(cb); },
       kill: () => { try { child.kill(); } catch { /* already dead */ } },

@@ -539,6 +539,12 @@ describe("Connection settings", () => {
     await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "s1", settings: { masterModel: "claude-sonnet-4-6" } }));
     expect(sent.at(-1).settings).toMatchObject({ masterModel: "claude-sonnet-4-6" });
     expect(settings.masterModel()).toBe("claude-sonnet-4-6");
+
+    // codex settings keys must round-trip over the protocol (not stripped by the zod schema).
+    await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "s2", settings: { codexWorkerModel: "gpt-5.5-codex", codexBin: "/opt/codex/bin/codex" } }));
+    expect(sent.at(-1).settings).toMatchObject({ codexWorkerModel: "gpt-5.5-codex", codexBin: "/opt/codex/bin/codex" });
+    expect(settings.codexWorkerModel()).toBe("gpt-5.5-codex");
+    expect(settings.codexBin()).toBe("/opt/codex/bin/codex");
   });
 
   it("commands.list uses the live sub when workerId given, else the cwd catalog", async () => {

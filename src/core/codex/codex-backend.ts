@@ -2,7 +2,7 @@ import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, Master
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
 import type { CodexSpawn } from "./codex-transport.js";
-import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTurn } from "./codex-protocol.js";
+import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
 import { turnCostUsd } from "./codex-pricing.js";
 
@@ -61,6 +61,7 @@ class CodexStream implements AgentStream {
   private turnDone: (() => void) | null = null;
   private cumTurns = 0;
   private lastContextTokens = 0;
+  private lastUsage: CodexTokenUsageBreakdown | null = null;
   private contextWindow = 0;
   private overrideModel: string | null = null;
   private overrideMode: string | null = null;
@@ -147,11 +148,12 @@ class CodexStream implements AgentStream {
         const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
         const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
         const modeOverride = this.overrideMode ? mapPermissionMode(this.overrideMode) : null;
+        const effort = mapEffort(this.opts.effort);
         const turnRes = (await client.request("turn/start", {
           threadId,
           input,
           ...(this.overrideModel ? { model: this.overrideModel } : {}),
-          ...(mapEffort(this.opts.effort) ? { effort: mapEffort(this.opts.effort) } : {}),
+          ...(effort ? { effort } : {}),
           ...(modeOverride ? { approvalPolicy: modeOverride.approvalPolicy, sandboxPolicy: sandboxPolicyFor(modeOverride.sandbox) } : {}),
         })) as { turn?: { id?: string } };
         // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
@@ -223,6 +225,7 @@ class CodexStream implements AgentStream {
     if (method === "thread/tokenUsage/updated") {
       const last = p?.tokenUsage?.last;
       if (last) this.lastContextTokens = (last.inputTokens ?? 0) + (last.cachedInputTokens ?? 0);
+      if (last) this.lastUsage = last;
       const win = p?.tokenUsage?.modelContextWindow;
       if (typeof win === "number") this.contextWindow = win;
       return;
@@ -246,7 +249,7 @@ class CodexStream implements AgentStream {
       this.channel.push({
         kind: "turn_end",
         subtype,
-        costUsd: turnCostUsd(this.overrideModel ?? this.opts.model, undefined),
+        costUsd: turnCostUsd(this.overrideModel ?? (this.opts.model || this.deps.defaultModel()), this.lastUsage ?? undefined),
         numTurns: this.cumTurns,
         durationMs: turn?.durationMs ?? 0,
         contextTokens: this.lastContextTokens,
@@ -271,6 +274,9 @@ class CodexStream implements AgentStream {
     client.respondError(id, -32601, `rookery does not handle ${method}`);
   }
 
+  // Between sending turn/start and receiving its response (or turn/started), activeTurnId is
+  // still null and interrupt() no-ops — a tiny dead window Claude's SDK interrupt doesn't have;
+  // acceptable best-effort (the turn then runs to completion).
   async interrupt(): Promise<void> {
     if (!this.client || !this.threadId || !this.activeTurnId) return;
     try {

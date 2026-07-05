@@ -123,7 +123,7 @@ describe("FleetOrchestrator checkpoints (race/shutdown/restore/cleanup)", () => 
     const bus = new EventBus();
     const fleet = new FleetOrchestrator({
       repos, bus, git, factory, worktreesDir: "/wt", idgen: () => "a0",
-      forkSession: async () => ({ sessionId: "forked" }), // fork() needs a forkSession injected
+      forkSession: async (_provider: string, _id: string, _opts?: { title?: string }) => ({ sessionId: "forked" }), // fork() needs a forkSession injected
     });
     const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t" });
     await tick(); // let the spawn-time checkpoint (seq 0) persist
