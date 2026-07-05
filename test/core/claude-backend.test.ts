@@ -92,6 +92,24 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events[0]).toEqual({ kind: "message", role: "user", text: "sdk-injected context", parentToolUseId: null });
   });
+
+  it("emits non-nested text deltas", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text: "tok" } } },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events[0]).toEqual({ kind: "text_delta", text: "tok" });
+  });
+
+  it("emits tool_progress with rounded elapsed seconds", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "tool_progress", tool_use_id: "t9", elapsed_time_seconds: 3.6 },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events[0]).toEqual({ kind: "tool_progress", toolUseId: "t9", elapsedSec: 4 });
+  });
 });
 
 describe("ClaudeBackend — option assembly", () => {

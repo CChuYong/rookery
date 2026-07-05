@@ -4,7 +4,7 @@ import { ThinkingCoalescer } from "./thinking-coalescer.js";
 import type { EventBus, WorkerEventData } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { truncateBytes } from "./truncate.js";
-import type { SlashCommandInfo } from "./commands.js";
+import type { SlashCommandInfo } from "./agent-backend.js";
 
 // Instruction injected into every worker turn so it treats fenced <untrusted-...> content as data, not instructions.
 export const WORKER_FENCE_INSTRUCTION =

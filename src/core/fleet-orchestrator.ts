@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Repositories } from "../persistence/repositories.js";
 import type { EventBus } from "./events.js";
 import type { GitOps } from "./git-ops.js";
-import type { SlashCommandInfo } from "./commands.js";
+import type { SlashCommandInfo } from "./agent-backend.js";
 import { truncateBytes } from "./truncate.js";
 
 const DIFF_MAX_BYTES = 512 * 1024; // byte cap before sending a diff directly as a single WS frame (git-diff-no-chunking)

@@ -1,4 +1,6 @@
 import type { QueryFn } from "../../src/core/claude-backend.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
+import type { AgentBackend } from "../../src/core/agent-backend.js";
 
 // Minimal step that mimics the shape of an SDK message. Handles only assistant text/result.
 export type FakeStep =
@@ -106,9 +108,6 @@ export function fakeStreamingQuery(responder: (userText: string, turn: number) =
   }) as unknown as QueryFn;
   return fn;
 }
-
-import { ClaudeBackend } from "../../src/core/claude-backend.js";
-import type { AgentBackend } from "../../src/core/agent-backend.js";
 
 // Port-level fakes: the same scripts, driven through the real ClaudeBackend adapter — worker/master tests
 // exercise consumer+adapter together (equivalent coverage to the old direct-queryFn injection).
