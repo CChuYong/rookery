@@ -199,4 +199,72 @@ describe("AutomationForm", () => {
     // plan mode: no bypass warning
     expect(screen.queryByTestId("bypass-warning")).toBeNull();
   });
+
+  // ── Task 3: provider (claude|codex) selector ──
+
+  it("defaults the provider select to claude and submits provider: claude", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    const providerSelect = screen.getByLabelText("에이전트 백엔드") as HTMLSelectElement;
+    expect(providerSelect.value).toBe("claude");
+
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do it";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "claude" }));
+  });
+
+  it("selecting provider codex submits provider: codex (master action)", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do it";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex" }));
+  });
+
+  it("selecting provider codex submits provider: codex (worker action)", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "workerjob" } });
+    const taskEditor = screen.getByLabelText("작업");
+    taskEditor.textContent = "fix the bug";
+    fireEvent.input(taskEditor);
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex" }));
+  });
+
+  it("initialises from init prop: provider codex shows in the select", () => {
+    const job = {
+      id: "a2",
+      name: "existing-codex",
+      enabled: true,
+      trigger: { kind: "cron" as const, cron: "0 3 * * *", timezone: "UTC" },
+      action: { kind: "master" as const, prompt: "p", cwd: "/c", sessionMode: "reuse" as const },
+      model: null,
+      effort: null,
+      permissionMode: "bypassPermissions",
+      maxTurns: null,
+      lastRunAt: null,
+      lastStatus: null,
+      lastError: null,
+      nextRunAt: null,
+      createdAt: "t",
+      provider: "codex",
+    };
+    render(<AutomationForm job={job} repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    const providerSelect = screen.getByLabelText("에이전트 백엔드") as HTMLSelectElement;
+    expect(providerSelect.value).toBe("codex");
+  });
 });

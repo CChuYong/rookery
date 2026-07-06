@@ -62,6 +62,11 @@ export function AutomationForm(p: {
   const [task, setTask] = useState(wc?.task ?? "");
   const [base, setBase] = useState(wc?.base ?? "");
 
+  // Agent backend for this automation's created sessions/workers (Task 3: P3 automation-origin codex).
+  // Applies to BOTH master and worker actions, so it lives in the shared Model/Execution section below
+  // rather than inside the per-kind action block. Mirrors WorkerSpawnModal's provider idiom.
+  const [provider, setProvider] = useState<"claude" | "codex">(init?.provider === "codex" ? "codex" : "claude");
+
   // Model / Execution fields (Task 4: newly added)
   const [model, setModel] = useState(init?.model ?? "");
   const [effort, setEffort] = useState(init?.effort ?? "high");
@@ -105,6 +110,7 @@ export function AutomationForm(p: {
         trigger,
         action,
         enabled,
+        provider,
         model: resolvedModel,
         effort: resolvedEffort,
         permissionMode: resolvedPermissionMode,
@@ -243,6 +249,24 @@ export function AutomationForm(p: {
           {/* ── Model / Execution section (Task 4) */}
           <section className="flex flex-col gap-3">
             <h3 className="eyebrow eyebrow-sm font-semibold uppercase text-fg-dim">{t("automationForm.sectionExecution")}</h3>
+
+            {/* Agent backend (provider) select — applies to BOTH master and worker actions (Task 3), so it sits
+                here in the shared section rather than the per-kind Action block below. Labels reuse the
+                workerSpawnModal.providerClaude/providerCodex i18n keys (proper nouns, fit as-is). Model select
+                below is deliberately left unchanged for codex: it already accepts free-text/unknown ids as a raw
+                option, so a codex model override typed/selected there flows through unmodified — no special-casing. */}
+            <label className="flex flex-col gap-1">
+              <span className="text-[12px] text-fg-dim">{t("automationForm.provider")}</span>
+              <Select
+                size="md"
+                className="w-full"
+                value={provider}
+                onChange={(e) => setProvider(e.target.value as "claude" | "codex")}
+              >
+                <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+                <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+              </Select>
+            </label>
 
             {/* Model select */}
             <label className="flex flex-col gap-1">

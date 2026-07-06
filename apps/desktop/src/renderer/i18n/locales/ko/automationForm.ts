@@ -2,6 +2,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "automationForm.eyebrow": "자동화",
   "automationForm.sectionExecution": "모델 / 실행",
+  "automationForm.provider": "에이전트 백엔드",
   "automationForm.model": "모델",
   "automationForm.effort": "effort",
   "automationForm.permissionMode": "권한 모드",
