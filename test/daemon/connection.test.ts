@@ -608,20 +608,28 @@ describe("Connection settings", () => {
     expect(sent.filter((m) => m.type === "fleet.ack").map((m) => m.action)).toEqual(["rename", "archive", "delete", "rename", "archive", "delete"]);
   });
 
-  it("session.delete releases the session's MCP bridge registration (best-effort)", async () => {
-    const released: string[] = [];
-    const sessions = { delete: async () => {} } as unknown as SessionManager;
+  // P3-remaining Track B #3 (docs/2026-07-06-p3r-codex-hardening-finish.md): the daemon-only teardown
+  // (McpBridge release + CODEX_HOME removal) moved OFF the Connection ctor/call path and into
+  // SessionManager.delete (SessionManagerDeps.onSessionDelete) — the single owner. This exercises the
+  // full chain through a real SessionManager so the relocation's "fires exactly once" guarantee is
+  // verified at the Connection entry point too, not just at the SessionManager unit level.
+  it("session.delete triggers the daemon's onSessionDelete cleanup exactly once, via SessionManager (not Connection)", async () => {
     const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const released: string[] = [];
+    const sm = new SessionManager(
+      { repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, onSessionDelete: (id: string) => released.push(id) },
+      () => "s1",
+    );
+    const session = sm.create("/x");
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
-    const conn = new Connection(
-      socket, sessions, new EventBus(), {} as unknown as FleetOrchestrator, repos,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      (id: string) => released.push(id),
-    );
-    await conn.handleRaw(JSON.stringify({ type: "session.delete", reqId: "q1", sessionId: "s1" }));
-    expect(released).toEqual(["s1"]); // released even though nothing registered one (bridge.release is a no-op for unknown keys)
-    expect(sent.at(-1)).toMatchObject({ type: "fleet.ack", action: "delete", id: "s1" });
+    const conn = new Connection(socket, sm, bus, fleet, repos);
+    await conn.handleRaw(JSON.stringify({ type: "session.delete", reqId: "q1", sessionId: session.id }));
+    expect(released).toEqual([session.id]); // fired exactly once — from SessionManager.delete, not duplicated by Connection
+    expect(sent.at(-1)).toMatchObject({ type: "fleet.ack", action: "delete", id: session.id });
   });
 
   it("session.create with provider codex persists the provider and routes turns to the codex backend", async () => {

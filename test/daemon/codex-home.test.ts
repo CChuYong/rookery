@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource } from "../../src/daemon/codex-home.js";
+import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource, gcOrphanCodexHomes } from "../../src/daemon/codex-home.js";
 
 describe("materializeCodexHome", () => {
   const dirs: string[] = [];
@@ -228,6 +228,46 @@ describe("removeCodexHome", () => {
     const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
     try {
       expect(() => removeCodexHome(rookeryHome, "never-existed")).not.toThrow();
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("gcOrphanCodexHomes", () => {
+  it("removes only the codex-homes entries NOT in liveSessionIds", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const base = path.join(rookeryHome, "codex-homes");
+      for (const name of ["a", "b", "c"]) {
+        fs.mkdirSync(path.join(base, name), { recursive: true });
+        fs.writeFileSync(path.join(base, name, "config.toml"), "");
+      }
+      gcOrphanCodexHomes(rookeryHome, new Set(["a", "c"]));
+      expect(fs.existsSync(path.join(base, "a"))).toBe(true);
+      expect(fs.existsSync(path.join(base, "b"))).toBe(false); // orphan — not live → removed
+      expect(fs.existsSync(path.join(base, "c"))).toBe(true);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op when codex-homes does not exist (never throws)", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      expect(() => gcOrphanCodexHomes(rookeryHome, new Set(["a"]))).not.toThrow();
+      expect(fs.existsSync(path.join(rookeryHome, "codex-homes"))).toBe(false);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("never throws even if readdir itself fails (best-effort)", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      // codex-homes exists but as a FILE (not a dir) → readdirSync throws ENOTDIR — must be swallowed.
+      fs.writeFileSync(path.join(rookeryHome, "codex-homes"), "not a dir");
+      expect(() => gcOrphanCodexHomes(rookeryHome, new Set(["a"]))).not.toThrow();
     } finally {
       fs.rmSync(rookeryHome, { recursive: true, force: true });
     }

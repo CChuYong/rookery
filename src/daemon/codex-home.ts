@@ -104,6 +104,29 @@ function codexHomeDirFor(rookeryHome: string, sessionKey: string): string {
   return path.join(rookeryHome, "codex-homes", sessionKey);
 }
 
+// P3-remaining Track B #7 — boot sweep for orphaned per-session CODEX_HOME dirs (docs/2026-07-06-p3r-
+// codex-hardening-finish.md). A session delete that crashes between the DB cascade and the best-effort
+// removeCodexHome call, or a fork whose createSession throws after seedCodexHomeFromSource, can leave a
+// stray `<rookeryHome>/codex-homes/<id>/` dir with no backing session row. Called once at daemon boot
+// (server.ts, after fleet.rehydrate()/resetRunningSessions()/resetRunningAutomations()) with the live
+// session ids read fresh from the DB. ⚠️ Boot-only: no in-flight fork/create can race it at startup (the
+// daemon hasn't accepted any connections yet), so this must NOT be called during normal operation.
+// Best-effort, never throws — a missing codex-homes dir or a readdir failure (e.g. permission error, or
+// the path existing as a non-directory) is a silent no-op.
+export function gcOrphanCodexHomes(rookeryHome: string, liveSessionIds: Set<string>): void {
+  const base = path.join(rookeryHome, "codex-homes");
+  if (!fs.existsSync(base)) return;
+  let names: string[];
+  try {
+    names = fs.readdirSync(base);
+  } catch {
+    return; // best-effort
+  }
+  for (const name of names) {
+    if (!liveSessionIds.has(name)) removeCodexHome(rookeryHome, name); // removeCodexHome itself never throws
+  }
+}
+
 // Starts from the user's real config.toml (if present) — preserving model_providers/base_url/etc, so a
 // minimal rookery-only config doesn't silently drop the user's customizations — strips any PRIOR
 // rookery mcp block (defensive: idempotent even if the real file itself somehow carries one), then

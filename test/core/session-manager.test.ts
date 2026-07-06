@@ -161,6 +161,48 @@ describe("SessionManager", () => {
     expect(repos.getSession(session.id)).toBeUndefined(); // row cascaded cleanly, no FK throw
   });
 
+  // P3-remaining Track B #3 (docs/2026-07-06-p3r-codex-hardening-finish.md): onSessionDelete is the daemon's
+  // combined bridge.release + removeCodexHome teardown, now owned by SessionManager.delete (moved off the
+  // Connection-side call so it fires from exactly ONE place regardless of the delete caller).
+  it("delete() calls onSessionDelete exactly once with the id, AFTER the row cascade", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const git = new FakeGitOps();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt" });
+    const calls: string[] = [];
+    let sessionRowPresentDuringCallback: boolean | undefined;
+    const onSessionDelete = (id: string): void => {
+      calls.push(id);
+      sessionRowPresentDuringCallback = !!repos.getSession(id); // row must already be gone (cascade ran first)
+    };
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, onSessionDelete }, () => `s${n++}`);
+    const s = sm.create("/work");
+
+    await sm.delete(s.id);
+
+    expect(calls).toEqual([s.id]); // fired exactly once, with the deleted session's id
+    expect(sessionRowPresentDuringCallback).toBe(false); // called AFTER deleteSession, not before
+  });
+
+  it("delete() completes even when onSessionDelete throws (best-effort)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const git = new FakeGitOps();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt" });
+    let invoked = false;
+    const onSessionDelete = (): void => { invoked = true; throw new Error("boom"); };
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, onSessionDelete }, () => `s${n++}`);
+    const s = sm.create("/work");
+
+    await expect(sm.delete(s.id)).resolves.toBeUndefined(); // does not reject/throw
+    expect(invoked).toBe(true); // the hook really was called (not merely absent)
+    expect(repos.getSession(s.id)).toBeUndefined(); // the delete itself still completed
+  });
+
   it("get() during an in-flight delete does not resurrect the session from the DB row", async () => {
     // gate fleet.delete so the delete window stays open while we probe get()
     const repos = new Repositories(openDb(":memory:"));

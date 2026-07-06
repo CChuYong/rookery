@@ -48,6 +48,12 @@ export interface SessionManagerDeps {
   makeCapabilities?: (externalKey: string | null, sessionId: string) => (() => TurnCapabilities) | undefined;
   // Forks a session's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
   forkSession?: ForkFn;
+  // P3-remaining Track B #3 (docs/2026-07-06-p3r-codex-hardening-finish.md): best-effort per-session
+  // cleanup for a deleted session's daemon-only state (McpBridge release + removeCodexHome), injected
+  // by the daemon (server.ts). Called once, inside delete(), AFTER the row cascade — the single owner of
+  // this teardown (moved off the Connection-side call so it can't fire twice or leak on a future
+  // programmatic delete caller that bypasses Connection). Never throws (delete() wraps the call).
+  onSessionDelete?: (id: string) => void;
 }
 
 export interface Session {
@@ -217,6 +223,9 @@ export class SessionManager {
         try { await this.deps.fleet.delete(w.id); } catch { /* best-effort — remaining rows are cleaned up by the cascade below */ }
       }
       this.deps.repos.deleteSession(id);
+      // Best-effort daemon-only teardown (bridge release + CODEX_HOME removal) — the single owner of this
+      // cleanup (see SessionManagerDeps.onSessionDelete). Never allowed to fail the delete itself.
+      try { this.deps.onSessionDelete?.(id); } catch { /* best-effort */ }
     } finally {
       this.deleting.delete(id);
     }

@@ -34,7 +34,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { Connection } from "./connection.js";
 import { McpBridge } from "./mcp-bridge.js";
-import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource } from "./codex-home.js";
+import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource, gcOrphanCodexHomes } from "./codex-home.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -159,10 +159,12 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   });
   // Item 6 (docs/2026-07-06-p25-codex-hardening.md): the ONE place both a session's MCP bridge
   // registration AND its materialized per-session CODEX_HOME dir are torn down together, so a future
-  // second delete caller can't release one half and leak the other. Wired below wherever
-  // `bridge.release` used to be passed directly (currently just the Connection ctor). Both steps are
-  // best-effort/never-throw individually (bridge.release no-ops on an unknown key; removeCodexHome
-  // swallows fs errors), so this closure itself never throws either.
+  // second delete caller can't release one half and leak the other. P3-remaining Track B #3
+  // (docs/2026-07-06-p3r-codex-hardening-finish.md): wired into SessionManager.delete via deps
+  // (SessionManagerDeps.onSessionDelete) — the single owner, since that's the ONE delete path every
+  // caller (Connection, and any future programmatic caller) goes through. Both steps are best-effort/
+  // never-throw individually (bridge.release no-ops on an unknown key; removeCodexHome swallows fs
+  // errors), so this closure itself never throws either.
   const onSessionDelete = (id: string): void => {
     bridge.release(id);
     removeCodexHome(config.home, id);
@@ -199,6 +201,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   repos.resetRunningSessions();
   // Likewise clear automation rows left 'running' by a mid-run crash → otherwise the Automation page shows a perpetual pulse.
   repos.resetRunningAutomations();
+  // P3-remaining Track B #7 (docs/2026-07-06-p3r-codex-hardening-finish.md): sweep orphaned per-session
+  // CODEX_HOME dirs (no backing session row — left behind by a crash mid-delete or mid-fork). Boot-only:
+  // no in-flight fork/create can race it this early (before any WS connection is accepted).
+  gcOrphanCodexHomes(config.home, new Set(repos.listSessions().map((s) => s.id)));
   // Slack holders (bridge / thread reader / reporter-ensure) — installed by startSlack on connect, released
   // owner-scoped on stop (clearIf) so a stale connection's late stop can't clobber the live one's holders.
   const bridgeHolder = makeHolder<SlackInteractionBridge>();
@@ -224,7 +230,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId);
     return { sessionId: forkedUuid };
   };
-  const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
+  const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,
     // Fork routing by provider: codex routes through forkCodexMaster (per-session CODEX_HOME
     // relocation, see above); claude keeps the SDK's own (eager) forkSession.
     forkSession: (provider, id, opts) => (provider === "codex" ? forkCodexMaster(id, opts) : sdkForkSession(id, opts)),
@@ -421,7 +427,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, onSessionDelete);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });
