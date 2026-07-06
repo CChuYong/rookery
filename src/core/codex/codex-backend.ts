@@ -30,13 +30,15 @@ export interface CodexBackendDeps {
   // Pre-turn handshake+thread-start timeout (P3-remaining Track A — docs/2026-07-06-p3r-codex-hardening-finish.md):
   // resolved ONCE per stream (server.ts passes `() => settings.codexHandshakeTimeoutMs()`), covering
   // the phase the idle watchdog above does NOT — openClient() (spawn+initialize+provisioning) through
-  // startOrResumeThread() (thread/start|resume) — since the idle watchdog only arms AFTER turn/start's
-  // response. A child wedged anywhere in that phase never trips the idle watchdog; only a manual stop
-  // would recover it without this. 0 (or ≤0), or the dep being absent entirely, DISABLES it: no timer
-  // is ever armed and the handshake awaits normally, however long it takes. Default 30s (generous for
-  // a cold Rust-binary spawn + auth). On timeout the stream REJECTS (no i18n notice — this is a
-  // terminal stream failure the worker/master surfaces as a terminal error, unlike the idle watchdog's
-  // mid-turn transcript notice) and the client/transport is torn down.
+  // startOrResumeThread() (thread/start|resume) — since the idle watchdog only arms inside sendTurn(),
+  // i.e. once a turn/start request is about to be issued (armed just BEFORE that request since the
+  // cleanup wave — see sendTurn's own comment). A child wedged anywhere in the handshake/thread-start
+  // phase never trips the idle watchdog; only a manual stop would recover it without this. 0 (or ≤0),
+  // or the dep being absent entirely, DISABLES it: no timer is ever armed and the handshake awaits
+  // normally, however long it takes. Default 30s (generous for a cold Rust-binary spawn + auth). On
+  // timeout the stream REJECTS (no i18n notice — this is a terminal stream failure the worker/master
+  // surfaces as a terminal error, unlike the idle watchdog's mid-turn transcript notice) and the
+  // client/transport is torn down.
   handshakeTimeoutMs?: () => number;
 }
 
@@ -373,21 +375,30 @@ abstract class CodexSessionBase implements AgentStream {
   protected async sendTurn(client: CodexClient, threadId: string, text: string, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
     const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
     const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
-    // Always explicit: sandbox/approval identical regardless of path (spawn vs live override),
-    // and workspace-write is always network-on by rookery decision (spec Track E).
-    const turnRes = (await client.request("turn/start", {
-      threadId,
-      input,
-      ...(modelOverride ? { model: modelOverride } : {}),
-      ...(effort ? { effort } : {}),
-      approvalPolicy: mode.approvalPolicy,
-      sandboxPolicy: sandboxPolicyFor(mode.sandbox),
-    })) as { turn?: { id?: string } };
-    // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
-    // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
-    if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
+    // Arm BEFORE the turn/start request (not after it resolves): a child wedged after receiving
+    // turn/start but before responding — and before emitting any notification — would otherwise be
+    // uncovered by the idle watchdog (the handshake timeout only covers openClient()..thread/start,
+    // already complete by this point). Arming here also covers the undocumented turn/started-vs-
+    // response ordering below: if the watchdog fires during this window, activeTurnId may still be
+    // the PREVIOUS turn's id (or undefined on the very first turn) — onIdleTimeout()'s interrupt() is
+    // already best-effort (it targets whatever activeTurnId is, and may no-op), so the real backstop
+    // is the grace→kill escalation, which is the correct outcome for a genuinely wedged turn/start.
+    // turnDone is already set above, so onIdleTimeout's `turnDone === null` guard is satisfied.
     this.armIdleWatchdog(); // P2.5 Track B — arm right as we start awaiting this turn's completion
     try {
+      // Always explicit: sandbox/approval identical regardless of path (spawn vs live override),
+      // and workspace-write is always network-on by rookery decision (spec Track E).
+      const turnRes = (await client.request("turn/start", {
+        threadId,
+        input,
+        ...(modelOverride ? { model: modelOverride } : {}),
+        ...(effort ? { effort } : {}),
+        approvalPolicy: mode.approvalPolicy,
+        sandboxPolicy: sandboxPolicyFor(mode.sandbox),
+      })) as { turn?: { id?: string } };
+      // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
+      // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
+      if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
       await turnEnded; // resolves on turn/completed (any status), a watchdog-triggered kill, or an external client close
     } finally {
       this.disarmIdleWatchdog(); // covers every resolution path (redundant with turn/completed's own disarm, but never dangling)
@@ -659,9 +670,15 @@ export class CodexBackend implements AgentBackend {
     const transport = this.deps.spawn({ env: opts?.env ?? this.deps.env?.() });
     const client = new CodexClient(transport);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // A hung ephemeral child must not wedge the worker.fork request forever.
+    // Fork honors codexHandshakeTimeoutMs for coherence with the rest of the codex handshake phase
+    // (same setting openClient()/startOrResumeThread() use), but fork always has SOME timeout — the
+    // setting's "0 disables" semantics deliberately does NOT apply here: a hung ephemeral fork child
+    // must not wedge worker.fork/master-fork forever, so a disabled/non-positive setting falls back to
+    // the FORK_TIMEOUT_MS constant instead of waiting indefinitely.
+    const configured = this.deps.handshakeTimeoutMs?.() ?? 0;
+    const timeoutMs = configured > 0 ? configured : CodexBackend.FORK_TIMEOUT_MS;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`codex fork timed out after ${CodexBackend.FORK_TIMEOUT_MS / 1000}s`)), CodexBackend.FORK_TIMEOUT_MS);
+      timer = setTimeout(() => reject(new Error(`codex fork timed out after ${timeoutMs / 1000}s`)), timeoutMs);
     });
     try {
       return await Promise.race([this.doFork(client, threadId), timeout]);

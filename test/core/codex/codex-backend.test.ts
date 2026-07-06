@@ -488,6 +488,37 @@ describe("CodexBackend — fork timeout & explicit sandbox", () => {
     }
   });
 
+  // Cleanup wave B2: fork honors codexHandshakeTimeoutMs for coherence with the rest of the handshake
+  // phase, but a disabled (0) setting must NOT fully disable fork's own timeout — a hung ephemeral
+  // fork child must never wedge worker.fork/master-fork forever.
+  it("forkSession honors a positive codexHandshakeTimeoutMs dep instead of the 15s fallback", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [], { silentForkHang: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 5000 });
+      const p = b.forkSession("th-1");
+      const assertion = expect(p).rejects.toThrow(/timed out after 5s/);
+      await vi.advanceTimersByTimeAsync(5000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("forkSession with handshakeTimeoutMs:0 (disabled) still falls back to the 15s default — fork timeout is never fully disabled", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [], { silentForkHang: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 0 });
+      const p = b.forkSession("th-1");
+      const assertion = expect(p).rejects.toThrow(/timed out after 15s/);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("every turn/start carries explicit approvalPolicy + sandboxPolicy derived from the CURRENT mode", async () => {
     const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
@@ -521,6 +552,35 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
       expect(fake.requests.some((r) => r.method === "turn/interrupt")).toBe(true);
       const notice = seen.find((e) => e.kind === "push") as { push: { code?: string; params?: unknown } } | undefined;
       expect(notice?.push).toMatchObject({ code: "notice.codexTurnTimeout", params: { seconds: 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes the request→response window: fires even when turn/start itself never responds and no notification of any kind ever arrives (cleanup wave B1)", async () => {
+    // Before the cleanup wave, armIdleWatchdog() was called AFTER `await client.request("turn/start", …)`
+    // resolved — so a child wedged between receiving turn/start and answering it (before any
+    // notification) was invisible to the watchdog: the await itself would hang forever and the timer
+    // would never even be created. Arming BEFORE the request (see sendTurn's own comment) closes that
+    // window; this test uses silentTurnStart (no response, no turn/started) to prove it.
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [], { silentTurnStart: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("do the task");
+      const seen: AgentEvent[] = [];
+      const collected = (async () => { for await (const ev of b.openSession(q, baseOpts())) seen.push(ev); })();
+      const rejection = expect(collected).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(1000); // idle window elapses — NOTHING was ever seen, not even turn/start's own response
+      await vi.advanceTimersByTimeAsync(5000); // grace window elapses with no turn/completed → kill + fail
+      await rejection;
+
+      // activeTurnId is still null here (turn/start's response never arrived), so interrupt() itself
+      // no-ops (see interrupt()'s own comment on the dead window) — the grace→kill escalation is the
+      // real backstop, and that is exactly what must fire.
+      const notice = seen.find((e) => e.kind === "push") as { push: { code?: string; params?: unknown } } | undefined;
+      expect(notice?.push).toMatchObject({ code: "notice.codexTurnTimeout", params: { seconds: 1 } });
+      expect(fake.killed[0]).toBe(true); // the wedged child is killed, not left dangling
     } finally {
       vi.useRealTimers();
     }

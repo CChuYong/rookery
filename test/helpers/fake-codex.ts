@@ -26,6 +26,9 @@ export interface FakeCodexServerOpts {
   silentInitialize?: boolean; // the `initialize` request never gets a response — stalls openClient() (P3-remaining Track A handshake-timeout test)
   silentThreadStart?: boolean; // `thread/start`/`thread/resume` never get a response — stalls startOrResumeThread() (same test)
   initializeDelayMs?: number; // `initialize` responds after a real setTimeout delay instead of immediately — a genuinely SLOW (but completing) handshake, for proving handshakeTimeoutMs:0 truly disables the race rather than just never happening to trip it
+  silentTurnStart?: boolean; // `turn/start` gets NO response AND no `turn/started`/other notification at all — exercises the
+  // request→response idle-watchdog coverage window (cleanup wave B1): proves the watchdog fires even
+  // when it never got a turnRes.turn.id (activeTurnId stays null on a first turn).
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -98,6 +101,7 @@ export function fakeCodexSpawn(
           return;
         }
         if (msg.method === "turn/start") {
+          if (opts.silentTurnStart) return; // never respond, never notify — the turn is wedged before any ack at all
           const turnId = `turn-${turnCount}`;
           currentTurnId = turnId;
           send({ id: msg.id, result: { turn: { id: turnId, status: "inProgress" } } });
