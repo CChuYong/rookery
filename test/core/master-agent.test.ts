@@ -745,6 +745,41 @@ describe("MasterAgent", () => {
     expect(notices.length).toBe(0);
   });
 
+  it("records a notice.costBudget when cumCostUsd >= costBudgetUsd but does NOT abort (warning-only, mirror maxTurns)", async () => {
+    const d = deps(
+      fakeQuery([
+        { type: "assistant", text: "done" },
+        { type: "result", subtype: "success", total_cost_usd: 2.5, num_turns: 1, session_id: "s" },
+      ]),
+    );
+    const events: CoreEvent[] = [];
+    d.bus.subscribe("s1", (e) => events.push(e));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
+    await master.runTurn("do it", { costBudgetUsd: 2 }); // 2.5 >= 2 → notice
+    // Turn completed normally (no throw)
+    const notices = events.filter((e) => e.type === "master.notice");
+    expect(notices.some((e) => (e as { code?: string }).code === "notice.costBudget")).toBe(true);
+    const costNotice = notices.find((e) => (e as { code?: string }).code === "notice.costBudget") as { params?: Record<string, unknown> } | undefined;
+    expect(costNotice?.params).toEqual({ spent: "2.50", budget: "2.00" });
+    // Status is idle (turn completed, not aborted)
+    expect(events.some((e) => e.type === "master.status" && (e as { status?: string }).status === "idle")).toBe(true);
+  });
+
+  it("no costBudgetUsd in override → no notice.costBudget even with high cumCostUsd", async () => {
+    const d = deps(
+      fakeQuery([
+        { type: "assistant", text: "done" },
+        { type: "result", subtype: "success", total_cost_usd: 999, num_turns: 1, session_id: "s" },
+      ]),
+    );
+    const events: CoreEvent[] = [];
+    d.bus.subscribe("s1", (e) => events.push(e));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
+    await master.runTurn("do it"); // no costBudgetUsd → no notice
+    const notices = events.filter((e) => e.type === "master.notice" && (e as { code?: string }).code === "notice.costBudget");
+    expect(notices.length).toBe(0);
+  });
+
   it("captures sdk_session_id from the init system message (so a first-turn interrupt before any result still resumes)", async () => {
     const d = deps(fakeQuery([])); // queryFn replaced below
     // A turn that emits the init system message (carrying session_id) and then ends WITHOUT a result — mimics Stop

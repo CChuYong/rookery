@@ -34,6 +34,7 @@ export type WorkerFactory = (opts: {
   permissionMode?: string; // SDK permission mode at spawn time (falls back to the Worker default "bypassPermissions"). Changeable live.
   onTurnStart?: () => void; // called right before each turn starts — for checkpointing
   maxTurns?: number; // per-result turn cap passed through to Worker
+  costBudgetUsd?: number; // lifetime USD cost ceiling passed through to Worker
   provider?: string; // which AgentBackend runs this worker ('claude' | 'codex'). Fixed once running.
 }) => WorkerLike;
 
@@ -66,6 +67,7 @@ interface Entry {
   model?: string; // persisted current model → on resume, materialize with the same model (restart consistency)
   permissionMode?: string; // persisted current permission mode → on resume, materialize with the same mode (restart consistency)
   maxTurns?: number; // persisted per-result turn cap → materialize restores it (the unattended runaway guard)
+  costBudgetUsd?: number; // persisted lifetime cost ceiling → materialize restores it (the unattended runaway guard)
   effort?: string; // persisted spawn-time effort override → materialize restores it
   provider?: string; // which AgentBackend runs this worker ('claude' | 'codex') → materialize/fork restore it
   resumeSessionId?: string; // if present, "resumable but not yet started (lazy)" state — materialize on first send/await
@@ -122,7 +124,7 @@ export class FleetOrchestrator {
 
   // lazy resume: on first send/await, actually start the SDK session (factory+resume) → register the flow.
   private materialize(id: string, e: Entry): WorkerLike {
-    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, onTurnStart: () => this.checkpoint(id) });
+    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, costBudgetUsd: e.costBudgetUsd, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, onTurnStart: () => this.checkpoint(id) });
     agent.resume();
     e.agent = agent;
     e.resumeSessionId = undefined;
@@ -171,6 +173,7 @@ export class FleetOrchestrator {
         model: row.model ?? undefined,
         permissionMode: row.permission_mode ?? undefined,
         maxTurns: row.max_turns ?? undefined,
+        costBudgetUsd: row.cost_budget_usd ?? undefined,
         effort: row.effort ?? undefined,
         provider: row.provider ?? undefined,
         resumeSessionId,
@@ -181,7 +184,7 @@ export class FleetOrchestrator {
   // the returned Promise resolves after worktree provisioning finishes (agent boot = SDK session start continues asynchronously).
   // → at return time the worktree exists on disk, so the renderer's root resolution (explorer/diff) points at the worktree on the first try.
   // there is no concurrent-worker cap (removed) — spawn is never rejected.
-  async spawn(input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; provider?: string }): Promise<{ id: string }> {
+  async spawn(input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; costBudgetUsd?: number; provider?: string }): Promise<{ id: string }> {
     const id = this.idgen();
     // if there is a ticket, name the branch from its key (rookery/<slug>), with a short suffix only on collision. Otherwise rookery/<id>.
     const slug = input.ticketKey ? branchSlug(input.ticketKey) : "";
@@ -231,6 +234,7 @@ export class FleetOrchestrator {
       if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
       if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
       if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
+      if (src.cost_budget_usd != null) this.deps.repos.setWorkerCostBudgetUsd(newId, src.cost_budget_usd);
       if (src.effort) this.deps.repos.setWorkerEffort(newId, src.effort);
       this.deps.repos.copyWorkerEvents(id, newId);
       // Register a lazy-resumable entry (like rehydrate) → idle; materializes (resumes the forked SDK session) on first send.
@@ -238,7 +242,7 @@ export class FleetOrchestrator {
       this.entries.set(newId, {
         homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
         status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
-        maxTurns: src.max_turns ?? undefined, effort: src.effort ?? undefined, provider,
+        maxTurns: src.max_turns ?? undefined, costBudgetUsd: src.cost_budget_usd ?? undefined, effort: src.effort ?? undefined, provider,
         resumeSessionId: forkedUuid,
       });
       this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
@@ -255,7 +259,7 @@ export class FleetOrchestrator {
 
   private async run(
     id: string,
-    input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; provider?: string },
+    input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; costBudgetUsd?: number; provider?: string },
     branch: string,
     worktreePath: string,
     signalReady: () => void,
@@ -264,7 +268,7 @@ export class FleetOrchestrator {
     try {
       // persist the workers row first: even if base resolution/addWorktree fails, status/events can be safely
       // recorded in catch without an FK violation. (the base column uses the unresolved input value)
-      // These provisioning statements (createWorker / notify-arm / maxTurns+effort persists / the spawned emit) are INSIDE
+      // These provisioning statements (createWorker / notify-arm / maxTurns+costBudget+effort persists / the spawned emit) are INSIDE
       // the try on purpose — load-bearing for audit #25: createWorker itself can throw (an FK on a concurrently-deleted home
       // session, SQLITE_FULL). If it did outside the try, the catch's signalReady() would be skipped and spawn()'s returned
       // promise would never settle (a wedged master turn), while the rejected flow escaped as an unhandledRejection.
@@ -282,6 +286,7 @@ export class FleetOrchestrator {
       });
       if (input.notify) this.deps.repos.setWorkerNotifyArmed(id, true);
       if (input.maxTurns != null) repos.setWorkerMaxTurns(id, input.maxTurns);
+      if (input.costBudgetUsd != null) repos.setWorkerCostBudgetUsd(id, input.costBudgetUsd);
       if (input.effort) repos.setWorkerEffort(id, input.effort);
       // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
       // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
@@ -314,7 +319,7 @@ export class FleetOrchestrator {
         return;
       }
       signalReady(); // worktree provisioned → spawn() can return (the rest of boot continues)
-      const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns, provider: input.provider });
+      const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns, costBudgetUsd: input.costBudgetUsd, provider: input.provider });
       const entry: Entry = {
         agent,
         homeSessionId: input.homeSessionId,
@@ -325,6 +330,7 @@ export class FleetOrchestrator {
         status: "provisioning", // reconciled to running/idle right after start() below (a real transition that emits worker.status)
         permissionMode: input.permissionMode, // remember so a later resume (materialize) restores the same mode
         maxTurns: input.maxTurns, // remember so a later resume (materialize) restores the runaway guard
+        costBudgetUsd: input.costBudgetUsd, // remember so a later resume (materialize) restores the cost-budget runaway guard
         effort: input.effort, // remember so a later resume (materialize) restores the effort override
         provider: input.provider, // remember so a later resume (materialize) restores the same backend
         pendingLabel: !input.task, // task-less spawn: relabel from the first send() message instead

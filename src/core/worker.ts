@@ -24,6 +24,7 @@ export interface WorkerDeps {
   effort?: string; // effort fixed at spawn time (falls back to SDK default if absent). Not passed for Haiku models.
   onTurnStart?: () => void; // called right before each turn starts (start/send) — the orchestrator takes a checkpoint.
   maxTurns?: number; // per-result num_turns cap. When r.num_turns >= cap, the worker is stopped (notice emitted). null/undefined → unlimited.
+  costBudgetUsd?: number; // lifetime USD cost ceiling. When cumCostUsd >= budget, the worker is stopped (notice emitted). null/undefined → unlimited.
 }
 
 interface WorkerOpts {
@@ -336,6 +337,18 @@ export class Worker {
           const cap = this.opts.deps.maxTurns;
           if (cap != null && ev.numTurns >= cap) {
             this.record({ kind: "notice", text: `Turn cap reached (maxTurns=${cap}, num_turns=${ev.numTurns}) — stopping worker.` });
+            void this.stream?.interrupt(); // void: NOT await — would deadlock inside the consume loop
+            this.queue.close();
+            this.abort.abort();
+            this.transition("stopped");
+            this.deferred.splice(0); // clear deferred — cap notice already recorded; worker is terminating, no ghost turns
+            return;
+          }
+          // cost-budget guard: LIFETIME total (this.cumCostUsd, just incremented above), unlike maxTurns which is per-send.
+          // null/undefined → unlimited. Mutually exclusive with the maxTurns cap above (both terminal; whichever crosses first stops).
+          const budget = this.opts.deps.costBudgetUsd;
+          if (budget != null && this.cumCostUsd >= budget) {
+            this.record({ kind: "notice", text: `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
             void this.stream?.interrupt(); // void: NOT await — would deadlock inside the consume loop
             this.queue.close();
             this.abort.abort();

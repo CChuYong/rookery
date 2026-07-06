@@ -102,6 +102,20 @@ describe("Repositories", () => {
     expect(repos.getWorker("w1")!.effort).toBe("low");
   });
 
+  it("persists worker cost_budget_usd (cost-budget runaway guard, sibling of max_turns)", () => {
+    const repos = new Repositories(openDb(":memory:"), () => "t");
+    repos.createSession({ id: "s1", cwd: "/x" });
+    // default (createWorker without costBudgetUsd) → null (unlimited)
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w" });
+    expect(repos.getWorker("w1")!.cost_budget_usd).toBeNull();
+    // createWorker binds an explicit costBudgetUsd directly
+    repos.createWorker({ id: "w2", sessionId: "s1", repoPath: "/r", label: "w2", costBudgetUsd: 5 });
+    expect(repos.getWorker("w2")!.cost_budget_usd).toBe(5);
+    // setWorkerCostBudgetUsd round-trips (mirrors setWorkerMaxTurns)
+    repos.setWorkerCostBudgetUsd("w1", 12.5);
+    expect(repos.getWorker("w1")!.cost_budget_usd).toBe(12.5);
+  });
+
   it("creates and reads a session", () => {
     const s = repos.createSession({ id: "s1", cwd: "/work/repo" });
     expect(s.status).toBe("active");

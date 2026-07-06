@@ -741,6 +741,107 @@ describe("Worker", () => {
     expect(agent.status()).toBe("done"); // not stopped by cap
   });
 
+  it("stops at costBudgetUsd once cumCostUsd (lifetime) crosses it, across turns (mirror maxTurns)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const events: CoreEvent[] = [];
+    bus.subscribe("s1", (e) => events.push(e));
+    // turn#0 costs 0.4 (cumCostUsd=0.4 < budget 1.0 — passes); turn#1 costs 0.7 (cumCostUsd=1.1 >= 1.0 — stops).
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
+      deps: {
+        repos, bus, model: "m",
+        backend: fakeStreamingBackend((_text, turn) => [
+          { type: "assistant", text: `turn${turn}` },
+          { type: "result", subtype: "success", total_cost_usd: turn === 0 ? 0.4 : 0.7, num_turns: 1, session_id: "sdk-1" },
+        ]),
+        costBudgetUsd: 1.0,
+      },
+    });
+    agent.start("task");
+    await until(() => agent.status() === "idle"); // after turn#0: cumCostUsd=0.4 < 1.0 — no stop
+    agent.send("continue"); // turn#1: cumCostUsd=1.1 >= 1.0 — cost budget fires
+    await agent.waitUntilSettled();
+
+    expect(agent.status()).toBe("stopped");
+    const persisted = repos.listWorkerEvents("a1");
+    const notices = persisted.filter((e) => e.type === "notice");
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.includes("Cost budget reached"))).toBe(true);
+    const resultEvents = persisted.filter((e) => e.type === "result");
+    expect(resultEvents.length).toBe(2); // both results were processed before stop
+  });
+
+  it("no costBudgetUsd (undefined) → never stops even at high cumulative cost", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
+      deps: {
+        repos, bus: new EventBus(), model: "m",
+        backend: fakeBackend([
+          { type: "assistant", text: "done" },
+          { type: "result", subtype: "success", total_cost_usd: 999, num_turns: 1, session_id: "s" },
+        ]),
+        // costBudgetUsd: undefined (not set)
+      },
+    });
+    agent.start("task");
+    await agent.waitUntilSettled();
+    expect(agent.status()).toBe("done"); // not stopped by budget
+  });
+
+  it("maxTurns + costBudgetUsd both set, cost crosses while maxTurns does not that turn → stops via cost budget", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
+      deps: {
+        repos, bus: new EventBus(), model: "m",
+        backend: fakeBackend([
+          { type: "assistant", text: "done" },
+          { type: "result", subtype: "success", total_cost_usd: 1.5, num_turns: 2, session_id: "s" }, // cost crosses (>=1.0), turns doesn't (<100)
+        ]),
+        maxTurns: 100,
+        costBudgetUsd: 1.0,
+      },
+    });
+    agent.start("task");
+    await agent.waitUntilSettled();
+    expect(agent.status()).toBe("stopped");
+    const notices = repos.listWorkerEvents("a1").filter((e) => e.type === "notice");
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.includes("Cost budget reached"))).toBe(true);
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.includes("Turn cap reached"))).toBe(false);
+  });
+
+  it("maxTurns + costBudgetUsd both cross in the SAME turn → maxTurns (checked first) wins; the cost-budget check is not reached that turn", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
+      deps: {
+        repos, bus: new EventBus(), model: "m",
+        backend: fakeBackend([
+          { type: "assistant", text: "done" },
+          { type: "result", subtype: "success", total_cost_usd: 2.0, num_turns: 5, session_id: "s" }, // both maxTurns (>=3) and cost (>=1.0) cross
+        ]),
+        maxTurns: 3,
+        costBudgetUsd: 1.0,
+      },
+    });
+    agent.start("task");
+    await agent.waitUntilSettled();
+    expect(agent.status()).toBe("stopped");
+    const notices = repos.listWorkerEvents("a1").filter((e) => e.type === "notice");
+    // The maxTurns cap block returns before the cost-budget check runs, so only ONE notice is recorded.
+    expect(notices.length).toBe(1);
+    expect((JSON.parse(notices[0]!.payload_json) as { text?: string }).text).toContain("Turn cap reached");
+  });
+
   it("interruptTurn() clears deferred queue — no ghost turn, emits dropped notice with clientMsgId, worker lands idle", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });

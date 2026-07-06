@@ -57,6 +57,7 @@ export interface TurnOverride {
   permissionMode?: string; // Unspecified → bypassPermissions (current). Selected per UI session.
   clientMsgId?: string; // Optimistic bubble ID attached by the client — flowed back on the daemon echo so the client transitions pending→committed.
   maxTurns?: number; // Warning-only cap for master (no abort). When r.num_turns >= cap, a notice is emitted but the turn completes normally.
+  costBudgetUsd?: number; // Warning-only lifetime USD cost ceiling for master (no abort). When cumCostUsd >= budget, a notice is emitted but the turn completes normally.
 }
 
 // A pre-localized display notice for a system-injected (non-user) turn. code+params so each client re-localizes.
@@ -418,6 +419,11 @@ export class MasterAgent {
           if (masterCap != null && ev.numTurns >= masterCap) {
             const params = { max: masterCap, turns: ev.numTurns };
             this.recordEvent({ type: "master.notice", sessionId, code: "notice.turnCap", params, text: t(DEFAULT_LOCALE, "notice.turnCap", params) });
+          }
+          // costBudgetUsd: warning-only for master (no abort) — mirror maxTurns above, but on the LIFETIME cost total.
+          if (override?.costBudgetUsd != null && this.cumCostUsd >= override.costBudgetUsd) {
+            const params = { spent: this.cumCostUsd.toFixed(2), budget: override.costBudgetUsd.toFixed(2) };
+            this.recordEvent({ type: "master.notice", sessionId, code: "notice.costBudget", params, text: t(DEFAULT_LOCALE, "notice.costBudget", params) });
           }
         }
       }

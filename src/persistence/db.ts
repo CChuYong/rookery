@@ -164,6 +164,12 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     // so this only bites a mis-config. Codex workers are unaffected (workers aren't bypass-guarded).
     db.exec("ALTER TABLE automations ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'");
   },
+  (db) => {
+    // workers.cost_budget_usd: a LIFETIME USD cost ceiling — the sibling runaway guard to max_turns (see above).
+    // Nullable: NULL = unlimited (default off, opt-in). Survives restart the same way max_turns does
+    // (rehydrate→materialize restores it from this column).
+    db.exec("ALTER TABLE workers ADD COLUMN cost_budget_usd REAL");
+  },
 ];
 
 export function currentVersion(db: DB): number {

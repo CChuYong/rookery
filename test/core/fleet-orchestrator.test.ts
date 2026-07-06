@@ -93,6 +93,28 @@ describe("FleetOrchestrator", () => {
     expect(repos.getWorker("src")!.sdk_session_id).toBe("src-sdk"); // source untouched
   });
 
+  it("fork() inherits the source worker's cost_budget_usd (mirror max_turns inheritance)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build feature", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", costBudgetUsd: 8 });
+    repos.setWorkerSdkSessionId("src", "src-sdk");
+    const bus = new EventBus();
+    const git = new FakeGitOps({ checkpointSha: "snap0" });
+    let materializedCostBudget: number | undefined;
+    const factory = (o: { costBudgetUsd?: number }): WorkerLike => {
+      materializedCostBudget = o.costBudgetUsd;
+      return { start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: () => new Promise<void>(() => {}) };
+    };
+    const forkSession = async () => ({ sessionId: "forked-uuid" });
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk0" });
+
+    const { id } = await fleet.fork("src");
+
+    expect(repos.getWorker(id)!.cost_budget_usd).toBe(8); // persisted via setWorkerCostBudgetUsd
+    fleet.send(id, "go"); // lazy materialize
+    expect(materializedCostBudget).toBe(8); // restored into the factory call via the fork's Entry
+  });
+
   it("fork() throws when the source worker has no SDK session", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "home", cwd: "/x" });
@@ -185,6 +207,22 @@ describe("FleetOrchestrator", () => {
     await fleet.waitAllSettled();
     expect(captured.permissionMode).toBe("plan");
     expect(captured.maxTurns).toBe(7);
+  });
+
+  it("passes spawn-time costBudgetUsd to the factory (mirror maxTurns)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    let captured: { costBudgetUsd?: number } = {};
+    const factory = (o: { costBudgetUsd?: number }): WorkerLike => {
+      captured = o;
+      return { start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "done", waitUntilSettled: async () => {} };
+    };
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b" }), factory, worktreesDir: "/wt", idgen: () => "a0" });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t", costBudgetUsd: 3.5 });
+    await fleet.waitAllSettled();
+    expect(captured.costBudgetUsd).toBe(3.5);
+    expect(repos.getWorker(id)!.cost_budget_usd).toBe(3.5); // persisted
   });
 
   it("spawn resolves only AFTER the worktree is created (not optimistically before)", async () => {
@@ -933,6 +971,28 @@ describe("FleetOrchestrator rehydrate (restart recovery)", () => {
     fleet2.rehydrate();
     fleet2.send("a0", "continue"); // lazy materialize
     expect(seen[1]).toEqual({ maxTurns: 10, effort: "low" }); // restored from the row, not dropped
+  });
+
+  it("costBudgetUsd survives a restart: rehydrate→materialize passes it to the factory (mirror maxTurns, audit #9)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const seen: Array<{ costBudgetUsd?: number }> = [];
+    const factory = (o: { costBudgetUsd?: number }): WorkerLike => {
+      seen.push({ costBudgetUsd: o.costBudgetUsd });
+      return { start: () => {}, resume: () => {}, send: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: () => new Promise<void>(() => {}) };
+    };
+    const exists = () => true;
+    const fleet1 = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b", checkpointSha: "ck" }), factory, worktreesDir: "/wt", idgen: () => "a0", exists });
+    await fleet1.spawn({ homeSessionId: "sA", repoPath: "/code", label: "x", task: "t", costBudgetUsd: 2.25 });
+    expect(seen[0]).toEqual({ costBudgetUsd: 2.25 }); // persisted AND passed at spawn
+    repos.setWorkerSdkSessionId("a0", "sdk-1"); // make it resumable
+
+    // "restart": a fresh orchestrator over the same DB
+    const fleet2 = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b", checkpointSha: "ck" }), factory, worktreesDir: "/wt", idgen: () => "a1", exists });
+    fleet2.rehydrate();
+    fleet2.send("a0", "continue"); // lazy materialize
+    expect(seen[1]).toEqual({ costBudgetUsd: 2.25 }); // restored from the row, not dropped
   });
 
 });

@@ -9,6 +9,7 @@ export default {
   "notice.requiresAction": "⏸ Input/approval needed",
   "notice.interrupted": "⏹ Stopped",
   "notice.turnCap": "Turn cap reached (maxTurns={max}, num_turns={turns}) — consider stopping this session.",
+  "notice.costBudget": "Cost budget reached ({spent}/{budget} USD) — consider stopping this session.",
   "notice.workerDone": "✅ Worker {label} done",
   "notice.workerFailed": "⚠️ Worker {label} failed",
   "notice.workerStopped": "⏹ Worker {label} stopped",
