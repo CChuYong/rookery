@@ -722,6 +722,11 @@ export function App(): JSX.Element {
       model: s.overrides[s.activeSessionId]?.model ?? defaultModel,
       effort: s.overrides[s.activeSessionId]?.effort ?? s.settings.masterEffort,
       permissionMode: s.overrides[s.activeSessionId]?.permissionMode ?? "bypassPermissions",
+      // Codex masters are bypassPermissions-only (the daemon rejects any other mode at turn start), so a
+      // codex session's composer must offer ONLY bypass — otherwise one click on Plan/Default makes every
+      // subsequent send fail (finding [2]). Claude masters keep the full mode list (key omitted → Composer
+      // falls back to all four PERMISSION_MODES).
+      ...(provider === "codex" ? { permissionModes: ["bypassPermissions"] as const } : {}),
       editable: true,
       onModel: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { model: m }),
       onEffort: (e: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { effort: e }),
@@ -763,7 +768,7 @@ export function App(): JSX.Element {
             commands={s.commands}
             controls={{
               provider: activeSub.provider,
-              model: activeSub.model ?? s.settings?.workerModel ?? "claude-opus-4-8",
+              model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
               editable: activeSub.status === "running" || activeSub.status === "idle",
               onModel: (m) => subSetModel(activeSub.id, m),
               permissionMode: activeSub.permissionMode ?? "bypassPermissions",
@@ -1144,7 +1149,7 @@ export function App(): JSX.Element {
                       controls={{
                         // while running, the model + permission mode can be changed live (query.setModel / query.setPermissionMode). effort can't → omitted.
                         provider: activeSub.provider,
-                        model: activeSub.model ?? s.settings?.workerModel ?? "claude-opus-4-8",
+                        model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
                         editable: activeSub.status === "running" || activeSub.status === "idle",
                         onModel: (m) => subSetModel(activeSub.id, m),
                         permissionMode: activeSub.permissionMode ?? "bypassPermissions",

@@ -5,7 +5,7 @@ import { baseName as basename } from "../lib/path.js";
 import { makeChip } from "../lib/mention-editor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
-import { Select } from "../ui/input.js";
+import { Select, Input } from "../ui/input.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
@@ -95,6 +95,10 @@ export function Composer({
   // effort options from it (parity with the spawn/new-session/automation/settings pickers). Otherwise (claude,
   // or codex with an unfetched catalog) fall back to the Claude models list + generic EFFORTS — unchanged behavior.
   const codexActive = controls?.provider === "codex" && codexModels != null;
+  // Codex conversation with an unfetched catalog → free-text model input (parity with the spawn/new-session/
+  // automation/settings surfaces + the design's null-catalog contract), NOT the Claude dropdown, which would
+  // otherwise offer Claude-only ids a codex turn rejects (finding [11]/[14]).
+  const codexFreeText = controls?.provider === "codex" && codexModels == null;
   const modelList: ReadonlyArray<{ id: string; label: string }> = codexActive
     ? codexModels!.map((m) => ({ id: m.id, label: m.displayName }))
     : models;
@@ -191,24 +195,35 @@ export function Composer({
         {controls &&
           (controls.editable ? (
             <>
-              <Select
-                size="xs"
-                className="min-w-0 text-fg-dim"
-                title={t("composer.modelTitle")}
-                value={controls.model}
-                disabled={disabled}
-                onChange={(e) => {
-                  const m = e.target.value;
-                  controls.onModel?.(m);
-                  // codex: picking a model pre-selects that model's default reasoning effort (parity with the spawn pickers).
-                  if (codexActive) { const de = codexDefaultEffort(m, codexModels); if (de) controls.onEffort?.(de); }
-                }}
-              >
-                {modelList.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-                {!modelList.some((m) => m.id === controls.model) && controls.model && <option value={controls.model}>{controls.model}</option>}
-              </Select>
+              {codexFreeText ? (
+                <Input
+                  size="xs"
+                  className="min-w-0 text-fg-dim"
+                  title={t("composer.modelTitle")}
+                  value={controls.model}
+                  disabled={disabled}
+                  onChange={(e) => controls.onModel?.(e.target.value)}
+                />
+              ) : (
+                <Select
+                  size="xs"
+                  className="min-w-0 text-fg-dim"
+                  title={t("composer.modelTitle")}
+                  value={controls.model}
+                  disabled={disabled}
+                  onChange={(e) => {
+                    const m = e.target.value;
+                    controls.onModel?.(m);
+                    // codex: picking a model pre-selects that model's default reasoning effort (parity with the spawn pickers).
+                    if (codexActive) { const de = codexDefaultEffort(m, codexModels); if (de) controls.onEffort?.(de); }
+                  }}
+                >
+                  {modelList.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                  {!modelList.some((m) => m.id === controls.model) && controls.model && <option value={controls.model}>{controls.model}</option>}
+                </Select>
+              )}
               {controls.effort !== undefined && effortSupported(controls.model) && (
                 <Select
                   size="xs"

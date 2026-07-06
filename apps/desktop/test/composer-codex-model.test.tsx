@@ -38,11 +38,15 @@ describe("Composer codex model/effort (codex-aware controls)", () => {
     expect(onEffort).toHaveBeenCalledWith("medium"); // gpt-5.4's defaultReasoningEffort
   });
 
-  it("provider=codex but codexModels null (catalog unfetched) → falls back to the Claude models list, keeping the current value", () => {
-    render(<Composer onSend={() => {}} controls={{ provider: "codex", model: "gpt-5.5", effort: "high", editable: true, onModel: () => {}, onEffort: () => {} }} />);
-    const model = screen.getByTitle(MODEL_TITLE) as HTMLSelectElement;
-    expect(screen.getByRole("option", { name: /Opus/ })).toBeInTheDocument(); // Claude fallback
-    expect(model.value).toBe("gpt-5.5"); // current codex value preserved as an out-of-list option
+  it("provider=codex but codexModels null (catalog unfetched) → free-text model input, NO Claude models leak (finding [11]/[14])", () => {
+    const onModel = vi.fn();
+    render(<Composer onSend={() => {}} controls={{ provider: "codex", model: "gpt-5.5", effort: "high", editable: true, onModel, onEffort: () => {} }} />);
+    const model = screen.getByTitle(MODEL_TITLE) as HTMLInputElement;
+    expect(model.tagName).toBe("INPUT"); // free-text, matching the other four codex surfaces — not the Claude dropdown
+    expect(model.value).toBe("gpt-5.5");
+    expect(screen.queryByRole("option", { name: /Opus|Sonnet|Haiku/ })).toBeNull(); // no Claude model is pickable
+    fireEvent.change(model, { target: { value: "gpt-5.4-mini" } });
+    expect(onModel).toHaveBeenCalledWith("gpt-5.4-mini");
   });
 
   it("provider=claude → Claude models even when a codex catalog is loaded", () => {

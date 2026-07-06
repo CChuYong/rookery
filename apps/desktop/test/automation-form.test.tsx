@@ -272,6 +272,35 @@ describe("AutomationForm", () => {
     expect(providerSelect.value).toBe("codex");
   });
 
+  // ── codex-parity findings [12]/[13]: provider-aware model state + null-catalog free-text ──
+
+  it("[12] switching provider does not carry the other provider's model id into the submitted automation", () => {
+    useStore.getState().setCodexModels(null);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    // pick a Claude model, then flip the provider to codex
+    fireEvent.change(screen.getByLabelText("모델"), { target: { value: "claude-sonnet-4-6" } });
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do it";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.click(screen.getByText("저장"));
+    const submitted = onSubmit.mock.calls[0][0];
+    expect(submitted.provider).toBe("codex");
+    expect(submitted.model).not.toBe("claude-sonnet-4-6"); // the codex model field is independent, not the stale Claude id
+  });
+
+  it("[13] provider codex with an unfetched catalog renders a free-text model input, not the Claude dropdown", () => {
+    useStore.getState().setCodexModels(null);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    const model = screen.getByLabelText("모델") as HTMLElement;
+    expect(model.tagName).toBe("INPUT"); // free-text fallback, matching the spawn/new-session surfaces
+    expect(screen.queryByRole("option", { name: /Opus|Sonnet|Haiku/ })).toBeNull(); // no Claude id is pickable for codex
+  });
+
   // ── Task 3 (Track C): codex + non-bypass permissionMode warning ──
 
   it("shows the codex-bypass warning for provider codex + permissionMode plan", () => {
@@ -470,13 +499,14 @@ describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4
     expect(screen.queryByLabelText("effort")).toBeNull();
   });
 
-  it("codex + codexModels null → the model select still lists the Claude `models` catalog (unchanged)", () => {
+  it("codex + codexModels null → free-text model input, NOT the Claude models catalog (finding [13])", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
-    const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
-    // the Claude static-fallback catalog includes Opus/Sonnet labels, not the codex catalog's displayNames
-    expect(within(modelSelect).getByText("Opus 4.8")).toBeInTheDocument();
-    expect(within(modelSelect).queryByText("GPT-5.5")).toBeNull();
+    const model = screen.getByLabelText("모델") as HTMLElement;
+    // Null catalog falls back to a free-text input (the daemon applies the codex*Model default when empty),
+    // never the Claude dropdown, whose ids a codex run would reject.
+    expect(model.tagName).toBe("INPUT");
+    expect(screen.queryByText("Opus 4.8")).toBeNull();
   });
 
   it("claude provider (default) → the model select lists the Claude `models` catalog regardless of codexModels", () => {
