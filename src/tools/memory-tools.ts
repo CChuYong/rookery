@@ -1,5 +1,5 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Repositories } from "../persistence/repositories.js";
 
@@ -22,7 +22,10 @@ export function recallImpl(
   return { matches: rows.map((r) => ({ content: r.content, tags: r.tags })) };
 }
 
-export function createMemoryToolsServer(repos: Repositories): McpSdkServerConfigWithInstance {
+// Raw tool defs (extracted so they can travel the provider-neutral port — see agent-backend.ts's
+// ProviderToolDef / MasterTurnOptions.toolDefs). Claude wraps these with createSdkMcpServer below;
+// the Codex adapter registers the same objects on the daemon MCP bridge (src/daemon/mcp-bridge.ts).
+export function memoryToolDefs(repos: Repositories): SdkMcpToolDefinition<any>[] {
   const remember = tool(
     "remember",
     "Persist an important fact to long-term memory so it can be recalled in future turns or sessions.",
@@ -69,9 +72,9 @@ export function createMemoryToolsServer(repos: Repositories): McpSdkServerConfig
     { annotations: { readOnlyHint: true } },
   );
 
-  return createSdkMcpServer({
-    name: MEMORY_SERVER_NAME,
-    version: "0.0.1",
-    tools: [remember, recall],
-  });
+  return [remember, recall];
+}
+
+export function createMemoryToolsServer(repos: Repositories): McpSdkServerConfigWithInstance {
+  return createSdkMcpServer({ name: MEMORY_SERVER_NAME, version: "0.0.1", tools: memoryToolDefs(repos) });
 }

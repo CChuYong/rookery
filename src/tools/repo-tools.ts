@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Repositories } from "../persistence/repositories.js";
 import { isSafeGitRef } from "../core/git-ref.js";
@@ -21,7 +21,10 @@ function errorText(t: string) {
   return { content: [{ type: "text" as const, text: t }], isError: true };
 }
 
-export function createRepoToolsServer(repos: Repositories, idgen: () => string = () => randomUUID()): McpSdkServerConfigWithInstance {
+// Raw tool defs (extracted so they can travel the provider-neutral port — see agent-backend.ts's
+// ProviderToolDef / MasterTurnOptions.toolDefs). Claude wraps these with createSdkMcpServer below;
+// the Codex adapter registers the same objects on the daemon MCP bridge (src/daemon/mcp-bridge.ts).
+export function repoToolDefs(repos: Repositories, idgen: () => string = () => randomUUID()): SdkMcpToolDefinition<any>[] {
   const register = tool(
     "register_repo",
     "Register a git repository into the pool so workers can be spawned against it. Provide a short domain description for routing.",
@@ -87,5 +90,9 @@ export function createRepoToolsServer(repos: Repositories, idgen: () => string =
     },
   );
 
-  return createSdkMcpServer({ name: REPO_SERVER_NAME, version: "0.0.1", tools: [register, list, update, remove] });
+  return [register, list, update, remove];
+}
+
+export function createRepoToolsServer(repos: Repositories, idgen: () => string = () => randomUUID()): McpSdkServerConfigWithInstance {
+  return createSdkMcpServer({ name: REPO_SERVER_NAME, version: "0.0.1", tools: repoToolDefs(repos, idgen) });
 }

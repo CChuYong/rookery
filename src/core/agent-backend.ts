@@ -18,6 +18,10 @@ export interface SlashCommandInfo {
 export type ProviderMcpServer = unknown;
 export type ProviderPermissionCallback = unknown;
 
+// Neutral in-process tool definition (structurally the Claude SDK's SdkMcpToolDefinition and the
+// bridge's BridgeToolDef — assignability pinned by tests). Handlers close over live daemon objects.
+export type ProviderToolDef = { name: string; description: string; inputSchema: Record<string, unknown>; handler: (args: never, extra: unknown) => Promise<unknown> };
+
 export type AgentEvent =
   // Provider session id, emitted EARLY (on the init system message) and again on turn end —
   // an interrupt before the first turn end must not orphan resume (see worker.ts/master-agent.ts capture comments).
@@ -58,6 +62,11 @@ export interface AgentSessionOptions {
 
 // Master-turn extras: provider-specific tool wiring, passed through opaquely (P2 will neutralize these).
 export interface MasterTurnOptions extends AgentSessionOptions {
+  // Base in-process tool servers as RAW definitions (server name → defs). Claude adapter wraps them
+  // with createSdkMcpServer; Codex adapter registers them on the daemon MCP bridge for the session.
+  toolDefs?: Record<string, ProviderToolDef[]>;
+  // The rookery session id — used to key the master's registration on the Codex adapter's MCP bridge.
+  sessionKey?: string;
   mcpServers?: Record<string, ProviderMcpServer>;
   allowedTools?: string[];
   disallowedTools?: string[];

@@ -1,5 +1,5 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import type { Repositories } from "../persistence/repositories.js";
@@ -69,11 +69,14 @@ export async function spawnWorkerImpl(
   }
 }
 
-export function createFleetToolsServer(
+// Raw tool defs (extracted so they can travel the provider-neutral port — see agent-backend.ts's
+// ProviderToolDef / MasterTurnOptions.toolDefs). Claude wraps these with createSdkMcpServer below;
+// the Codex adapter registers the same objects on the daemon MCP bridge (src/daemon/mcp-bridge.ts).
+export function fleetToolDefs(
   fleet: FleetOrchestrator,
   repos: Repositories,
   homeSessionId: string,
-): McpSdkServerConfigWithInstance {
+): SdkMcpToolDefinition<any>[] {
   const spawn = tool(
     "spawn_worker",
     "Spawn a worktree-isolated worker to work on a task in a REGISTERED repo (by name). It runs autonomously, then idles awaiting further instructions. Observe it (view_worker_transcript / get_worker_status / view_worker_diff), steer it (send_worker), and tell it to commit & open a PR itself when the work is ready. " +
@@ -207,9 +210,13 @@ export function createFleetToolsServer(
     },
   );
 
-  return createSdkMcpServer({
-    name: FLEET_SERVER_NAME,
-    version: "0.0.1",
-    tools: [spawn, send, interrupt, list, status, transcript, diff, stop, discard],
-  });
+  return [spawn, send, interrupt, list, status, transcript, diff, stop, discard];
+}
+
+export function createFleetToolsServer(
+  fleet: FleetOrchestrator,
+  repos: Repositories,
+  homeSessionId: string,
+): McpSdkServerConfigWithInstance {
+  return createSdkMcpServer({ name: FLEET_SERVER_NAME, version: "0.0.1", tools: fleetToolDefs(fleet, repos, homeSessionId) });
 }

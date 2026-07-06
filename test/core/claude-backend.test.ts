@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ClaudeBackend, claudeUserMessages } from "../../src/core/claude-backend.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import type { AgentEvent, AgentStream } from "../../src/core/agent-backend.js";
+import type { ProviderToolDef } from "../../src/core/agent-backend.js";
 import { fakeQuery, fakeStreamingQuery } from "../helpers/fake-query.js";
 import { MessageQueue } from "../../src/core/message-queue.js";
 
@@ -155,6 +156,39 @@ describe("ClaudeBackend — option assembly", () => {
     expect(o.effort).toBeUndefined();
     expect(o.thinking).toBeUndefined();
     expect(o.resume).toBeUndefined();
+  });
+
+  it("wraps toolDefs groups into mcpServers.<group>; an opaque mcpServers overlay wins over a defs-wrapped group on collision", async () => {
+    const cap = capture(RESULT);
+    const backend = new ClaudeBackend(cap.fn);
+    const stubDef = (name: string): ProviderToolDef => ({
+      name,
+      description: "d",
+      inputSchema: {},
+      handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    });
+    const sentinelFleet = { type: "sdk", name: "fleet", instance: {} } as unknown;
+    await collect(backend.startTurn("hi", {
+      ...baseOpts(),
+      toolDefs: { memory: [stubDef("remember")], repos: [stubDef("list_repos")], fleet: [stubDef("spawn_worker")] },
+      mcpServers: { fleet: sentinelFleet },
+    }));
+    const o = cap.input().options!;
+    const servers = o.mcpServers as Record<string, { type?: string; name?: string }>;
+    expect(Object.keys(servers).sort()).toEqual(["fleet", "memory", "repos"]);
+    expect(servers.memory).toMatchObject({ type: "sdk", name: "memory" });
+    expect(servers.repos).toMatchObject({ type: "sdk", name: "repos" });
+    // The opaque overlay for "fleet" wins over the defs-wrapped "fleet" server (per-source overlays win on collision).
+    expect(servers.fleet).toBe(sentinelFleet);
+  });
+
+  it("without toolDefs, an opaque mcpServers overlay passes through untouched (same identity, no wrapping)", async () => {
+    const cap = capture(RESULT);
+    const backend = new ClaudeBackend(cap.fn);
+    const mcp = { fleet: { marker: true } };
+    await collect(backend.startTurn("hi", { ...baseOpts(), mcpServers: mcp }));
+    const o = cap.input().options!;
+    expect(o.mcpServers).toBe(mcp);
   });
 });
 

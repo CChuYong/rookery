@@ -3,9 +3,9 @@ import { ThinkingCoalescer } from "./thinking-coalescer.js";
 import type { EventBus, CoreEvent } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
 import type { FleetOrchestrator } from "./fleet-orchestrator.js";
-import { createMemoryToolsServer, MEMORY_TOOL_NAMES } from "../tools/memory-tools.js";
-import { createRepoToolsServer, REPO_TOOL_NAMES } from "../tools/repo-tools.js";
-import { createFleetToolsServer, FLEET_TOOL_NAMES } from "../tools/fleet-tools.js";
+import { memoryToolDefs, MEMORY_TOOL_NAMES } from "../tools/memory-tools.js";
+import { repoToolDefs, REPO_TOOL_NAMES } from "../tools/repo-tools.js";
+import { fleetToolDefs, FLEET_TOOL_NAMES } from "../tools/fleet-tools.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { truncateBytes } from "./truncate.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
@@ -312,13 +312,14 @@ export class MasterAgent {
         // base system prompt + per-source fragment ("+"). The fragment is fixed within a session so it doesn't disturb the cache prefix.
         systemPromptAppend: this.buildSystemPrompt() + (caps.systemPromptAppend ? `\n\n${caps.systemPromptAppend}` : ""),
         resume: this.sdkSessionId,
-        // base (memory/repos/fleet) + per-source additional servers ("+"). On key collision, caps wins.
-        mcpServers: {
-          memory: createMemoryToolsServer(repos),
-          repos: createRepoToolsServer(repos),
-          fleet: createFleetToolsServer(fleet, repos, sessionId),
-          ...caps.mcpServers,
-        },
+        // Base in-process tool servers as RAW defs, travelling the provider-neutral port (P2 tool-port
+        // refactor): the Claude adapter wraps each group with createSdkMcpServer; a future Codex adapter
+        // registers the same objects on the daemon MCP bridge. sessionKey keys that bridge registration.
+        toolDefs: { memory: memoryToolDefs(repos), repos: repoToolDefs(repos), fleet: fleetToolDefs(fleet, repos, sessionId) },
+        sessionKey: sessionId,
+        // Per-source additional servers only ("+") — the base three now travel as toolDefs above.
+        // On key collision with a defs-wrapped base server, caps (the overlay) wins.
+        mcpServers: caps.mcpServers,
         // base + per-source additions ("+"), then remove denyTools ("−").
         allowedTools: baseAllowed.filter((t) => !deny.has(t)),
         // Remove native harness schedule tools — headless no-ops that confuse with our schedule_* MCP tools.

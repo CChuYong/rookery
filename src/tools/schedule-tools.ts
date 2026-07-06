@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { Repositories, Automation } from "../persistence/repositories.js";
 
@@ -94,7 +94,10 @@ function toContent(r: Result) {
   return { content: [{ type: "text" as const, text: r.text }], ...(r.isError ? { isError: true } : {}) };
 }
 
-export function createScheduleToolsServer(c: ScheduleControl, sessionId: string): McpSdkServerConfigWithInstance {
+// Raw tool defs (extracted so they can travel the provider-neutral port — see agent-backend.ts's
+// ProviderToolDef / MasterTurnOptions.toolDefs). Claude wraps these with createSdkMcpServer below;
+// the Codex adapter registers the same objects on the daemon MCP bridge (src/daemon/mcp-bridge.ts).
+export function scheduleToolDefs(c: ScheduleControl, sessionId: string): SdkMcpToolDefinition<any>[] {
   const wakeup = tool(
     "schedule_wakeup",
     WAKEUP_DESC,
@@ -103,5 +106,9 @@ export function createScheduleToolsServer(c: ScheduleControl, sessionId: string)
   );
   const list = tool("schedule_list", LIST_DESC, {}, async () => toContent(listImpl(c, sessionId)));
   const cancel = tool("schedule_cancel", CANCEL_DESC, { id: z.string() }, async (args) => toContent(cancelImpl(c, sessionId, args.id)));
-  return createSdkMcpServer({ name: SCHEDULE_SERVER_NAME, version: "0.0.1", tools: [wakeup, list, cancel] });
+  return [wakeup, list, cancel];
+}
+
+export function createScheduleToolsServer(c: ScheduleControl, sessionId: string): McpSdkServerConfigWithInstance {
+  return createSdkMcpServer({ name: SCHEDULE_SERVER_NAME, version: "0.0.1", tools: scheduleToolDefs(c, sessionId) });
 }

@@ -1,4 +1,5 @@
-import { query as sdkQuery, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, createSdkMcpServer, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, MasterTurnOptions, SlashCommandInfo } from "./agent-backend.js";
 import { extractText, extractToolUses, extractToolResults } from "./sdk-extract.js";
 import { classifySystemPush } from "./system-push.js";
@@ -166,11 +167,28 @@ export class ClaudeBackend implements AgentBackend {
       options: {
         ...this.baseOptions(opts),
         ...(opts.canUseTool ? { canUseTool: opts.canUseTool as QueryOptions["canUseTool"] } : {}),
-        ...(opts.mcpServers ? { mcpServers: opts.mcpServers as QueryOptions["mcpServers"] } : {}),
+        ...this.buildMcpServersOption(opts),
         ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
         ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
       },
     });
     return new ClaudeStream(q);
+  }
+
+  // Wraps `opts.toolDefs` groups (the neutral port — see agent-backend.ts) with createSdkMcpServer,
+  // one server per group name, so they surface on the SDK call exactly where the old inline
+  // `mcpServers: { memory: createMemoryToolsServer(...), ... }` used to (byte-identical keys/instances).
+  // Merge order: wrapped-defs first, then the opaque `opts.mcpServers` spread AFTER — per-source
+  // overlays (e.g. the capabilities' schedule/slack servers) win on key collision.
+  // When `toolDefs` is absent, `opts.mcpServers` (if any) passes through untouched — same identity
+  // as before this refactor (no toolDefs path existed).
+  private buildMcpServersOption(opts: MasterTurnOptions): { mcpServers?: QueryOptions["mcpServers"] } {
+    if (!opts.toolDefs) {
+      return opts.mcpServers ? { mcpServers: opts.mcpServers as QueryOptions["mcpServers"] } : {};
+    }
+    const fromDefs = Object.fromEntries(
+      Object.entries(opts.toolDefs).map(([name, defs]) => [name, createSdkMcpServer({ name, tools: defs as SdkMcpToolDefinition[] })]),
+    );
+    return { mcpServers: { ...fromDefs, ...opts.mcpServers } as QueryOptions["mcpServers"] };
   }
 }
