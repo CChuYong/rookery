@@ -290,4 +290,12 @@ describe("AutomationForm", () => {
     // provider stays at its default (claude)
     expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
   });
+
+  it("hides the codex-bypass warning for a WORKER action + provider codex + permissionMode plan (workers run plan fine)", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("권한 모드"), { target: { value: "plan" } });
+    expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
+  });
 });

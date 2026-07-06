@@ -270,8 +270,11 @@ export function AutomationForm(p: {
               </label>
               {/* codex + a non-bypass permissionMode builds an automation that fails every run (per the P2 guard) —
                   mirrors the bypassWarning block's structure below (<p> as a sibling of the <label>, not nested
-                  inside it — nesting would make a click on the warning focus the select). */}
-              {provider === "codex" && permissionMode !== "bypassPermissions" && (
+                  inside it — nesting would make a click on the warning focus the select).
+                  MASTER-ONLY: the bypass-only guard applies to master actions only — codex workers map
+                  plan → a read-only sandbox and run fine (codex-vocab.ts, automation-action.ts), so a worker
+                  action must never trigger this warning even when its permissionMode is non-bypass. */}
+              {actionKind === "master" && provider === "codex" && permissionMode !== "bypassPermissions" && (
                 <p className="text-[11px] text-run/90" data-testid="codex-bypass-warning">
                   {t("automationForm.codexBypassWarning")}
                 </p>
