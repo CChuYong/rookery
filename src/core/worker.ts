@@ -315,6 +315,10 @@ export class Worker {
           this.emit({ kind: "tool_progress", id: ev.toolUseId, elapsedSec: ev.elapsedSec }); // live only (no persistence)
         } else if (ev.kind === "turn_end") {
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
+          // ev.costUsd/ev.numTurns are PER-SEND (this query()'s own cost + agentic-loop count), NOT
+          // conversation-cumulative — verified empirically against the Claude Agent SDK: a resumed turn's
+          // total_cost_usd/num_turns are independent of the prior turn's (t2 cost < t1 cost). So accumulating
+          // them into a lifetime session total is correct (no double-count).
           this.cumCostUsd += ev.costUsd;
           this.cumTurns += ev.numTurns;
           this.record({
@@ -326,8 +330,9 @@ export class Worker {
             contextTokens: ev.contextTokens,
             contextWindow: ev.contextWindow,
           });
-          // maxTurns cap: compare against ev.numTurns (the provider's conversation-cumulative agentic turn
-          // count per send). Do NOT use cumTurns (double-counts across sends). null/undefined → unlimited.
+          // maxTurns cap: PER-SEND guard — ev.numTurns is this send's agentic-loop count (per-send, see above),
+          // so this caps a single runaway send, NOT the lifetime total. (A lifetime cap would compare cumTurns.)
+          // null/undefined → unlimited.
           const cap = this.opts.deps.maxTurns;
           if (cap != null && ev.numTurns >= cap) {
             this.record({ kind: "notice", text: `Turn cap reached (maxTurns=${cap}, num_turns=${ev.numTurns}) — stopping worker.` });
