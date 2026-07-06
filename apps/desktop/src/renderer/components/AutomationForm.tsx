@@ -74,6 +74,9 @@ export function AutomationForm(p: {
   const [permissionMode, setPermissionMode] = useState(init?.permissionMode ?? "bypassPermissions");
   // maxTurns is managed as a string (empty = unset)
   const [maxTurns, setMaxTurns] = useState(init?.maxTurns != null ? String(init.maxTurns) : "");
+  // costBudgetUsd (cost budget guard Task 3) — a string, empty = unset. Unlike maxTurns, this applies to
+  // BOTH master and worker actions (the daemon checks it at runTurn WARN for master / fleet.spawn STOP for worker).
+  const [costBudget, setCostBudget] = useState(init?.costBudgetUsd != null ? String(init.costBudgetUsd) : "");
 
   // Create/update is a real round-trip (the server validates cron) → reflect the saving state on Save (otherwise the user clicks twice)
   const [saving, setSaving] = useState(false);
@@ -102,6 +105,8 @@ export function AutomationForm(p: {
     const resolvedPermissionMode = permissionMode || null;
     // maxTurns: an integer valid only for the worker action; master is always null
     const resolvedMaxTurns = actionKind === "worker" && maxTurns.trim() ? parseInt(maxTurns, 10) : null;
+    // costBudgetUsd: applies to BOTH action kinds — no worker-only guard (mirror the null-when-empty shape).
+    const resolvedCostBudget = costBudget.trim() && Number.isFinite(Number(costBudget)) && Number(costBudget) > 0 ? Number(costBudget) : null;
 
     setSaving(true);
     try {
@@ -115,6 +120,7 @@ export function AutomationForm(p: {
         effort: resolvedEffort,
         permissionMode: resolvedPermissionMode,
         maxTurns: resolvedMaxTurns,
+        costBudgetUsd: resolvedCostBudget,
       });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : t("automationModal.invalidCron"));
@@ -354,6 +360,23 @@ export function AutomationForm(p: {
                 <span className="text-[11px] text-muted">{t("automationForm.maxTurnsHint")}</span>
               </div>
             )}
+
+            {/* costBudgetUsd — shown for BOTH action kinds (KEY DIVERGENCE from maxTurns, which is worker-only):
+                the daemon checks this at runTurn (master, WARN-only) and at fleet.spawn (worker, STOP). */}
+            <div className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] text-fg-dim">{t("automationForm.costBudget")}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={costBudget}
+                  onChange={(e) => setCostBudget(e.target.value)}
+                  placeholder="off"
+                />
+              </label>
+              <span className="text-[11px] text-muted">{t("automationForm.costBudgetHint")}</span>
+            </div>
           </section>
 
           {/* ── Action section */}

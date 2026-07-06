@@ -15,6 +15,8 @@ export default {
   "settings.effort": "Effort",
   "settings.workerModel": "Worker default model",
   "settings.applyNewWorker": "Applies from new workers",
+  "settings.workerCostBudgetUsd": "Worker default cost budget (USD)",
+  "settings.workerCostBudgetUsdHint": "Default cost budget for spawned workers; empty = unlimited.",
   "settings.botName": "Agent name",
   "settings.botNameDesc": "Used as the master agent's own name in its system prompt. Defaults to rookery when left empty.",
   "settings.usage": "Usage",

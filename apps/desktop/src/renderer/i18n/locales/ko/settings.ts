@@ -15,6 +15,8 @@ export default {
   "settings.effort": "강도",
   "settings.workerModel": "워커 기본 모델",
   "settings.applyNewWorker": "새 워커부터 적용",
+  "settings.workerCostBudgetUsd": "워커 기본 비용 예산 (USD)",
+  "settings.workerCostBudgetUsdHint": "스폰되는 워커의 기본 비용 예산이에요. 비우면 제한 없음.",
   "settings.botName": "에이전트 이름",
   "settings.botNameDesc": "마스터 에이전트가 시스템 프롬프트에서 자기 이름으로 사용해요. 비우면 rookery.",
   "settings.usage": "사용량",

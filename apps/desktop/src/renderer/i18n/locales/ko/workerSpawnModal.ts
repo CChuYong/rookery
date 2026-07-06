@@ -9,6 +9,7 @@ export default {
   "workerSpawnModal.providerClaude": "Claude",
   "workerSpawnModal.providerCodex": "Codex",
   "workerSpawnModal.effortTitle": "effort",
+  "workerSpawnModal.costBudget": "비용 예산 (USD, 이 워커)",
   "workerSpawnModal.permTitle": "권한 모드 (이 워커 — 도구 실행 승인 정책) — bypass 또는 plan",
   "workerSpawnModal.permBypass": "Bypass Permissions",
   "workerSpawnModal.permPlan": "Plan Mode",

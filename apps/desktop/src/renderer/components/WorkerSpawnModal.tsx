@@ -24,7 +24,7 @@ export function WorkerSpawnModal(p: {
   branches?: string[]; // base branch candidates (picker hidden if absent)
   integrations?: IntegrationsStatus; // only connected integrations enable GitHub/Linear modes
   searchSource?: (provider: SourceProviderId, query: string) => Promise<SourceItem[]>; // search issues/tickets
-  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string) => void;
+  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => void;
   onClose: () => void;
 }): JSX.Element {
   const t = useT();
@@ -40,6 +40,8 @@ export function WorkerSpawnModal(p: {
   // clobber either field's value — the Claude <Select> and the codex <Input> remember their own last value).
   const [codexModel, setCodexModel] = useState("");
   const [effort, setEffort] = useState(p.defaultEffort);
+  // Cost budget override for this spawn (string; empty = off/unlimited — mirrors the settings-page workerCostBudgetUsd idiom).
+  const [costBudget, setCostBudget] = useState("");
   const [permissionMode, setPermissionMode] = useState("bypassPermissions"); // worker SDK permission mode (bypass | plan); changeable later in the composer
   const models = useStore((s) => s.models); // live model list (static fallback if absent)
   const [base, setBase] = useState(""); // "" = repo default base
@@ -91,6 +93,8 @@ export function WorkerSpawnModal(p: {
   const spawn = () => {
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
+    const cb = costBudget.trim() ? Number(costBudget) : undefined;
+    const costBudgetUsd = cb != null && Number.isFinite(cb) && cb > 0 ? cb : undefined;
     p.onSpawn(
       task.trim(),
       label.trim(),
@@ -100,6 +104,7 @@ export function WorkerSpawnModal(p: {
       selected ? { key: selected.identifier, url: selected.url } : undefined,
       permissionMode,
       provider === "claude" ? undefined : provider, // wire-minimal: absent means claude
+      costBudgetUsd,
     );
     dismiss();
   };
@@ -163,6 +168,15 @@ export function WorkerSpawnModal(p: {
                 ))}
               </Select>
             )}
+            {/* Optional lifetime USD cost ceiling for this worker (cost budget guard) — empty = unlimited (off). */}
+            <Input
+              size="sm"
+              className="w-28"
+              value={costBudget}
+              onChange={(e) => setCostBudget(e.target.value)}
+              placeholder="off"
+              title={t("workerSpawnModal.costBudget")}
+            />
           </div>
           {/* SDK permission mode for this worker — only bypassPermissions / plan (no default/acceptEdits). Changeable later in the composer. */}
           <Select size="sm" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")}>

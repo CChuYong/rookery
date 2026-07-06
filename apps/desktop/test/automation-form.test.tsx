@@ -301,3 +301,96 @@ describe("AutomationForm", () => {
     expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
   });
 });
+
+// ── Cost budget guard Task 3: costBudgetUsd field (applies to BOTH master and worker actions) ──
+
+describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
+  it("the cost-budget input is visible for a MASTER action (not gated like maxTurns)", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    // default action is master; maxTurns is hidden here but cost budget must still show
+    expect(screen.queryByLabelText("최대 턴 수")).toBeNull();
+    expect(screen.getByLabelText("비용 예산 (USD)")).toBeInTheDocument();
+  });
+
+  it("the cost-budget input is visible for a WORKER action too", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
+    expect(screen.getByLabelText("최대 턴 수")).toBeInTheDocument();
+    expect(screen.getByLabelText("비용 예산 (USD)")).toBeInTheDocument();
+  });
+
+  it("submit includes null costBudgetUsd when left empty, for a MASTER action", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do something";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: null }));
+  });
+
+  it("submit includes a numeric costBudgetUsd for a MASTER action", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do something";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "12.5" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: 12.5 }));
+  });
+
+  it("submit includes a numeric costBudgetUsd for a WORKER action", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "workerjob" } });
+    fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
+    const taskEditor = screen.getByLabelText("작업");
+    taskEditor.textContent = "fix the bug";
+    fireEvent.input(taskEditor);
+    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "3" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: 3 }));
+  });
+
+  it("non-numeric, zero, or negative cost budget resolves to null in the payload", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do something";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "-1" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: null }));
+  });
+
+  it("initialises the cost-budget input from init.costBudgetUsd", () => {
+    const job = {
+      id: "a3",
+      name: "existing",
+      enabled: true,
+      trigger: { kind: "cron" as const, cron: "0 3 * * *", timezone: "UTC" },
+      action: { kind: "master" as const, prompt: "p", cwd: "/c", sessionMode: "reuse" as const },
+      model: null,
+      effort: null,
+      permissionMode: "bypassPermissions",
+      maxTurns: null,
+      costBudgetUsd: 7.25,
+      lastRunAt: null,
+      lastStatus: null,
+      lastError: null,
+      nextRunAt: null,
+      createdAt: "t",
+      provider: "claude",
+    };
+    render(<AutomationForm job={job} repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    const input = screen.getByLabelText("비용 예산 (USD)") as HTMLInputElement;
+    expect(input.value).toBe("7.25");
+  });
+});

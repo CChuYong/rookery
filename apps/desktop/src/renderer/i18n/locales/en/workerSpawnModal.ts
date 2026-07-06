@@ -9,6 +9,7 @@ export default {
   "workerSpawnModal.providerClaude": "Claude",
   "workerSpawnModal.providerCodex": "Codex",
   "workerSpawnModal.effortTitle": "Effort",
+  "workerSpawnModal.costBudget": "Cost budget (USD, this worker)",
   "workerSpawnModal.permTitle": "Permission mode for this worker (tool-execution approval policy) — bypass or plan",
   "workerSpawnModal.permBypass": "Bypass Permissions",
   "workerSpawnModal.permPlan": "Plan Mode",

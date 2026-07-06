@@ -644,11 +644,11 @@ export function App(): JSX.Element {
   }, []);
   // Interrupt the worker's current turn (keep the session) — composer stop button. The worker equivalent of the master's stopMaster.
   const subInterrupt = useCallback((id: string) => { void client?.request({ type: "worker.interrupt", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
-  const spawnSub = (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string) => {
+  const spawnSub = (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => {
     const c = client;
     if (!c || !spawnRepo) return;
     void c
-      .request({ type: "fleet.spawn", repo: spawnRepo, task, label: label || spawnRepo, model, effort, base, ticketKey: ticket?.key, ticketUrl: ticket?.url, permissionMode: permissionMode as "bypassPermissions" | "plan" | undefined, provider: provider as "claude" | "codex" | undefined })
+      .request({ type: "fleet.spawn", repo: spawnRepo, task, label: label || spawnRepo, model, effort, base, ticketKey: ticket?.key, ticketUrl: ticket?.url, permissionMode: permissionMode as "bypassPermissions" | "plan" | undefined, provider: provider as "claude" | "codex" | undefined, costBudgetUsd })
       .then((r) =>
         c.request({ type: "fleet.list" }).then((lr) => {
           useStore.getState().setFleet(lr.fleet ?? []);

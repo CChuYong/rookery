@@ -146,6 +146,28 @@ describe("SettingsPage Codex tab", () => {
   });
 });
 
+// ── Cost budget guard Task 3: workerCostBudgetUsd default field (General tab) ──
+describe("SettingsPage workerCostBudgetUsd field", () => {
+  it("renders the field in the General tab with the value from settings", () => {
+    render(<SettingsPage {...base} settings={{ ...base.settings, workerCostBudgetUsd: "25" }} />);
+    expect(screen.getByDisplayValue("25")).toBeInTheDocument();
+  });
+
+  it("empty by default shows the 'off' placeholder", () => {
+    render(<SettingsPage {...base} />);
+    expect(screen.getByPlaceholderText("off")).toBeInTheDocument();
+  });
+
+  it("editing the field lands in the onSave(f) bulk-save payload", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.change(screen.getByPlaceholderText("off"), { target: { value: "10.5" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ workerCostBudgetUsd: "10.5" }));
+  });
+});
+
 // ── Task 3 (Track C): slackProvider select in the Slack tab ──
 describe("SettingsPage Slack tab — slackProvider", () => {
   it("shows the slackProvider select defaulted to the settings value (claude)", () => {

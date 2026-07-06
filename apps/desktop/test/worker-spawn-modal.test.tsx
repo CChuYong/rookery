@@ -117,3 +117,38 @@ describe("WorkerSpawnModal provider selector (P1.5 task 4)", () => {
     expect(modelField).toHaveAttribute("placeholder", "gpt-5.5");
   });
 });
+
+describe("WorkerSpawnModal cost budget (cost budget guard Task 3)", () => {
+  it("empty cost budget → onSpawn's trailing costBudgetUsd arg is undefined", () => {
+    const { onSpawn } = renderModal();
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
+  });
+
+  it("entering a numeric cost budget passes it as a number in the trailing onSpawn arg", () => {
+    const { onSpawn } = renderModal();
+    fireEvent.change(screen.getByTitle("비용 예산 (USD, 이 워커)"), { target: { value: "5" } });
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[0]![8]).toBe(5);
+  });
+
+  it("non-numeric, zero, or negative cost budget → onSpawn's trailing arg is undefined", () => {
+    const { onSpawn } = renderModal();
+    const input = screen.getByTitle("비용 예산 (USD, 이 워커)");
+
+    fireEvent.change(input, { target: { value: "abc" } });
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "t1" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
+
+    fireEvent.change(input, { target: { value: "0" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[1]![8]).toBeUndefined();
+
+    fireEvent.change(input, { target: { value: "-3" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[2]![8]).toBeUndefined();
+  });
+});
