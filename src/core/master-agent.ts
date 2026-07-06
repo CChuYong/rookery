@@ -1,4 +1,5 @@
-import type { AgentBackend, ProviderMcpServer, ProviderPermissionCallback } from "./agent-backend.js";
+import { randomUUID } from "node:crypto";
+import type { AgentBackend, ProviderMcpServer, ProviderPermissionCallback, ProviderToolDef } from "./agent-backend.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
 import type { EventBus, CoreEvent } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
@@ -6,9 +7,21 @@ import type { FleetOrchestrator } from "./fleet-orchestrator.js";
 import { memoryToolDefs, MEMORY_TOOL_NAMES } from "../tools/memory-tools.js";
 import { repoToolDefs, REPO_TOOL_NAMES } from "../tools/repo-tools.js";
 import { fleetToolDefs, FLEET_TOOL_NAMES } from "../tools/fleet-tools.js";
+import { askUserQuestionDef, type AskChannelResult } from "../tools/ask-user-question-def.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { truncateBytes } from "./truncate.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
+
+// Structural signature of the SDK's CanUseTool — defined locally (not imported) to keep this module
+// SDK-import-free (neutrality gate; see test/core/provider-neutral.test.ts). The third arg mirrors
+// what interaction-registry.ts's `request()` / slack/interaction.ts's `prompt()` actually read
+// (toolUseID + an optional abort signal); the cast from the opaque ProviderPermissionCallback to this
+// shape happens HERE, at the one place master-agent holds it.
+type RealCanUseToolSig = (
+  toolName: string,
+  input: unknown,
+  opts: { toolUseID: string; signal?: AbortSignal },
+) => Promise<AskChannelResult>;
 
 export interface MasterAgentDeps {
   repos: Repositories;
@@ -315,7 +328,24 @@ export class MasterAgent {
         // Base in-process tool servers as RAW defs, travelling the provider-neutral port (P2 tool-port
         // refactor): the Claude adapter wraps each group with createSdkMcpServer; a future Codex adapter
         // registers the same objects on the daemon MCP bridge. sessionKey keys that bridge registration.
-        toolDefs: { memory: memoryToolDefs(repos), repos: repoToolDefs(repos), fleet: fleetToolDefs(fleet, repos, sessionId) },
+        // askUserQuestion is added only when an interaction channel (deps.canUseTool) is injected —
+        // ClaudeBackend strips this group (Claude keeps its NATIVE AskUserQuestion + canUseTool path);
+        // CodexBackend flattens it into the bridge like every other group, giving codex masters the
+        // same structured-question capability (spec: docs/2026-07-06-p2-codex-master.md §The MCP bridge).
+        toolDefs: {
+          memory: memoryToolDefs(repos),
+          repos: repoToolDefs(repos),
+          fleet: fleetToolDefs(fleet, repos, sessionId),
+          ...(this.opts.deps.canUseTool
+            ? {
+                askUserQuestion: [
+                  askUserQuestionDef((input) =>
+                    (this.opts.deps.canUseTool as RealCanUseToolSig)("AskUserQuestion", input, { toolUseID: randomUUID(), signal: abort.signal }),
+                  ),
+                ] as ProviderToolDef[],
+              }
+            : {}),
+        },
         sessionKey: sessionId,
         // Per-source additional servers only ("+") — the base three now travel as toolDefs above.
         // On key collision with a defs-wrapped base server, caps (the overlay) wins.

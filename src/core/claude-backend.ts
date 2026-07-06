@@ -182,12 +182,19 @@ export class ClaudeBackend implements AgentBackend {
   // overlays (e.g. the capabilities' schedule/slack servers) win on key collision.
   // When `toolDefs` is absent, `opts.mcpServers` (if any) passes through untouched — same identity
   // as before this refactor (no toolDefs path existed).
+  // The "askUserQuestion" group (master-agent.ts, injected only when deps.canUseTool exists) is
+  // deliberately SKIPPED here: Claude already gets AskUserQuestion natively via the harness's own
+  // tool + canUseTool (see master-agent.ts's baseAllowed) — wrapping a second MCP tool of the same
+  // name would confuse the model with a duplicate. The Codex adapter has no such native tool, so it
+  // flattens every group (including askUserQuestion) into the bridge as-is (CodexBackend.startTurn).
   private buildMcpServersOption(opts: MasterTurnOptions): { mcpServers?: QueryOptions["mcpServers"] } {
     if (!opts.toolDefs) {
       return opts.mcpServers ? { mcpServers: opts.mcpServers as QueryOptions["mcpServers"] } : {};
     }
     const fromDefs = Object.fromEntries(
-      Object.entries(opts.toolDefs).map(([name, defs]) => [name, createSdkMcpServer({ name, tools: defs as SdkMcpToolDefinition[] })]),
+      Object.entries(opts.toolDefs)
+        .filter(([name]) => name !== "askUserQuestion")
+        .map(([name, defs]) => [name, createSdkMcpServer({ name, version: "0.0.1", tools: defs as SdkMcpToolDefinition[] })]),
     );
     return { mcpServers: { ...fromDefs, ...opts.mcpServers } as QueryOptions["mcpServers"] };
   }

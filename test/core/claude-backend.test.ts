@@ -170,12 +170,14 @@ describe("ClaudeBackend — option assembly", () => {
     const sentinelFleet = { type: "sdk", name: "fleet", instance: {} } as unknown;
     await collect(backend.startTurn("hi", {
       ...baseOpts(),
-      toolDefs: { memory: [stubDef("remember")], repos: [stubDef("list_repos")], fleet: [stubDef("spawn_worker")] },
+      // askUserQuestion included alongside the base groups — must be dropped (Claude keeps its NATIVE
+      // AskUserQuestion tool + canUseTool; a duplicate MCP tool of the same name would confuse the model).
+      toolDefs: { memory: [stubDef("remember")], repos: [stubDef("list_repos")], fleet: [stubDef("spawn_worker")], askUserQuestion: [stubDef("AskUserQuestion")] },
       mcpServers: { fleet: sentinelFleet },
     }));
     const o = cap.input().options!;
     const servers = o.mcpServers as Record<string, { type?: string; name?: string }>;
-    expect(Object.keys(servers).sort()).toEqual(["fleet", "memory", "repos"]);
+    expect(Object.keys(servers).sort()).toEqual(["fleet", "memory", "repos"]); // no "askUserQuestion" key
     expect(servers.memory).toMatchObject({ type: "sdk", name: "memory" });
     expect(servers.repos).toMatchObject({ type: "sdk", name: "repos" });
     // The opaque overlay for "fleet" wins over the defs-wrapped "fleet" server (per-source overlays win on collision).
@@ -189,6 +191,26 @@ describe("ClaudeBackend — option assembly", () => {
     await collect(backend.startTurn("hi", { ...baseOpts(), mcpServers: mcp }));
     const o = cap.input().options!;
     expect(o.mcpServers).toBe(mcp);
+  });
+
+  // PICKUP from Task 2 review (M1): wrapped base servers must advertise version "0.0.1" (parity with the
+  // pre-refactor inline createMemoryToolsServer()/createSdkMcpServer() calls, which always passed version).
+  // The wrapped McpSdkServerConfigWithInstance only exposes {type, name, instance} publicly — the version
+  // is not on the config object itself, but IS observable at runtime on the live McpServer instance's
+  // underlying protocol Server (its serverInfo), so we read it there rather than relying on the code change alone.
+  it("wrapped toolDefs servers advertise version \"0.0.1\" on the underlying McpServer instance", async () => {
+    const cap = capture(RESULT);
+    const backend = new ClaudeBackend(cap.fn);
+    const stubDef = (name: string): ProviderToolDef => ({
+      name,
+      description: "d",
+      inputSchema: {},
+      handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    });
+    await collect(backend.startTurn("hi", { ...baseOpts(), toolDefs: { memory: [stubDef("remember")] } }));
+    const o = cap.input().options!;
+    const servers = o.mcpServers as Record<string, { instance?: { server?: { _serverInfo?: { version?: string } } } }>;
+    expect(servers.memory?.instance?.server?._serverInfo?.version).toBe("0.0.1");
   });
 });
 

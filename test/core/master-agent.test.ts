@@ -179,10 +179,48 @@ describe("MasterAgent", () => {
     const { d, opts } = capture(base);
     const fakeCanUseTool = (() => {}) as never;
     await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...d, canUseTool: fakeCanUseTool } }).runTurn("hi");
-    const o = opts() as { allowedTools?: string[]; canUseTool?: unknown; permissionMode?: string };
+    const o = opts() as { allowedTools?: string[]; canUseTool?: unknown; permissionMode?: string; mcpServers?: Record<string, unknown> };
     expect(o.canUseTool).toBe(fakeCanUseTool); // the injected canUseTool is passed straight through to query
     expect(o.allowedTools).toContain("AskUserQuestion"); // always allowed so the agent can ask questions
     expect(o.permissionMode).toBe("bypassPermissions"); // mode stays as-is (dormant)
+    // Claude keeps the NATIVE AskUserQuestion (above) — the askUserQuestion bridge-tool-def group must
+    // NOT surface as a duplicate MCP server on the actual SDK call (ClaudeBackend drops the group).
+    expect(Object.keys(o.mcpServers ?? {})).not.toContain("askUserQuestion");
+  });
+
+  it("includes an askUserQuestion toolDefs group (named exactly \"AskUserQuestion\") only when canUseTool is injected", async () => {
+    // A minimal capturing fake AgentBackend (not ClaudeBackend) so we can inspect the RAW MasterTurnOptions
+    // master-agent builds — ClaudeBackend intentionally strips this group before it reaches the SDK options
+    // captured by the `capture()` helper above, so that helper can't see it either way.
+    function capturingBackend() {
+      let captured: { toolDefs?: Record<string, Array<{ name: string }>> } | undefined;
+      const backend = {
+        openSession: () => { throw new Error("not used"); },
+        startTurn: (_prompt: string, opts: { toolDefs?: Record<string, Array<{ name: string }>> }) => {
+          captured = opts;
+          async function* gen() {
+            yield { kind: "turn_end" as const, subtype: "success", costUsd: 0, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 };
+          }
+          const it = gen();
+          return Object.assign(it, { interrupt: async () => {}, setModel: async () => {}, setPermissionMode: async () => {}, supportedCommands: async () => [] });
+        },
+      };
+      return { backend, opts: () => captured };
+    }
+
+    const withAsk = deps(fakeQuery([]));
+    const capA = capturingBackend();
+    const fakeCanUseTool = (() => {}) as never;
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...withAsk, backend: capA.backend as never, canUseTool: fakeCanUseTool } }).runTurn("hi");
+    const askGroup = capA.opts()?.toolDefs?.askUserQuestion;
+    expect(askGroup).toBeDefined();
+    expect(askGroup).toHaveLength(1);
+    expect(askGroup?.[0]?.name).toBe("AskUserQuestion");
+
+    const withoutAsk = deps(fakeQuery([]));
+    const capB = capturingBackend();
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...withoutAsk, backend: capB.backend as never } }).runTurn("hi");
+    expect(capB.opts()?.toolDefs?.askUserQuestion).toBeUndefined();
   });
 
   it("uses the per-turn permissionMode override, defaulting to bypassPermissions", async () => {
