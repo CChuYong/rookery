@@ -13,7 +13,7 @@ import type { SlackClient, ChatStreamArgs, ChatStreamerLike, AppendPayload } fro
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
-function setup(opts: { allowed?: string; allowAll?: boolean; refuseReply?: boolean; queryFn?: ReturnType<typeof fakeQuery> } = {}) {
+function setup(opts: { allowed?: string; allowAll?: boolean; refuseReply?: boolean; queryFn?: ReturnType<typeof fakeQuery>; provider?: string } = {}) {
   const repos = new Repositories(openDb(":memory:"));
   const bus = new EventBus();
   const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
@@ -35,6 +35,7 @@ function setup(opts: { allowed?: string; allowAll?: boolean; refuseReply?: boole
     refuseReply: opts.refuseReply ?? true,
     refusalMessage: "Sorry, you're not authorized to use this bot.",
     locale: "ko" as const,
+    provider: opts.provider,
   });
   const home = "/home";
   const registry = new ThreadRegistry(bus);
@@ -89,6 +90,23 @@ describe("handleIncoming", () => {
     await handleIncoming(s.ctx("second", "100.1"), deps, s.registry);
     const rows = s.repos.listSessions().filter((r) => r.external_key === "slack:T1:C1:100.1");
     expect(rows).toHaveLength(1);
+  });
+
+  // Task 3 (P2.5 Track C): SlackConfig.provider flows through getOrCreateByKey → repos.createSession.
+  it("passes sc.provider to getOrCreateByKey — a codex-configured slack session is created on the codex provider", async () => {
+    const s = setup({ allowAll: true, provider: "codex" });
+    const deps = { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home };
+    await handleIncoming(s.ctx("hello", "500.1"), deps, s.registry);
+    const row = s.repos.getSessionByExternalKey("slack:T1:C1:500.1");
+    expect(row?.provider).toBe("codex");
+  });
+
+  it("defaults to claude when sc.provider is unset (unchanged behavior)", async () => {
+    const s = setup({ allowAll: true });
+    const deps = { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home };
+    await handleIncoming(s.ctx("hello", "510.1"), deps, s.registry);
+    const row = s.repos.getSessionByExternalKey("slack:T1:C1:510.1");
+    expect(row?.provider).toBe("claude");
   });
 
   it("refuses a user not in the allowlist without creating a session or running a turn", async () => {

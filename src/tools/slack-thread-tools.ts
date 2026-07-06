@@ -1,5 +1,5 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { truncateBytes } from "../core/truncate.js";
 
 // Port that the read_thread tool depends on. Slack-agnostic — src/slack implements this contract and injects it (prevents core→slack imports).
@@ -51,12 +51,16 @@ export async function readThreadImpl(
   return { text: kept.join("\n") };
 }
 
-// read_thread tool (no input — channel/thread are bound). The model calls it when it needs context.
-export function createSlackThreadToolsServer(
+// Raw tool defs (extracted so they can travel the provider-neutral port — see agent-backend.ts's
+// ProviderToolDef / MasterTurnOptions.toolDefs, and schedule-tools.ts's scheduleToolDefs for the same
+// pattern). read_thread has no input — channel/thread are bound at construction time. Claude wraps this
+// with createSdkMcpServer below; the Codex adapter registers the same objects on the daemon MCP bridge,
+// so a codex slack session also gets read_thread (src/daemon/mcp-bridge.ts).
+export function slackThreadToolDefs(
   getReader: () => SlackThreadReader | null,
   channel: string,
   threadTs: string,
-): McpSdkServerConfigWithInstance {
+): SdkMcpToolDefinition<any>[] {
   const readThread = tool(
     "read_thread",
     "Read the surrounding messages of the current Slack thread (the discussion before and after the message that triggered you). Call this when the user's request seems to depend on earlier context you cannot see.",
@@ -67,5 +71,13 @@ export function createSlackThreadToolsServer(
     },
     { annotations: { readOnlyHint: true } },
   );
-  return createSdkMcpServer({ name: SLACK_THREAD_SERVER_NAME, version: "0.0.1", tools: [readThread] });
+  return [readThread];
+}
+
+export function createSlackThreadToolsServer(
+  getReader: () => SlackThreadReader | null,
+  channel: string,
+  threadTs: string,
+): McpSdkServerConfigWithInstance {
+  return createSdkMcpServer({ name: SLACK_THREAD_SERVER_NAME, version: "0.0.1", tools: slackThreadToolDefs(getReader, channel, threadTs) });
 }

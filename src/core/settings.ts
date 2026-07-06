@@ -37,6 +37,7 @@ export interface SettingsValues {
   slackRefuseReply: string; // whether to auto-reply to non-allowed users ("1"/"0", default "1")
   slackRefusalMessage: string; // refusal reply message
   slackLocale: string; // Slack output language ("ko"/"en", settings-only, default "ko")
+  slackProvider: string; // AgentBackend for slack-origin master sessions ("claude"/"codex", settings-only, default "claude"). Opt-in — a codex slack session inherits the P2 bypassPermissions-only codex-master guard.
   usageRefreshMs: string; // usage refresh interval (ms, settings-only). Applied at boot.
   hasAcceptedDataNotice: string; // first-run data-transmission consent flag ("1" accepted, default "0"). Not secret → echoed.
   onboardingDone: string; // first-run onboarding completed flag ("1" done, default "0"). Not secret → echoed.
@@ -200,6 +201,13 @@ export class Settings {
   slackLocale(): string {
     return resolveLocale(this.repos.getSetting("slackLocale"));
   }
+  // AgentBackend for slack-origin sessions (P2.5 Track C). Mirrors slackLocale's coercion shape: any
+  // stored value other than exactly "codex" (missing, cleared, or garbage) falls back to "claude" — this
+  // is the opt-in switch that puts a Slack thread's master session on a codex backend (bridge + read_thread
+  // via toolDefs, see slack/capabilities.ts), so an unrecognized value must never silently become codex.
+  slackProvider(): "claude" | "codex" {
+    return this.repos.getSetting("slackProvider") === "codex" ? "codex" : "claude";
+  }
   usageRefreshMs(): string {
     return this.repos.getSetting("usageRefreshMs") ?? String(DEFAULT_USAGE_REFRESH_MS);
   }
@@ -221,6 +229,7 @@ export class Settings {
       slackRefuseReply: this.slackRefuseReply(),
       slackRefusalMessage: this.slackRefusalMessage(),
       slackLocale: this.slackLocale(),
+      slackProvider: this.slackProvider(),
       usageRefreshMs: this.usageRefreshMs(),
       hasAcceptedDataNotice: this.hasAcceptedDataNotice(),
       onboardingDone: this.onboardingDone(),

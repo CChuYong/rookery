@@ -21,6 +21,7 @@ export interface SlackConfig {
   locale: Locale; // Slack output language (resolved from settings.slackLocale())
   workerRelayEnabled: boolean; // mirror Slack-origin masters' worker activity into workerRelayChannel
   workerRelayChannel: string; // Slack channel ID for the worker relay ("" = off)
+  provider?: string; // AgentBackend for newly-created slack-origin sessions ("claude"/"codex", from settings.slackProvider()). Absent → getOrCreateByKey/repos.createSession default to "claude". Only applies at first creation of a thread's session (fixed thereafter).
 }
 
 export interface SlackDeps {
@@ -145,7 +146,7 @@ export async function handleIncoming(
   if (failedFiles > 0) await safePost(ctx.client, ctx.channel, ctx.threadTs, PARTIAL_FILE(sc.locale, failedFiles));
 
   const key = threadKey(ctx.team, ctx.channel, ctx.threadTs);
-  const session = deps.sessions.getOrCreateByKey(key, sc.cwd);
+  const session = deps.sessions.getOrCreateByKey(key, sc.cwd, sc.provider);
   registry.ensure(
     session.id,
     () =>

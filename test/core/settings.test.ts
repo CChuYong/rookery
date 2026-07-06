@@ -31,6 +31,7 @@ describe("Settings", () => {
       workerSlackRelayEnabled: "0",
       workerSlackRelayChannel: "",
       slackLocale: "ko",
+      slackProvider: "claude",
     });
   });
 
@@ -80,6 +81,20 @@ describe("Settings", () => {
     expect(s.slackLocale()).toBe("en");
     s.apply({ slackLocale: null as unknown as string }); // clear → ko
     expect(s.slackLocale()).toBe("ko");
+  });
+
+  it("slackProvider: defaults claude, overridable to codex, unknown/clear coerces back to claude", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.slackProvider()).toBe("claude");
+    expect(s.all().slackProvider).toBe("claude");
+    s.apply({ slackProvider: "codex" });
+    expect(s.slackProvider()).toBe("codex");
+    expect(s.all().slackProvider).toBe("codex");
+    s.apply({ slackProvider: "bogus" }); // unknown value → coerced back to claude (opt-in only via exact "codex")
+    expect(s.slackProvider()).toBe("claude");
+    s.apply({ slackProvider: "codex" });
+    s.apply({ slackProvider: null as unknown as string }); // clear reverts to default
+    expect(s.slackProvider()).toBe("claude");
   });
 
   it("slack refusal: default on with default message, overridable", () => {

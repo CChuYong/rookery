@@ -326,6 +326,28 @@ describe("SessionManager", () => {
     expect(sm.list()).toHaveLength(2);
   });
 
+  // Task 3 (P2.5 Track C): getOrCreateByKey gains an optional provider param, threaded through to
+  // create()/repos.createSession — used by the slack path when settings.slackProvider()==="codex".
+  it("getOrCreateByKey(key, cwd, 'codex') creates the session on the codex provider (repos round-trip)", () => {
+    const { sm, repos } = manager();
+    const s = sm.getOrCreateByKey("slack:T1:C1:1.0", "/work", "codex");
+    expect(repos.getSession(s.id)!.provider).toBe("codex");
+  });
+
+  it("getOrCreateByKey without a provider defaults to claude (unchanged behavior)", () => {
+    const { sm, repos } = manager();
+    const s = sm.getOrCreateByKey("slack:T1:C1:2.0", "/work");
+    expect(repos.getSession(s.id)!.provider).toBe("claude");
+  });
+
+  it("getOrCreateByKey ignores the provider arg on a repeat lookup of an existing keyed session (provider is fixed at creation)", () => {
+    const { sm, repos } = manager();
+    const first = sm.getOrCreateByKey("slack:T1:C1:3.0", "/work", "codex");
+    const again = sm.getOrCreateByKey("slack:T1:C1:3.0", "/work", "claude");
+    expect(again.id).toBe(first.id);
+    expect(repos.getSession(first.id)!.provider).toBe("codex"); // unchanged by the second call's arg
+  });
+
   it("delivers to a live master immediately; persists for a cold session and drains it on next load", async () => {
     // sm = new SessionManager({...}) as the file builds it; repos is its injected Repositories.
     const { sm, repos } = makeSM();

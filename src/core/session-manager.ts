@@ -105,7 +105,8 @@ export class SessionManager {
 
   // If opts.origin is explicit (automation fresh etc.) use it as-is, otherwise derive from the externalKey prefix.
   // opts.provider (P2): which AgentBackend this session runs on ("claude" | "codex"). Absent → repos.createSession
-  // defaults to "claude" (slack/automation creation paths never pass this — see task-5-brief.md non-goals).
+  // defaults to "claude". (P2.5 Track C: the slack path now passes this via getOrCreateByKey when
+  // settings.slackProvider()==="codex"; automation-origin still never passes it — deferred to P3.)
   create(cwd: string, opts: { externalKey?: string; origin?: string; originRef?: string | null; provider?: string } = {}): Session {
     const id = this.idgen();
     const src = opts.origin ? { origin: opts.origin, originRef: opts.originRef ?? null } : deriveOrigin(opts.externalKey ?? null);
@@ -113,13 +114,15 @@ export class SessionManager {
     return this.build(id, cwd, null, opts.externalKey ?? null);
   }
 
-  getOrCreateByKey(externalKey: string, cwd: string): Session {
+  // provider (P2.5 Track C): only used on first creation of this key — an existing keyed session's
+  // provider is fixed at creation time and is not retroactively changed by a later call's arg.
+  getOrCreateByKey(externalKey: string, cwd: string, provider?: string): Session {
     const existing = this.deps.repos.getSessionByExternalKey(externalKey);
     // A keyed session (e.g. a Slack thread reply) racing its own deletion must error rather than resurrect the
     // mid-teardown session or spawn a duplicate keyed one — the caller (Slack) surfaces the error.
     if (existing && this.deleting.has(existing.id)) throw new Error(`session ${existing.id} is being deleted`);
     if (existing) return this.get(existing.id)!;
-    return this.create(cwd, { externalKey }); // origin is derived from the key prefix (slack/automation)
+    return this.create(cwd, { externalKey, provider }); // origin is derived from the key prefix (slack/automation)
   }
 
   // Fork a master session: copy its SDK conversation into a new branch + duplicate its transcript, so the fork carries

@@ -117,6 +117,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       slackRefuseReply: z.string().nullable().optional(), // whether to auto-reply on refusal "1"/"0"
       slackRefusalMessage: z.string().nullable().optional(), // refusal reply message
       slackLocale: z.string().nullable().optional(), // Slack output language "ko"/"en"
+      slackProvider: z.string().nullable().optional(), // AgentBackend for slack-origin sessions "claude"/"codex" (settings-only, default "claude")
       usageRefreshMs: z.string().nullable().optional(), // usage refresh interval (ms)
       linearApiKey: z.string().nullable().optional(), // write-only secret key. Not echoed back in settings.result.
       anthropicApiKey: z.string().nullable().optional(), // write-only secret. Not echoed in settings.result.

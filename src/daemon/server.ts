@@ -283,6 +283,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     locale: settings.slackLocale() as Locale,
     workerRelayEnabled: settings.workerSlackRelayEnabled() === "1",
     workerRelayChannel: settings.workerSlackRelayChannel(),
+    // P2.5 Track C: which AgentBackend newly-created slack-origin sessions run on ("claude"/"codex",
+    // default "claude" — opt-in). A codex slack session is bypassPermissions-only (P2 guard); a
+    // non-bypass slack permission config would fail the turn at start.
+    provider: settings.slackProvider(),
   });
   // Slack Bolt starts asynchronously (doesn't block boot). Status is broadcast to @all via slack.status.
   const dispatcher = new AutomationDispatcher({
