@@ -189,7 +189,9 @@ export class Settings {
   workerCostBudgetUsd(): number | null {
     const raw = this.repos.getSetting("workerCostBudgetUsd");
     if (!raw) return null;
-    const parsed = Number.parseFloat(raw);
+    // Number(), not parseFloat: parseFloat tolerates trailing garbage ("5x" -> 5), which is inconsistent
+    // with the UI's Number() validation. Number("5x") -> NaN, so it falls through to null below.
+    const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }
 
@@ -244,6 +246,7 @@ export class Settings {
   }
 
   all(): SettingsValues {
+    const wcb = this.workerCostBudgetUsd(); // hoisted: avoid calling the getter twice for the same field below
     return {
       masterName: this.masterName(),
       masterModel: this.masterModel(),
@@ -268,7 +271,7 @@ export class Settings {
       defaultSessionCwd: this.defaultSessionCwdRaw(),
       workerSlackRelayEnabled: this.workerSlackRelayEnabled(),
       workerSlackRelayChannel: this.workerSlackRelayChannel(),
-      workerCostBudgetUsd: this.workerCostBudgetUsd() == null ? "" : String(this.workerCostBudgetUsd()),
+      workerCostBudgetUsd: wcb == null ? "" : String(wcb),
     };
   }
 

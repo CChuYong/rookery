@@ -658,7 +658,7 @@ export class FleetOrchestrator {
     if (timer) clearTimeout(timer);
   }
 
-  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number }> {
+  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number; maxTurns?: number | null; costBudgetUsd?: number | null }> {
     const metrics = this.deps.repos.workerActivityAndCost(); // one indexed batched query for the whole fleet
     return this.deps.repos
       .listAllWorkers()
@@ -675,6 +675,8 @@ export class FleetOrchestrator {
         archived: !!r.archived_at, // archived or not — the UI splits into tree/archive
         ticketKey: r.ticket_key,
         ticketUrl: r.ticket_url,
+        maxTurns: r.max_turns, // per-result turn cap, the sibling runaway guard to costBudgetUsd (WorkerRow protocol field)
+        costBudgetUsd: r.cost_budget_usd, // lifetime USD cost ceiling; null = unlimited
         ...(metrics.get(r.id) ?? {}), // lastActivityTs / costUsd from worker_events (absent when the worker has neither)
       }))
       .filter((x) => (filter?.status ? x.status === filter.status : true))

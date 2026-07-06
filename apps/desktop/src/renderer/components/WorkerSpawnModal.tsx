@@ -168,13 +168,15 @@ export function WorkerSpawnModal(p: {
                 ))}
               </Select>
             )}
-            {/* Optional lifetime USD cost ceiling for this worker (cost budget guard) — empty = unlimited (off). */}
+            {/* Optional lifetime USD cost ceiling for this worker (cost budget guard) — empty = the workerCostBudgetUsd
+                settings default applies (via the server's subFactory override ?? default ?? unlimited chain), not
+                unconditionally "no limit". */}
             <Input
               size="sm"
               className="w-28"
               value={costBudget}
               onChange={(e) => setCostBudget(e.target.value)}
-              placeholder="off"
+              placeholder="default"
               title={t("workerSpawnModal.costBudget")}
             />
           </div>

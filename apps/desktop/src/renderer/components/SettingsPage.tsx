@@ -156,7 +156,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     </div>
                     <div className="max-w-[220px]">
                       <Field label={t("settings.workerCostBudgetUsd")} hint={t("settings.workerCostBudgetUsdHint")}>
-                        <Input value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
+                        <Input type="number" value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
                       </Field>
                     </div>
                   </div>

@@ -282,6 +282,22 @@ describe("Settings", () => {
     expect(s.all().workerCostBudgetUsd).toBe("");
   });
 
+  it("workerCostBudgetUsd: strict parse rejects trailing garbage (Number, not parseFloat)", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    s.apply({ workerCostBudgetUsd: "5x" }); // parseFloat("5x") -> 5 (wrong); Number("5x") -> NaN -> null
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "5.5" });
+    expect(s.workerCostBudgetUsd()).toBe(5.5);
+    s.apply({ workerCostBudgetUsd: "0" });
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "-3" });
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "" });
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "5" });
+    expect(s.workerCostBudgetUsd()).toBe(5);
+  });
+
   it("defaultSessionCwd: raw is '' when unset (resolver falls back to process.cwd()), echoes the raw set value", () => {
     const s = new Settings(new Repositories(openDb(":memory:")), config);
     expect(s.defaultSessionCwdRaw()).toBe(""); // unset → empty (so the UI can tell)

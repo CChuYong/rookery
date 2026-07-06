@@ -780,6 +780,20 @@ describe("FleetOrchestrator", () => {
     expect(typeof row.lastActivityTs).toBe("number");
   });
 
+  it("list() carries costBudgetUsd + maxTurns (protocol WorkerRow siblings), null when unset", () => {
+    const { repos, fleet } = setup();
+    repos.createWorker({ id: "wBudget", sessionId: "sA", repoPath: "/r", label: "app", worktreePath: "/wt/wBudget", branch: "b", costBudgetUsd: 3.5 });
+    repos.setWorkerMaxTurns("wBudget", 10);
+    repos.createWorker({ id: "wPlain", sessionId: "sA", repoPath: "/r", label: "app2", worktreePath: "/wt/wPlain", branch: "b2" });
+    const rows = fleet.list();
+    const budgetRow = rows.find((w) => w.id === "wBudget")!;
+    expect(budgetRow.costBudgetUsd).toBe(3.5);
+    expect(budgetRow.maxTurns).toBe(10);
+    const plainRow = rows.find((w) => w.id === "wPlain")!;
+    expect(plainRow.costBudgetUsd).toBeNull();
+    expect(plainRow.maxTurns).toBeNull();
+  });
+
 });
 
 describe("FleetOrchestrator rehydrate (restart recovery)", () => {
