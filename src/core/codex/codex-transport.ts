@@ -10,9 +10,10 @@ export interface CodexTransport {
   kill(): void;
 }
 
-// `args` are extra `codex app-server` CLI args appended after the subcommand — used by P2's
-// per-turn master child to pass `-c mcp_servers.rookery.url="..."` (process-level config IS
-// per-session config for a one-child-per-turn design; see docs/2026-07-06-p2-codex-master.md).
+// `args` are extra `codex app-server` CLI args appended after the subcommand. P2 used this for the
+// per-turn master child's `-c mcp_servers.rookery.url="..."` bridge config; P2.5 Track A moved that
+// value into a per-session CODEX_HOME config.toml instead (docs/2026-07-06-p25-codex-hardening.md), so
+// no caller populates `args` anymore — kept in the type for future extra-CLI-arg needs.
 export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv; args?: string[] }) => CodexTransport;
 
 // Real transport: one `codex app-server` child per session, newline-delimited JSON-RPC on stdio.

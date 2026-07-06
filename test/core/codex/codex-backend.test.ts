@@ -113,15 +113,15 @@ describe("CodexBackend.startTurn", () => {
   function stubBridge() {
     const calls: Array<{ key: string; defs: () => ProviderToolDef[] }> = [];
     const bridge = {
-      ensureSession(key: string, defs: () => ProviderToolDef[]): { url: string } {
+      ensureSession(key: string, defs: () => ProviderToolDef[]): { codexHome: string } {
         calls.push({ key, defs });
-        return { url: `http://127.0.0.1:8787/mcp/tok-1` };
+        return { codexHome: "/tmp/codex-homes/sess-1" };
       },
     };
     return { bridge, calls };
   }
 
-  it("fresh turn: thread/start carries cwd/model/approvalPolicy/sandbox + developerInstructions; spawn args carry the bridge url; events translate; stream ends after ONE turn", async () => {
+  it("fresh turn: thread/start carries cwd/model/approvalPolicy/sandbox + developerInstructions; spawns with CODEX_HOME env (NOT argv); events translate; stream ends after ONE turn", async () => {
     const fake = fakeCodexSpawn(() => [
       { kind: "agentMessage", text: "hi" },
       { kind: "command", id: "c1", command: "ls" },
@@ -139,7 +139,9 @@ describe("CodexBackend.startTurn", () => {
 
     const start = fake.requests.find((r) => r.method === "thread/start")!.params;
     expect(start).toMatchObject({ cwd: "/wt", model: "gpt-5.5", approvalPolicy: "never", sandbox: "danger-full-access", developerInstructions: "SYS-PROMPT-1" });
-    expect(fake.spawns[0]!.args).toEqual(["-c", `mcp_servers.rookery.url="http://127.0.0.1:8787/mcp/tok-1"`]);
+    // Token out of argv (P2.5 Track A): the bridge-materialized CODEX_HOME travels as env, and no -c/args are ever passed.
+    expect(fake.spawns[0]!.env).toMatchObject({ CODEX_HOME: "/tmp/codex-homes/sess-1" });
+    expect(fake.spawns[0]!.args).toBeUndefined();
 
     expect(events[0]).toEqual({ kind: "session_id", sessionId: "th-1" });
     expect(events).toContainEqual({ kind: "message", role: "assistant", text: "hi", parentToolUseId: null });
@@ -152,6 +154,24 @@ describe("CodexBackend.startTurn", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.key).toBe("sess-1");
     expect(calls[0]!.defs().map((d) => d.name).sort()).toEqual(["list_repos", "remember"]);
+  });
+
+  // P2.5 Track A reconciliation (item 4): a codex master turn's per-session CODEX_HOME (from the
+  // bridge) must win over the P1.5 shared codexApiKey CODEX_HOME — otherwise the bridge-materialized
+  // config.toml/auth.json the daemon just wrote would never be the dir the child actually reads.
+  it("the bridge's per-session CODEX_HOME overrides deps.env's shared CODEX_HOME for a master turn", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const { bridge } = stubBridge();
+    const b = new CodexBackend({
+      spawn: fake.spawn,
+      defaultModel: () => "gpt-5.5",
+      bridge,
+      env: () => ({ CODEX_HOME: "/shared/codex-home", OTHER_VAR: "kept" }),
+    });
+    const opts = baseOpts({ sessionKey: "sess-1", toolDefs: { memory: [fakeToolDef("remember")] } });
+    await collect(b.startTurn("hi", opts as never));
+    // The per-session dir wins for CODEX_HOME, but other base env entries survive the merge.
+    expect(fake.spawns[0]!.env).toMatchObject({ CODEX_HOME: "/tmp/codex-homes/sess-1", OTHER_VAR: "kept" });
   });
 
   // Task 1 (final-review fix wave): schedule tools now reach codex masters too — server.ts's
@@ -194,11 +214,12 @@ describe("CodexBackend.startTurn", () => {
     expect(fake.spawns).toHaveLength(0);
   });
 
-  it("no bridge deps → spawn args absent/empty; a tool-less master turn still completes", async () => {
+  it("no bridge deps → no CODEX_HOME override / no args; a tool-less master turn still completes", async () => {
     const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // no bridge, no toolDefs/sessionKey
     const events = await collect(b.startTurn("hi", baseOpts() as never));
-    expect(fake.spawns[0]!.args ?? []).toEqual([]);
+    expect(fake.spawns[0]!.args).toBeUndefined();
+    expect(fake.spawns[0]!.env).toBeUndefined(); // no deps.env either — nothing to add
     expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
   });
 
@@ -207,7 +228,8 @@ describe("CodexBackend.startTurn", () => {
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // deps.bridge absent
     const opts = baseOpts({ sessionKey: "sess-2", toolDefs: { memory: [fakeToolDef("remember")] } });
     await collect(b.startTurn("hi", opts as never));
-    expect(fake.spawns[0]!.args ?? []).toEqual([]);
+    expect(fake.spawns[0]!.args).toBeUndefined();
+    expect(fake.spawns[0]!.env).toBeUndefined();
   });
 
   it("interrupt mid-turn: turn/interrupt sent with the active turn id, turn_end subtype interrupted, stream ends", async () => {

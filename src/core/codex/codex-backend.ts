@@ -11,12 +11,14 @@ export interface CodexBackendDeps {
   defaultModel: () => string; // Settings resolver — used when the session has no model (spawn override wins)
   apiKey?: () => string | undefined; // in-app codex API key (Settings resolver). Present → provision auth.json via RPC after handshake.
   env?: () => NodeJS.ProcessEnv | undefined; // extra env for the spawned child (Settings resolver, e.g. CODEX_HOME redirection)
-  // Daemon MCP bridge (P2 master turns): registers a rookery session's in-process tool defs and
-  // returns a plain URL string for the per-turn child's `-c mcp_servers.rookery.url=...` spawn arg.
-  // The shape here is deliberately a bare string (not the real McpBridge.ensureSession's
-  // `{url:(host,port)=>string}`) — core must not import daemon code, so server.ts pre-binds
-  // host/port before handing this backend its bridge dep (see docs/2026-07-06-p2-codex-master.md).
-  bridge?: { ensureSession(key: string, defs: () => ProviderToolDef[]): { url: string } };
+  // Daemon MCP bridge (P2 master turns; P2.5 Track A hardening — docs/2026-07-06-p25-codex-hardening.md):
+  // registers a rookery session's in-process tool defs and returns the ready-to-use per-session
+  // CODEX_HOME directory the daemon has already materialized (config.toml with the bridge url +
+  // auth.json passthrough) — the bridge URL now lives ONLY in that on-disk config, never in argv.
+  // core must not import daemon code, so server.ts's closure does the actual materializing (writing
+  // config.toml/auth.json under `<rookery home>/codex-homes/<sessionKey>/`) and hands back just the
+  // path (see docs/2026-07-06-p2-codex-master.md for the original bridge wiring).
+  bridge?: { ensureSession(key: string, defs: () => ProviderToolDef[]): { codexHome: string } };
 }
 
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
@@ -144,11 +146,19 @@ abstract class CodexSessionBase implements AgentStream {
   protected abstract pump(): Promise<void>;
 
   // Spawns the child, wires the client's close/notification/server-request handlers, completes the
-  // initialize handshake, and provisions the in-app API key if configured. `spawnArgs` carries the
-  // master turn's `-c mcp_servers.rookery.url=...` (absent for workers and tool-less master turns).
-  protected async openClient(spawnArgs?: string[]): Promise<CodexClient> {
+  // initialize handshake, and provisions the in-app API key if configured. `envOverride` carries the
+  // master turn's per-session CODEX_HOME (`{CODEX_HOME: <bridge-materialized dir>}` — P2.5 Track A;
+  // absent for workers and tool-less master turns, which fall back to `deps.env` alone). No `-c` arg
+  // is ever passed anymore — the bridge URL lives only in that dir's config.toml (mode 0600).
+  protected async openClient(envOverride?: NodeJS.ProcessEnv): Promise<CodexClient> {
     const abort = this.opts.abortController;
-    const transport = this.deps.spawn({ env: this.deps.env?.(), args: spawnArgs });
+    // envOverride (when present) wins over the base env — a per-turn per-session CODEX_HOME must
+    // override the shared codexApiKey CODEX_HOME (P1.5) for master turns. When NEITHER is set, pass
+    // `env: undefined` rather than `{}`: realCodexSpawn does `{ ...process.env, ...env }`, so an empty
+    // object is harmless either way, but `undefined` reads as "nothing to add" and matches prior behavior.
+    const baseEnv = this.deps.env?.();
+    const env = envOverride ? { ...(baseEnv ?? {}), ...envOverride } : baseEnv;
+    const transport = this.deps.spawn({ env, args: undefined });
     const client = new CodexClient(transport);
     this.client = client;
     this.clientClosedP = new Promise((resolve) => { this.resolveClientClosed = resolve; });
@@ -433,7 +443,7 @@ class CodexTurnStream extends CodexSessionBase {
     deps: CodexBackendDeps,
     private readonly prompt: string,
     opts: MasterTurnOptions,
-    private readonly spawnArgs: string[] | undefined,
+    private readonly envOverride: NodeJS.ProcessEnv | undefined,
     totalsByThread: Map<string, CodexTokenUsageBreakdown>,
   ) {
     super(deps, opts, totalsByThread);
@@ -445,7 +455,7 @@ class CodexTurnStream extends CodexSessionBase {
       // spec's "model override N/A" note: a master turn is single-shot, overrides land on the
       // NEXT startTurn() call's opts instead.
       const mode = mapPermissionMode(this.opts.permissionMode);
-      const client = await this.openClient(this.spawnArgs);
+      const client = await this.openClient(this.envOverride);
       const threadId = await this.startOrResumeThread(client, mode, this.opts.systemPromptAppend);
       const effort = mapEffort(this.opts.effort);
       await this.sendTurn(client, threadId, this.prompt, mode, effort, undefined);
@@ -480,13 +490,13 @@ export class CodexBackend implements AgentBackend {
     if (mode.sandbox !== "danger-full-access") {
       throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");
     }
-    let spawnArgs: string[] | undefined;
+    let envOverride: NodeJS.ProcessEnv | undefined;
     if (opts.sessionKey && opts.toolDefs && this.deps.bridge) {
       const flattened = Object.values(opts.toolDefs).flat();
-      const { url } = this.deps.bridge.ensureSession(opts.sessionKey, () => flattened);
-      spawnArgs = ["-c", `mcp_servers.rookery.url="${url}"`];
+      const { codexHome } = this.deps.bridge.ensureSession(opts.sessionKey, () => flattened);
+      envOverride = { CODEX_HOME: codexHome };
     }
-    return new CodexTurnStream(this.deps, prompt, opts, spawnArgs, this.totalsByThread);
+    return new CodexTurnStream(this.deps, prompt, opts, envOverride, this.totalsByThread);
   }
 
   private static readonly FORK_TIMEOUT_MS = 15_000;

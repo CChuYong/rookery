@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { WebSocket } from "ws";
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { startDaemon } from "../../src/daemon/server.js";
 import { loadConfig } from "../../src/config.js";
@@ -187,6 +189,35 @@ describe("startDaemon (integration)", () => {
       // With data-fencing, vars are wrapped in <untrusted-*> tags — the value "INJECTED" is present but fenced.
       expect(prompts.some((p) => p.includes("INJECTED"))).toBe(true); // would have been "MSG=" if the adapter had dropped vars
       expect(prompts.some((p) => p.includes("untrusted-slack-message"))).toBe(true); // fenced (not raw)
+      ws.close();
+    } finally {
+      await daemon.close();
+    }
+  });
+
+  // Item 6 (docs/2026-07-06-p25-codex-hardening.md): session.delete's combined onSessionDelete closure
+  // (server.ts) must remove the session's materialized per-session CODEX_HOME dir, not just release the
+  // bridge registration. A real codex turn is out of scope here (needs the actual `codex` binary/auth) —
+  // we simulate a PRIOR turn having materialized the dir, then assert it's gone after session.delete.
+  it("session.delete removes the session's codex-homes/<id> CODEX_HOME dir (best-effort cleanup)", async () => {
+    const home = "/tmp/rookery-server-codexhome-delete";
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) });
+    try {
+      const ws = await connect(daemon.port, daemon.token);
+      ws.send(JSON.stringify({ type: "session.create", cwd: "/tmp" }));
+      const created = await nextMessage(ws);
+      const sessionId = created.sessionId as string;
+
+      const codexHomeDir = path.join(home, "codex-homes", sessionId);
+      fs.mkdirSync(codexHomeDir, { recursive: true });
+      fs.writeFileSync(path.join(codexHomeDir, "config.toml"), '[mcp_servers.rookery]\nurl = "http://x"\n');
+      expect(fs.existsSync(codexHomeDir)).toBe(true);
+
+      ws.send(JSON.stringify({ type: "session.delete", reqId: "d1", sessionId }));
+      const ack = await nextMessage(ws);
+      expect(ack).toMatchObject({ type: "fleet.ack", action: "delete", id: sessionId });
+      expect(fs.existsSync(codexHomeDir)).toBe(false);
       ws.close();
     } finally {
       await daemon.close();

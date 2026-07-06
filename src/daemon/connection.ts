@@ -97,9 +97,11 @@ export class Connection {
     private readonly interactions?: InteractionResponder,
     private readonly automations?: AutomationProvider,
     private readonly resolveSlackRefs?: SlackRefResolverFn,
-    // Best-effort release of a codex master session's MCP bridge registration (server.ts wires this to
-    // McpBridge.release). Absent in most tests (no bridge involved in the claude-only path).
-    private readonly releaseBridgeSession?: (sessionId: string) => void,
+    // Best-effort combined teardown for a deleted session's codex-master-only state (server.ts wires
+    // this to ONE closure: McpBridge.release + removeCodexHome — see docs/2026-07-06-p25-codex-hardening.md
+    // item 6). Both halves live/die together so a future second delete caller can't release one and leak
+    // the other. Absent in most tests (no bridge/codex-home involved in the claude-only path).
+    private readonly onSessionDelete?: (sessionId: string) => void,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -219,8 +221,8 @@ export class Connection {
       }
       case "session.delete": {
         await this.sessions.delete(msg.sessionId);
-        // Best-effort: release the session's MCP bridge registration (no-op for claude sessions, which never register one).
-        try { this.releaseBridgeSession?.(msg.sessionId); } catch { /* best-effort */ }
+        // Best-effort: release the session's MCP bridge registration + codex-home dir (no-op for claude sessions, which never register either).
+        try { this.onSessionDelete?.(msg.sessionId); } catch { /* best-effort */ }
         this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "delete", id: msg.sessionId });
         return;
       }

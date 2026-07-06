@@ -1,6 +1,7 @@
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, WebSocket } from "ws";
 import type { RawData } from "ws";
@@ -33,6 +34,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { Connection } from "./connection.js";
 import { McpBridge } from "./mcp-bridge.js";
+import { materializeCodexHome, removeCodexHome } from "./codex-home.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -88,7 +90,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   if (!isLoopback) {
     process.stderr.write(
       `[rookery] WARNING: binding non-loopback host ${config.host} (ROOKERY_ALLOW_NONLOOPBACK set) — the WS token ` +
-        `travels in plaintext over ws://. Expose only behind a trusted tunnel.\n`,
+        `travels in plaintext over ws://. Expose only behind a trusted tunnel. The MCP bridge (a codex master ` +
+        `turn's per-turn tool endpoint, P2.5 Track A) is also reachable on this bind — anyone holding a live ` +
+        `session's bridge URL/token can call rookery's in-process tools.\n`,
     );
   }
   secureHome(config); // tighten ~/.rookery to 0700 + sensitive files to 0600 (boot repair). best-effort, never throws.
@@ -129,15 +133,31 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       fs.mkdirSync(codexHomeDir, { recursive: true });
       return { CODEX_HOME: codexHomeDir };
     },
-    // Pre-binds host/port for the bridge's per-provider-agnostic ensureSession signature (CodexBackendDeps.bridge
-    // takes a plain `{url:string}` — core must not import daemon code, see codex-backend.ts's comment on `bridge`).
+    // P2.5 Track A (docs/2026-07-06-p25-codex-hardening.md): the closure materializes the per-session
+    // CODEX_HOME (config.toml with the bridge url + auth.json passthrough, see codex-home.ts) and hands
+    // the backend back just the directory path — core must not import daemon code, see codex-backend.ts's
+    // comment on `bridge`. The bridge URL itself never leaves this closure (no argv, no env either).
     bridge: {
       ensureSession: (key, defs) => {
         const { url } = bridge.ensureSession(key, defs);
-        return { url: url(config.host, boundPort) };
+        const codexHome = materializeCodexHome(config.home, key, url(config.host, boundPort), {
+          apiKeySet: !!settings.codexApiKey(),
+          realCodexHome: process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+        });
+        return { codexHome };
       },
     },
   });
+  // Item 6 (docs/2026-07-06-p25-codex-hardening.md): the ONE place both a session's MCP bridge
+  // registration AND its materialized per-session CODEX_HOME dir are torn down together, so a future
+  // second delete caller can't release one half and leak the other. Wired below wherever
+  // `bridge.release` used to be passed directly (currently just the Connection ctor). Both steps are
+  // best-effort/never-throw individually (bridge.release no-ops on an unknown key; removeCodexHome
+  // swallows fs errors), so this closure itself never throws either.
+  const onSessionDelete = (id: string): void => {
+    bridge.release(id);
+    removeCodexHome(config.home, id);
+  };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
   const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; provider?: string }): WorkerLike =>
     new Worker({
@@ -370,7 +390,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, (id) => bridge.release(id));
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, onSessionDelete);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });
