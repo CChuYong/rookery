@@ -116,7 +116,7 @@ export function NewSessionPage(p: {
               <Select value=""> blank. This leading "" option shows a "use default" label instead — the daemon
               applies the codexMasterModel settings default when the session's model is empty, so we deliberately
               do NOT auto-pick a catalog model here (that would silently override the default). */}
-          <option value="">{p.codexDefaultModel || t("settings.codexModelDefaultOption")}</option>
+          <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
           {codexModels.map((m) => (
             <option key={m.id} value={m.id}>{m.displayName}</option>
           ))}

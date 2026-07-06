@@ -102,8 +102,8 @@ describe("NewSessionPage codex model+effort dropdown (Codex Model Picker Task 3)
 
     const modelField = screen.getByTitle(MODEL_TITLE) as HTMLSelectElement;
     expect(modelField.value).toBe(""); // unchanged: still defaults to "" (no auto-pick from the catalog)
-    // the "" option's visible label is the codexDefaultModel placeholder text, not a blank string
+    // the "" option's visible label surfaces the codexDefaultModel ("Use daemon default (gpt-5.5)"), not a blank string
     expect(modelField.options[0]!.value).toBe("");
-    expect(modelField.options[0]!.textContent).toBe("gpt-5.5");
+    expect(modelField.options[0]!.textContent).toContain("gpt-5.5");
   });
 });

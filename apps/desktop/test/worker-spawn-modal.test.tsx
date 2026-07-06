@@ -192,7 +192,7 @@ describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)") as HTMLSelectElement;
     expect(modelField.value).toBe(""); // unchanged: still defaults to "" (no auto-pick from the catalog)
     expect(modelField.options[0]!.value).toBe("");
-    expect(modelField.options[0]!.textContent).toBe("gpt-5.5");
+    expect(modelField.options[0]!.textContent).toContain("gpt-5.5"); // "Use daemon default (gpt-5.5)"
   });
 
   it("onSpawn carries the selected codex model + pre-selected effort", () => {

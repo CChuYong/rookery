@@ -105,6 +105,7 @@ export default {
   "settings.codexMasterModel": "Codex master default model",
   "settings.codexMasterModelHint": "Applies from new Codex master sessions.",
   "settings.codexModelDefaultOption": "Use daemon default",
+  "settings.codexModelDefaultOptionWith": "Use daemon default ({model})",
   "settings.codexApiKey": "Codex API key",
   "settings.codexApiKeyHint": "Leave blank to use codex login (~/.codex/auth.json).",
   "settings.codexTurnIdleTimeoutMs": "Codex turn idle timeout (ms)",

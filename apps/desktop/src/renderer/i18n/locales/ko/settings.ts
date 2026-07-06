@@ -105,6 +105,7 @@ export default {
   "settings.codexMasterModel": "Codex 마스터 기본 모델",
   "settings.codexMasterModelHint": "새 Codex 마스터 세션부터 적용돼요.",
   "settings.codexModelDefaultOption": "데몬 기본값 사용",
+  "settings.codexModelDefaultOptionWith": "데몬 기본값 사용 ({model})",
   "settings.codexApiKey": "Codex API 키",
   "settings.codexApiKeyHint": "비워두면 codex login(~/.codex/auth.json)을 사용합니다.",
   "settings.codexTurnIdleTimeoutMs": "Codex 턴 유휴 타임아웃(ms)",
