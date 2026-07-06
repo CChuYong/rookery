@@ -1,7 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
+import { useStore } from "../src/renderer/store/store.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
+import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 const items: SourceItem[] = [
   { provider: "github", id: "1", identifier: "#1", title: "First issue", url: "https://x/1", body: "" },
@@ -115,6 +117,82 @@ describe("WorkerSpawnModal provider selector (P1.5 task 4)", () => {
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
     expect(modelField.tagName).toBe("INPUT");
     expect(modelField).toHaveAttribute("placeholder", "gpt-5.5");
+  });
+});
+
+const CODEX_MODELS: CodexModelInfo[] = [
+  { id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true },
+  { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
+];
+
+describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task 3)", () => {
+  beforeEach(() => {
+    useStore.setState({ codexModels: null }); // reset the singleton store before each test
+  });
+
+  it("codexModels seeded → the codex model field is a <Select> listing the catalog (displayName options)", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    renderModal();
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
+    expect(modelField.tagName).toBe("SELECT");
+    expect(screen.getByText("GPT-5.5")).toBeInTheDocument();
+    expect(screen.getByText("GPT-5.4")).toBeInTheDocument();
+  });
+
+  it("selecting a codex model updates the effort <Select>'s options to that model's supportedEfforts and pre-selects its defaultEffort", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    renderModal();
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)") as HTMLSelectElement;
+    fireEvent.change(modelField, { target: { value: "gpt-5.4" } });
+
+    const effortSelect = screen.getByTitle("effort") as HTMLSelectElement;
+    expect(effortSelect.value).toBe("medium"); // gpt-5.4's defaultEffort
+    expect(within(effortSelect).queryByText("매우 높음")).toBeNull(); // not in gpt-5.4's supportedEfforts
+
+    fireEvent.change(modelField, { target: { value: "gpt-5.5" } });
+    expect((screen.getByTitle("effort") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
+  });
+
+  it("codexModels null → the codex model field stays the free-text <Input> and effort shows the generic EFFORTS list", () => {
+    renderModal(undefined, { codexDefaultModel: "gpt-5.5" });
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
+    expect(modelField.tagName).toBe("INPUT");
+    const effortSelect = screen.getByTitle("effort") as HTMLSelectElement;
+    expect(within(effortSelect).getByText("매우 높음")).toBeInTheDocument(); // generic EFFORTS includes xhigh regardless of model
+    expect(within(effortSelect).getByText("최대")).toBeInTheDocument(); // generic EFFORTS includes max (codex catalogs never do)
+  });
+
+  it("an out-of-list current codex model value (typed as free text while the catalog was still loading) is preserved as a selectable option once the catalog arrives", () => {
+    // codexModels starts null → free-text input; the user types a value; the catalog then loads (reactive
+    // store update) and the field flips to a <Select> that must not silently discard the typed value.
+    renderModal();
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-preview" } }); // not in CODEX_MODELS
+
+    act(() => { useStore.getState().setCodexModels(CODEX_MODELS); });
+
+    const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)") as HTMLSelectElement;
+    expect(modelField.tagName).toBe("SELECT");
+    expect(within(modelField).getByText("gpt-preview")).toBeInTheDocument();
+    expect(modelField.value).toBe("gpt-preview");
+  });
+
+  it("onSpawn carries the selected codex model + pre-selected effort", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const { onSpawn } = renderModal();
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.4" } });
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[0]![2]).toBe("gpt-5.4"); // spawnModel
+    expect(onSpawn.mock.calls[0]![3]).toBe("medium"); // effort (gpt-5.4's defaultEffort)
+    expect(onSpawn.mock.calls[0]![7]).toBe("codex"); // provider
   });
 });
 

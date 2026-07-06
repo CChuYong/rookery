@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
-import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
+import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
@@ -44,6 +44,7 @@ export function WorkerSpawnModal(p: {
   const [costBudget, setCostBudget] = useState("");
   const [permissionMode, setPermissionMode] = useState("bypassPermissions"); // worker SDK permission mode (bypass | plan); changeable later in the composer
   const models = useStore((s) => s.models); // live model list (static fallback if absent)
+  const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text fallback
   const [base, setBase] = useState(""); // "" = repo default base
   // ── Source search (GitHub issues/PRs · Linear tickets)
   const [q, setQ] = useState("");
@@ -88,8 +89,12 @@ export function WorkerSpawnModal(p: {
   const clearSelected = () => { setSelected(null); setQ(""); };
 
   const { closing, dismiss } = useDismissTransition(p.onClose);
-  // The model text actually in play for this spawn — the Claude catalog selection, or the free-text codex field.
+  // The model text actually in play for this spawn — the Claude catalog selection, or the codex field (select or free-text).
   const effectiveModel = provider === "codex" ? codexModel : model;
+  // Codex effort options come from the selected model's catalog entry when the catalog was fetched; unknown model
+  // or no catalog (null) falls back to the generic EFFORTS vocabulary so the selector is never empty.
+  const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effectiveModel, codexModels) : null;
+  const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
   const spawn = () => {
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
@@ -144,15 +149,36 @@ export function WorkerSpawnModal(p: {
           </Select>
           <div className="flex gap-2">
             {provider === "codex" ? (
-              // codex has no fixed model catalog on the desktop side — free text, daemon default when empty.
-              <Input
-                size="sm"
-                className="flex-1"
-                value={codexModel}
-                onChange={(e) => setCodexModel(e.target.value)}
-                placeholder={p.codexDefaultModel}
-                title={t("workerSpawnModal.modelTitle")}
-              />
+              codexModels != null ? (
+                // codex catalog fetched — dropdown, selecting a model also pre-selects its default effort.
+                <Select
+                  size="sm"
+                  className="flex-1"
+                  value={codexModel}
+                  onChange={(e) => {
+                    const nm = e.target.value;
+                    setCodexModel(nm);
+                    const de = codexDefaultEffort(nm, codexModels);
+                    if (de) setEffort(de);
+                  }}
+                  title={t("workerSpawnModal.modelTitle")}
+                >
+                  {codexModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.displayName}</option>
+                  ))}
+                  {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
+                </Select>
+              ) : (
+                // codex catalog unavailable (couldn't fetch) — free text, daemon default when empty.
+                <Input
+                  size="sm"
+                  className="flex-1"
+                  value={codexModel}
+                  onChange={(e) => setCodexModel(e.target.value)}
+                  placeholder={p.codexDefaultModel}
+                  title={t("workerSpawnModal.modelTitle")}
+                />
+              )
             ) : (
               <Select size="sm" className="flex-1" value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")}>
                 {models.map((m) => (
@@ -163,7 +189,7 @@ export function WorkerSpawnModal(p: {
             )}
             {effortSupported(effectiveModel) && (
               <Select size="sm" className="w-28" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
-                {EFFORTS.map((ef) => (
+                {effortOptions.map((ef) => (
                   <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                 ))}
               </Select>

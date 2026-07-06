@@ -8,8 +8,9 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
 import { useDraftStore } from "../store/drafts.js";
+import { useStore } from "../store/store.js";
 import { Select, Input } from "../ui/input.js";
-import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
+import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 
 // New master session — full page (entire main area). The input field is identical to the chat composer (markdown, file attachments, @ prefill, / skills).
 // Start with it empty for an empty session. @ and / operate live against the repo/folder (cwd) picked below (if none selected, the daemon's default cwd).
@@ -46,6 +47,7 @@ export function NewSessionPage(p: {
   // either field's last value (same idiom as WorkerSpawnModal's codexModel state).
   const [codexModel, setCodexModel] = useState("");
   const isCodex = provider === "codex";
+  const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text fallback
 
   // Preserve the typed prompt across page close/reopen and session-create failures — same draft-store wiring as ConversationPane,
   // but with a fixed key since this page isn't per-session. Read non-reactively (only at mount); this page remounts (key={pageId}) on reopen.
@@ -89,13 +91,38 @@ export function NewSessionPage(p: {
       <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
     </Select>
   );
-  // codex has no fixed model catalog on the desktop side — free text, daemon default (settings.codexMasterModel) when empty.
+  // Codex effort options come from the selected model's catalog entry when the catalog was fetched; unknown model
+  // or no catalog (null) falls back to the generic EFFORTS vocabulary so the selector is never empty.
+  const codexEfforts = codexModels != null ? codexEffortsFor(codexModel || p.codexDefaultModel || "", codexModels) : null;
+  const codexEffortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
+  // codex model field: a catalog-driven dropdown when codex.models.list succeeded, else today's free text
+  // (daemon default, settings.codexMasterModel, when empty).
   const codexControls = isCodex && (
     <>
-      <Input size="xs" className="w-28 min-w-0 text-fg-dim" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
+      {codexModels != null ? (
+        <Select
+          size="xs"
+          className="w-28 min-w-0 text-fg-dim"
+          value={codexModel}
+          onChange={(e) => {
+            const nm = e.target.value;
+            setCodexModel(nm);
+            const de = codexDefaultEffort(nm, codexModels);
+            if (de) setEffort(de);
+          }}
+          title={t("composer.modelTitle")}
+        >
+          {codexModels.map((m) => (
+            <option key={m.id} value={m.id}>{m.displayName}</option>
+          ))}
+          {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
+        </Select>
+      ) : (
+        <Input size="xs" className="w-28 min-w-0 text-fg-dim" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
+      )}
       {effortSupported(codexModel || p.codexDefaultModel || "") && (
         <Select size="xs" className="min-w-0 text-fg-dim" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
-          {EFFORTS.map((ef) => (
+          {codexEffortOptions.map((ef) => (
             <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
           ))}
         </Select>

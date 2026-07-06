@@ -1,7 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
+import { useStore } from "../src/renderer/store/store.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
+import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 describe("WorkerSpawnModal", () => {
   it("defaults to direct-write mode (no search box) and passes base through onSpawn", () => {
@@ -100,5 +102,35 @@ describe("WorkerSpawnModal", () => {
     expect(await screen.findByText(/ABC-7/)).toBeInTheDocument();
     fireEvent.blur(input);
     await waitFor(() => expect(screen.queryByText(/ABC-7/)).toBeNull());
+  });
+});
+
+const CODEX_MODELS: CodexModelInfo[] = [
+  { id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true },
+  { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
+];
+
+describe("WorkerSpawnModal codex model+effort onSpawn payload (Codex Model Picker Task 3)", () => {
+  beforeEach(() => {
+    useStore.setState({ codexModels: null }); // reset the singleton store before each test
+  });
+
+  it("codexModels seeded — onSpawn carries the dropdown-selected model + its pre-selected default effort", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.5" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-5.5", "xhigh", undefined, undefined, "bypassPermissions", "codex", undefined]);
+  });
+
+  it("codexModels null — onSpawn still carries the typed free-text model + the generic default effort", () => {
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-6" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-6", "high", undefined, undefined, "bypassPermissions", "codex", undefined]); // effort defaults from p.defaultEffort, unchanged by the (absent) catalog
   });
 });
