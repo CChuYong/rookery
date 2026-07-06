@@ -1,5 +1,7 @@
 # 2026-07-06 — P1.5: Codex follow-ups (spec)
 
+> Status 2026-07-06: **Implemented** — all 6 in-scope backlog items, Tracks A-E per the scope table below (item 3 folds into Track A). Live smoke pending merge.
+
 Follow-up wave to P1 (`docs/2026-07-06-p1-codex-worker-backend.md`). Scope decided from the 8-item P1.5 backlog: **6 in, 2 re-deferred with rationale**.
 
 ## Scope decision

@@ -1,6 +1,6 @@
 # 2026-07-05 — Codex backend: parity analysis & effort estimate
 
-> Status 2026-07-05+: **P0 (seam extraction) implemented** — `src/core/agent-backend.ts` (port) + `src/core/claude-backend.ts` (adapter); Worker/MasterAgent/SessionManager are SDK-import-free (guarded by `test/core/provider-neutral.test.ts`). P1 (Codex worker backend) implemented 2026-07-06 — see docs/2026-07-06-p1-codex-worker-backend.md; desktop provider UX, per-turn pricing, and the Codex master remain open (P1.5/P2/P3).
+> Status 2026-07-05+: **P0 (seam extraction) implemented** — `src/core/agent-backend.ts` (port) + `src/core/claude-backend.ts` (adapter); Worker/MasterAgent/SessionManager are SDK-import-free (guarded by `test/core/provider-neutral.test.ts`). P1 (Codex worker backend) implemented 2026-07-06 — see docs/2026-07-06-p1-codex-worker-backend.md. P1.5 implemented 2026-07-06 — desktop provider UX, per-turn pricing with verified RATES, in-app `codexApiKey` via `CODEX_HOME`, fork timeout, always-network-on workspace-write; see docs/2026-07-06-p15-codex-followups.md. Remaining: P2 (Codex master), trust-entry cleanup, numTurns granularity.
 
 Scope: what it takes for rookery (built on the Claude Agent SDK) to also support **OpenAI Codex** as an agent backend — for workers first, optionally the master — with a seam designed for further providers later.
 
