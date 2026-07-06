@@ -8,7 +8,7 @@ Follow-up to P2 (`docs/2026-07-06-p2-codex-master.md`). Scope = the P2 final-rev
 |---|---|---|
 | 1 | argv bridge-token exposure → CODEX_HOME config.toml | **IN** — Track A (live-spiked) |
 | 2 | Desktop: new-session provider selector + `codexMasterModel` field | **IN** — Track D |
-| 3 | maxTurns inert on codex masters — UI treatment | **IN** — folded into Track D |
+| 3 | maxTurns inert on codex masters — UI treatment | **DISSOLVED (no-op)** — renderer map found NO session-level maxTurns in the renderer or protocol (`session.send` carries only model/effort/permissionMode); the only maxTurns UI is automation-level (worker-action-only). Nothing to hide. Also: codex genuinely supports effort (low..xhigh), so the effort select is correct for codex too — no special-casing. |
 | 4 | Turn watchdog (bridge-stall / wedged turn) | **IN** — Track B |
 | 5 | Persistent per-session child pool | **OUT** (user) |
 | 6 | Bridge release placement + CODEX_HOME cleanup on delete | **IN** — folded into Track A |
@@ -40,12 +40,13 @@ Design:
 - **slackProvider setting**: `settings.slackProvider(): "claude" | "codex"` (default "claude"). `getOrCreateByKey` (used by the slack path) gains an optional provider; the slack handler passes `settings.slackProvider()`. A codex slack session is a codex master → gets the bridge + read_thread def + AskUserQuestion (canUseTool exists for slack). ⚠️ codex masters are bypassPermissions-only (P2 guard) — slack codex sessions inherit that; a non-bypass slack config would fail at turn start. Document.
 - **Deferred (P3)**: automation-origin codex (the automation action config gaining `provider`) — automations are unattended bypassPermissions; codex-over-bridge under full automation wants its own review. The session-provider routing is already provider-agnostic, so only the automation config/DB/UI surface is deferred.
 
-## Track D — desktop (items 2 + 3)
+## Track D — desktop (item 2)
 
 (Anchors from the renderer exploration — see the plan for exact file:line.)
-1. **New-session provider selector**: add a `claude | codex` choice to the session-creation flow so a user can create a codex master (`session.create` already accepts optional `provider`). Follow the WorkerSpawnModal provider-select idiom; default claude → wire-omit.
-2. **`codexMasterModel` settings field**: a text field in the existing Settings → Codex section next to `codexWorkerModel` (the setting + protocol key exist since P2; renderer just adds the field + i18n keys ko/en + fixture updates in EVERY test file carrying a full `SettingsValues` literal — the P1 dual-gate lesson).
-3. **maxTurns hide for codex**: where per-session model/effort/permissionMode/maxTurns overrides are chosen, hide/disable maxTurns when the session's provider is codex (inert: numTurns=1/turn), driven by the session's `provider` (surface it in the store if not already). If provider isn't in the session row store type, add it (protocol session-list row already carries it after P2).
+1. **New-session provider selector**: `NewSessionPage.tsx` (full-page form, `onStart({cwd,prompt,model,effort})` → `startSession` in App.tsx builds `session.create`) gets a `claude | codex` selector (WorkerSpawnModal idiom: default claude → wire-omit `provider`; codex swaps the model field to free-text with `settings.codexMasterModel` placeholder). App's `startSession` sends `provider` on `session.create` and, for codex, stamps the codex model as the override (not the Claude picker's). The selector lives in the Composer `leftSlot`/controls area.
+2. **`codexMasterModel` settings field**: 3-line copy beside `codexWorkerModel` in `SettingsPage.tsx` Codex section (`f.codexMasterModel ?? ""`, placeholder gpt-5.5). Daemon setting + protocol key already exist (P2); the 5 `SettingsValues` fixtures ALREADY carry `codexMasterModel` (P2) → no fixture edits. i18n: mirror `settings.codexWorkerModel`/Hint keys, ko+en.
+3. **Store provider type**: add `provider?: string` to the inline session-row type at `store.ts:16` (data already flows from `session.list`; only the type is missing). Enables an optional codex badge on the session row/header via the existing `ProviderBadge`.
+- item 3 (maxTurns hide): DISSOLVED — no session-level maxTurns UI exists (see scope table).
 
 ## Non-goals (unchanged)
 
