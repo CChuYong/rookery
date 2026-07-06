@@ -534,7 +534,7 @@ export function App(): JSX.Element {
     }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchFleet(); });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
-  const startSession = (opts: { cwd?: string; prompt?: string; model: string; effort: string; provider?: string }) => {
+  const startSession = (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string }) => {
     navigate({ overlay: null });
     const c = client;
     if (!c) return;

@@ -23,7 +23,7 @@ export function NewSessionPage(p: {
   defaultModel: string;
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, settings.codexMasterModel)
-  onStart: (opts: { cwd?: string; prompt?: string; model: string; effort: string; provider?: string }) => void;
+  onStart: (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string }) => void;
   onClose?: () => void; // if absent, hide the close button (when shown as the default screen with no session)
   browseDir?: (dir: string, cwd?: string) => Promise<BrowseResult>; // @ file autocomplete (relative to the selected cwd)
   loadCommands?: (cwd?: string) => Promise<SlashCommand[]>; // / skill candidates (relative to the selected cwd)
@@ -64,7 +64,7 @@ export function NewSessionPage(p: {
     p.onStart({
       cwd: cwd.trim() || undefined,
       prompt: prompt.trim() || undefined,
-      model: isCodex ? codexModel.trim() : model,
+      model: isCodex ? codexModel.trim() || undefined : model,
       effort,
       provider: isCodex ? "codex" : undefined, // wire-minimal: absent means claude
     });

@@ -56,9 +56,19 @@ export function materializeCodexHome(rookeryHome: string, sessionKey: string, br
       }
     }
     // else: no real auth.json to link — skip; the turn fails with a clear codex auth error (acceptable, per spec).
+  } else {
+    // apiKeySet: provisioning writes auth.json here. Clear a stale symlink from a prior no-key run
+    // (else account/read sees the symlinked real auth and skips provisioning) — but never touch a
+    // real (provisioned) auth.json file.
+    try {
+      const a = path.join(dir, "auth.json");
+      if (fs.lstatSync(a).isSymbolicLink()) fs.unlinkSync(a);
+    } catch {
+      /* absent — fine */
+    }
   }
-  // apiKeySet === true: do nothing here — codex-backend.ts's openClient() provisions auth.json into
-  // THIS dir via account/login/start once account/read reports requiresOpenaiAuth.
+  // codex-backend.ts's openClient() provisions auth.json into THIS dir via account/login/start once
+  // account/read reports requiresOpenaiAuth.
 
   return dir;
 }

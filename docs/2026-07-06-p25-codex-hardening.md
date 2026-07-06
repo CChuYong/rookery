@@ -1,5 +1,7 @@
 # 2026-07-06 — P2.5: Codex hardening & finish (spec)
 
+> Status: **implemented 2026-07-06** — Track A (argv-token → per-session `CODEX_HOME` `config.toml`), Track B (per-turn inactivity watchdog), Track C (slack-thread defs + `slackProvider`), Track D (desktop new-session provider selector + `codexMasterModel`) all landed. Live smoke (controller): a real codex master turn with the bridge token present ONLY in `config.toml` (child argv verified clean) still round-tripped a bridge tool call. Remaining: automation-origin codex (P3), persistent child pool (item 5, out of scope by user decision).
+
 Follow-up to P2 (`docs/2026-07-06-p2-codex-master.md`). Scope = the P2 final-review backlog. User decision: **items 1,2,3,4,6,7 IN; item 5 (persistent child pool) OUT.**
 
 ## Scope

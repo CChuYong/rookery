@@ -110,6 +110,31 @@ describe("materializeCodexHome", () => {
     expect(fs.existsSync(path.join(dir, "auth.json"))).toBe(false);
   });
 
+  it("apiKeySet:true clears a STALE auth.json symlink left over from a prior no-key run", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    fs.writeFileSync(path.join(realCodexHome, "auth.json"), '{"token":"real"}');
+    // First materialize with no key: leaves a symlink behind.
+    const dir = materializeCodexHome(rookeryHome, "sess-1", "http://url", { apiKeySet: false, realCodexHome });
+    const authLinkPath = path.join(dir, "auth.json");
+    expect(fs.lstatSync(authLinkPath).isSymbolicLink()).toBe(true);
+    // Flip to apiKeySet:true (mid-session no-key→key flip) — the stale symlink must be cleared.
+    materializeCodexHome(rookeryHome, "sess-1", "http://url", { apiKeySet: true, realCodexHome });
+    expect(fs.existsSync(authLinkPath)).toBe(false);
+  });
+
+  it("apiKeySet:true preserves a real (provisioned) auth.json FILE — never unlinks it", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    const dir = materializeCodexHome(rookeryHome, "sess-1", "http://url", { apiKeySet: true, realCodexHome });
+    const authPath = path.join(dir, "auth.json");
+    // Simulate codex-backend.ts's openClient() having already provisioned a real auth.json here.
+    fs.writeFileSync(authPath, '{"token":"provisioned"}');
+    materializeCodexHome(rookeryHome, "sess-1", "http://url", { apiKeySet: true, realCodexHome });
+    expect(fs.lstatSync(authPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(authPath, "utf8")).toBe('{"token":"provisioned"}');
+  });
+
   it("re-materializing is idempotent (no error, no leftover stale symlink) across repeated calls", () => {
     const rookeryHome = tmp("rookery-home-");
     const realCodexHome = tmp("real-codex-home-");
