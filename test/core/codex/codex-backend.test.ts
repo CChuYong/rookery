@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { CodexBackend } from "../../../src/core/codex/codex-backend.js";
+import { CodexBackend, formatDuration } from "../../../src/core/codex/codex-backend.js";
 import { fakeCodexSpawn, type CodexStep } from "../../helpers/fake-codex.js";
 import type { AgentEvent, AgentStream, ProviderToolDef } from "../../../src/core/agent-backend.js";
 import { MessageQueue } from "../../../src/core/message-queue.js";
@@ -716,6 +716,97 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("formatDuration (P3-remaining Track A #5)", () => {
+  it("sub-second shows ms, 1000ms+ shows rounded seconds", () => {
+    expect(formatDuration(500)).toBe("500ms");
+    expect(formatDuration(120000)).toBe("120s");
+    expect(formatDuration(1500)).toBe("2s"); // rounds, doesn't truncate
+  });
+});
+
+describe("CodexBackend — pre-turn handshake/thread-start timeout (P3-remaining Track A #2)", () => {
+  it("stalls during initialize: the stream fails with a handshake-timeout error and the child is killed", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { silentInitialize: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("x"); q.close();
+      const collected = collect(b.openSession(q, baseOpts()));
+      const rejection = expect(collected).rejects.toThrow(/handshake.*timed out/);
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejection;
+      expect(fake.killed[0]).toBe(true); // the spawned transport was killed on timeout
+      expect(fake.requests.some((r) => r.method === "thread/start")).toBe(false); // never got past initialize
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stalls during thread/start: the stream fails with a handshake-timeout error and the child is killed", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { silentThreadStart: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("x"); q.close();
+      const collected = collect(b.openSession(q, baseOpts()));
+      const rejection = expect(collected).rejects.toThrow(/handshake.*timed out/);
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejection;
+      expect(fake.killed[0]).toBe(true);
+      expect(fake.requests.some((r) => r.method === "initialize")).toBe(true); // got past initialize this time
+      expect(fake.requests.some((r) => r.method === "thread/start")).toBe(true); // request was sent, just never answered
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("also trips on a master (startTurn) turn — the race lives in the shared base, not just the worker path", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { silentInitialize: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 1000 });
+      const collected = collect(b.startTurn("hi", baseOpts() as never));
+      const rejection = expect(collected).rejects.toThrow(/handshake.*timed out/);
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejection;
+      expect(fake.killed[0]).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a normal handshake under a tiny handshakeTimeoutMs is NOT a false trip — the turn starts and completes", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 1000 });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
+  });
+
+  it("0 disables the handshake timeout — a genuinely SLOW (but completing) handshake still succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { initializeDelayMs: 5000 });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", handshakeTimeoutMs: () => 0 });
+      const q = new MessageQueue(); q.push("x"); q.close();
+      const collected = collect(b.openSession(q, baseOpts()));
+      await vi.advanceTimersByTimeAsync(5000); // let the delayed initialize answer land
+      const events = await collected;
+      expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("no handshakeTimeoutMs dep at all behaves like 0 (disabled) — backward compatible with existing deps callers", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]); // no handshakeTimeoutMs at all
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
   });
 });
 

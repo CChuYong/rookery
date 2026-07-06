@@ -27,6 +27,25 @@ export interface CodexBackendDeps {
   // entirely, DISABLES the watchdog: no timer is ever armed. Lives in the shared CodexSessionBase
   // turn wait, so it applies to BOTH the worker's long-lived stream and the master's single-turn one.
   idleTimeoutMs?: () => number;
+  // Pre-turn handshake+thread-start timeout (P3-remaining Track A — docs/2026-07-06-p3r-codex-hardening-finish.md):
+  // resolved ONCE per stream (server.ts passes `() => settings.codexHandshakeTimeoutMs()`), covering
+  // the phase the idle watchdog above does NOT — openClient() (spawn+initialize+provisioning) through
+  // startOrResumeThread() (thread/start|resume) — since the idle watchdog only arms AFTER turn/start's
+  // response. A child wedged anywhere in that phase never trips the idle watchdog; only a manual stop
+  // would recover it without this. 0 (or ≤0), or the dep being absent entirely, DISABLES it: no timer
+  // is ever armed and the handshake awaits normally, however long it takes. Default 30s (generous for
+  // a cold Rust-binary spawn + auth). On timeout the stream REJECTS (no i18n notice — this is a
+  // terminal stream failure the worker/master surfaces as a terminal error, unlike the idle watchdog's
+  // mid-turn transcript notice) and the client/transport is torn down.
+  handshakeTimeoutMs?: () => number;
+}
+
+// Friendlier duration formatting for timeout messages (P3-remaining Track A #5): sub-second
+// (test-sized) timeouts render as "500ms" instead of a misleading rounded "0s"/"1s". Irrelevant at
+// real-world defaults (30s/120s) — purely cosmetic, but keeps small-timeout messages honest. Exported
+// for a direct unit test (mirrors mapPermissionMode/mapEffort in codex-vocab.ts).
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
 }
 
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
@@ -207,6 +226,40 @@ abstract class CodexSessionBase implements AgentStream {
     return client;
   }
 
+  // Wraps openClient()+startOrResumeThread() (the pre-first-turn handshake) in a single timeout race
+  // (P3-remaining Track A #2 — mirrors CodexBackend.forkSession's timer pattern: a setTimeout that
+  // rejects, cleared in a finally). `handshakeTimeoutMs` is resolved ONCE for this call (0/≤0/absent
+  // disables — no timer, the two awaits just run in sequence with no race). On a timeout, the SAME
+  // timer/promise covers BOTH phases (openClient, then startOrResumeThread) — whichever is in flight
+  // when it fires loses the race and this rejects. Teardown: openClient assigns `this.client`
+  // synchronously (before its first await, see openClient's own body) — so even a stall INSIDE
+  // initialize/thread-start still leaves a closable/killable client, and `this.client?.close()` in
+  // the catch tears down the spawned transport immediately (pump()'s own outer finally{teardownClient()}
+  // would eventually do this too, but closing here is synchronous and immediate rather than waiting on
+  // that unwind — CodexClient.close() is idempotent, so the later teardownClient() call is harmless).
+  protected async openHandshake(mode: PermissionPair, developerInstructions?: string, envOverride?: NodeJS.ProcessEnv): Promise<{ client: CodexClient; threadId: string }> {
+    const ms = this.deps.handshakeTimeoutMs?.() ?? 0;
+    if (ms <= 0) {
+      const client = await this.openClient(envOverride);
+      const threadId = await this.startOrResumeThread(client, mode, developerInstructions);
+      return { client, threadId };
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`codex handshake/thread-start timed out after ${formatDuration(ms)}`)), ms);
+    });
+    try {
+      const client = await Promise.race([this.openClient(envOverride), timeout]);
+      const threadId = await Promise.race([this.startOrResumeThread(client, mode, developerInstructions), timeout]);
+      return { client, threadId };
+    } catch (err) {
+      this.client?.close();
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   // Symmetric teardown for openClient(): removes the abort listener, closes the client (idempotent
   // via CodexClient's own `closed` guard), and releases anything still parked on clientClosedP
   // (safety net in case onClosed never fired). Always called from pump()'s outer finally.
@@ -279,9 +332,13 @@ abstract class CodexSessionBase implements AgentStream {
   // done=true, so pushing after fail() would lose the notice.
   private onGraceExpired(): void {
     this.graceTimer = null;
+    // `seconds` (rounded) feeds the i18n params — the ko/en catalog templates bake in their own unit
+    // suffix ("{seconds}초"/"{seconds}s"), so this stays a plain number for BOTH the daemon (i18n.ts)
+    // and desktop (renderer re-localization) catalogs to interpolate identically. The raw (never
+    // localized) Error message below is the one place formatDuration applies — see #5.
     const seconds = Math.round(this.idleTimeoutMsForTurn / 1000);
     this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexTurnTimeout", params: { seconds }, text: t(DEFAULT_LOCALE, "notice.codexTurnTimeout", { seconds }) } });
-    this.channel.fail(new Error(`codex turn timed out after ${seconds}s of inactivity`));
+    this.channel.fail(new Error(`codex turn timed out after ${formatDuration(this.idleTimeoutMsForTurn)} of inactivity`));
     this.client?.close();
   }
 
@@ -503,9 +560,8 @@ class CodexWorkerStream extends CodexSessionBase {
   protected async pump(): Promise<void> {
     const abort = this.opts.abortController;
     try {
-      const client = await this.openClient();
       const mode = mapPermissionMode(this.opts.permissionMode);
-      const threadId = await this.startOrResumeThread(client, mode, this.opts.systemPromptAppend);
+      const { client, threadId } = await this.openHandshake(mode, this.opts.systemPromptAppend);
 
       const inputIt = this.input[Symbol.asyncIterator]();
       while (true) {
@@ -549,8 +605,7 @@ class CodexTurnStream extends CodexSessionBase {
       // spec's "model override N/A" note: a master turn is single-shot, overrides land on the
       // NEXT startTurn() call's opts instead.
       const mode = mapPermissionMode(this.opts.permissionMode);
-      const client = await this.openClient(this.envOverride);
-      const threadId = await this.startOrResumeThread(client, mode, this.opts.systemPromptAppend);
+      const { client, threadId } = await this.openHandshake(mode, this.opts.systemPromptAppend, this.envOverride);
       const effort = mapEffort(this.opts.effort);
       await this.sendTurn(client, threadId, this.prompt, mode, effort, undefined);
     } finally {

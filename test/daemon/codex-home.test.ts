@@ -73,6 +73,37 @@ describe("materializeCodexHome", () => {
     expect(secondContent).not.toContain('tok-1"');
   });
 
+  it("strips a rookery sub-table (e.g. [mcp_servers.rookery.headers]) alongside the main block, preserving unrelated tables (P3-remaining Track A #4)", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    fs.writeFileSync(
+      path.join(realCodexHome, "config.toml"),
+      '[model_providers.x]\nbase_url = "https://example.com"\n\n[mcp_servers.rookery]\nurl = "http://stale/old"\n\n[mcp_servers.rookery.headers]\nAuthorization = "Bearer stale"\n',
+    );
+    const dir = materializeCodexHome(rookeryHome, "sess-1", "http://127.0.0.1:8787/mcp/tok-1", { apiKeySet: false, realCodexHome });
+    const content = fs.readFileSync(path.join(dir, "config.toml"), "utf8");
+    expect(content).toContain("[model_providers.x]"); // unrelated table preserved
+    expect(content).toContain('base_url = "https://example.com"');
+    expect(content).not.toContain("[mcp_servers.rookery.headers]"); // sub-table stripped
+    expect(content).not.toContain("Bearer stale");
+    expect(content).not.toContain("http://stale/old");
+    expect(content.split("[mcp_servers.rookery]")).toHaveLength(2); // exactly one clean rookery block appended
+    expect(content).toContain('url = "http://127.0.0.1:8787/mcp/tok-1"');
+  });
+
+  it("does not strip an unrelated server whose name merely starts with 'rookery' (no dot boundary)", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    fs.writeFileSync(
+      path.join(realCodexHome, "config.toml"),
+      '[mcp_servers.rookeryOther]\nurl = "http://keep-me"\n',
+    );
+    const dir = materializeCodexHome(rookeryHome, "sess-1", "http://127.0.0.1:8787/mcp/tok-1", { apiKeySet: false, realCodexHome });
+    const content = fs.readFileSync(path.join(dir, "config.toml"), "utf8");
+    expect(content).toContain("[mcp_servers.rookeryOther]");
+    expect(content).toContain('url = "http://keep-me"');
+  });
+
   it("falls back to a minimal config when the real config.toml can't be read (e.g. it's a directory, not a file)", () => {
     const rookeryHome = tmp("rookery-home-");
     const realCodexHome = tmp("real-codex-home-");

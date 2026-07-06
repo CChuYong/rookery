@@ -132,6 +132,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // fresh every turn, same as the other settings resolvers on this backend. 0/negative disables it
     // (see Settings.codexTurnIdleTimeoutMs's own comment for the fail-safe parse).
     idleTimeoutMs: () => settings.codexTurnIdleTimeoutMs(),
+    // Pre-turn handshake+thread-start timeout (P3-remaining Track A — docs/2026-07-06-p3r-codex-hardening-finish.md):
+    // resolved fresh per stream, same convention as idleTimeoutMs above. Covers openClient()+
+    // startOrResumeThread(), a phase the idle watchdog above does NOT cover (it only arms after
+    // turn/start's response).
+    handshakeTimeoutMs: () => settings.codexHandshakeTimeoutMs(),
     env: () => {
       if (!settings.codexApiKey()) return undefined;
       fs.mkdirSync(codexHomeDir, { recursive: true });

@@ -18,6 +18,12 @@ export const DEFAULT_CODEX_BIN = "codex";
 // DEFAULT_USAGE_REFRESH_MS's shape: a raw string in the settings table/echoed SettingsValues, ""
 // meaning "use the default"). 0 (or a non-positive parse) disables the watchdog entirely.
 export const DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS = 120000;
+// Codex pre-turn handshake+thread-start timeout default (P3-remaining Track A — a child wedged
+// during openClient (spawn+initialize+provisioning) or startOrResumeThread never trips the
+// per-turn idle watchdog above, since that only arms AFTER turn/start's response). Mirrors
+// DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS's shape exactly. Generous default for a cold Rust-binary
+// spawn + auth; 0 (or non-positive) disables it entirely.
+export const DEFAULT_CODEX_HANDSHAKE_TIMEOUT_MS = 30000;
 
 // Settings that can be changed at runtime. Use the value stored in the DB (settings table) if present, otherwise the config/hardcoded default.
 // All kept as strings (parsing happens on the consumer side) → keeps SettingsPatch/the protocol simple. Slack tokens are secret, so they're not here (separate setter).
@@ -31,6 +37,7 @@ export interface SettingsValues {
   codexMasterModel: string; // codex master default model (settings-only, no env/config fallback). default "gpt-5.5".
   codexBin: string; // codex CLI binary/path used to spawn `codex app-server` (settings-only). default "codex".
   codexTurnIdleTimeoutMs: string; // per-turn codex watchdog inactivity timeout, ms as a raw string (settings-only). 0 disables. default "120000".
+  codexHandshakeTimeoutMs: string; // pre-turn codex handshake+thread-start timeout, ms as a raw string (settings-only). 0 disables. default "30000".
   slackCwd: string; // cwd for Slack-originated sessions (settings-only, defaults to process.cwd())
   slackAllowedUsers: string; // user ids allowed to get responses (comma-separated, settings-only)
   slackAllowAll: string; // "1" allows everyone (settings-only, fail-closed default "0")
@@ -103,6 +110,17 @@ export class Settings {
     if (raw === undefined) return DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) ? parsed : DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS;
+  }
+
+  // Pre-turn codex handshake+thread-start timeout (P3-remaining Track A). Same shape/contract as
+  // codexTurnIdleTimeoutMs above: returns the PARSED number directly (injected into
+  // CodexBackendDeps.handshakeTimeoutMs, resolved fresh per stream). Missing/non-numeric → the
+  // default (fail safe, never NaN); "0" (or negative) is a deliberate, valid disable value.
+  codexHandshakeTimeoutMs(): number {
+    const raw = this.repos.getSetting("codexHandshakeTimeoutMs");
+    if (raw === undefined) return DEFAULT_CODEX_HANDSHAKE_TIMEOUT_MS;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_CODEX_HANDSHAKE_TIMEOUT_MS;
   }
 
   // Linear API key (integration secret). Kept out of SettingsValues to isolate it from being echoed via settings.result.
@@ -223,6 +241,7 @@ export class Settings {
       codexMasterModel: this.codexMasterModel(),
       codexBin: this.codexBin(),
       codexTurnIdleTimeoutMs: String(this.codexTurnIdleTimeoutMs()), // echoed as a raw string, mirroring usageRefreshMs's shape
+      codexHandshakeTimeoutMs: String(this.codexHandshakeTimeoutMs()), // echoed as a raw string, same shape
       slackCwd: this.slackCwd(),
       slackAllowedUsers: this.slackAllowedUsers(),
       slackAllowAll: this.slackAllowAll(),

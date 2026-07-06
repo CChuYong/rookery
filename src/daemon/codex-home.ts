@@ -125,21 +125,32 @@ function loadBaseConfig(realCodexHome: string): string {
   }
 }
 
-// Removes a [mcp_servers.rookery] table from TOML text. Textual, not a full TOML parser: a table body
-// runs until the next top-level `[...]` header or EOF — sufficient because this exact block is only
-// ever written by rookery, in this exact shape.
+// A dot after "rookery" scopes this to sub-tables of the rookery namespace specifically (e.g.
+// `[mcp_servers.rookery.headers]`) — NOT an unrelated server whose name merely starts with the same
+// prefix (e.g. a hypothetical `[mcp_servers.rookeryOther]`, which has no dot there and must survive).
+const ROOKERY_SUBTABLE_PREFIX = "[mcp_servers.rookery.";
+
+function isRookeryTableHeader(trimmed: string): boolean {
+  return trimmed === ROOKERY_BLOCK_HEADER || trimmed.startsWith(ROOKERY_SUBTABLE_PREFIX);
+}
+
+// Removes the [mcp_servers.rookery] table AND any [mcp_servers.rookery.<...>] sub-table (P3-remaining
+// Track A #4 — a hand-written `[mcp_servers.rookery.headers]` etc. would otherwise survive and
+// orphan-attach to the freshly appended block) from TOML text. Textual, not a full TOML parser: each
+// matched table's body runs until the next top-level `[...]` header or EOF — sufficient because this
+// exact block is only ever written by rookery, in this exact shape.
 function stripRookeryBlock(toml: string): string {
   const lines = toml.split("\n");
   const out: string[] = [];
   let inBlock = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed === ROOKERY_BLOCK_HEADER) {
+    if (isRookeryTableHeader(trimmed)) {
       inBlock = true;
       continue;
     }
     if (inBlock && trimmed.startsWith("[")) inBlock = false;
     if (!inBlock) out.push(line);
   }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n"); // collapse gaps left by the removed block
+  return out.join("\n").replace(/\n{3,}/g, "\n\n"); // collapse gaps left by the removed block(s)
 }

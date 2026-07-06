@@ -23,6 +23,9 @@ export interface FakeCodexServerOpts {
   // turn/completed — leaves the turn wedged so the watchdog's grace-window kill path can be exercised
   // (P2.5 Track B; the default behavior below auto-completes on interrupt, which is right for the
   // ordinary interrupt()-path tests but wrong for testing the kill escalation).
+  silentInitialize?: boolean; // the `initialize` request never gets a response — stalls openClient() (P3-remaining Track A handshake-timeout test)
+  silentThreadStart?: boolean; // `thread/start`/`thread/resume` never get a response — stalls startOrResumeThread() (same test)
+  initializeDelayMs?: number; // `initialize` responds after a real setTimeout delay instead of immediately — a genuinely SLOW (but completing) handshake, for proving handshakeTimeoutMs:0 truly disables the race rather than just never happening to trip it
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -36,13 +39,17 @@ export function fakeCodexSpawn(
   requests: Array<{ method: string; params: Record<string, unknown> }>;
   responses: Array<{ id: number | string; result: unknown }>;
   spawns: Array<{ env?: NodeJS.ProcessEnv; args?: string[] }>;
+  killed: boolean[]; // parallel to spawns — killed[i] is true once transport.kill() was called for spawn i (P3-remaining Track A handshake-timeout teardown assertion)
 } {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   const responses: Array<{ id: number | string; result: unknown }> = [];
   const spawns: Array<{ env?: NodeJS.ProcessEnv; args?: string[] }> = [];
+  const killedFlags: boolean[] = [];
   const threadId = opts.threadId ?? "th-1";
   const spawn: CodexSpawn = (spawnOpts) => {
+    const idx = spawns.length;
     spawns.push({ env: spawnOpts.env, args: spawnOpts.args });
+    killedFlags.push(false);
     let lineCb: (l: string) => void = () => {};
     let exitCb: (i: { code: number | null; message?: string }) => void = () => {};
     let killed = false;
@@ -52,7 +59,7 @@ export function fakeCodexSpawn(
     const transport: CodexTransport = {
       onLine: (cb) => { lineCb = cb; },
       onExit: (cb) => { exitCb = cb; },
-      kill: () => { killed = true; },
+      kill: () => { killed = true; killedFlags[idx] = true; },
       write: (line) => {
         const msg = JSON.parse(line) as {
           id?: number | string;
@@ -67,10 +74,16 @@ export function fakeCodexSpawn(
           return;
         }
         requests.push({ method: msg.method, params: msg.params ?? {} });
-        if (msg.method === "initialize") { send({ id: msg.id, result: { userAgent: "fake" } }); return; }
+        if (msg.method === "initialize") {
+          if (opts.silentInitialize) return;
+          const respond = () => send({ id: msg.id, result: { userAgent: "fake" } });
+          if (opts.initializeDelayMs) setTimeout(respond, opts.initializeDelayMs); else respond();
+          return;
+        }
         if (msg.method === "initialized") return;
         if (msg.method === "thread/start" || msg.method === "thread/resume" || msg.method === "thread/fork") {
           if (msg.method === "thread/fork" && opts.silentForkHang) return; // never respond — exercises forkSession's timeout
+          if ((msg.method === "thread/start" || msg.method === "thread/resume") && opts.silentThreadStart) return; // never respond — exercises the handshake-timeout test
           if (opts.failThreadStart) { send({ id: msg.id, error: { code: -32000, message: "no auth" } }); return; }
           const id = msg.method === "thread/fork" ? `${threadId}-fork` : threadId;
           send({ method: "thread/started", params: { thread: { id } } });
@@ -136,5 +149,5 @@ export function fakeCodexSpawn(
     };
     return transport;
   };
-  return { spawn, requests, responses, spawns };
+  return { spawn, requests, responses, spawns, killed: killedFlags };
 }
