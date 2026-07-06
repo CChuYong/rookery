@@ -169,6 +169,17 @@ describe("Settings", () => {
     expect(s.anthropicApiKey()).toBe("env-key"); // delete reverts to env
   });
 
+  it("codexApiKey: write-only (not echoed), no env/config fallback", () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const s = new Settings(repos, config);
+    expect(s.codexApiKey()).toBeUndefined(); // unset default (no env fallback, unlike anthropicApiKey)
+    s.setCodexApiKey("sk-test");
+    expect(s.codexApiKey()).toBe("sk-test");
+    expect(Object.keys(s.all())).not.toContain("codexApiKey"); // write-only
+    s.setCodexApiKey(undefined);
+    expect(s.codexApiKey()).toBeUndefined();
+  });
+
   it("hasAcceptedDataNotice: default 0, echoed in all()", () => {
     const cfg = config;
     const s = new Settings(new Repositories(openDb(":memory:")), cfg);

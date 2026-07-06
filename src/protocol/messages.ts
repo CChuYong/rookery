@@ -118,6 +118,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       usageRefreshMs: z.string().nullable().optional(), // usage refresh interval (ms)
       linearApiKey: z.string().nullable().optional(), // write-only secret key. Not echoed back in settings.result.
       anthropicApiKey: z.string().nullable().optional(), // write-only secret. Not echoed in settings.result.
+      codexApiKey: z.string().nullable().optional(), // write-only secret (codex in-app API key). Not echoed in settings.result.
       hasAcceptedDataNotice: z.string().optional(), // first-run data-transmission consent flag ("1"/"0"). Echoed.
       onboardingDone: z.string().optional(), // first-run onboarding completed flag ("1"/"0"). Echoed.
       defaultSessionCwd: z.string().nullable().optional(), // default cwd for desktop sessions when none is picked. Echoed.

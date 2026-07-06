@@ -18,6 +18,7 @@ export interface FakeCodexServerOpts {
   failThreadStart?: boolean; // reject thread/start (spawn/handshake failure path)
   dieAfterTurns?: number;    // simulate process death after N completed turns
   silentForkHang?: boolean; // thread/fork requests get NO response at all (fork-timeout test)
+  requiresOpenaiAuth?: boolean; // account/read answer for in-app apiKey provisioning tests (default false)
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -119,6 +120,8 @@ export function fakeCodexSpawn(
           }
           return;
         }
+        if (msg.method === "account/read") { send({ id: msg.id, result: { requiresOpenaiAuth: opts.requiresOpenaiAuth ?? false } }); return; }
+        if (msg.method === "account/login/start") { send({ id: msg.id, result: {} }); return; }
         // any other request: generic empty result
         send({ id: msg.id, result: {} });
       },

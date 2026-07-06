@@ -36,8 +36,8 @@ export interface SettingsValues {
   workerSlackRelayChannel: string; // Slack channel ID for the worker relay ("" = off even if enabled). Echoed.
 }
 
-// null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey are outside SettingsValues (write-only secrets), so they're separate.
-export type SettingsPatch = { [K in keyof SettingsValues]?: string | null } & { linearApiKey?: string | null; anthropicApiKey?: string | null };
+// null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey/codexApiKey are outside SettingsValues (write-only secrets), so they're separate.
+export type SettingsPatch = { [K in keyof SettingsValues]?: string | null } & { linearApiKey?: string | null; anthropicApiKey?: string | null; codexApiKey?: string | null };
 
 export class Settings {
   constructor(
@@ -93,6 +93,17 @@ export class Settings {
   setAnthropicApiKey(key: string | undefined): void {
     if (!key) this.repos.deleteSetting("anthropicApiKey");
     else this.repos.setSetting("anthropicApiKey", key);
+  }
+
+  // Codex in-app API key (secret, DB-only — no env/config fallback, unlike anthropicApiKey). write-only (not echoed via settings.result).
+  // When set, the daemon redirects codex children to a rookery-managed CODEX_HOME and provisions
+  // auth.json via account/login/start (the app-server ignores CODEX_API_KEY env — see codex-transport.ts AUTH NOTE).
+  codexApiKey(): string | undefined {
+    return this.repos.getSetting("codexApiKey");
+  }
+  setCodexApiKey(key: string | undefined): void {
+    if (!key) this.repos.deleteSetting("codexApiKey");
+    else this.repos.setSetting("codexApiKey", key);
   }
   // First-run data-transmission consent flag ("1" accepted). Echoed (not secret).
   hasAcceptedDataNotice(): string {

@@ -1,4 +1,6 @@
 import http from "node:http";
+import path from "node:path";
+import fs from "node:fs";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, WebSocket } from "ws";
 import type { RawData } from "ws";
@@ -105,10 +107,19 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const settings = new Settings(repos, config);
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
   // Backend registry (P1): workers pick by provider; the master stays on Claude.
-  // Codex auth = the user's ~/.codex/auth.json (`codex login`) — see codex-transport.ts AUTH NOTE.
+  // Codex auth = the user's ~/.codex/auth.json (`codex login`) by default — see codex-transport.ts AUTH NOTE.
+  // P1.5: an in-app codexApiKey (settings) redirects the child to a rookery-managed CODEX_HOME and
+  // provisions auth.json via RPC (see codex-backend.ts pump()), leaving the user's ~/.codex untouched.
+  const codexHomeDir = path.join(config.home, "codex-home");
   const codexBackend = new CodexBackend({
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
+    apiKey: () => settings.codexApiKey(),
+    env: () => {
+      if (!settings.codexApiKey()) return undefined;
+      fs.mkdirSync(codexHomeDir, { recursive: true });
+      return { CODEX_HOME: codexHomeDir };
+    },
   });
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
   const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; provider?: string }): WorkerLike =>

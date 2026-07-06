@@ -269,3 +269,37 @@ describe("CodexBackend — fork timeout & explicit sandbox", () => {
     expect(turn.sandboxPolicy).toMatchObject({ type: "workspaceWrite", networkAccess: true }); // rookery decision: workspace-write is always network-on
   });
 });
+
+describe("CodexBackend — in-app apiKey provisioning", () => {
+  it("apiKey set + requiresOpenaiAuth:true → account/read then account/login/start (before thread/start)", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { requiresOpenaiAuth: true });
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", apiKey: () => "sk-test" });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    await collect(b.openSession(q, baseOpts()));
+    const methods = fake.requests.map((r) => r.method);
+    const readIdx = methods.indexOf("account/read");
+    const loginIdx = methods.indexOf("account/login/start");
+    const startIdx = methods.indexOf("thread/start");
+    expect(readIdx).toBeGreaterThanOrEqual(0);
+    expect(loginIdx).toBeGreaterThan(readIdx);
+    expect(startIdx).toBeGreaterThan(loginIdx);
+    expect(fake.requests[loginIdx].params).toEqual({ type: "apiKey", apiKey: "sk-test" });
+  });
+
+  it("apiKey set + requiresOpenaiAuth:false → account/read present, NO account/login/start", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { requiresOpenaiAuth: false });
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", apiKey: () => "sk-test" });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    await collect(b.openSession(q, baseOpts()));
+    expect(fake.requests.some((r) => r.method === "account/read")).toBe(true);
+    expect(fake.requests.some((r) => r.method === "account/login/start")).toBe(false);
+  });
+
+  it("no apiKey → NO account/read at all", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // apiKey resolver absent
+    const q = new MessageQueue(); q.push("x"); q.close();
+    await collect(b.openSession(q, baseOpts()));
+    expect(fake.requests.some((r) => r.method === "account/read")).toBe(false);
+  });
+});

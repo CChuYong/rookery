@@ -9,6 +9,8 @@ import { turnCostUsd } from "./codex-pricing.js";
 export interface CodexBackendDeps {
   spawn: CodexSpawn;
   defaultModel: () => string; // Settings resolver — used when the session has no model (spawn override wins)
+  apiKey?: () => string | undefined; // in-app codex API key (Settings resolver). Present → provision auth.json via RPC after handshake.
+  env?: () => NodeJS.ProcessEnv | undefined; // extra env for the spawned child (Settings resolver, e.g. CODEX_HOME redirection)
 }
 
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
@@ -106,7 +108,7 @@ class CodexStream implements AgentStream {
 
   private async pump(): Promise<void> {
     const abort = this.opts.abortController;
-    const transport = this.deps.spawn({});
+    const transport = this.deps.spawn({ env: this.deps.env?.() });
     const client = new CodexClient(transport);
     this.client = client;
     let clientClosed = false;
@@ -128,6 +130,16 @@ class CodexStream implements AgentStream {
       client.onServerRequest((id, method) => this.handleServerRequest(id, method));
       await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
       client.notify("initialized", {});
+
+      // In-app API key: provision the (redirected) CODEX_HOME's auth.json once via RPC —
+      // the app-server ignores CODEX_API_KEY env (P1 finding). Subsequent spawns skip via account/read.
+      const apiKey = this.deps.apiKey?.();
+      if (apiKey) {
+        const acct = (await client.request("account/read", {})) as { requiresOpenaiAuth?: boolean } | null;
+        if (acct?.requiresOpenaiAuth) {
+          await client.request("account/login/start", { type: "apiKey", apiKey });
+        }
+      }
 
       const mode = mapPermissionMode(this.opts.permissionMode);
       const startParams: CodexThreadStartParams = {
@@ -336,7 +348,7 @@ export class CodexBackend implements AgentBackend {
 
   // Fork a thread via an ephemeral app-server child (used by FleetOrchestrator fork routing).
   async forkSession(threadId: string): Promise<{ sessionId: string }> {
-    const transport = this.deps.spawn({});
+    const transport = this.deps.spawn({ env: this.deps.env?.() });
     const client = new CodexClient(transport);
     let timer: ReturnType<typeof setTimeout> | undefined;
     // A hung ephemeral child must not wedge the worker.fork request forever.

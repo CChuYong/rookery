@@ -713,6 +713,17 @@ describe("Connection — integrations / source.search", () => {
     expect(JSON.stringify(sent.at(-1))).not.toContain("lin_secret");
     expect(sent.at(-1).settings.masterModel).toBe("m");
   });
+
+  it("settings.set stores codexApiKey but never echoes it", async () => {
+    const sent: any[] = [];
+    const repos0 = new Repositories(openDb(":memory:"));
+    const settings = new Settings(repos0, loadConfig({}));
+    const { conn } = makeConnWith(sent, { settings });
+    await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "y", settings: { codexApiKey: "sk-test", masterModel: "m" } }));
+    expect(settings.codexApiKey()).toBe("sk-test");
+    expect(JSON.stringify(sent.at(-1))).not.toContain("sk-test");
+    expect(sent.at(-1).settings.masterModel).toBe("m");
+  });
 });
 
 describe("Connection automation routes", () => {
