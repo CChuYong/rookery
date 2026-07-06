@@ -183,6 +183,18 @@ describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task
     expect(modelField.value).toBe("gpt-preview");
   });
 
+  // ── Task 4 fold-in (Task 3 review Minor #1): the leading "" option so a fresh open doesn't render blank ──
+  it("a fresh open (codexModel still \"\") shows a non-blank leading default option labelled with codexDefaultModel", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    renderModal(undefined, { codexDefaultModel: "gpt-5.5" });
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)") as HTMLSelectElement;
+    expect(modelField.value).toBe(""); // unchanged: still defaults to "" (no auto-pick from the catalog)
+    expect(modelField.options[0]!.value).toBe("");
+    expect(modelField.options[0]!.textContent).toBe("gpt-5.5");
+  });
+
   it("onSpawn carries the selected codex model + pre-selected effort", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     const { onSpawn } = renderModal();

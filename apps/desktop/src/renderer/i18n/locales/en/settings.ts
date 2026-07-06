@@ -104,6 +104,7 @@ export default {
   "settings.codexWorkerModelHint": "Applies from new Codex workers.",
   "settings.codexMasterModel": "Codex master default model",
   "settings.codexMasterModelHint": "Applies from new Codex master sessions.",
+  "settings.codexModelDefaultOption": "Use daemon default",
   "settings.codexApiKey": "Codex API key",
   "settings.codexApiKeyHint": "Leave blank to use codex login (~/.codex/auth.json).",
   "settings.codexTurnIdleTimeoutMs": "Codex turn idle timeout (ms)",

@@ -93,4 +93,17 @@ describe("NewSessionPage codex model+effort dropdown (Codex Model Picker Task 3)
     expect(onStart.mock.calls[0]![0].effort).toBe("high"); // unchanged — no catalog to pre-select from
     expect(onStart.mock.calls[0]![0].provider).toBe("codex");
   });
+
+  // ── Task 4 fold-in (Task 3 review Minor #1): the leading "" option so a fresh open doesn't render blank ──
+  it("a fresh open (codexModel still \"\") shows a non-blank leading default option labelled with codexDefaultModel", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={() => {}} codexDefaultModel="gpt-5.5" />);
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelField = screen.getByTitle(MODEL_TITLE) as HTMLSelectElement;
+    expect(modelField.value).toBe(""); // unchanged: still defaults to "" (no auto-pick from the catalog)
+    // the "" option's visible label is the codexDefaultModel placeholder text, not a blank string
+    expect(modelField.options[0]!.value).toBe("");
+    expect(modelField.options[0]!.textContent).toBe("gpt-5.5");
+  });
 });

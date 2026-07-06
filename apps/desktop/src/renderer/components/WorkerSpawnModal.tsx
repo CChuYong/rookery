@@ -163,6 +163,11 @@ export function WorkerSpawnModal(p: {
                   }}
                   title={t("workerSpawnModal.modelTitle")}
                 >
+                  {/* Task 4 fold-in (Task 3 review Minor #1): a fresh open with the catalog present used to render
+                      this <Select value=""> blank. This leading "" option shows a "use default" label instead — the
+                      daemon applies the codexWorkerModel settings default when the spawn's model is empty, so we
+                      deliberately do NOT auto-pick a catalog model here (that would silently override the default). */}
+                  <option value="">{p.codexDefaultModel || t("settings.codexModelDefaultOption")}</option>
                   {codexModels.map((m) => (
                     <option key={m.id} value={m.id}>{m.displayName}</option>
                   ))}

@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { AutomationForm } from "../src/renderer/components/AutomationForm.js";
+import { useStore } from "../src/renderer/store/store.js";
+import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 describe("AutomationForm", () => {
   it("submits a new cron + master automation", () => {
@@ -392,5 +394,112 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     render(<AutomationForm job={job} repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
     const input = screen.getByLabelText("비용 예산 (USD)") as HTMLInputElement;
     expect(input.value).toBe("7.25");
+  });
+});
+
+// ── Codex Model Picker Task 4: model/effort catalog coupling ──
+
+const CODEX_MODELS: CodexModelInfo[] = [
+  { id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true },
+  { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
+];
+
+describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4)", () => {
+  beforeEach(() => {
+    useStore.setState({ codexModels: null }); // reset the singleton store before each test
+  });
+
+  it("provider codex + codexModels seeded → the model select lists the catalog (+ the default option + out-of-list)", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
+    expect(within(modelSelect).getByText("GPT-5.5")).toBeInTheDocument();
+    expect(within(modelSelect).getByText("GPT-5.4")).toBeInTheDocument();
+    // leading "" default option is preserved
+    expect(within(modelSelect).getByText("기본값")).toBeInTheDocument();
+  });
+
+  it("an out-of-list saved model value (init.model not in the catalog) is preserved as a selectable option", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const job = {
+      id: "a4",
+      name: "existing",
+      enabled: true,
+      trigger: { kind: "cron" as const, cron: "0 3 * * *", timezone: "UTC" },
+      action: { kind: "master" as const, prompt: "p", cwd: "/c", sessionMode: "reuse" as const },
+      model: "gpt-preview",
+      effort: "high",
+      permissionMode: "bypassPermissions",
+      maxTurns: null,
+      costBudgetUsd: null,
+      lastRunAt: null,
+      lastStatus: null,
+      lastError: null,
+      nextRunAt: null,
+      createdAt: "t",
+      provider: "codex",
+    };
+    render(<AutomationForm job={job} repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
+    expect(modelSelect.value).toBe("gpt-preview");
+    expect(within(modelSelect).getByText("gpt-preview")).toBeInTheDocument();
+  });
+
+  it("selecting a codex model sets the effort select's options to its supportedEfforts and pre-selects its defaultEffort", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
+    fireEvent.change(modelSelect, { target: { value: "gpt-5.4" } });
+
+    const effortSelect = screen.getByLabelText("effort") as HTMLSelectElement;
+    expect(effortSelect.value).toBe("medium"); // gpt-5.4's defaultEffort
+    expect(within(effortSelect).queryByText("매우 높음")).toBeNull(); // not in gpt-5.4's supportedEfforts
+
+    fireEvent.change(modelSelect, { target: { value: "gpt-5.5" } });
+    expect((screen.getByLabelText("effort") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
+  });
+
+  it("codex + no model selected ('' default) → the effort select is hidden entirely", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    expect(screen.queryByLabelText("effort")).toBeNull();
+  });
+
+  it("codex + codexModels null → the model select still lists the Claude `models` catalog (unchanged)", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
+    // the Claude static-fallback catalog includes Opus/Sonnet labels, not the codex catalog's displayNames
+    expect(within(modelSelect).getByText("Opus 4.8")).toBeInTheDocument();
+    expect(within(modelSelect).queryByText("GPT-5.5")).toBeNull();
+  });
+
+  it("claude provider (default) → the model select lists the Claude `models` catalog regardless of codexModels", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
+    expect(within(modelSelect).getByText("Opus 4.8")).toBeInTheDocument();
+    expect(within(modelSelect).queryByText("GPT-5.5")).toBeNull();
+  });
+
+  it("submit carries the selected codex model + its pre-selected effort", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("모델"), { target: { value: "gpt-5.4" } });
+
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "do it";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex", model: "gpt-5.4", effort: "medium" }));
   });
 });

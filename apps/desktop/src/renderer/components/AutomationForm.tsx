@@ -8,7 +8,7 @@ import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand } from "./PromptEditor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { PERMISSION_MODES, permLabel } from "./Composer.js";
-import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
+import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 
 // Comma-separated id string ↔ array. Drops empty tokens, and returns undefined when empty (= no filter).
@@ -31,6 +31,7 @@ export function AutomationForm(p: {
 }): JSX.Element {
   const t = useT();
   const models = useStore((s) => s.models); // live model list (static fallback when absent)
+  const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text-tolerant select fallback
   const init = p.job === "new" ? null : p.job;
   const [name, setName] = useState(init?.name ?? "");
   // UI edits only cron/slack ('once' is for the agent's own wake-up, so it's excluded from the list → cron fallback)
@@ -81,6 +82,17 @@ export function AutomationForm(p: {
   // Create/update is a real round-trip (the server validates cron) → reflect the saving state on Save (otherwise the user clicks twice)
   const [saving, setSaving] = useState(false);
 
+  // Codex model/effort catalog coupling (Task 4) — mirrors WorkerSpawnModal/NewSessionPage's derived-consts idiom.
+  // `codexModels` present (non-null) AND provider is codex → the model select sources from the catalog and the
+  // effort select is driven by the selected model's supportedEfforts (falling back to the generic EFFORTS
+  // vocabulary when the model is unknown to the catalog, e.g. an out-of-list saved override).
+  const isCodexList = provider === "codex" && codexModels != null;
+  const codexEfforts = isCodexList ? codexEffortsFor(model, codexModels) : null;
+  const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
+  // "effort-supported" gate: for codex+list a model is always effort-supported (catalog value or the EFFORTS
+  // fallback is never empty); otherwise fall back to the generic Claude-oriented check (hides only for haiku).
+  const modelEffortSupported = (m: string): boolean => (isCodexList ? true : effortSupported(m));
+
   const submit = async () => {
     setSubmitError(null);
     const ch = parseIds(channels);
@@ -101,7 +113,7 @@ export function AutomationForm(p: {
 
     // spec C.5: assemble model/effort/permissionMode/maxTurns
     const resolvedModel = model || null;
-    const resolvedEffort = resolvedModel && effortSupported(resolvedModel) ? effort : null;
+    const resolvedEffort = resolvedModel && modelEffortSupported(resolvedModel) ? effort : null;
     const resolvedPermissionMode = permissionMode || null;
     // maxTurns: an integer valid only for the worker action; master is always null
     const resolvedMaxTurns = actionKind === "worker" && maxTurns.trim() ? parseInt(maxTurns, 10) : null;
@@ -287,24 +299,45 @@ export function AutomationForm(p: {
               )}
             </div>
 
-            {/* Model select */}
+            {/* Model select — codex + a fetched catalog sources options from codexModels instead of the Claude
+                `models` list (Task 4); claude or an unfetched catalog (null) keeps today's Claude-list select,
+                which already tolerates a free-text/unknown id as a raw extra <option>. Selecting a codex model
+                also pre-selects its catalog default effort (mirrors WorkerSpawnModal/NewSessionPage). */}
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-fg-dim">{t("automationForm.model")}</span>
               <Select
                 size="md"
                 className="w-full"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => {
+                  const nm = e.target.value;
+                  setModel(nm);
+                  if (isCodexList) {
+                    const de = codexDefaultEffort(nm, codexModels);
+                    if (de) setEffort(de);
+                  }
+                }}
               >
                 <option value="">{t("automationForm.modelDefaultOption")}</option>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
+                {isCodexList ? (
+                  <>
+                    {codexModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.displayName}</option>
+                    ))}
+                    {model && !codexModels.some((m) => m.id === model) && <option value={model}>{model}</option>}
+                  </>
+                ) : (
+                  models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))
+                )}
               </Select>
             </label>
 
-            {/* Effort select — shown only when a model is selected and effortSupported */}
-            {model && effortSupported(model) && (
+            {/* Effort select — shown only when a model is selected and effort-supported. Options are the codex
+                catalog's per-model efforts when codex+list (falling back to the generic EFFORTS vocabulary for
+                an out-of-list model), else the generic EFFORTS list. */}
+            {model && modelEffortSupported(model) && (
               <label className="flex flex-col gap-1">
                 <span className="text-[12px] text-fg-dim">{t("automationForm.effort")}</span>
                 <Select
@@ -313,7 +346,7 @@ export function AutomationForm(p: {
                   value={effort}
                   onChange={(e) => setEffort(e.target.value)}
                 >
-                  {EFFORTS.map((e) => (
+                  {effortOptions.map((e) => (
                     <option key={e} value={e}>{t(effortLabelKey(e))}</option>
                   ))}
                 </Select>

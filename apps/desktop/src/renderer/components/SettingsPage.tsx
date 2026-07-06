@@ -46,6 +46,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   // that a key was saved this session, driving the same "saved" placeholder idiom the slack token fields use.
   const [codexKeySaved, setCodexKeySaved] = useState(false);
   const models = useStore((s) => s.models); // live model list (initialized from the static fallback if none)
+  const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text fallback for the defaults below
 
   // Slack on/off toggle: the request is fire-and-forget from here, so between the click and the daemon's slack.status
   // event landing (prop change) the button showed no feedback at all (audit #53). `busy` covers that window; a fallback
@@ -382,10 +383,34 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     <Input value={f.codexBin ?? ""} placeholder="codex" onChange={(e) => setF({ ...f, codexBin: e.target.value })} />
                   </Field>
                   <Field label={t("settings.codexWorkerModel")} hint={t("settings.codexWorkerModelHint")}>
-                    <Input value={f.codexWorkerModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
+                    {codexModels != null ? (
+                      <Select value={f.codexWorkerModel ?? ""} onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })}>
+                        <option value="">{t("settings.codexModelDefaultOption")}</option>
+                        {codexModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.displayName}</option>
+                        ))}
+                        {f.codexWorkerModel && !codexModels.some((m) => m.id === f.codexWorkerModel) && (
+                          <option value={f.codexWorkerModel}>{f.codexWorkerModel}</option>
+                        )}
+                      </Select>
+                    ) : (
+                      <Input value={f.codexWorkerModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
+                    )}
                   </Field>
                   <Field label={t("settings.codexMasterModel")} hint={t("settings.codexMasterModelHint")}>
-                    <Input value={f.codexMasterModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
+                    {codexModels != null ? (
+                      <Select value={f.codexMasterModel ?? ""} onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })}>
+                        <option value="">{t("settings.codexModelDefaultOption")}</option>
+                        {codexModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.displayName}</option>
+                        ))}
+                        {f.codexMasterModel && !codexModels.some((m) => m.id === f.codexMasterModel) && (
+                          <option value={f.codexMasterModel}>{f.codexMasterModel}</option>
+                        )}
+                      </Select>
+                    ) : (
+                      <Input value={f.codexMasterModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
+                    )}
                   </Field>
                   <Field label={t("settings.codexTurnIdleTimeoutMs")} hint={t("settings.codexTurnIdleTimeoutMsHint")}>
                     <Input type="number" value={f.codexTurnIdleTimeoutMs ?? ""} placeholder="120000" onChange={(e) => setF({ ...f, codexTurnIdleTimeoutMs: e.target.value })} />

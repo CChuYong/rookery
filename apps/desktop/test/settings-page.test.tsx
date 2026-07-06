@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { SettingsPage } from "../src/renderer/components/SettingsPage.js";
+import { useStore } from "../src/renderer/store/store.js";
+import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 const base = {
   settings: { masterName: "rookery", masterModel: "m", workerModel: "w", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "x", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex", codexTurnIdleTimeoutMs: "120000", codexHandshakeTimeoutMs: "30000", slackProvider: "claude", workerCostBudgetUsd: "" },
@@ -143,6 +145,65 @@ describe("SettingsPage Codex tab", () => {
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexHandshakeTimeoutMs: "5000" }));
+  });
+});
+
+// ── Codex Model Picker Task 4: codexWorkerModel/codexMasterModel selects driven by codex.models.list ──
+const CODEX_MODELS: CodexModelInfo[] = [
+  { id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true },
+  { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
+];
+
+describe("SettingsPage Codex tab — model defaults as selects (Codex Model Picker Task 4)", () => {
+  beforeEach(() => {
+    useStore.setState({ codexModels: null }); // reset the singleton store before each test
+  });
+
+  it("codexModels seeded → codexWorkerModel/codexMasterModel render as <Select>s listing the catalog + the '' default option", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<SettingsPage {...base} />);
+    fireEvent.click(screen.getByText("Codex"));
+
+    const workerSelect = screen.getByLabelText(/Codex 워커 기본 모델/) as HTMLSelectElement;
+    const masterSelect = screen.getByLabelText(/Codex 마스터 기본 모델/) as HTMLSelectElement;
+    expect(workerSelect.tagName).toBe("SELECT");
+    expect(masterSelect.tagName).toBe("SELECT");
+    // both fixture defaults are "gpt-5.5" (a catalog id)
+    expect(workerSelect.value).toBe("gpt-5.5");
+    expect(masterSelect.value).toBe("gpt-5.5");
+    expect(within(workerSelect).getByText("GPT-5.4")).toBeInTheDocument();
+    expect(within(workerSelect).getByText("데몬 기본값 사용")).toBeInTheDocument(); // the "" default option
+  });
+
+  it("changing codexWorkerModel/codexMasterModel selects round-trips into the onSave(f) payload", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Codex"));
+
+    fireEvent.change(screen.getByLabelText(/Codex 워커 기본 모델/), { target: { value: "gpt-5.4" } });
+    fireEvent.change(screen.getByLabelText(/Codex 마스터 기본 모델/), { target: { value: "" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexWorkerModel: "gpt-5.4", codexMasterModel: "" }));
+  });
+
+  it("codexModels null → codexWorkerModel/codexMasterModel stay free-text <Input>s", () => {
+    render(<SettingsPage {...base} />);
+    fireEvent.click(screen.getByText("Codex"));
+    const workerField = screen.getByLabelText(/Codex 워커 기본 모델/);
+    const masterField = screen.getByLabelText(/Codex 마스터 기본 모델/);
+    expect(workerField.tagName).toBe("INPUT");
+    expect(masterField.tagName).toBe("INPUT");
+  });
+
+  it("an out-of-list saved value (e.g. gpt-preview) is preserved as a selectable option", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    render(<SettingsPage {...base} settings={{ ...base.settings, codexWorkerModel: "gpt-preview" }} />);
+    fireEvent.click(screen.getByText("Codex"));
+    const workerSelect = screen.getByLabelText(/Codex 워커 기본 모델/) as HTMLSelectElement;
+    expect(workerSelect.value).toBe("gpt-preview");
+    expect(within(workerSelect).getByText("gpt-preview")).toBeInTheDocument();
   });
 });
 
