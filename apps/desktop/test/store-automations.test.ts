@@ -14,6 +14,7 @@ describe("store automations", () => {
         effort: null,
         permissionMode: null,
         maxTurns: null,
+        costBudgetUsd: null,
         lastRunAt: null,
         lastStatus: null,
         lastError: null,

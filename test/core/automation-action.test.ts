@@ -20,7 +20,7 @@ function deps() {
 }
 const base = (over: Partial<Automation>): Automation => ({
   id: "a1", name: "n", enabled: true, trigger: { kind: "slack" }, action: { kind: "master", prompt: "x", cwd: "/w", sessionMode: "reuse" },
-  model: null, effort: null, permissionMode: null, maxTurns: null, nextRunAt: null, lastRunAt: null, lastStatus: null, lastError: null, createdAt: "t",
+  model: null, effort: null, permissionMode: null, maxTurns: null, costBudgetUsd: null, nextRunAt: null, lastRunAt: null, lastStatus: null, lastError: null, createdAt: "t",
   provider: "claude", ...over,
 });
 
@@ -195,5 +195,33 @@ describe("runAutomationAction", () => {
     const opts = h.runTurn.mock.calls[0]?.[1] as { permissionMode?: string; maxTurns?: number } | undefined;
     expect(opts?.permissionMode).toBeUndefined();
     expect(opts?.maxTurns).toBeUndefined();
+  });
+
+  it("master: threads costBudgetUsd to runTurn opts", async () => {
+    const h = deps();
+    const a = base({ costBudgetUsd: 8.25, action: { kind: "master", prompt: "do it", cwd: "/w", sessionMode: "reuse" } });
+    await runAutomationAction(a, {}, h.d);
+    const opts = h.runTurn.mock.calls[0]?.[1] as { costBudgetUsd?: number } | undefined;
+    expect(opts?.costBudgetUsd).toBe(8.25);
+  });
+
+  it("worker: threads costBudgetUsd to fleet.spawn", async () => {
+    const h = deps();
+    const a = base({ costBudgetUsd: 15, action: { kind: "worker", repo: "app-api", task: "fix it" } });
+    await runAutomationAction(a, {}, h.d);
+    const spawnArg = h.spawn.mock.calls[0]?.[0] as { costBudgetUsd?: number } | undefined;
+    expect(spawnArg?.costBudgetUsd).toBe(15);
+  });
+
+  it("master/worker: null costBudgetUsd passes as undefined (settings default applies downstream)", async () => {
+    const h = deps();
+    await runAutomationAction(base({ costBudgetUsd: null, action: { kind: "master", prompt: "do it", cwd: "/w", sessionMode: "reuse" } }), {}, h.d);
+    const opts = h.runTurn.mock.calls[0]?.[1] as { costBudgetUsd?: number } | undefined;
+    expect(opts?.costBudgetUsd).toBeUndefined();
+
+    const h2 = deps();
+    await runAutomationAction(base({ costBudgetUsd: null, action: { kind: "worker", repo: "app-api", task: "fix it" } }), {}, h2.d);
+    const spawnArg = h2.spawn.mock.calls[0]?.[0] as { costBudgetUsd?: number } | undefined;
+    expect(spawnArg?.costBudgetUsd).toBeUndefined();
   });
 });

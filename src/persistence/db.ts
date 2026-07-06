@@ -170,6 +170,12 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     // (rehydrate→materialize restores it from this column).
     db.exec("ALTER TABLE workers ADD COLUMN cost_budget_usd REAL");
   },
+  (db) => {
+    // automations.cost_budget_usd: per-automation override of the lifetime USD cost ceiling (mirrors
+    // automations.max_turns, which was already in the initial schema). NULL = unlimited/no override —
+    // the settings default (workerCostBudgetUsd) applies instead for worker actions.
+    db.exec("ALTER TABLE automations ADD COLUMN cost_budget_usd REAL");
+  },
 ];
 
 export function currentVersion(db: DB): number {

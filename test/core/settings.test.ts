@@ -33,6 +33,7 @@ describe("Settings", () => {
       workerSlackRelayChannel: "",
       slackLocale: "ko",
       slackProvider: "claude",
+      workerCostBudgetUsd: "",
     });
   });
 
@@ -259,6 +260,26 @@ describe("Settings", () => {
     s.apply({ workerSlackRelayEnabled: "1", workerSlackRelayChannel: "C0123" });
     expect(s.all().workerSlackRelayEnabled).toBe("1");
     expect(s.all().workerSlackRelayChannel).toBe("C0123");
+  });
+
+  it("workerCostBudgetUsd: default null (off), overridable, malformed/zero/negative coerce to null, clears to null", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    expect(s.all().workerCostBudgetUsd).toBe("");
+    s.apply({ workerCostBudgetUsd: "12.5" });
+    expect(s.workerCostBudgetUsd()).toBe(12.5);
+    expect(s.all().workerCostBudgetUsd).toBe("12.5");
+    s.apply({ workerCostBudgetUsd: "0" }); // non-positive → off, unlike codexTurnIdleTimeoutMs's deliberate-0 semantics
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "-5" }); // negative → off
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "not-a-number" }); // malformed → off, never NaN
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    s.apply({ workerCostBudgetUsd: "7" });
+    expect(s.workerCostBudgetUsd()).toBe(7);
+    s.apply({ workerCostBudgetUsd: null }); // explicit clear → back to default (null/off)
+    expect(s.workerCostBudgetUsd()).toBeNull();
+    expect(s.all().workerCostBudgetUsd).toBe("");
   });
 
   it("defaultSessionCwd: raw is '' when unset (resolver falls back to process.cwd()), echoes the raw set value", () => {

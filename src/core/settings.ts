@@ -51,6 +51,7 @@ export interface SettingsValues {
   defaultSessionCwd: string; // default cwd for desktop sessions when none is picked (raw value, "" if unset; resolver falls back to process.cwd()). Not secret → echoed.
   workerSlackRelayEnabled: string; // mirror Slack-origin masters' worker activity to a channel ("1"/"0", default "0"). Echoed.
   workerSlackRelayChannel: string; // Slack channel ID for the worker relay ("" = off even if enabled). Echoed.
+  workerCostBudgetUsd: string; // default lifetime USD cost ceiling applied to spawned workers when a spawn has no explicit override (settings-only). "" = unlimited (off). Echoed.
 }
 
 // null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey/codexApiKey are outside SettingsValues (write-only secrets), so they're separate.
@@ -180,6 +181,18 @@ export class Settings {
     return this.repos.getSetting("workerSlackRelayChannel")?.trim() ?? "";
   }
 
+  // Default lifetime USD cost ceiling applied to a spawned worker when the spawn itself has no explicit
+  // costBudgetUsd override (server.ts subFactory: override ?? this default ?? unlimited). Default OFF
+  // (null = unlimited) — opt-in, unlike codexTurnIdleTimeoutMs/codexHandshakeTimeoutMs which always have a
+  // positive numeric default. Missing, empty, non-positive ("0"/negative), or malformed → null (fail safe:
+  // a bad value must never silently arm a stop-everything guard).
+  workerCostBudgetUsd(): number | null {
+    const raw = this.repos.getSetting("workerCostBudgetUsd");
+    if (!raw) return null;
+    const parsed = Number.parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
   // Slack bot/app tokens (secret). DB first, falling back to env (config) if absent — headless/CI compatible. write-only (not echoed).
   slackBotToken(): string | undefined {
     return this.repos.getSetting("slackBotToken") ?? this.config.slack.botToken;
@@ -255,6 +268,7 @@ export class Settings {
       defaultSessionCwd: this.defaultSessionCwdRaw(),
       workerSlackRelayEnabled: this.workerSlackRelayEnabled(),
       workerSlackRelayChannel: this.workerSlackRelayChannel(),
+      workerCostBudgetUsd: this.workerCostBudgetUsd() == null ? "" : String(this.workerCostBudgetUsd()),
     };
   }
 

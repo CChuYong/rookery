@@ -170,7 +170,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     removeCodexHome(config.home, id);
   };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
-  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; provider?: string }): WorkerLike =>
+  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; costBudgetUsd?: number; provider?: string }): WorkerLike =>
     new Worker({
       id: o.id,
       sessionId: o.sessionId,
@@ -184,6 +184,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         model: o.model ?? (o.provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
         effort: o.effort ?? settings.workerEffort(),
         permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns,
+        // explicit spawn override wins; else the settings default; else unlimited (null/0/negative/malformed → null via the getter).
+        costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
       },
       sdkSessionId: o.sdkSessionId ?? null,
     });

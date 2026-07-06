@@ -31,6 +31,8 @@ const automationInputSchema = z.object({
   effort: effortField,
   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).nullable().optional(),
   maxTurns: z.number().int().positive().nullable().optional(),
+  // Lifetime USD cost ceiling — the sibling runaway guard to maxTurns (see workers.cost_budget_usd). NULL = unlimited.
+  costBudgetUsd: z.number().positive().nullable().optional(),
   // Which AgentBackend runs sessions/workers created by this automation. Optional; defaults to "claude" on write
   // (see Repositories.createAutomation). Not nullable — an automation always has a definite backend.
   provider: z.enum(["claude", "codex"]).optional(),
@@ -92,7 +94,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.checkpoints"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("worker.restore"), reqId: z.string(), id: z.string(), seq: z.number() }),
   z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string() }),
-  z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
+  z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
   // Slash command/skill candidates. If workerId is given, probe within that live session; otherwise probe by cwd.
   z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional() }),
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
@@ -131,6 +133,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       defaultSessionCwd: z.string().nullable().optional(), // default cwd for desktop sessions when none is picked. Echoed.
       workerSlackRelayEnabled: z.string().optional(), // mirror worker activity to a Slack channel ("1"/"0"). Echoed.
       workerSlackRelayChannel: z.string().nullable().optional(), // Slack channel ID for the worker relay. Echoed.
+      workerCostBudgetUsd: z.string().nullable().optional(), // default lifetime USD cost ceiling for spawned workers ("" = unlimited). Echoed.
       slackBotToken: z.string().nullable().optional(), // write-only secret. Not echoed.
       slackAppToken: z.string().nullable().optional(), // write-only secret. Not echoed.
     }),
@@ -167,6 +170,7 @@ export interface WorkerRow {
   ticketUrl?: string | null;
   lastActivityTs?: number; // ms epoch of the worker's last message event (fleet.list snapshot); absent if it has none
   costUsd?: number;        // cumulative $ from the worker's last result event; absent if it never completed a turn
+  costBudgetUsd?: number | null; // lifetime USD cost ceiling (the sibling runaway guard to maxTurns); null/absent = unlimited
 }
 
 // Integration connection status (on-demand pull). github=gh auth, linear=key present + viewer verification.

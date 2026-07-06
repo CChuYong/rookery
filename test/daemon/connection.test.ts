@@ -50,7 +50,7 @@ type FleetOverride = {
   setPermissionMode?: (id: string, mode: string) => Promise<void>;
   transcript?: (id: string, sinceSeq?: number) => Array<{ seq: number; type: string; payload: unknown }>;
   send?: (id: string, text: string) => void;
-  spawn?: (input: { homeSessionId: string; repoPath: string; label: string; task: string; base?: string; permissionMode?: string }) => { id: string };
+  spawn?: (input: { homeSessionId: string; repoPath: string; label: string; task: string; base?: string; permissionMode?: string; costBudgetUsd?: number }) => { id: string };
 };
 
 function makeConn(sent: any[], overrides: { fleet?: FleetOverride }): Connection {
@@ -512,6 +512,27 @@ describe("Connection worker chat routes", () => {
     await conn.handleRaw(JSON.stringify({ type: "fleet.spawn", reqId: "sp", repo: "demo", task: "t", permissionMode: "plan" }));
     expect(calls[0]).toMatchObject({ permissionMode: "plan" });
     expect(sent.at(-1)).toMatchObject({ type: "fleet.spawn.result", reqId: "sp", id: "newsub" });
+  });
+
+  it("fleet.spawn threads costBudgetUsd into fleet.spawn", async () => {
+    const sent: any[] = [];
+    const calls: Array<{ costBudgetUsd?: number }> = [];
+    const fleet: FleetOverride = { spawn: (input) => { calls.push(input); return { id: "newsub" }; } };
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "repos.register", reqId: "r0", name: "demo", path: "/code/demo", description: "d" }));
+    await conn.handleRaw(JSON.stringify({ type: "fleet.spawn", reqId: "sp", repo: "demo", task: "t", costBudgetUsd: 3.5 }));
+    expect(calls[0]).toMatchObject({ costBudgetUsd: 3.5 });
+    expect(sent.at(-1)).toMatchObject({ type: "fleet.spawn.result", reqId: "sp", id: "newsub" });
+  });
+
+  it("fleet.spawn omits costBudgetUsd (undefined) when the client doesn't send it", async () => {
+    const sent: any[] = [];
+    const calls: Array<{ costBudgetUsd?: number }> = [];
+    const fleet: FleetOverride = { spawn: (input) => { calls.push(input); return { id: "newsub" }; } };
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "repos.register", reqId: "r0", name: "demo", path: "/code/demo", description: "d" }));
+    await conn.handleRaw(JSON.stringify({ type: "fleet.spawn", reqId: "sp", repo: "demo", task: "t" }));
+    expect(calls[0]?.costBudgetUsd).toBeUndefined();
   });
 
   it("fleet.spawn errors on an unknown repo", async () => {

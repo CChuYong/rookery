@@ -30,6 +30,14 @@ describe("protocol v2 client messages", () => {
     expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app", task: "do x" }).success).toBe(true);
   });
 
+  it("fleet.spawn: costBudgetUsd accepts a positive number, null, or omitted; rejects non-positive", () => {
+    expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app", costBudgetUsd: 5.5 }).success).toBe(true);
+    expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app", costBudgetUsd: null }).success).toBe(true);
+    expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app" }).success).toBe(true); // omitted
+    expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app", costBudgetUsd: 0 }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app", costBudgetUsd: -1 }).success).toBe(false);
+  });
+
   it("rejects unknown type", () => {
     expect(() => parseClientMessage(JSON.stringify({ type: "nope" }))).toThrow();
   });
@@ -110,6 +118,27 @@ describe("automation protocol messages", () => {
     expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, maxTurns: 0 } }))).toThrow();
     // maxTurns=-1 rejected
     expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, maxTurns: -1 } }))).toThrow();
+  });
+
+  it("automation.create: costBudgetUsd is accepted, validated, and optional (mirrors maxTurns)", () => {
+    const base = {
+      type: "automation.create", reqId: "q",
+      automation: {
+        name: "n",
+        trigger: { kind: "cron", cron: "0 3 * * *", timezone: "UTC" },
+        action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" },
+      },
+    };
+    // valid positive number
+    expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, costBudgetUsd: 12.5 } }))).not.toThrow();
+    // omitted (optional)
+    expect(() => parseClientMessage(JSON.stringify(base))).not.toThrow();
+    // null allowed (explicit clear)
+    expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, costBudgetUsd: null } }))).not.toThrow();
+    // 0 rejected (must be positive)
+    expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, costBudgetUsd: 0 } }))).toThrow();
+    // negative rejected
+    expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, costBudgetUsd: -5 } }))).toThrow();
   });
 
   it("automation.create: provider accepts claude|codex, is optional, and rejects a bad enum value", () => {

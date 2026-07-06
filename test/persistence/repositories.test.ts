@@ -296,7 +296,7 @@ describe("automations", () => {
   it("creates+reads a cron/master automation (disabled, no run, next null)", () => {
     const r = mk();
     const a = r.createAutomation("a1", cronMaster);
-    expect(a).toMatchObject({ id: "a1", name: "nightly", enabled: false, model: null, effort: null, nextRunAt: null, lastRunAt: null, createdAt: "2026-06-22T00:00:00.000Z" });
+    expect(a).toMatchObject({ id: "a1", name: "nightly", enabled: false, model: null, effort: null, costBudgetUsd: null, nextRunAt: null, lastRunAt: null, createdAt: "2026-06-22T00:00:00.000Z" });
     expect(a.trigger).toEqual({ kind: "cron", cron: "0 3 * * *", timezone: "Asia/Seoul" });
     expect(a.action).toEqual({ kind: "master", prompt: "summarize", cwd: "/w", sessionMode: "reuse" });
     expect(r.getAutomation("a1")).toEqual(a);
@@ -335,6 +335,23 @@ describe("automations", () => {
     r.updateAutomation(a.id, { permissionMode: null, maxTurns: null }); // explicit null → cleared
     expect(r.getAutomation(a.id)?.permissionMode).toBeNull();
     expect(r.getAutomation(a.id)?.maxTurns).toBeNull();
+  });
+
+  it("automation stores/reads costBudgetUsd (sibling of maxTurns), update is null-preserving", () => {
+    const r = mk();
+    const a = r.createAutomation("a1", { ...cronMaster, costBudgetUsd: 12.5 });
+    expect(r.getAutomation(a.id)?.costBudgetUsd).toBe(12.5);
+    r.updateAutomation(a.id, { name: "y" }); // undefined → preserved
+    expect(r.getAutomation(a.id)?.costBudgetUsd).toBe(12.5);
+    r.updateAutomation(a.id, { costBudgetUsd: null }); // explicit null → cleared
+    expect(r.getAutomation(a.id)?.costBudgetUsd).toBeNull();
+  });
+
+  it("automation: costBudgetUsd defaults to null when omitted at creation", () => {
+    const r = mk();
+    const a = r.createAutomation("a1", cronMaster);
+    expect(a.costBudgetUsd).toBeNull();
+    expect(r.getAutomation("a1")?.costBudgetUsd).toBeNull();
   });
 
   it("automation: provider round-trips ('codex' explicit, 'claude' default)", () => {

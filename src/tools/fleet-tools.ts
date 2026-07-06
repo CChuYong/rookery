@@ -52,7 +52,7 @@ export async function spawnWorkerImpl(
   fleet: FleetOrchestrator,
   repos: Repositories,
   homeSessionId: string,
-  args: { repo: string; task: string; base?: string; model?: string; effort?: string; provider?: "claude" | "codex"; notify?: boolean },
+  args: { repo: string; task: string; base?: string; model?: string; effort?: string; provider?: "claude" | "codex"; notify?: boolean; costBudgetUsd?: number },
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   const repo = repos.getRepoByName(args.repo);
   if (!repo) return errorText(`unknown repo '${args.repo}'. Register it first or call list_repos.`);
@@ -62,7 +62,7 @@ export async function spawnWorkerImpl(
   }
   try {
     // model/effort are only set when explicitly requested — otherwise undefined → fleet.spawn launches with the global defaults.
-    const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, effort: args.effort, provider: args.provider, notify: args.notify });
+    const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, effort: args.effort, provider: args.provider, notify: args.notify, costBudgetUsd: args.costBudgetUsd });
     return text(`Spawned ${id} in '${repo.name}' (worktree branch rookery/${id}).${args.notify ? " You'll be notified when it finishes." : ""}`);
   } catch (err) {
     return errorText(`spawn failed: ${String(err)}`);
@@ -90,6 +90,7 @@ export function fleetToolDefs(
       effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max) ONLY when the user explicitly requested it; otherwise omit to use the default."),
       provider: z.enum(["claude", "codex"]).optional().describe("Agent backend for this worker (default claude). codex = OpenAI Codex via app-server."),
       notify: z.boolean().optional().describe("When true, you are notified once this worker finishes this dispatch (goes idle) or fails — your turn can end and you'll be woken with the result. One-shot: re-arm with send_worker notify:true."),
+      costBudgetUsd: z.number().positive().optional().describe("Stop the worker once its cumulative cost reaches this many USD (runaway guard). Omit = unlimited."),
     },
     async (args) => spawnWorkerImpl(fleet, repos, homeSessionId, args),
   );

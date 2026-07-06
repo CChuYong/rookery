@@ -488,7 +488,7 @@ export class Connection {
         const home = this.sessions.getOrCreateByKey(UI_FLEET_SESSION_KEY, repo.path);
         const label = msg.label?.trim() || msg.task?.trim().slice(0, 40) || "worker";
         try {
-          const { id } = await this.fleet.spawn({ homeSessionId: home.id, repoPath: repo.path, label, task: msg.task, base: spawnBase, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, ticketKey: msg.ticketKey, ticketUrl: msg.ticketUrl, provider: msg.provider });
+          const { id } = await this.fleet.spawn({ homeSessionId: home.id, repoPath: repo.path, label, task: msg.task, base: spawnBase, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, ticketKey: msg.ticketKey, ticketUrl: msg.ticketUrl, provider: msg.provider, costBudgetUsd: msg.costBudgetUsd ?? undefined });
           this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
         } catch (err) {
           this.reply({ type: "error", message: `fleet.spawn: ${String(err)}`, reqId: msg.reqId });

@@ -40,6 +40,26 @@ describe("fleet tools", () => {
     expect(workers).toHaveLength(1);
     expect(workers[0]!.provider).toBe("codex");
   });
+
+  it("spawn_worker's costBudgetUsd param reaches fleet.spawn and persists on the worker row", async () => {
+    const { repos, fo } = fleet();
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const out = await spawnWorkerImpl(fo, repos, "s1", { repo: "app", task: "do it", costBudgetUsd: 7.5 });
+    await fo.waitAllSettled();
+    expect(out.isError).toBeFalsy();
+    const workers = repos.listAllWorkers();
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.cost_budget_usd).toBe(7.5);
+  });
+
+  it("spawn_worker omits costBudgetUsd (unlimited) when not provided", async () => {
+    const { repos, fo } = fleet();
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    await spawnWorkerImpl(fo, repos, "s1", { repo: "app", task: "do it" });
+    await fo.waitAllSettled();
+    const workers = repos.listAllWorkers();
+    expect(workers[0]!.cost_budget_usd).toBeNull();
+  });
 });
 
 describe("formatTranscript", () => {
