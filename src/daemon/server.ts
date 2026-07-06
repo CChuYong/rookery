@@ -464,16 +464,22 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     usageCollector.stop();
     scheduler.stop();
     clearInterval(heartbeat);
-    // Destroy sockets immediately instead of a graceful close (ensures the close() Promise doesn't wait forever).
+    await slack.stop(); // stop accepting new Slack-triggered turns before draining the in-flight ones
+    // Finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master turns.
+    // Otherwise writing to a closed DB raises a 'database is not open' unhandled rejection. Crucially this
+    // runs BEFORE the http-server teardown below (finding [15]): a codex master turn reaches its in-process
+    // tools over the MCP bridge mounted on THIS http server, so the bridge must stay reachable for the
+    // drain grace window — otherwise an in-flight codex turn loses tool connectivity mid-tool-call, hangs
+    // on its idle watchdog until the drain times out, and its late persistence then races db.close(). A
+    // Claude master turn (in-process SDK MCP) doesn't need the http server, so this ordering only helps.
+    await fleet.close(5000);
+    await sessions.drain(5000);
+    // Now tear down the transport. Destroy sockets immediately instead of a graceful close (ensures the
+    // close() Promise doesn't wait forever), then the WS server, then the http server (and its bridge).
     for (const ws of wss.clients) ws.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
     httpServer.closeAllConnections?.(); // Node 18.2+: forcibly close any remaining keep-alive connections
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-    await slack.stop();
-    // Finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master turns.
-    // Otherwise writing to a closed DB raises a 'database is not open' unhandled rejection.
-    await fleet.close(5000);
-    await sessions.drain(5000);
     db.close();
     lock?.release();
   };
