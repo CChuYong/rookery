@@ -15,6 +15,15 @@ const RATES: Record<string, { input: number; cachedInput: number; output: number
   "gpt-5.4-nano": { input: 0.2, cachedInput: 0.02, output: 1.25 },
 };
 
+// Whether `model` has a pricing entry (finding [18]). The desktop model picker is driven by the live
+// app-server model/list catalog, which is NOT restricted to RATES keys, so a user can select a model
+// absent from the table — turnCostUsd then bills it as $0, silently neutering cost metrics and the
+// costBudgetUsd runaway guard (the sole codex runaway guard, since the per-send maxTurns cap is inert on
+// codex). Callers warn once on a false result so the blind spot is visible instead of silent.
+export function isRatedModel(model: string): boolean {
+  return Object.prototype.hasOwnProperty.call(RATES, model);
+}
+
 export function turnCostUsd(model: string, usage: CodexTokenUsageBreakdown | undefined): number {
   const rate = RATES[model];
   if (!rate || !usage) return 0;

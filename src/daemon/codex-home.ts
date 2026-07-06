@@ -86,8 +86,16 @@ export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: st
   const src = path.join(rookeryHome, "codex-homes", sourceSessionId, "sessions");
   if (!fs.existsSync(src)) return;
   const dst = path.join(rookeryHome, "codex-homes", newSessionId, "sessions");
-  fs.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 });
-  fs.cpSync(src, dst, { recursive: true });
+  // Best-effort, never throws (finding [21]): mkdirSync/cpSync can fail (ENOSPC, EACCES on a rollout
+  // file, or the source home ripped out mid-copy by a concurrent session.delete). This runs AFTER the
+  // ephemeral fork child already succeeded, so a copy failure must degrade to "fork without prior
+  // context" — matching this function's documented contract above — not fail the whole fork.
+  try {
+    fs.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 });
+    fs.cpSync(src, dst, { recursive: true });
+  } catch {
+    /* best-effort — the fork still runs, just without the source's conversation context */
+  }
 }
 
 // Best-effort cleanup on session delete (item 6) — never throws. Removes the whole per-session

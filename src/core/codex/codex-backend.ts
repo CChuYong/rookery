@@ -4,7 +4,11 @@ import { CodexClient } from "./codex-client.js";
 import type { CodexSpawn } from "./codex-transport.js";
 import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
-import { turnCostUsd } from "./codex-pricing.js";
+import { turnCostUsd, isRatedModel } from "./codex-pricing.js";
+
+// Models billed at $0 because they have no pricing entry — warned once per process so the daemon log
+// surfaces the cost/budget blind spot (finding [18]) without spamming a line every turn.
+const warnedUnratedModels = new Set<string>();
 
 export interface CodexBackendDeps {
   spawn: CodexSpawn;
@@ -550,6 +554,14 @@ abstract class CodexSessionBase implements AgentStream {
       this.disarmIdleWatchdog(); // the turn is over — no more silence to guard against until the NEXT turn/start
       if (turn?.status === "failed" && turn.error?.message) {
         this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexError", params: { message: turn.error.message }, text: t(DEFAULT_LOCALE, "notice.codexError", { message: turn.error.message }) } });
+      }
+      // Surface the $0/inert-budget blind spot once per model (finding [18]): a model the picker offered
+      // from the live catalog but that has no RATES entry bills as $0, so cumCostUsd never grows and the
+      // costBudgetUsd guard — the sole codex runaway guard, since the per-send maxTurns cap is inert on
+      // codex — can never trip. A daemon-log line makes that visible instead of silent.
+      if (!isRatedModel(this.billedModel) && !warnedUnratedModels.has(this.billedModel)) {
+        warnedUnratedModels.add(this.billedModel);
+        console.warn(`[codex] no pricing entry for model "${this.billedModel}" — turn cost recorded as $0; the costBudgetUsd guard is inert for it`);
       }
       const subtype = turn?.status === "failed" ? "error" : turn?.status === "interrupted" ? "interrupted" : "success";
       this.channel.push({

@@ -204,6 +204,22 @@ describe("seedCodexHomeFromSource", () => {
       fs.rmSync(rookeryHome, { recursive: true, force: true });
     }
   });
+
+  it("swallows a copy/mkdir failure (never throws) — honours its documented best-effort contract (finding [21])", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      // Source has a real sessions/ tree so we get past the existsSync(src) guard...
+      const srcSessions = path.join(rookeryHome, "codex-homes", "src-1", "sessions");
+      fs.mkdirSync(srcSessions, { recursive: true });
+      fs.writeFileSync(path.join(srcSessions, "rollout.jsonl"), "{}\n");
+      // ...but block the destination: codex-homes/new-1 exists as a FILE, so mkdirSync(dirname(dst)) throws.
+      // Without the try/catch this propagates and fails the whole codex master fork after thread/fork already succeeded.
+      fs.writeFileSync(path.join(rookeryHome, "codex-homes", "new-1"), "not a directory");
+      expect(() => seedCodexHomeFromSource(rookeryHome, "src-1", "new-1")).not.toThrow();
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("removeCodexHome", () => {

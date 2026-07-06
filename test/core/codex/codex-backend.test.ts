@@ -61,6 +61,31 @@ describe("CodexBackend.openSession — translation", () => {
     expect(turns.map((t) => (t as { numTurns: number }).numTurns)).toEqual([1, 1, 1]);
   });
 
+  it("warns ONCE per process (daemon log) when billing a codex model absent from the pricing table (finding [18])", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
+      const q = new MessageQueue(); q.push("t1"); q.push("t2"); q.close(); // two turns → still one warning
+      await collect(b.openSession(q, baseOpts({ model: "gpt-unrated-xyz" })));
+      const hits = warn.mock.calls.filter((c) => String(c[0]).includes("gpt-unrated-xyz"));
+      expect(hits).toHaveLength(1); // the $0/inert-budget blind spot is surfaced, not silent
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not warn when billing a rated model", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
+      const q = new MessageQueue(); q.push("x"); q.close();
+      await collect(b.openSession(q, baseOpts({ model: "gpt-5.5" })));
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("gpt-5.5"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("maps thread start options: cwd, model, effort, approval/sandbox from permissionMode", async () => {
     const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }]);
     const q = new MessageQueue(); q.push("x"); q.close();
