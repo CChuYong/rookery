@@ -54,6 +54,8 @@ Design:
 
 Persistent child pool (item 5), automation-origin codex (P3), non-bypass codex masters, `plan` analog, nested-subagent panels, bearer-header bridge auth (0600 config.toml + loopback suffices).
 
+**Known limitation / P3:** codex master session **fork** is not supported yet. Track A moved codex master turns to a per-session `CODEX_HOME` where the thread's rollouts live, but the ephemeral fork child spawns on the SHARED home, so it can't see the source thread to fork it — `SessionManager.fork` now guards this with a clear thrown error instead of a confusing bridge/rollout failure. The proper fix (fork with the source's per-session home + relocate the forked rollout) is deferred to P3. Codex **worker** fork is unaffected (workers run on the shared home, not a per-session one).
+
 ## Testing
 
 - Track A: unit — `ensureSession` materializes CODEX_HOME (config.toml 0600 with the mcp block, auth symlink when no key, user-config preserved when present); CodexTurnStream spawns with `CODEX_HOME` env and no `-c` arg; delete removes the dir + releases the bridge. Live smoke (controller): a real codex master turn with the token ONLY in config.toml (grep the child argv = clean) still calls a bridge tool.

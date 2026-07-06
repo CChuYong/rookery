@@ -135,6 +135,11 @@ export class SessionManager {
     const label = row.label?.trim() || row.cwd.split(/[\\/]/).filter(Boolean).pop() || sessionId;
     const forkLabel = `${label} (fork)`;
     const provider = row.provider || "claude";
+    // P2.5: codex master turns run in a per-session CODEX_HOME whose rollouts the ephemeral fork
+    // child (shared home) can't see — forking a codex master is deferred to P3 (rollout relocation).
+    if (provider === "codex") {
+      throw new Error("forking a codex session is not supported yet (P3) — the per-session CODEX_HOME rollout cannot be relocated by the fork child");
+    }
     const { sessionId: forkedUuid } = await this.deps.forkSession(provider, row.sdk_session_id, { title: forkLabel });
     const id = this.idgen();
     // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.

@@ -215,7 +215,9 @@ describe("SessionManager", () => {
     expect(repos.getSession(orig.id)!.label).toBe("My session");
   });
 
-  it("fork() of a codex session calls forkSession('codex', ...) and the fork inherits the provider", async () => {
+  // P2.5 Track A moved codex master turns to a per-session CODEX_HOME, whose rollouts the ephemeral
+  // fork child (shared home) can't see — forking a codex master is guarded off until P3 (rollout relocation).
+  it("fork() of a codex session throws a clear not-yet-supported error and never calls forkSession", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
@@ -227,10 +229,8 @@ describe("SessionManager", () => {
     const orig = sm.create("/work/repo", { provider: "codex" }); // s0
     repos.setSdkSessionId(orig.id, "thread-1");
 
-    const forked = await sm.fork(orig.id); // s1
-
-    expect(forkCalls).toEqual([{ provider: "codex", id: "thread-1" }]);
-    expect(repos.getSession(forked.id)!.provider).toBe("codex"); // fork inherits the source's (codex) provider
+    await expect(sm.fork(orig.id)).rejects.toThrow(/codex.*not supported|not supported.*codex/i);
+    expect(forkCalls).toEqual([]); // never reaches the fork child
   });
 
   it("fork() throws when the source session never ran a turn (no sdk_session_id)", async () => {
