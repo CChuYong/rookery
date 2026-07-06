@@ -612,6 +612,26 @@ describe("Connection settings", () => {
     expect(sent.find((m) => m.reqId === "q2").commands).toEqual([{ name: "cwd-cmd", description: "for /r" }]);
   });
 
+  it("commands.list skips the Claude cwd probe for a codex session or worker (finding [6])", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/r" });
+    repos.createWorker({ id: "cx", sessionId: "s1", repoPath: "/r", label: "w", provider: "codex" });
+    const bus = new EventBus();
+    const fleet = { listCommands: async () => [] } as unknown as FleetOrchestrator;
+    let probed = false;
+    const catalog = { forCwd: async () => { probed = true; return [{ name: "review", description: "x" }]; } };
+    const sent: any[] = [];
+    const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
+    const conn = new Connection(socket, {} as unknown as SessionManager, bus, fleet, repos, undefined, undefined, catalog);
+
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1", workerId: "cx" })); // codex worker (provider from the DB row)
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q2", cwd: "/r", provider: "codex" })); // codex master (client provider hint)
+
+    expect(probed).toBe(false); // the Claude-SDK cwd probe is never run for codex
+    expect(sent.find((m) => m.reqId === "q1").commands).toEqual([]);
+    expect(sent.find((m) => m.reqId === "q2").commands).toEqual([]);
+  });
+
   it("commands.list falls back to the daemon cwd (process.cwd()) when neither cwd nor workerId is given (new session / skill)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();

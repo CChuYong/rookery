@@ -359,11 +359,17 @@ export function App(): JSX.Element {
   useEffect(() => {
     const c = client;
     if (s.daemon !== "up" || !c) return;
-    let msg: { type: "commands.list"; workerId?: string; cwd?: string } | null = null;
-    if (s.activeWorkerId) msg = { type: "commands.list", workerId: s.activeWorkerId };
-    else if (s.activeSessionId) {
-      const cwd = s.sessions.find((x) => x.id === s.activeSessionId)?.cwd;
-      if (cwd) msg = { type: "commands.list", cwd };
+    // Thread provider so the daemon skips the Claude-SDK cwd probe for codex sessions/workers (finding [6]):
+    // codex has no slash-command catalog, so a probe there is a dead, misleading affordance (and a wasted
+    // Claude query). The active worker/session provider is authoritative on the client side.
+    let msg: { type: "commands.list"; workerId?: string; cwd?: string; provider?: "claude" | "codex" } | null = null;
+    if (s.activeWorkerId) {
+      const provider = s.fleet[s.activeWorkerId]?.provider as "claude" | "codex" | undefined;
+      msg = { type: "commands.list", workerId: s.activeWorkerId, ...(provider ? { provider } : {}) };
+    } else if (s.activeSessionId) {
+      const sess = s.sessions.find((x) => x.id === s.activeSessionId);
+      const provider = sess?.provider as "claude" | "codex" | undefined;
+      if (sess?.cwd) msg = { type: "commands.list", cwd: sess.cwd, ...(provider ? { provider } : {}) };
     }
     if (!msg) { useStore.getState().setCommands([]); return; }
     let live = true; // prevent a late commands response from the previous context from overwriting when switching conversation panes

@@ -96,7 +96,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
   // Slash command/skill candidates. If workerId is given, probe within that live session; otherwise probe by cwd.
-  z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional() }),
+  z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
   z.object({ type: z.literal("models.list"), reqId: z.string() }),
   z.object({ type: z.literal("codex.models.list"), reqId: z.string() }),

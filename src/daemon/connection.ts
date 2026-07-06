@@ -434,7 +434,13 @@ export class Connection {
         // If there's an active worker, use its live session (including runtime-discovered skills); otherwise probe by cwd (cached).
         let commands: SlashCommandInfo[] = [];
         if (msg.workerId) commands = await this.fleet.listCommands(msg.workerId);
-        if (commands.length === 0) {
+        // Codex has no Claude slash-command catalog (its supportedCommands() is always []), so the cwd
+        // fallback below — a raw Claude SDK probe — must not run for a codex session/worker (finding [6]):
+        // it would spawn a Claude query codex can't use (and fails silently without Anthropic auth) and
+        // feed the composer dead commands. Provider comes from the worker's DB row, or the client's hint
+        // for a master session (the message carries no sessionId).
+        const provider = msg.provider ?? (msg.workerId ? this.repos.getWorker(msg.workerId)?.provider : undefined);
+        if (commands.length === 0 && provider !== "codex") {
           // cwd unspecified + not a worker (new session, no repo selected) → fall back to the daemon's default cwd. Since session.create
           // builds the session with process.cwd() when cwd is absent, show the same skills that session will actually have in the / autocomplete.
           const cwd = msg.cwd ?? (msg.workerId ? this.repos.getWorker(msg.workerId)?.worktree_path ?? undefined : (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()));
