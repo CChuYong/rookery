@@ -31,11 +31,14 @@ export function fakeCodexSpawn(
   spawn: CodexSpawn;
   requests: Array<{ method: string; params: Record<string, unknown> }>;
   responses: Array<{ id: number | string; result: unknown }>;
+  spawns: Array<{ env?: NodeJS.ProcessEnv; args?: string[] }>;
 } {
   const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   const responses: Array<{ id: number | string; result: unknown }> = [];
+  const spawns: Array<{ env?: NodeJS.ProcessEnv; args?: string[] }> = [];
   const threadId = opts.threadId ?? "th-1";
-  const spawn: CodexSpawn = () => {
+  const spawn: CodexSpawn = (spawnOpts) => {
+    spawns.push({ env: spawnOpts.env, args: spawnOpts.args });
     let lineCb: (l: string) => void = () => {};
     let exitCb: (i: { code: number | null; message?: string }) => void = () => {};
     let killed = false;
@@ -128,5 +131,5 @@ export function fakeCodexSpawn(
     };
     return transport;
   };
-  return { spawn, requests, responses };
+  return { spawn, requests, responses, spawns };
 }

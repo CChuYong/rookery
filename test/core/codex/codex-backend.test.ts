@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { CodexBackend } from "../../../src/core/codex/codex-backend.js";
 import { fakeCodexSpawn, type CodexStep } from "../../helpers/fake-codex.js";
-import type { AgentEvent, AgentStream } from "../../../src/core/agent-backend.js";
+import type { AgentEvent, AgentStream, ProviderToolDef } from "../../../src/core/agent-backend.js";
 import { MessageQueue } from "../../../src/core/message-queue.js";
 
 async function collect(stream: AgentStream): Promise<AgentEvent[]> {
@@ -95,9 +95,111 @@ describe("CodexBackend.openSession — translation", () => {
     await expect(collect(b.openSession(q, baseOpts()))).rejects.toThrow(/no auth/);
   });
 
-  it("startTurn (master path) throws a clean not-supported error", () => {
-    const { backend: b } = backend(() => []);
-    expect(() => b.startTurn("hi", baseOpts() as never)).toThrow(/not supported/);
+});
+
+describe("CodexBackend.startTurn", () => {
+  // P2 REPLACES the P1 stub (which always threw "not supported yet") with the real per-turn
+  // ephemeral-child implementation below — see docs/2026-07-06-p2-codex-master.md. The old stub
+  // test asserted exactly the behavior this task removes, so it is replaced wholesale rather than
+  // kept alongside (it would otherwise assert bypassPermissions no longer throws — a contradiction).
+
+  function fakeToolDef(name: string): ProviderToolDef {
+    return { name, description: name, inputSchema: {}, handler: async () => ({ content: [{ type: "text", text: "" }] }) };
+  }
+
+  function stubBridge() {
+    const calls: Array<{ key: string; defs: () => ProviderToolDef[] }> = [];
+    const bridge = {
+      ensureSession(key: string, defs: () => ProviderToolDef[]): { url: string } {
+        calls.push({ key, defs });
+        return { url: `http://127.0.0.1:8787/mcp/tok-1` };
+      },
+    };
+    return { bridge, calls };
+  }
+
+  it("fresh turn: thread/start carries cwd/model/approvalPolicy/sandbox + developerInstructions; spawn args carry the bridge url; events translate; stream ends after ONE turn", async () => {
+    const fake = fakeCodexSpawn(() => [
+      { kind: "agentMessage", text: "hi" },
+      { kind: "command", id: "c1", command: "ls" },
+      { kind: "turnEnd", durationMs: 10 },
+    ]);
+    const { bridge, calls } = stubBridge();
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", bridge });
+    const opts = baseOpts({
+      sessionKey: "sess-1",
+      toolDefs: { memory: [fakeToolDef("remember")], repos: [fakeToolDef("list_repos")] },
+      systemPromptAppend: "SYS-PROMPT-1",
+    });
+    const stream = b.startTurn("do the task", opts as never);
+    const events = await collect(stream);
+
+    const start = fake.requests.find((r) => r.method === "thread/start")!.params;
+    expect(start).toMatchObject({ cwd: "/wt", model: "gpt-5.5", approvalPolicy: "never", sandbox: "danger-full-access", developerInstructions: "SYS-PROMPT-1" });
+    expect(fake.spawns[0]!.args).toEqual(["-c", `mcp_servers.rookery.url="http://127.0.0.1:8787/mcp/tok-1"`]);
+
+    expect(events[0]).toEqual({ kind: "session_id", sessionId: "th-1" });
+    expect(events).toContainEqual({ kind: "message", role: "assistant", text: "hi", parentToolUseId: null });
+    expect(events).toContainEqual({ kind: "tool_use", id: "c1", name: "shell", input: { command: "ls", cwd: undefined }, parentToolUseId: null });
+    expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success", durationMs: 10 });
+
+    // Single-shot: exactly one turn/start ever sent — the stream ends itself, no queue involved.
+    expect(fake.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.key).toBe("sess-1");
+    expect(calls[0]!.defs().map((d) => d.name).sort()).toEqual(["list_repos", "remember"]);
+  });
+
+  it("resume turn: thread/resume with threadId + UPDATED developerInstructions; session_id emitted early", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const opts = baseOpts({ resume: "th-1", systemPromptAppend: "SYS-PROMPT-2 (turn 2)" });
+    const events = await collect(b.startTurn("continue please", opts as never));
+
+    const resume = fake.requests.find((r) => r.method === "thread/resume")!.params;
+    expect(resume).toMatchObject({ threadId: "th-1", developerInstructions: "SYS-PROMPT-2 (turn 2)" });
+    expect(fake.requests.some((r) => r.method === "thread/start")).toBe(false);
+    expect(events[0]).toEqual({ kind: "session_id", sessionId: "th-1" });
+  });
+
+  it("non-bypass permissionMode throws SYNCHRONOUSLY, before any child is spawned", () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    expect(() => b.startTurn("hi", baseOpts({ permissionMode: "default" }) as never)).toThrow(/bypassPermissions/);
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("no bridge deps → spawn args absent/empty; a tool-less master turn still completes", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // no bridge, no toolDefs/sessionKey
+    const events = await collect(b.startTurn("hi", baseOpts() as never));
+    expect(fake.spawns[0]!.args ?? []).toEqual([]);
+    expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
+  });
+
+  it("ensureSession is skipped when toolDefs/sessionKey are present but the bridge dep is not", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // deps.bridge absent
+    const opts = baseOpts({ sessionKey: "sess-2", toolDefs: { memory: [fakeToolDef("remember")] } });
+    await collect(b.startTurn("hi", opts as never));
+    expect(fake.spawns[0]!.args ?? []).toEqual([]);
+  });
+
+  it("interrupt mid-turn: turn/interrupt sent with the active turn id, turn_end subtype interrupted, stream ends", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "working…" }]); // turn never self-ends
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const stream = b.startTurn("long task", baseOpts() as never);
+    const seen: AgentEvent[] = [];
+    const done = (async () => { for await (const ev of stream) { seen.push(ev); if (ev.kind === "text_delta") release(); } })();
+    await gate;
+    await stream.interrupt();
+    await done;
+    const intr = fake.requests.find((r) => r.method === "turn/interrupt");
+    expect(intr?.params).toEqual({ threadId: "th-1", turnId: "turn-0" });
+    expect(seen.at(-1)).toMatchObject({ kind: "turn_end", subtype: "interrupted" });
   });
 });
 

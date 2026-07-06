@@ -10,7 +10,10 @@ export interface CodexTransport {
   kill(): void;
 }
 
-export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv }) => CodexTransport;
+// `args` are extra `codex app-server` CLI args appended after the subcommand — used by P2's
+// per-turn master child to pass `-c mcp_servers.rookery.url="..."` (process-level config IS
+// per-session config for a one-child-per-turn design; see docs/2026-07-06-p2-codex-master.md).
+export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv; args?: string[] }) => CodexTransport;
 
 // Real transport: one `codex app-server` child per session, newline-delimited JSON-RPC on stdio.
 // `bin` is a resolver (Settings-backed) so runtime changes apply to new sessions.
@@ -20,8 +23,8 @@ export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv }) => CodexTransport;
 // via the codexApiKey setting: server.ts redirects CODEX_HOME to <rookery home>/codex-home and
 // codex-backend.ts pump() provisions it once via account/login/start.
 export function realCodexSpawn(bin: () => string): CodexSpawn {
-  return ({ env }) => {
-    const child = nodeSpawn(bin(), ["app-server"], {
+  return ({ env, args }) => {
+    const child = nodeSpawn(bin(), ["app-server", ...(args ?? [])], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...env },
     });

@@ -1,4 +1,4 @@
-import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, MasterTurnOptions, SlashCommandInfo } from "../agent-backend.js";
+import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
 import type { CodexSpawn } from "./codex-transport.js";
@@ -11,9 +11,17 @@ export interface CodexBackendDeps {
   defaultModel: () => string; // Settings resolver — used when the session has no model (spawn override wins)
   apiKey?: () => string | undefined; // in-app codex API key (Settings resolver). Present → provision auth.json via RPC after handshake.
   env?: () => NodeJS.ProcessEnv | undefined; // extra env for the spawned child (Settings resolver, e.g. CODEX_HOME redirection)
+  // Daemon MCP bridge (P2 master turns): registers a rookery session's in-process tool defs and
+  // returns a plain URL string for the per-turn child's `-c mcp_servers.rookery.url=...` spawn arg.
+  // The shape here is deliberately a bare string (not the real McpBridge.ensureSession's
+  // `{url:(host,port)=>string}`) — core must not import daemon code, so server.ts pre-binds
+  // host/port before handing this backend its bridge dep (see docs/2026-07-06-p2-codex-master.md).
+  bridge?: { ensureSession(key: string, defs: () => ProviderToolDef[]): { url: string } };
 }
 
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
+
+type PermissionPair = ReturnType<typeof mapPermissionMode>;
 
 // Unbounded async push-queue bridging notification callbacks into the stream's pull loop.
 // The waiter is a {resolve, reject} pair: fail() must REJECT a parked consumer — resolving it
@@ -55,35 +63,43 @@ class EventChannel {
   }
 }
 
-class CodexStream implements AgentStream {
-  private readonly channel = new EventChannel();
-  private client: CodexClient | null = null;
-  private threadId: string | null = null;
-  private activeTurnId: string | null = null;
-  private turnDone: (() => void) | null = null;
-  private cumTurns = 0;
-  private lastContextTokens = 0;
-  private contextWindow = 0;
-  private overrideModel: string | null = null;
-  private overrideMode: string | null = null;
+// Shared per-session core reused by BOTH the worker's long-lived streaming-input stream
+// (CodexWorkerStream) and the master's single-turn ephemeral-child stream (CodexTurnStream):
+// client handshake + onClosed wiring, notification translation, server-request decline responder,
+// EventChannel, pricing accumulator/billedModel, session_id emission, and thread-start/resume param
+// assembly. Subclasses provide only the input strategy (queue-drain loop vs one turn/start) via `pump()`.
+abstract class CodexSessionBase implements AgentStream {
+  protected readonly channel = new EventChannel();
+  protected client: CodexClient | null = null;
+  protected threadId: string | null = null;
+  protected activeTurnId: string | null = null;
+  protected turnDone: (() => void) | null = null;
+  protected cumTurns = 0;
+  protected lastContextTokens = 0;
+  protected contextWindow = 0;
+  protected overrideModel: string | null = null;
+  protected overrideMode: string | null = null;
   private started = false;
+  protected clientClosed = false;
+  private resolveClientClosed: () => void = () => {};
+  protected clientClosedP: Promise<void> = new Promise((resolve) => { this.resolveClientClosed = resolve; });
+  private onAbort: () => void = () => {};
 
   // Per-turn billing accumulator: deltas of the thread-cumulative tokenUsage.total between
   // updates (multi-call turns sum every call — see docs/2026-07-06-p15-codex-followups.md Track B).
   // Fresh session: baseline zeros (thread totals start at 0). Resumed session: baseline null —
   // the FIRST update only sets it (its one call is uncounted; the resume response carries no baseline).
-  private prevTotal: CodexTokenUsageBreakdown | null;
-  private turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  protected prevTotal: CodexTokenUsageBreakdown | null;
+  protected turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   // Snapshotted once at construction, then re-snapshotted only when a turn/start actually carries a
   // model override — pricing must bill the model the THREAD was actually running under for that turn,
   // not whatever this.opts.model/defaultModel() resolve to NOW (mid-turn setModel, or a
   // codexWorkerModel settings change mid-session, must not misprice an already-billed turn).
-  private billedModel: string;
+  protected billedModel: string;
 
   constructor(
-    private readonly deps: CodexBackendDeps,
-    private readonly input: AsyncIterable<string>,
-    private readonly opts: AgentSessionOptions,
+    protected readonly deps: CodexBackendDeps,
+    protected readonly opts: AgentSessionOptions,
   ) {
     this.prevTotal = opts.resume ? null : { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };
     this.billedModel = this.opts.model || this.deps.defaultModel();
@@ -112,92 +128,100 @@ class CodexStream implements AgentStream {
     }
   }
 
-  private async pump(): Promise<void> {
+  // Subclass-specific input strategy: openSession's queue-drain loop, or startTurn's one turn/start.
+  protected abstract pump(): Promise<void>;
+
+  // Spawns the child, wires the client's close/notification/server-request handlers, completes the
+  // initialize handshake, and provisions the in-app API key if configured. `spawnArgs` carries the
+  // master turn's `-c mcp_servers.rookery.url=...` (absent for workers and tool-less master turns).
+  protected async openClient(spawnArgs?: string[]): Promise<CodexClient> {
     const abort = this.opts.abortController;
-    const transport = this.deps.spawn({ env: this.deps.env?.() });
+    const transport = this.deps.spawn({ env: this.deps.env?.(), args: spawnArgs });
     const client = new CodexClient(transport);
     this.client = client;
-    let clientClosed = false;
-    let resolveClientClosed: () => void = () => {};
-    const clientClosedP = new Promise<void>((resolve) => { resolveClientClosed = resolve; });
-    const onAbort = () => client.close();
-    abort.signal.addEventListener("abort", onAbort, { once: true });
-    try {
-      client.onClosed((err) => {
-        clientClosed = true;
-        if (this.turnDone) { const d = this.turnDone; this.turnDone = null; d(); }
-        // Unexpected child death fails the stream (worker → terminal error). A DELIBERATE close
-        // (stop/abort or pump teardown) must NOT end the channel here: pump's own settlement does —
-        // otherwise a pump error unwinding through finally{close()} is masked by an early clean end.
-        if (err && !abort.signal.aborted) this.channel.fail(err);
-        resolveClientClosed();
-      });
-      client.onNotification((method, params) => this.handleNotification(method, params));
-      client.onServerRequest((id, method) => this.handleServerRequest(id, method));
-      await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
-      client.notify("initialized", {});
+    this.clientClosedP = new Promise((resolve) => { this.resolveClientClosed = resolve; });
+    this.onAbort = () => client.close();
+    abort.signal.addEventListener("abort", this.onAbort, { once: true });
+    client.onClosed((err) => {
+      this.clientClosed = true;
+      if (this.turnDone) { const d = this.turnDone; this.turnDone = null; d(); }
+      // Unexpected child death fails the stream (worker → terminal error). A DELIBERATE close
+      // (stop/abort or pump teardown) must NOT end the channel here: pump's own settlement does —
+      // otherwise a pump error unwinding through finally{close()} is masked by an early clean end.
+      if (err && !abort.signal.aborted) this.channel.fail(err);
+      this.resolveClientClosed();
+    });
+    client.onNotification((method, params) => this.handleNotification(method, params));
+    client.onServerRequest((id, method) => this.handleServerRequest(id, method));
+    await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
+    client.notify("initialized", {});
 
-      // In-app API key: provision the (redirected) CODEX_HOME's auth.json once via RPC —
-      // the app-server ignores CODEX_API_KEY env (P1 finding). Subsequent spawns skip via account/read.
-      const apiKey = this.deps.apiKey?.();
-      if (apiKey) {
-        const acct = (await client.request("account/read", {})) as { requiresOpenaiAuth?: boolean } | null;
-        if (acct?.requiresOpenaiAuth) {
-          await client.request("account/login/start", { type: "apiKey", apiKey });
-        }
+    // In-app API key: provision the (redirected) CODEX_HOME's auth.json once via RPC —
+    // the app-server ignores CODEX_API_KEY env (P1 finding). Subsequent spawns skip via account/read.
+    const apiKey = this.deps.apiKey?.();
+    if (apiKey) {
+      const acct = (await client.request("account/read", {})) as { requiresOpenaiAuth?: boolean } | null;
+      if (acct?.requiresOpenaiAuth) {
+        await client.request("account/login/start", { type: "apiKey", apiKey });
       }
-
-      const mode = mapPermissionMode(this.opts.permissionMode);
-      const startParams: CodexThreadStartParams = {
-        cwd: this.opts.cwd,
-        model: this.opts.model || this.deps.defaultModel(),
-        approvalPolicy: mode.approvalPolicy,
-        sandbox: mode.sandbox,
-        ...(this.opts.systemPromptAppend ? { developerInstructions: this.opts.systemPromptAppend } : {}),
-      };
-      const res = (this.opts.resume
-        ? await client.request("thread/resume", { threadId: this.opts.resume, ...startParams })
-        : await client.request("thread/start", startParams)) as CodexThreadStartResponse;
-      const threadId = res.thread?.id ?? this.opts.resume;
-      if (!threadId) throw new Error("codex: thread/start returned no thread id");
-      this.threadId = threadId;
-      this.channel.push({ kind: "session_id", sessionId: threadId }); // early — port contract (resume after restart)
-
-      const inputIt = this.input[Symbol.asyncIterator]();
-      while (true) {
-        if (abort.signal.aborted || clientClosed) return;
-        // Race the next input against client close — otherwise a stop/abort while the queue is
-        // still open would leave pump parked on input forever and hang the stream's final await.
-        const r = await Promise.race([inputIt.next(), clientClosedP.then(() => null)]);
-        if (r === null || r.done) return;
-        const text = r.value;
-        const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
-        const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
-        const currentMode = mapPermissionMode(this.overrideMode ?? this.opts.permissionMode);
-        const effort = mapEffort(this.opts.effort);
-        // Always explicit: sandbox/approval identical regardless of path (spawn vs live override),
-        // and workspace-write is always network-on by rookery decision (spec Track E).
-        // The override actually changes the thread's model from THIS turn on — snapshot it for
-        // billing before the request so turn/completed prices against what actually ran.
-        if (this.overrideModel) this.billedModel = this.overrideModel;
-        const turnRes = (await client.request("turn/start", {
-          threadId,
-          input,
-          ...(this.overrideModel ? { model: this.overrideModel } : {}),
-          ...(effort ? { effort } : {}),
-          approvalPolicy: currentMode.approvalPolicy,
-          sandboxPolicy: sandboxPolicyFor(currentMode.sandbox),
-        })) as { turn?: { id?: string } };
-        // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
-        // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
-        if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
-        await turnEnded; // resolves on turn/completed (any status) or client close
-      }
-    } finally {
-      abort.signal.removeEventListener("abort", onAbort);
-      client.close();
-      resolveClientClosed(); // safety: never leave the race parked even if onClosed didn't fire
     }
+    return client;
+  }
+
+  // Symmetric teardown for openClient(): removes the abort listener, closes the client (idempotent
+  // via CodexClient's own `closed` guard), and releases anything still parked on clientClosedP
+  // (safety net in case onClosed never fired). Always called from pump()'s outer finally.
+  protected teardownClient(): void {
+    this.opts.abortController.signal.removeEventListener("abort", this.onAbort);
+    this.client?.close();
+    this.resolveClientClosed();
+  }
+
+  // thread/start (fresh) or thread/resume (opts.resume set) — same param assembly either way,
+  // including developerInstructions when the caller passes system-prompt text (workers rarely do;
+  // master turns always do — buildSystemPrompt() changes every turn, see
+  // docs/2026-07-06-p2-codex-master.md). Emits session_id EARLY, before any turn runs (port
+  // contract: resume must be possible even if the turn never completes).
+  protected async startOrResumeThread(client: CodexClient, mode: PermissionPair, developerInstructions?: string): Promise<string> {
+    const startParams: CodexThreadStartParams = {
+      cwd: this.opts.cwd,
+      model: this.opts.model || this.deps.defaultModel(),
+      approvalPolicy: mode.approvalPolicy,
+      sandbox: mode.sandbox,
+      ...(developerInstructions ? { developerInstructions } : {}),
+    };
+    const res = (this.opts.resume
+      ? await client.request("thread/resume", { threadId: this.opts.resume, ...startParams })
+      : await client.request("thread/start", startParams)) as CodexThreadStartResponse;
+    const threadId = res.thread?.id ?? this.opts.resume;
+    if (!threadId) throw new Error("codex: thread/start returned no thread id");
+    this.threadId = threadId;
+    this.channel.push({ kind: "session_id", sessionId: threadId }); // early — port contract (resume after restart)
+    return threadId;
+  }
+
+  // Sends ONE turn/start with `text` and awaits its turn/completed (any status) or a client close.
+  // `modelOverride` is applied verbatim to the request (worker: live setModel() override if any;
+  // master: always undefined — a master turn is single-shot, see CodexBackend.startTurn). The caller
+  // is responsible for snapshotting `billedModel` BEFORE calling this, so pricing bills the model the
+  // thread actually ran this turn under.
+  protected async sendTurn(client: CodexClient, threadId: string, text: string, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
+    const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
+    const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
+    // Always explicit: sandbox/approval identical regardless of path (spawn vs live override),
+    // and workspace-write is always network-on by rookery decision (spec Track E).
+    const turnRes = (await client.request("turn/start", {
+      threadId,
+      input,
+      ...(modelOverride ? { model: modelOverride } : {}),
+      ...(effort ? { effort } : {}),
+      approvalPolicy: mode.approvalPolicy,
+      sandboxPolicy: sandboxPolicyFor(mode.sandbox),
+    })) as { turn?: { id?: string } };
+    // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
+    // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
+    if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
+    await turnEnded; // resolves on turn/completed (any status) or client close
   }
 
   private handleNotification(method: string, params: unknown): void {
@@ -330,15 +354,85 @@ class CodexStream implements AgentStream {
   }
 
   async setModel(model: string): Promise<void> {
-    this.overrideModel = model; // applied on the next turn/start (per-turn override)
+    this.overrideModel = model; // applied on the next turn/start (per-turn override); a no-op on a
+    // single-shot master turn (CodexTurnStream never reads it back — the next call is a NEW startTurn).
   }
 
   async setPermissionMode(mode: string): Promise<void> {
-    this.overrideMode = mode; // applied on the next turn/start (approvalPolicy + sandboxPolicy overrides)
+    this.overrideMode = mode; // same per-turn-override semantics as setModel above.
   }
 
   async supportedCommands(): Promise<SlashCommandInfo[]> {
-    return []; // Codex has no slash-command catalog surface we expose in P1
+    return []; // Codex has no slash-command catalog surface we expose in P1/P2
+  }
+}
+
+// Worker path (P1): a long-lived streaming-input session — many turns drained from `input` over one
+// child process's lifetime.
+class CodexWorkerStream extends CodexSessionBase {
+  constructor(
+    deps: CodexBackendDeps,
+    private readonly input: AsyncIterable<string>,
+    opts: AgentSessionOptions,
+  ) {
+    super(deps, opts);
+  }
+
+  protected async pump(): Promise<void> {
+    const abort = this.opts.abortController;
+    try {
+      const client = await this.openClient();
+      const mode = mapPermissionMode(this.opts.permissionMode);
+      const threadId = await this.startOrResumeThread(client, mode, this.opts.systemPromptAppend);
+
+      const inputIt = this.input[Symbol.asyncIterator]();
+      while (true) {
+        if (abort.signal.aborted || this.clientClosed) return;
+        // Race the next input against client close — otherwise a stop/abort while the queue is
+        // still open would leave pump parked on input forever and hang the stream's final await.
+        const r = await Promise.race([inputIt.next(), this.clientClosedP.then(() => null)]);
+        if (r === null || r.done) return;
+        const text = r.value;
+        const currentMode = mapPermissionMode(this.overrideMode ?? this.opts.permissionMode);
+        const effort = mapEffort(this.opts.effort);
+        // The override actually changes the thread's model from THIS turn on — snapshot it for
+        // billing before the request so turn/completed prices against what actually ran.
+        if (this.overrideModel) this.billedModel = this.overrideModel;
+        await this.sendTurn(client, threadId, text, currentMode, effort, this.overrideModel ?? undefined);
+      }
+    } finally {
+      this.teardownClient();
+    }
+  }
+}
+
+// Master path (P2): a single-turn ephemeral child — spawn, thread/start-or-resume with fresh
+// developerInstructions, ONE turn/start, await completion, then the stream ends (pump() returns and
+// [Symbol.asyncIterator]'s wrapper closes the channel). See CodexBackend.startTurn for the
+// bypassPermissions guard and bridge wiring that happen BEFORE this stream is even constructed.
+class CodexTurnStream extends CodexSessionBase {
+  constructor(
+    deps: CodexBackendDeps,
+    private readonly prompt: string,
+    opts: MasterTurnOptions,
+    private readonly spawnArgs: string[] | undefined,
+  ) {
+    super(deps, opts);
+  }
+
+  protected async pump(): Promise<void> {
+    try {
+      // Fixed for the whole (single) turn — no live setPermissionMode influence, matching the
+      // spec's "model override N/A" note: a master turn is single-shot, overrides land on the
+      // NEXT startTurn() call's opts instead.
+      const mode = mapPermissionMode(this.opts.permissionMode);
+      const client = await this.openClient(this.spawnArgs);
+      const threadId = await this.startOrResumeThread(client, mode, this.opts.systemPromptAppend);
+      const effort = mapEffort(this.opts.effort);
+      await this.sendTurn(client, threadId, this.prompt, mode, effort, undefined);
+    } finally {
+      this.teardownClient();
+    }
   }
 }
 
@@ -346,11 +440,24 @@ export class CodexBackend implements AgentBackend {
   constructor(private readonly deps: CodexBackendDeps) {}
 
   openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
-    return new CodexStream(this.deps, input, opts);
+    return new CodexWorkerStream(this.deps, input, opts);
   }
 
-  startTurn(_prompt: string, _opts: MasterTurnOptions): AgentStream {
-    throw new Error("Codex master sessions are not supported yet (P1 is worker-only; see docs/2026-07-06-p1-codex-worker-backend.md)");
+  // Per-turn ephemeral child (P2 — docs/2026-07-06-p2-codex-master.md). Rejects SYNCHRONOUSLY for
+  // restricted sandboxes: they silently block the turn-scoped MCP bridge call rather than erroring
+  // (spike finding #2), so this is the only place that footgun can be caught cleanly.
+  startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
+    const mode = mapPermissionMode(opts.permissionMode);
+    if (mode.sandbox !== "danger-full-access") {
+      throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");
+    }
+    let spawnArgs: string[] | undefined;
+    if (opts.sessionKey && opts.toolDefs && this.deps.bridge) {
+      const flattened = Object.values(opts.toolDefs).flat();
+      const { url } = this.deps.bridge.ensureSession(opts.sessionKey, () => flattened);
+      spawnArgs = ["-c", `mcp_servers.rookery.url="${url}"`];
+    }
+    return new CodexTurnStream(this.deps, prompt, opts, spawnArgs);
   }
 
   private static readonly FORK_TIMEOUT_MS = 15_000;
