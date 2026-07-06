@@ -1,5 +1,7 @@
 # 2026-07-06 — Cost budget guard (spec)
 
+> **Status (2026-07-06): implemented.** Worker stop / master warn at `cumCostUsd >= costBudgetUsd`; per-spawn (`spawn_worker`/`fleet.spawn`) / per-automation / `workerCostBudgetUsd` settings-default overrides; all 3 desktop fields + i18n ko+en. Default OFF. Lifetime TURN cap still future.
+
 Closes the long-standing "no cost/turn budget guard" gap (flagged since the 2026-06-22 production-readiness review; the docs promise "Runaway control (cost/turn budgets) will be introduced separately later"). Especially load-bearing now that automations can spawn **codex** masters/workers unattended (P3).
 
 ## Design: `costBudgetUsd` — a LIFETIME USD ceiling, sibling of `maxTurns`
