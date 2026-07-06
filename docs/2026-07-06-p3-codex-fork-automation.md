@@ -1,5 +1,7 @@
 # 2026-07-06 — P3: codex master fork + automation-origin codex (spec)
 
+> Status: **implemented 2026-07-06.** Live smoke (controller): a real codex master session ran a turn storing a fact, was forked via `SessionManager.fork` → the fork's `CODEX_HOME` was seeded from the source session's `sessions/` rollout tree → a turn on the fork recalled the stored fact, confirming context was preserved through the real fork + seeding stack (not just the earlier spike script). The P2.5 fork guard (`docs/2026-07-06-p25-codex-hardening.md`'s "codex master session fork is not supported yet") is removed — fork now routes to the codex fork-and-seed path instead of throwing.
+
 The two bundled P3 backlog items (user pick): **#1 make codex master session fork actually work** (P2.5 guarded it with a not-supported error) + **#8 let automations run on codex** (deferred from P2.5). Both touch the session-provider seam.
 
 ## Track A — codex master fork (#1)
