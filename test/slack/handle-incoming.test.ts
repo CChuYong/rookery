@@ -21,10 +21,10 @@ function setup(opts: { allowed?: string; allowAll?: boolean; refuseReply?: boole
   const sessions = new SessionManager({
     repos,
     bus,
-    backend: new ClaudeBackend(opts.queryFn ?? fakeQuery([
+    backends: { claude: new ClaudeBackend(opts.queryFn ?? fakeQuery([
       { type: "assistant", text: "hi from master" },
       { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
-    ])),
+    ])) },
     masterModel: "mm",
     fleet,
   });

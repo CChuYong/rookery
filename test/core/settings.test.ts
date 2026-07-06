@@ -16,6 +16,7 @@ describe("Settings", () => {
       masterEffort: config.masterEffort,
       workerEffort: config.workerEffort,
       codexWorkerModel: "gpt-5.5",
+      codexMasterModel: "gpt-5.5",
       codexBin: "codex",
       slackCwd: process.cwd(),
       slackAllowedUsers: "",
@@ -42,6 +43,16 @@ describe("Settings", () => {
     s.apply({ codexWorkerModel: null, codexBin: null });
     expect(s.codexWorkerModel()).toBe("gpt-5.5");
     expect(s.codexBin()).toBe("codex");
+  });
+
+  it("codexMasterModel: settings-only default, overridable, clears to default", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.codexMasterModel()).toBe("gpt-5.5");
+    s.apply({ codexMasterModel: "gpt-5.5-mini" });
+    expect(s.codexMasterModel()).toBe("gpt-5.5-mini");
+    expect(s.all().codexMasterModel).toBe("gpt-5.5-mini");
+    s.apply({ codexMasterModel: null });
+    expect(s.codexMasterModel()).toBe("gpt-5.5");
   });
 
   it("slackLocale: defaults to ko, overridable, clears to default", () => {

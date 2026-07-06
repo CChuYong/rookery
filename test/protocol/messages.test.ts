@@ -132,6 +132,14 @@ describe("protocol", () => {
     });
   });
 
+  it("parses session.create with an optional provider (claude|codex); rejects anything else", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "session.create", provider: "codex" }))).toEqual({
+      type: "session.create",
+      provider: "codex",
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "session.create", provider: "gpt" }))).toThrow();
+  });
+
   it("parses session.open with an external key", () => {
     expect(parseClientMessage(JSON.stringify({ type: "session.open", key: "thread-42" }))).toEqual({
       type: "session.open",

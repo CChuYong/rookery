@@ -103,7 +103,10 @@ export class McpBridge {
     }
 
     // Never let a rejected promise escape the http layer as an unhandled rejection or a thrown error.
-    this.dispatch(req, res, entry).catch(() => {
+    this.dispatch(req, res, entry).catch((err: unknown) => {
+      // PICKUP (Task 1 review M1): log before responding — a swallowed dispatch error previously left
+      // no trace anywhere, which made a live codex-turn stall against the bridge nearly undiagnosable.
+      console.error("[mcp-bridge]", err);
       if (!res.headersSent) {
         res.statusCode = 500;
         res.end();

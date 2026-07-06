@@ -32,6 +32,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { Connection } from "./connection.js";
+import { McpBridge } from "./mcp-bridge.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -106,6 +107,14 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const git = new RealGitOps();
   const settings = new Settings(repos, config);
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
+  // Daemon-hosted MCP bridge (P2 — docs/2026-07-06-p2-codex-master.md): mounted on THIS http server (see
+  // below, before existing routing) so a codex master turn's per-turn ephemeral child can reach rookery's
+  // in-process tool servers (memory/repos/fleet/schedule) the way the Claude Agent SDK reaches them in-process.
+  const bridge = new McpBridge({});
+  // Actual bound port for bridge URLs: config.port may be 0 (OS-assigned ephemeral, common in tests) — the
+  // bridge closure below reads this var (not config.port) so it resolves the REAL listening port, updated
+  // once listen() resolves further down. Before that (there is no turn that early), it's config.port itself.
+  let boundPort = config.port;
   // Backend registry (P1): workers pick by provider; the master stays on Claude.
   // Codex auth = the user's ~/.codex/auth.json (`codex login`) by default — see codex-transport.ts AUTH NOTE.
   // P1.5: an in-app codexApiKey (settings) redirects the child to a rookery-managed CODEX_HOME and
@@ -119,6 +128,14 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (!settings.codexApiKey()) return undefined;
       fs.mkdirSync(codexHomeDir, { recursive: true });
       return { CODEX_HOME: codexHomeDir };
+    },
+    // Pre-binds host/port for the bridge's per-provider-agnostic ensureSession signature (CodexBackendDeps.bridge
+    // takes a plain `{url:string}` — core must not import daemon code, see codex-backend.ts's comment on `bridge`).
+    bridge: {
+      ensureSession: (key, defs) => {
+        const { url } = bridge.ensureSession(key, defs);
+        return { url: url(config.host, boundPort) };
+      },
     },
   });
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
@@ -161,8 +178,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const nameResolverHolder = makeHolder<SlackRefResolver>();
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
-  const sessions = new SessionManager({ repos, bus, backend, masterModel: () => settings.masterModel(), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
-    forkSession: (id, opts) => sdkForkSession(id, opts), // SDK session fork (eager) for SessionManager.fork
+  const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
+    // Fork routing by provider (mirrors fleet's forkSession above): codex forks via an ephemeral app-server child; claude keeps the SDK's own (eager) forkSession.
+    forkSession: (provider, id, opts) => (provider === "codex" ? codexBackend.forkSession(id) : sdkForkSession(id, opts)),
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.
@@ -297,6 +315,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   };
 
   const httpServer = http.createServer((req, res) => {
+    // MCP bridge FIRST: a codex master turn's per-turn child reaches its tools at /mcp/<token> on this same
+    // server. handleHttp returns false for anything outside its base path, so this falls through cleanly.
+    if (bridge.handleHttp(req, res)) return;
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
       return;
@@ -343,7 +364,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, (id) => bridge.release(id));
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });
@@ -404,6 +425,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     throw err;
   }
   const port = (httpServer.address() as AddressInfo).port;
+  boundPort = port; // resolve the codexBackend bridge closure to the REAL listening port (config.port may have been 0)
 
   return { port, token, close };
 }

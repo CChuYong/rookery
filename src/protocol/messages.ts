@@ -38,7 +38,7 @@ const automationInputSchema = z.object({
 });
 
 export const clientMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("session.create"), cwd: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("session.create"), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
@@ -106,6 +106,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       masterModel: z.string().nullable().optional(),
       workerModel: z.string().nullable().optional(),
       codexWorkerModel: z.string().nullable().optional(), // codex worker default model (settings-only)
+      codexMasterModel: z.string().nullable().optional(), // codex master default model (settings-only)
       codexBin: z.string().nullable().optional(), // codex CLI binary/path used to spawn `codex app-server`
       masterEffort: effortField,
       workerEffort: effortField,
@@ -170,7 +171,7 @@ export interface IntegrationsStatus {
 
 export type ServerMessage =
   | { type: "session.created"; sessionId: string; cwd: string; reqId?: string }
-  | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean }>; reqId?: string }
+  | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string }>; reqId?: string }
   | { type: "worker.list.result"; sessionId: string; reqId?: string; workers: WorkerRow[] }
   | { type: "event"; event: CoreEvent }
   | { type: "error"; message: string; reqId?: string }

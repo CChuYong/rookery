@@ -79,6 +79,17 @@ describe("Repositories", () => {
     expect(repos.getWorker("w2")!.provider).toBe("claude");
   });
 
+  it("createSession: provider round-trips ('codex' explicit, 'claude' default)", () => {
+    repos.createSession({ id: "s1", cwd: "/x", provider: "codex" });
+    expect(repos.getSession("s1")!.provider).toBe("codex");
+    repos.createSession({ id: "s2", cwd: "/x" });
+    expect(repos.getSession("s2")!.provider).toBe("claude");
+    // listSessionsWithActivity (SELECT s.*) surfaces it too — the row shape SessionManager.list() reads from.
+    const rows = repos.listSessionsWithActivity();
+    expect(rows.find((r) => r.id === "s1")!.provider).toBe("codex");
+    expect(rows.find((r) => r.id === "s2")!.provider).toBe("claude");
+  });
+
   it("persists worker max_turns and effort (restart budget guard, audit #9)", () => {
     const repos = new Repositories(openDb(":memory:"), () => "t");
     repos.createSession({ id: "s1", cwd: "/x" });

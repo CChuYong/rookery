@@ -35,7 +35,7 @@ describe("SessionManager makeCapabilities wiring", () => {
         : undefined;
     };
     let n = 0;
-    const sm = new SessionManager({ repos: b.repos, bus: b.bus, backend: b.backend, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
+    const sm = new SessionManager({ repos: b.repos, bus: b.bus, backends: { claude: b.backend }, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
     const s = sm.getOrCreateByKey("slack:T:C:1.0", "/work");
     await s.master.runTurn("hi");
     expect(seen).toContainEqual({ key: "slack:T:C:1.0", id: "s0" });
@@ -49,7 +49,7 @@ describe("SessionManager makeCapabilities wiring", () => {
     const makeCapabilities = (externalKey: string | null) =>
       externalKey?.startsWith("slack:") ? () => ({ systemPromptAppend: "CAP_MARKER" }) : undefined;
     let n = 0;
-    const sm = new SessionManager({ repos: b.repos, bus: b.bus, backend: b.backend, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
+    const sm = new SessionManager({ repos: b.repos, bus: b.bus, backends: { claude: b.backend }, masterModel: "mm", fleet: b.fleet, makeCapabilities }, () => `s${n++}`);
     const s = sm.create("/work"); // no externalKey (ui/cli)
     await s.master.runTurn("hi");
     const o = b.opts() as { systemPrompt?: { append?: string }; allowedTools?: string[] };

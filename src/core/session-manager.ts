@@ -20,14 +20,21 @@ export function deriveOrigin(externalKey: string | null): { origin: string; orig
   return { origin: "ui", originRef: null };
 }
 
-// Forks an SDK session into a new branch and returns the new session id (default = the SDK's forkSession). Injected at the composition root.
-export type ForkFn = (sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
+// Forks a session's SDK conversation into a new branch, routed by the SOURCE session's provider
+// (e.g. "claude" → SDK forkSession, "codex" → CodexBackend.forkSession — same routing shape as
+// FleetOrchestrator's forkSession, see fleet-orchestrator.ts). Injected at the composition root.
+export type ForkFn = (provider: string, sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
 
 export interface SessionManagerDeps {
   repos: Repositories;
   bus: EventBus;
-  backend: AgentBackend;
-  masterModel: string | (() => string); // string or runtime-settings resolver
+  // Backend registry (P2): a master session picks its AgentBackend by its persisted `provider` column.
+  // Key "claude" is REQUIRED (the default backend for pre-existing rows / unspecified provider).
+  backends: Record<string, AgentBackend>;
+  masterModel: string | (() => string); // string or runtime-settings resolver (claude default)
+  // Per-provider master model resolver overrides (e.g. { codex: () => settings.codexMasterModel() }).
+  // Falls back to masterModel when the session's provider has no entry here.
+  masterModelByProvider?: Record<string, string | (() => string)>;
   masterEffort?: string | (() => string); // global default effort resolver (defaults to "high" if unspecified)
   masterName?: string | (() => string); // bot name resolver (defaults to "rookery" if unspecified)
   fleet: FleetOrchestrator;
@@ -62,9 +69,14 @@ export class SessionManager {
   }
 
   private build(id: string, cwd: string, sdkSessionId: string | null, externalKey: string | null): Session {
-    const { repos, bus, backend, masterModel, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
+    const { repos, bus, backends, masterModel, masterModelByProvider, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
+    // Provider routing (P2, mirrors FleetOrchestrator's worker provider routing): pick the backend + the
+    // model resolver by the row's persisted provider (default "claude" for pre-existing/unspecified rows).
+    const provider = repos.getSession(id)?.provider || "claude";
+    const backend = backends[provider] ?? backends["claude"]!;
+    const modelForProvider = masterModelByProvider?.[provider] ?? masterModel;
     // Pass the resolver through as-is → MasterAgent resolves it per turn (Settings changes are reflected in cached sessions).
-    const model = typeof masterModel === "function" ? masterModel : () => masterModel;
+    const model = typeof modelForProvider === "function" ? modelForProvider : () => modelForProvider;
     const effort = typeof masterEffort === "function" ? masterEffort : () => masterEffort ?? "high";
     const name = typeof masterName === "function" ? masterName : () => masterName ?? "rookery";
     // Automation (unattended) sessions must never get a blocking approval/AskUserQuestion handler — a headless turn that
@@ -90,10 +102,12 @@ export class SessionManager {
   }
 
   // If opts.origin is explicit (automation fresh etc.) use it as-is, otherwise derive from the externalKey prefix.
-  create(cwd: string, opts: { externalKey?: string; origin?: string; originRef?: string | null } = {}): Session {
+  // opts.provider (P2): which AgentBackend this session runs on ("claude" | "codex"). Absent → repos.createSession
+  // defaults to "claude" (slack/automation creation paths never pass this — see task-5-brief.md non-goals).
+  create(cwd: string, opts: { externalKey?: string; origin?: string; originRef?: string | null; provider?: string } = {}): Session {
     const id = this.idgen();
     const src = opts.origin ? { origin: opts.origin, originRef: opts.originRef ?? null } : deriveOrigin(opts.externalKey ?? null);
-    this.deps.repos.createSession({ id, cwd, externalKey: opts.externalKey, origin: src.origin, originRef: src.originRef });
+    this.deps.repos.createSession({ id, cwd, externalKey: opts.externalKey, origin: src.origin, originRef: src.originRef, provider: opts.provider });
     return this.build(id, cwd, null, opts.externalKey ?? null);
   }
 
@@ -115,9 +129,11 @@ export class SessionManager {
     if (!this.deps.forkSession) throw new Error("session forking is not available");
     const label = row.label?.trim() || row.cwd.split(/[\\/]/).filter(Boolean).pop() || sessionId;
     const forkLabel = `${label} (fork)`;
-    const { sessionId: forkedUuid } = await this.deps.forkSession(row.sdk_session_id, { title: forkLabel });
+    const provider = row.provider || "claude";
+    const { sessionId: forkedUuid } = await this.deps.forkSession(provider, row.sdk_session_id, { title: forkLabel });
     const id = this.idgen();
-    this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null }); // a fork is always a plain ui session
+    // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
+    this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
     this.deps.repos.setSdkSessionId(id, forkedUuid);
     this.deps.repos.copySessionEvents(sessionId, id);
     this.deps.repos.setSessionLabel(id, forkLabel);
@@ -200,7 +216,7 @@ export class SessionManager {
     if (timer) clearTimeout(timer);
   }
 
-  list(): Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean }> {
+  list(): Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider: string }> {
     return this.deps.repos
       .listSessionsWithActivity()
       .filter((r) => r.external_key !== UI_FLEET_SESSION_KEY && r.external_key !== AUTOMATION_FLEET_SESSION_KEY) // hide UI/automation fleet container sessions
@@ -217,6 +233,7 @@ export class SessionManager {
           pinned: !!r.pinned_at, // pinned flag — UI splits into a 'pinned' section at the top
           origin: src.origin, // ui | slack | automation
           originRef: src.originRef, // slack=thread key, automation=automation id, ui=null
+          provider: r.provider || "claude", // which AgentBackend runs this master session ('claude' | 'codex')
         };
       });
   }

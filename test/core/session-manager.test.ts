@@ -21,7 +21,7 @@ function manager() {
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   let n = 0;
   const sm = new SessionManager(
-    { repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet },
+    { repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet },
     () => `s${n++}`,
   );
   return { repos, bus, sm };
@@ -40,7 +40,7 @@ function makeSM(sharedRepos?: Repositories) {
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   let n = 0;
   const sm = new SessionManager(
-    { repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet },
+    { repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet },
     () => `s${n++}`,
   );
   return { repos, bus, sm };
@@ -111,7 +111,7 @@ describe("SessionManager", () => {
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt" });
     let n = 0;
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet }, () => `s${n++}`);
     const s = sm.create("/work");
     const { id: wid } = await fleet.spawn({ homeSessionId: s.id, repoPath: "/code", label: "w", task: "t" });
     await fleet.waitAllSettled();
@@ -148,7 +148,7 @@ describe("SessionManager", () => {
       },
     };
     const sm = new SessionManager(
-      { repos, bus, backend: new ClaudeBackend(queryFn), masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
+      { repos, bus, backends: { claude: new ClaudeBackend(queryFn) }, masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
       () => "s0",
     );
     const session = sm.create("/x");
@@ -172,7 +172,7 @@ describe("SessionManager", () => {
       delete: async (_id: string) => { await gate; },
     };
     const sm = new SessionManager(
-      { repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
+      { repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet: fleetFake as unknown as FleetOrchestrator },
       () => "s0",
     );
     const session = sm.create("/x");
@@ -192,10 +192,10 @@ describe("SessionManager", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const forkCalls: Array<{ id: string; title?: string }> = [];
-    const forkSession = async (sdkSessionId: string, opts?: { title?: string }) => { forkCalls.push({ id: sdkSessionId, title: opts?.title }); return { sessionId: "forked-uuid" }; };
+    const forkCalls: Array<{ provider: string; id: string; title?: string }> = [];
+    const forkSession = async (provider: string, sdkSessionId: string, opts?: { title?: string }) => { forkCalls.push({ provider, id: sdkSessionId, title: opts?.title }); return { sessionId: "forked-uuid" }; };
     let n = 0;
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
     const orig = sm.create("/work/repo"); // s0
     repos.setSdkSessionId(orig.id, "orig-sdk");
     repos.setSessionLabel(orig.id, "My session");
@@ -203,15 +203,34 @@ describe("SessionManager", () => {
 
     const forked = await sm.fork(orig.id); // s1
 
-    expect(forkCalls).toEqual([{ id: "orig-sdk", title: "My session (fork)" }]); // forked from the orig SDK session
+    expect(forkCalls).toEqual([{ provider: "claude", id: "orig-sdk", title: "My session (fork)" }]); // forked from the orig SDK session, routed by its provider
     expect(forked.id).toBe("s1");
     const row = repos.getSession(forked.id)!;
     expect(row.sdk_session_id).toBe("forked-uuid");
     expect(row.label).toBe("My session (fork)");
     expect(row.origin).toBe("ui");
+    expect(row.provider).toBe("claude"); // fork inherits the source's provider
     expect(repos.listSessionEvents(forked.id)).toHaveLength(1); // transcript copied
     expect(repos.getSession(orig.id)!.sdk_session_id).toBe("orig-sdk"); // original untouched
     expect(repos.getSession(orig.id)!.label).toBe("My session");
+  });
+
+  it("fork() of a codex session calls forkSession('codex', ...) and the fork inherits the provider", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const forkCalls: Array<{ provider: string; id: string }> = [];
+    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, id: sdkSessionId }); return { sessionId: "forked-thread" }; };
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]), codex: fakeBackend([]) }, masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const orig = sm.create("/work/repo", { provider: "codex" }); // s0
+    repos.setSdkSessionId(orig.id, "thread-1");
+
+    const forked = await sm.fork(orig.id); // s1
+
+    expect(forkCalls).toEqual([{ provider: "codex", id: "thread-1" }]);
+    expect(repos.getSession(forked.id)!.provider).toBe("codex"); // fork inherits the source's (codex) provider
   });
 
   it("fork() throws when the source session never ran a turn (no sdk_session_id)", async () => {
@@ -219,9 +238,40 @@ describe("SessionManager", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet, forkSession: async () => ({ sessionId: "x" }) }, () => "s0");
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, forkSession: async () => ({ sessionId: "x" }) }, () => "s0");
     const orig = sm.create("/work");
     await expect(sm.fork(orig.id)).rejects.toThrow(/nothing to fork/);
+  });
+
+  it("build() routes provider→backend and resolves the provider's model via masterModelByProvider", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const claudeModels: string[] = [];
+    const codexModels: string[] = [];
+    const claudeBase = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-c" }]);
+    const claudeQueryFn = ((input: { options?: { model?: string } }) => { claudeModels.push(input.options?.model ?? ""); return (claudeBase as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
+    const codexBase = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-x" }]);
+    // A fake "codex" backend (built the same way as the claude one — the port is provider-agnostic) so this
+    // test exercises SessionManager's routing/resolver logic in isolation from the real CodexBackend.
+    const codexQueryFn = ((input: { options?: { model?: string } }) => { codexModels.push(input.options?.model ?? ""); return (codexBase as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
+    const sm = new SessionManager({
+      repos, bus,
+      backends: { claude: new ClaudeBackend(claudeQueryFn), codex: new ClaudeBackend(codexQueryFn) },
+      masterModel: "claude-default",
+      masterModelByProvider: { codex: () => "gpt-5.5-codex" },
+      fleet,
+    });
+    const claudeSession = sm.create("/c"); // default provider (unspecified → claude)
+    await claudeSession.master.runTurn("hi");
+    const codexSession = sm.create("/x", { provider: "codex" });
+    await codexSession.master.runTurn("hi");
+
+    expect(claudeModels).toEqual(["claude-default"]); // claude session → claude backend + the global model resolver
+    expect(codexModels).toEqual(["gpt-5.5-codex"]); // codex session → codex backend + its provider-specific resolver
+    expect(repos.getSession(claudeSession.id)!.provider).toBe("claude");
+    expect(repos.getSession(codexSession.id)!.provider).toBe("codex");
   });
 
   it("injects a session-bound canUseTool from makeCanUseTool(externalKey) into the master query (UX-13 wiring)", async () => {
@@ -235,7 +285,7 @@ describe("SessionManager", () => {
     const base = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk" }]);
     const queryFn = ((input: { options?: { canUseTool?: unknown } }) => { captured = input.options?.canUseTool; return (base as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
     const makeCanUseTool = (extKey: string | null, sid: string) => { calls.push([extKey, sid]); return extKey?.startsWith("slack:") ? sentinel : undefined; };
-    const sm = new SessionManager({ repos, bus, backend: new ClaudeBackend(queryFn), masterModel: "m", fleet, makeCanUseTool }, () => "s0");
+    const sm = new SessionManager({ repos, bus, backends: { claude: new ClaudeBackend(queryFn) }, masterModel: "m", fleet, makeCanUseTool }, () => "s0");
     const session = sm.getOrCreateByKey("slack:T1:C1:1.0", "/x");
     await session.master.runTurn("hi");
     expect(calls).toContainEqual(["slack:T1:C1:1.0", "s0"]); // called with the session's externalKey
@@ -255,7 +305,7 @@ describe("SessionManager", () => {
     const queryFn = ((input: { options?: { canUseTool?: unknown } }) => { captured = input.options?.canUseTool; return (base as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
     const makeCanUseTool = () => sentinel; // the registry returns a BLOCKING handler for ANY session
     let n = 0;
-    const sm = new SessionManager({ repos, bus, backend: new ClaudeBackend(queryFn), masterModel: "m", fleet, makeCanUseTool }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backends: { claude: new ClaudeBackend(queryFn) }, masterModel: "m", fleet, makeCanUseTool }, () => `s${n++}`);
     // fresh automation session: keyless but origin-tagged (deriveOrigin(externalKey) alone would miss it → must key on stored origin)
     const auto = sm.create("/au", { origin: "automation", originRef: "a1" });
     await auto.master.runTurn("do it");
@@ -299,7 +349,7 @@ describe("SessionManager", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "m", fleet });
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "m", fleet });
     sm.getOrCreateByKey(AUTOMATION_FLEET_SESSION_KEY, "/x");
     expect(sm.list().some((s) => s.cwd === "/x")).toBe(false);
   });

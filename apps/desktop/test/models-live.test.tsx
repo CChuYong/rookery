@@ -5,7 +5,7 @@ import { MODELS } from "../src/renderer/lib/models.js";
 import { SettingsPage } from "../src/renderer/components/SettingsPage.js";
 
 const settingsProps = {
-  settings: { masterName: "rookery", masterModel: "claude-opus-4-7", workerModel: "claude-opus-4-7", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "Sorry, you're not authorized to use this bot.", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexBin: "codex" },
+  settings: { masterName: "rookery", masterModel: "claude-opus-4-7", workerModel: "claude-opus-4-7", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "Sorry, you're not authorized to use this bot.", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex" },
   onSave: () => {},
   onClose: () => {},
   slack: "off" as const,

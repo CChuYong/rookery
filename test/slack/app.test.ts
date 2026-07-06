@@ -14,7 +14,7 @@ function deps(tokens?: { botToken?: string; appToken?: string }) {
   const bus = new EventBus();
   const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-  const sessions = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "m", fleet });
+  const sessions = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "m", fleet });
   const slackConfig = () => ({ botToken: tokens?.botToken, appToken: tokens?.appToken, cwd: "/work", allowedUsers: [], allowAll: false });
   return { sessions, bus, slackConfig, home: "/home" };
 }

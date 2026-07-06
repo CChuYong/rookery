@@ -151,6 +151,11 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     // every pre-existing row on the Claude backend.
     db.exec("ALTER TABLE workers ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'");
   },
+  (db) => {
+    // sessions.provider: which AgentBackend runs this master session ("claude" | "codex"). Default keeps
+    // every pre-existing row on the Claude backend (mirrors workers.provider above — see task-5-brief.md).
+    db.exec("ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'");
+  },
 ];
 
 export function currentVersion(db: DB): number {

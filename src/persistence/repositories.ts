@@ -9,6 +9,7 @@ export interface SessionRow {
   origin: string | null; // ui | slack | automation (source). Legacy rows / direct creation are null → consumers fall back to external_key.
   origin_ref: string | null; // Identifier within the source: slack=thread key, automation=automation id, ui=null.
   pinned_at: string | null; // Pin timestamp (if set, shown in sidebar 'pinned' section). null=not pinned.
+  provider: string; // which AgentBackend runs this master session ('claude' | 'codex'). Spawn-set, fixed for the session's lifetime.
   label: string | null;
   archived_at: string | null;
   created_at: string;
@@ -105,13 +106,13 @@ export class Repositories {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
-  createSession(input: { id: string; cwd: string; externalKey?: string; origin?: string; originRef?: string | null }): SessionRow {
+  createSession(input: { id: string; cwd: string; externalKey?: string; origin?: string; originRef?: string | null; provider?: string }): SessionRow {
     const ts = this.now();
     this.db
       .prepare(
-        "INSERT INTO sessions(id, cwd, status, sdk_session_id, external_key, origin, origin_ref, created_at, updated_at) VALUES (?, ?, 'active', NULL, ?, ?, ?, ?, ?)",
+        "INSERT INTO sessions(id, cwd, status, sdk_session_id, external_key, origin, origin_ref, provider, created_at, updated_at) VALUES (?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?)",
       )
-      .run(input.id, input.cwd, input.externalKey ?? null, input.origin ?? null, input.originRef ?? null, ts, ts);
+      .run(input.id, input.cwd, input.externalKey ?? null, input.origin ?? null, input.originRef ?? null, input.provider ?? "claude", ts, ts);
     return this.getSession(input.id)!;
   }
 

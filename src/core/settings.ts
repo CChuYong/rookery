@@ -10,6 +10,9 @@ export const DEFAULT_SLACK_REFUSAL = "Sorry, you're not authorized to use this b
 // Codex worker backend defaults (P1, settings-only — no env/config fallback, unlike workerModel/workerEffort).
 // No codexApiKey: the app-server ignores CODEX_API_KEY env; auth relies on the user's ~/.codex/auth.json (`codex login`).
 export const DEFAULT_CODEX_WORKER_MODEL = "gpt-5.5";
+// Codex master default model (P2, settings-only — mirrors codexWorkerModel/DEFAULT_CODEX_WORKER_MODEL's
+// "no env/config fallback" convention; symmetric master/worker split, same default value).
+export const DEFAULT_CODEX_MASTER_MODEL = "gpt-5.5";
 export const DEFAULT_CODEX_BIN = "codex";
 
 // Settings that can be changed at runtime. Use the value stored in the DB (settings table) if present, otherwise the config/hardcoded default.
@@ -21,6 +24,7 @@ export interface SettingsValues {
   masterEffort: string;
   workerEffort: string;
   codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-5.5".
+  codexMasterModel: string; // codex master default model (settings-only, no env/config fallback). default "gpt-5.5".
   codexBin: string; // codex CLI binary/path used to spawn `codex app-server` (settings-only). default "codex".
   slackCwd: string; // cwd for Slack-originated sessions (settings-only, defaults to process.cwd())
   slackAllowedUsers: string; // user ids allowed to get responses (comma-separated, settings-only)
@@ -70,6 +74,10 @@ export class Settings {
 
   codexWorkerModel(): string {
     return this.repos.getSetting("codexWorkerModel") ?? DEFAULT_CODEX_WORKER_MODEL;
+  }
+
+  codexMasterModel(): string {
+    return this.repos.getSetting("codexMasterModel") ?? DEFAULT_CODEX_MASTER_MODEL;
   }
 
   codexBin(): string {
@@ -184,6 +192,7 @@ export class Settings {
       masterEffort: this.masterEffort(),
       workerEffort: this.workerEffort(),
       codexWorkerModel: this.codexWorkerModel(),
+      codexMasterModel: this.codexMasterModel(),
       codexBin: this.codexBin(),
       slackCwd: this.slackCwd(),
       slackAllowedUsers: this.slackAllowedUsers(),

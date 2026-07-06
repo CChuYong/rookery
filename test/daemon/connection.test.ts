@@ -12,7 +12,8 @@ import type { ClientSocket, AutomationProvider, SlackRefResolverFn } from "../..
 import { InteractionRegistry } from "../../src/core/interaction-registry.js";
 import { Settings } from "../../src/core/settings.js";
 import { loadConfig } from "../../src/config.js";
-import { fakeBackend } from "../helpers/fake-query.js";
+import { fakeBackend, fakeQuery } from "../helpers/fake-query.js";
+import { ClaudeBackend } from "../../src/core/claude-backend.js";
 
 function setup() {
   const repos = new Repositories(openDb(":memory:"));
@@ -24,10 +25,10 @@ function setup() {
     {
       repos,
       bus,
-      backend: fakeBackend([
+      backends: { claude: fakeBackend([
         { type: "assistant", text: "ack" },
         { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
-      ]),
+      ]) },
       masterModel: "mm",
       fleet,
     },
@@ -65,10 +66,10 @@ function makeConn(sent: any[], overrides: { fleet?: FleetOverride }): Connection
     {
       repos,
       bus,
-      backend: fakeBackend([
+      backends: { claude: fakeBackend([
         { type: "assistant", text: "ack" },
         { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
-      ]),
+      ]) },
       masterModel: "mm",
       fleet: realFleet,
     },
@@ -88,10 +89,10 @@ function makeConnWithBus(sent: any[]): { conn: Connection; bus: EventBus } {
     {
       repos,
       bus,
-      backend: fakeBackend([
+      backends: { claude: fakeBackend([
         { type: "assistant", text: "ack" },
         { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
-      ]),
+      ]) },
       masterModel: "mm",
       fleet,
     },
@@ -112,7 +113,7 @@ describe("Connection", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet }, () => "s1");
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet }, () => "s1");
     const reg = new InteractionRegistry(bus);
     const sent: string[] = [];
     const socket: ClientSocket = { send: (d) => sent.push(d) };
@@ -228,7 +229,7 @@ describe("Connection", () => {
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
     let n = 0;
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet }, () => `s${n++}`);
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet }, () => `s${n++}`);
     const socket: ClientSocket = { send: (d) => sent.push(d) };
     const models = { list: async () => [{ id: "x-model", displayName: "X Model" }] };
     const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, models);
@@ -374,7 +375,7 @@ describe("Connection v2 routes", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const realFleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet: realFleet }, () => "sess-1");
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet: realFleet }, () => "sess-1");
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
     const conn = new Connection(socket, sm, bus, realFleet, repos);
@@ -408,7 +409,7 @@ describe("Connection v2 routes", () => {
     const factory2 = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const bus2 = new EventBus();
     const fleet2 = new FleetOrchestrator({ repos: repos2, bus: bus2, git: new FakeGitOps(), factory: factory2, worktreesDir: "/wt" });
-    const sm2 = new SessionManager({ repos: repos2, bus: bus2, backend: fakeBackend([]), masterModel: "mm", fleet: fleet2 }, () => "sess-2");
+    const sm2 = new SessionManager({ repos: repos2, bus: bus2, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet: fleet2 }, () => "sess-2");
     const conn2 = new Connection({ send: (d: string) => sent2.push(JSON.parse(d) as unknown) }, sm2, bus2, fleet2, repos2);
     repos2.createSession({ id: "sess-2", cwd: "/w" });
     repos2.addSessionEvent({ sessionId: "sess-2", seq: 0, type: "master.system", payloadJson: JSON.stringify({ type: "master.system", sessionId: "sess-2", text: "ok" }) });
@@ -527,7 +528,7 @@ describe("Connection settings", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet });
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet });
     const config = loadConfig({});
     const settings = new Settings(repos, config);
     const sent: any[] = [];
@@ -607,6 +608,49 @@ describe("Connection settings", () => {
     expect(sent.filter((m) => m.type === "fleet.ack").map((m) => m.action)).toEqual(["rename", "archive", "delete", "rename", "archive", "delete"]);
   });
 
+  it("session.delete releases the session's MCP bridge registration (best-effort)", async () => {
+    const released: string[] = [];
+    const sessions = { delete: async () => {} } as unknown as SessionManager;
+    const repos = new Repositories(openDb(":memory:"));
+    const sent: any[] = [];
+    const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
+    const conn = new Connection(
+      socket, sessions, new EventBus(), {} as unknown as FleetOrchestrator, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      (id: string) => released.push(id),
+    );
+    await conn.handleRaw(JSON.stringify({ type: "session.delete", reqId: "q1", sessionId: "s1" }));
+    expect(released).toEqual(["s1"]); // released even though nothing registered one (bridge.release is a no-op for unknown keys)
+    expect(sent.at(-1)).toMatchObject({ type: "fleet.ack", action: "delete", id: "s1" });
+  });
+
+  it("session.create with provider codex persists the provider and routes turns to the codex backend", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const claudeCalls: string[] = [];
+    const codexCalls: string[] = [];
+    const claudeBase = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-c" }]);
+    const claudeQueryFn = ((input: unknown) => { claudeCalls.push("claude"); return (claudeBase as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
+    const codexBase = fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-x" }]);
+    // A fake "codex" backend built the same way as the claude one (the port is provider-agnostic) — records
+    // that a turn was routed to it, independent of the real CodexBackend/bridge.
+    const codexQueryFn = ((input: unknown) => { codexCalls.push("codex"); return (codexBase as (x: unknown) => unknown)(input); }) as ReturnType<typeof fakeQuery>;
+    const sm = new SessionManager({ repos, bus, backends: { claude: new ClaudeBackend(claudeQueryFn), codex: new ClaudeBackend(codexQueryFn) }, masterModel: "mm", fleet });
+    const sent: any[] = [];
+    const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
+    const conn = new Connection(socket, sm, bus, fleet, repos);
+
+    await conn.handleRaw(JSON.stringify({ type: "session.create", cwd: "/x", provider: "codex", reqId: "c1" }));
+    const created = sent.find((m) => m.type === "session.created")!;
+    expect(repos.getSession(created.sessionId as string)!.provider).toBe("codex"); // persisted via the protocol field
+
+    await conn.handleRaw(JSON.stringify({ type: "session.send", sessionId: created.sessionId, text: "hi", reqId: "t1" }));
+    expect(codexCalls).toEqual(["codex"]); // SessionManager routed the turn to the codex backend
+    expect(claudeCalls).toEqual([]); // never touched the claude backend
+  });
+
   it("session.stop routes to sessions.stop and acks", async () => {
     const stopped: string[] = [];
     const sessions = { stop: async (id: string) => { stopped.push(id); } } as unknown as SessionManager;
@@ -662,7 +706,7 @@ function makeConnWith(sent: any[], opts: { settings?: Settings; source?: unknown
   const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
   let n = 0;
   const sm = new SessionManager(
-    { repos, bus, backend: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]), masterModel: "mm", fleet },
+    { repos, bus, backends: { claude: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]) }, masterModel: "mm", fleet },
     () => `s${n++}`,
   );
   const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
@@ -755,7 +799,7 @@ describe("Connection automation routes", () => {
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
     let n = 0;
     const sm = new SessionManager(
-      { repos, bus, backend: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]), masterModel: "mm", fleet },
+      { repos, bus, backends: { claude: fakeBackend([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" }]) }, masterModel: "mm", fleet },
       () => `s${n++}`,
     );
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
@@ -857,7 +901,7 @@ describe("Connection automation routes", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet });
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet });
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
     const conn = new Connection(socket, sm, bus, fleet, repos); // no automations provider
     await conn.handleRaw(JSON.stringify({ type: "automation.list", reqId: "q4" }));
@@ -874,7 +918,7 @@ describe("Connection automation.resolveSlackRefs", () => {
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const sm = new SessionManager({ repos, bus, backend: fakeBackend([]), masterModel: "mm", fleet });
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet });
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
     const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, resolveSlackRefs);

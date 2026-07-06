@@ -97,6 +97,9 @@ export class Connection {
     private readonly interactions?: InteractionResponder,
     private readonly automations?: AutomationProvider,
     private readonly resolveSlackRefs?: SlackRefResolverFn,
+    // Best-effort release of a codex master session's MCP bridge registration (server.ts wires this to
+    // McpBridge.release). Absent in most tests (no bridge involved in the claude-only path).
+    private readonly releaseBridgeSession?: (sessionId: string) => void,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -140,7 +143,7 @@ export class Connection {
     switch (msg.type) {
       case "session.create": {
         // No explicit cwd (desktop "New Session" with no folder picked) → the configured default folder, else process.cwd().
-        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()));
+        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()), { provider: msg.provider });
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
@@ -216,6 +219,8 @@ export class Connection {
       }
       case "session.delete": {
         await this.sessions.delete(msg.sessionId);
+        // Best-effort: release the session's MCP bridge registration (no-op for claude sessions, which never register one).
+        try { this.releaseBridgeSession?.(msg.sessionId); } catch { /* best-effort */ }
         this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "delete", id: msg.sessionId });
         return;
       }
