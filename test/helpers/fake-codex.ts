@@ -7,7 +7,7 @@ export type CodexStep =
   | { kind: "agentMessage"; text: string; id?: string }
   | { kind: "command"; id: string; command: string; output?: string; failed?: boolean }
   | { kind: "fileChange"; id: string; failed?: boolean }
-  | { kind: "tokenUsage"; last: { inputTokens: number; cachedInputTokens?: number }; contextWindow?: number }
+  | { kind: "tokenUsage"; last: { inputTokens: number; cachedInputTokens?: number }; total?: { inputTokens: number; cachedInputTokens?: number; outputTokens?: number }; contextWindow?: number }
   | { kind: "errorNote"; message: string }
   | { kind: "requestApproval"; id: string } // emits a server→client commandExecution approval request
   | { kind: "turnEnd"; status?: "completed" | "interrupted" | "failed"; durationMs?: number; errorMessage?: string }
@@ -92,7 +92,7 @@ export function fakeCodexSpawn(
               send({ method: "item/started", params: { threadId, turnId, item: { type: "fileChange", id: step.id, changes: [], status: "inProgress" } } });
               send({ method: "item/completed", params: { threadId, turnId, item: { type: "fileChange", id: step.id, changes: [], status: step.failed ? "failed" : "completed" } } });
             } else if (step.kind === "tokenUsage") {
-              send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { last: step.last, total: step.last, modelContextWindow: step.contextWindow ?? null } } });
+              send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { last: step.last, total: step.total ?? step.last, modelContextWindow: step.contextWindow ?? null } } });
             } else if (step.kind === "errorNote") {
               send({ method: "error", params: { threadId, turnId, error: { message: step.message }, willRetry: false } });
             } else if (step.kind === "requestApproval") {

@@ -39,7 +39,10 @@ describe("CodexBackend.openSession — translation", () => {
     expect(events).toContainEqual({ kind: "message", role: "assistant", text: "hello", parentToolUseId: null });
     expect(events).toContainEqual({ kind: "tool_use", id: "c1", name: "shell", input: { command: "ls -la", cwd: undefined }, parentToolUseId: null });
     expect(events).toContainEqual({ kind: "tool_result", toolUseId: "c1", isError: false, content: "files", parentToolUseId: null });
-    expect(events.at(-1)).toEqual({ kind: "turn_end", subtype: "success", costUsd: 0, numTurns: 1, durationMs: 42, contextTokens: 1000, contextWindow: 272000 });
+    // costUsd is no longer a placeholder 0 now that RATES is filled: the fake mirrors `last` into
+    // `total` when a step omits it, so this fresh session's single update bills its full delta from
+    // the zero baseline — (900-100)*5.00/1M + 100*0.50/1M + 0*30.00/1M = 0.00405.
+    expect(events.at(-1)).toEqual({ kind: "turn_end", subtype: "success", costUsd: 0.00405, numTurns: 1, durationMs: 42, contextTokens: 1000, contextWindow: 272000 });
   });
 
   it("synthesizes CUMULATIVE numTurns across turns (port contract — worker maxTurns cap)", async () => {
@@ -195,5 +198,46 @@ describe("CodexBackend — controls and edges", () => {
     })();
     await expect(done).resolves.toBeUndefined();
     expect(seen.some((e) => e.kind === "turn_end")).toBe(true);
+  });
+});
+
+describe("CodexBackend — pricing aggregation", () => {
+  it("sums per-update TOTAL deltas across a multi-call turn (fresh session baseline = zeros)", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "tokenUsage", last: { inputTokens: 800, cachedInputTokens: 200 }, total: { inputTokens: 1000, cachedInputTokens: 200, outputTokens: 50 } },
+      { kind: "tokenUsage", last: { inputTokens: 900, cachedInputTokens: 700 }, total: { inputTokens: 2600, cachedInputTokens: 900, outputTokens: 150 } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts({ model: "gpt-5.5" })));
+    const end = events.find((e) => e.kind === "turn_end") as { costUsd: number };
+    // turn delta vs zeros: input 2600 (cached 900), output 150
+    // cost = (2600-900)*5.00/1M + 900*0.50/1M + 150*30.00/1M = 0.0085 + 0.00045 + 0.0045
+    expect(end.costUsd).toBeCloseTo(0.01345, 10);
+  });
+
+  it("resume: first tokenUsage update only sets the baseline (thread history not billed)", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "tokenUsage", last: { inputTokens: 100 }, total: { inputTokens: 50_000, cachedInputTokens: 10_000, outputTokens: 9_000 } }, // history-inclusive
+      { kind: "tokenUsage", last: { inputTokens: 100 }, total: { inputTokens: 51_000, cachedInputTokens: 10_500, outputTokens: 9_100 } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts({ model: "gpt-5.5", resume: "th-1" })));
+    const end = events.find((e) => e.kind === "turn_end") as { costUsd: number };
+    // only the second update's delta bills: input 1000 (cached 500), output 100
+    // cost = 500*5.00/1M + 500*0.50/1M + 100*30.00/1M = 0.0025 + 0.00025 + 0.003
+    expect(end.costUsd).toBeCloseTo(0.00575, 10);
+  });
+
+  it("accumulator resets per turn and clamps negative deltas to 0", async () => {
+    const { backend: b } = backend((_t, turn) => turn === 0
+      ? [{ kind: "tokenUsage", last: { inputTokens: 1 }, total: { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 100 } }, { kind: "turnEnd" }]
+      : [{ kind: "tokenUsage", last: { inputTokens: 1 }, total: { inputTokens: 500, cachedInputTokens: 0, outputTokens: 50 } }, { kind: "turnEnd" }]); // total went BACKWARD (compaction/reset) — clamp
+    const q = new MessageQueue(); q.push("a"); q.push("b"); q.close();
+    const events = await collect(b.openSession(q, baseOpts({ model: "gpt-5.5" })));
+    const ends = events.filter((e) => e.kind === "turn_end") as Array<{ costUsd: number }>;
+    expect(ends[0]!.costUsd).toBeCloseTo(1000 * 5 / 1e6 + 100 * 30 / 1e6, 10);
+    expect(ends[1]!.costUsd).toBe(0); // clamped, not negative
   });
 });

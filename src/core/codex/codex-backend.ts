@@ -61,17 +61,25 @@ class CodexStream implements AgentStream {
   private turnDone: (() => void) | null = null;
   private cumTurns = 0;
   private lastContextTokens = 0;
-  private lastUsage: CodexTokenUsageBreakdown | null = null;
   private contextWindow = 0;
   private overrideModel: string | null = null;
   private overrideMode: string | null = null;
   private started = false;
 
+  // Per-turn billing accumulator: deltas of the thread-cumulative tokenUsage.total between
+  // updates (multi-call turns sum every call — see docs/2026-07-06-p15-codex-followups.md Track B).
+  // Fresh session: baseline zeros (thread totals start at 0). Resumed session: baseline null —
+  // the FIRST update only sets it (its one call is uncounted; the resume response carries no baseline).
+  private prevTotal: CodexTokenUsageBreakdown | null;
+  private turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+
   constructor(
     private readonly deps: CodexBackendDeps,
     private readonly input: AsyncIterable<string>,
     private readonly opts: AgentSessionOptions,
-  ) {}
+  ) {
+    this.prevTotal = opts.resume ? null : { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };
+  }
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
     if (this.started) throw new Error("CodexStream is single-use");
@@ -225,9 +233,19 @@ class CodexStream implements AgentStream {
     if (method === "thread/tokenUsage/updated") {
       const last = p?.tokenUsage?.last;
       if (last) this.lastContextTokens = (last.inputTokens ?? 0) + (last.cachedInputTokens ?? 0);
-      if (last) this.lastUsage = last;
       const win = p?.tokenUsage?.modelContextWindow;
       if (typeof win === "number") this.contextWindow = win;
+      const total = p?.tokenUsage?.total;
+      if (total) {
+        if (this.prevTotal === null) {
+          this.prevTotal = total; // resumed stream: baseline only
+        } else {
+          this.turnAccum.inputTokens += Math.max(0, (total.inputTokens ?? 0) - (this.prevTotal.inputTokens ?? 0));
+          this.turnAccum.cachedInputTokens += Math.max(0, (total.cachedInputTokens ?? 0) - (this.prevTotal.cachedInputTokens ?? 0));
+          this.turnAccum.outputTokens += Math.max(0, (total.outputTokens ?? 0) - (this.prevTotal.outputTokens ?? 0));
+          this.prevTotal = total;
+        }
+      }
       return;
     }
     if (method === "error") {
@@ -249,12 +267,13 @@ class CodexStream implements AgentStream {
       this.channel.push({
         kind: "turn_end",
         subtype,
-        costUsd: turnCostUsd(this.overrideModel ?? (this.opts.model || this.deps.defaultModel()), this.lastUsage ?? undefined),
+        costUsd: turnCostUsd(this.overrideModel ?? (this.opts.model || this.deps.defaultModel()), this.turnAccum),
         numTurns: this.cumTurns,
         durationMs: turn?.durationMs ?? 0,
         contextTokens: this.lastContextTokens,
         contextWindow: this.contextWindow,
       });
+      this.turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }; // reset per turn, including failed/interrupted
       if (this.turnDone) { const d = this.turnDone; this.turnDone = null; d(); }
       return;
     }

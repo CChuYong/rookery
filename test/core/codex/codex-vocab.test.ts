@@ -21,7 +21,12 @@ describe("codex vocab", () => {
     expect(mapEffort("weird")).toBeUndefined();
     expect(mapEffort(undefined)).toBeUndefined();
   });
-  it("pricing returns 0 with an empty rate table", () => {
-    expect(turnCostUsd("gpt-5.5", { inputTokens: 1000, outputTokens: 500 })).toBe(0);
+  it("prices known models and returns 0 for unknown/absent", () => {
+    expect(turnCostUsd("gpt-5.5", { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 })).toBeCloseTo(5.0, 10);
+    expect(turnCostUsd("gpt-5.5", { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(0.5, 10);
+    expect(turnCostUsd("gpt-5.4-mini", { inputTokens: 0, cachedInputTokens: 0, outputTokens: 1_000_000 })).toBeCloseTo(4.5, 10);
+    expect(turnCostUsd("gpt-5.5-pro", { inputTokens: 1_000_000, cachedInputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(30.0, 10); // no cache discount tier
+    expect(turnCostUsd("some-unknown", { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 })).toBe(0);
+    expect(turnCostUsd("gpt-5.5", undefined)).toBe(0);
   });
 });
