@@ -156,6 +156,14 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     // every pre-existing row on the Claude backend (mirrors workers.provider above — see task-5-brief.md).
     db.exec("ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'");
   },
+  (db) => {
+    // automations.provider: which AgentBackend runs sessions/workers created by this automation ("claude" |
+    // "codex"). Default keeps every pre-existing rule on the Claude backend (mirrors workers.provider /
+    // sessions.provider above). Codex masters are bypassPermissions-only (P2 guard); a codex automation with a
+    // non-bypass permission_mode fails its run with a clear error at turn start — automations default to bypass,
+    // so this only bites a mis-config. Codex workers are unaffected (workers aren't bypass-guarded).
+    db.exec("ALTER TABLE automations ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'");
+  },
 ];
 
 export function currentVersion(db: DB): number {

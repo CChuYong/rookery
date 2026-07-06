@@ -20,7 +20,8 @@ function deps() {
 }
 const base = (over: Partial<Automation>): Automation => ({
   id: "a1", name: "n", enabled: true, trigger: { kind: "slack" }, action: { kind: "master", prompt: "x", cwd: "/w", sessionMode: "reuse" },
-  model: null, effort: null, permissionMode: null, maxTurns: null, nextRunAt: null, lastRunAt: null, lastStatus: null, lastError: null, createdAt: "t", ...over,
+  model: null, effort: null, permissionMode: null, maxTurns: null, nextRunAt: null, lastRunAt: null, lastStatus: null, lastError: null, createdAt: "t",
+  provider: "claude", ...over,
 });
 
 describe("applyVars (fence)", () => {
@@ -104,6 +105,36 @@ describe("runAutomationAction", () => {
     const cr = vi.spyOn(h.d.sessions, "create"); const go = vi.spyOn(h.d.sessions, "getOrCreateByKey");
     await runAutomationAction(base({ action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "fresh" } }), {}, h.d);
     expect(cr).toHaveBeenCalled(); expect(go).not.toHaveBeenCalled();
+  });
+  it("master reuse: passes the automation's provider to getOrCreateByKey (codex)", async () => {
+    const h = deps();
+    const go = vi.spyOn(h.d.sessions, "getOrCreateByKey");
+    await runAutomationAction(base({ provider: "codex", action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" } }), {}, h.d);
+    expect(go).toHaveBeenCalledWith("automation:a1", "/w", "codex");
+  });
+  it("master reuse: default automation provider ('claude') is passed through", async () => {
+    const h = deps();
+    const go = vi.spyOn(h.d.sessions, "getOrCreateByKey");
+    await runAutomationAction(base({ action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" } }), {}, h.d);
+    expect(go).toHaveBeenCalledWith("automation:a1", "/w", "claude");
+  });
+  it("master fresh: passes the automation's provider to create (codex)", async () => {
+    const h = deps();
+    const cr = vi.spyOn(h.d.sessions, "create");
+    await runAutomationAction(base({ provider: "codex", action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "fresh" } }), {}, h.d);
+    expect(cr).toHaveBeenCalledWith("/w", { origin: "automation", originRef: "a1", provider: "codex" });
+  });
+  it("worker: passes the automation's provider to fleet.spawn (codex)", async () => {
+    const h = deps();
+    await runAutomationAction(base({ provider: "codex", action: { kind: "worker", repo: "app-api", task: "fix it" } }), {}, h.d);
+    const spawnArg = h.spawn.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(spawnArg?.provider).toBe("codex");
+  });
+  it("worker: default automation provider ('claude') is passed to fleet.spawn", async () => {
+    const h = deps();
+    await runAutomationAction(base({ action: { kind: "worker", repo: "app-api", task: "fix it" } }), {}, h.d);
+    const spawnArg = h.spawn.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(spawnArg?.provider).toBe("claude");
   });
   it("worker: substitutes in task and spawns (fenced)", async () => {
     const h = deps();

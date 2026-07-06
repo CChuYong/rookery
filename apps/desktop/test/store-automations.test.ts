@@ -19,6 +19,7 @@ describe("store automations", () => {
         lastError: null,
         nextRunAt: null,
         createdAt: "t",
+        provider: "claude",
       },
     ]);
     expect(useStore.getState().automations).toHaveLength(1);

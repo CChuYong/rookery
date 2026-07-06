@@ -19,6 +19,7 @@ function mkMaster(id: string, prompt: string): Automation {
     lastError: null,
     nextRunAt: null,
     createdAt: "t",
+    provider: "claude",
   };
 }
 
@@ -37,6 +38,7 @@ const cronJob: Automation = {
   lastError: null,
   nextRunAt: null,
   createdAt: "t",
+  provider: "claude",
 };
 
 const slackJob: Automation = {
@@ -54,6 +56,7 @@ const slackJob: Automation = {
   lastError: null,
   nextRunAt: null,
   createdAt: "t",
+  provider: "claude",
 };
 
 it("lists jobs and fires run-now", () => {
@@ -248,6 +251,7 @@ const corruptJob: Automation = {
   lastError: null,
   nextRunAt: null,
   createdAt: "t",
+  provider: "claude",
 };
 
 it("corrupt automation row shows corrupt badge (automationPage.corrupt fallback text)", () => {

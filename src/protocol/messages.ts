@@ -31,6 +31,9 @@ const automationInputSchema = z.object({
   effort: effortField,
   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).nullable().optional(),
   maxTurns: z.number().int().positive().nullable().optional(),
+  // Which AgentBackend runs sessions/workers created by this automation. Optional; defaults to "claude" on write
+  // (see Repositories.createAutomation). Not nullable — an automation always has a definite backend.
+  provider: z.enum(["claude", "codex"]).optional(),
 }).superRefine((v, ctx) => {
   if (v.trigger.kind === "cron" && !isValidCron(v.trigger.cron, v.trigger.timezone)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid cron expression", path: ["trigger", "cron"] });

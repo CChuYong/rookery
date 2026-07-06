@@ -189,6 +189,7 @@ describe("AutomationForm", () => {
       lastError: null,
       nextRunAt: null,
       createdAt: "t",
+      provider: "claude",
     };
     render(<AutomationForm job={job} repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
     const permSelect = screen.getByLabelText("권한 모드") as HTMLSelectElement;

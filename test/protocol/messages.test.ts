@@ -111,6 +111,29 @@ describe("automation protocol messages", () => {
     // maxTurns=-1 rejected
     expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, maxTurns: -1 } }))).toThrow();
   });
+
+  it("automation.create: provider accepts claude|codex, is optional, and rejects a bad enum value", () => {
+    const base = {
+      type: "automation.create", reqId: "q",
+      automation: {
+        name: "n",
+        trigger: { kind: "cron", cron: "0 3 * * *", timezone: "UTC" },
+        action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" },
+      },
+    };
+    // omitted → undefined (allowed)
+    const omitted = clientMessageSchema.safeParse(base);
+    expect(omitted.success).toBe(true);
+    if (omitted.success && omitted.data.type === "automation.create") expect(omitted.data.automation.provider).toBeUndefined();
+    // "codex" accepted
+    const codex = clientMessageSchema.safeParse({ ...base, automation: { ...base.automation, provider: "codex" } });
+    expect(codex.success).toBe(true);
+    if (codex.success && codex.data.type === "automation.create") expect(codex.data.automation.provider).toBe("codex");
+    // "claude" accepted
+    expect(clientMessageSchema.safeParse({ ...base, automation: { ...base.automation, provider: "claude" } }).success).toBe(true);
+    // bad enum value rejected
+    expect(() => parseClientMessage(JSON.stringify({ ...base, automation: { ...base.automation, provider: "gpt" } }))).toThrow();
+  });
 });
 
 describe("protocol", () => {

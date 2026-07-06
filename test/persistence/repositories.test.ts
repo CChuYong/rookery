@@ -323,6 +323,17 @@ describe("automations", () => {
     expect(r.getAutomation(a.id)?.maxTurns).toBeNull();
   });
 
+  it("automation: provider round-trips ('codex' explicit, 'claude' default)", () => {
+    const r = mk();
+    const a = r.createAutomation("a1", { ...cronMaster, provider: "codex" });
+    expect(a.provider).toBe("codex");
+    expect(r.getAutomation("a1")!.provider).toBe("codex");
+    expect(r.listAutomations().find((x) => x.id === "a1")!.provider).toBe("codex");
+    const b = r.createAutomation("a2", cronMaster);
+    expect(b.provider).toBe("claude");
+    expect(r.getAutomation("a2")!.provider).toBe("claude");
+  });
+
   it("corrupt automation row degrades (visible, disabled, recoverable) — not whole-list death", () => {
     const r = mk();
     const a = r.createAutomation("a1", { name: "x", trigger: { kind: "cron", cron: "0 0 * * *", timezone: "UTC" }, action: { kind: "worker", repo: "app", task: "t" } });

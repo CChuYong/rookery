@@ -86,6 +86,8 @@ export interface Automation {
   // "running" is a transient state written when a run starts (so the UI shows it's firing) and reconciled to ok/error when it ends.
   lastRunAt: string | null; lastStatus: "ok" | "error" | "skipped" | "running" | null; lastError: string | null;
   createdAt: string;
+  /** Which AgentBackend runs sessions/workers created by this automation ("claude" | "codex"). Defaults to "claude". */
+  provider: string;
   /** Present (true) when the row has corrupt config JSON; the row is surfaced as disabled so it can be fixed/deleted. */
   corrupt?: true;
 }
@@ -93,6 +95,7 @@ export interface AutomationInput {
   name: string; enabled?: boolean; trigger: AutomationTrigger; action: AutomationAction;
   model?: string | null; effort?: string | null;
   permissionMode?: string | null; maxTurns?: number | null;
+  provider?: string;
 }
 
 // Worker terminal statuses (for the setWorkerStatus write-once guard). Same set as FleetOrchestrator.isTerminal — a domain invariant.
@@ -547,6 +550,7 @@ export class Repositories {
     action_type: string; action_config_json: string; model: string | null; effort: string | null;
     permission_mode: string | null; max_turns: number | null;
     next_run_at: string | null; last_run_at: string | null; last_status: string | null; last_error: string | null; created_at: string;
+    provider: string;
   }): Automation {
     try {
       return {
@@ -558,6 +562,7 @@ export class Repositories {
         nextRunAt: row.next_run_at,
         lastRunAt: row.last_run_at, lastStatus: (row.last_status as Automation["lastStatus"]) ?? null,
         lastError: row.last_error, createdAt: row.created_at,
+        provider: row.provider,
       };
     } catch {
       if (!this.warnedCorrupt.has(row.id)) {
@@ -573,6 +578,7 @@ export class Repositories {
         nextRunAt: null,
         lastRunAt: row.last_run_at, lastStatus: (row.last_status as Automation["lastStatus"]) ?? null,
         lastError: row.last_error, createdAt: row.created_at,
+        provider: row.provider,
       };
     }
   }
@@ -580,9 +586,9 @@ export class Repositories {
   createAutomation(id: string, input: AutomationInput): Automation {
     const { kind: tk, ...tc } = input.trigger; const { kind: ak, ...ac } = input.action;
     this.db.prepare(
-      `INSERT INTO automations (id,name,enabled,trigger_type,trigger_config_json,action_type,action_config_json,model,effort,permission_mode,max_turns,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(id, input.name, input.enabled ? 1 : 0, tk, JSON.stringify(tc), ak, JSON.stringify(ac), input.model ?? null, input.effort ?? null, input.permissionMode ?? null, input.maxTurns ?? null, this.now());
+      `INSERT INTO automations (id,name,enabled,trigger_type,trigger_config_json,action_type,action_config_json,model,effort,permission_mode,max_turns,provider,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(id, input.name, input.enabled ? 1 : 0, tk, JSON.stringify(tc), ak, JSON.stringify(ac), input.model ?? null, input.effort ?? null, input.permissionMode ?? null, input.maxTurns ?? null, input.provider ?? "claude", this.now());
     return this.getAutomation(id)!;
   }
 
@@ -599,7 +605,7 @@ export class Repositories {
     const trigger = patch.trigger ?? cur.trigger; const action = patch.action ?? cur.action;
     const { kind: tk, ...tc } = trigger; const { kind: ak, ...ac } = action;
     this.db.prepare(
-      `UPDATE automations SET name=?, enabled=?, trigger_type=?, trigger_config_json=?, action_type=?, action_config_json=?, model=?, effort=?, permission_mode=?, max_turns=? WHERE id=?`,
+      `UPDATE automations SET name=?, enabled=?, trigger_type=?, trigger_config_json=?, action_type=?, action_config_json=?, model=?, effort=?, permission_mode=?, max_turns=?, provider=? WHERE id=?`,
     ).run(
       patch.name ?? cur.name,
       (patch.enabled === undefined ? cur.enabled : patch.enabled) ? 1 : 0,
@@ -608,6 +614,7 @@ export class Repositories {
       patch.effort === undefined ? cur.effort : patch.effort,
       patch.permissionMode === undefined ? cur.permissionMode : patch.permissionMode,
       patch.maxTurns === undefined ? cur.maxTurns : patch.maxTurns,
+      patch.provider === undefined ? cur.provider : patch.provider,
       id,
     );
     return this.getAutomation(id);
