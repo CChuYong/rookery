@@ -6,7 +6,7 @@ import { makeChip } from "../lib/mention-editor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
 import { Select } from "../ui/input.js";
-import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
+import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
@@ -16,6 +16,7 @@ import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
 // Model/effort controls at the bottom of the input box. editable=true means selectable (master session, before spawn),
 // false means a read-only badge (running worker — model is fixed at spawn time).
 export interface ComposerControls {
+  provider?: string; // "codex" → the model dropdown is sourced from the codex model/list catalog + per-model efforts (like the spawn surfaces); absent/"claude" → the Claude models list. Codex falls back to the Claude list only if the catalog couldn't be fetched.
   model: string;
   effort?: string; // if absent, hide the effort select/badge (a running worker can't change effort live)
   permissionMode?: string; // if absent, hide the permission-mode select. Master + worker both expose it; absent only for read-only badges.
@@ -88,7 +89,17 @@ export function Composer({
   const placeholderText = placeholder ?? t("composer.placeholder");
   const sendLabelText = sendLabel ?? t("composer.sendLabel");
   const [text, setText] = useState(initialText ?? ""); // current message serialized from the editor (derived, for popup/empty-state/send decisions)
-  const models = useStore((s) => s.models); // live model list (static fallback if absent)
+  const models = useStore((s) => s.models); // live Claude model list (static fallback if absent)
+  const codexModels = useStore((s) => s.codexModels); // codex model/list catalog (null when unfetched)
+  // When the conversation runs on codex AND the catalog is available, source the model dropdown + per-model
+  // effort options from it (parity with the spawn/new-session/automation/settings pickers). Otherwise (claude,
+  // or codex with an unfetched catalog) fall back to the Claude models list + generic EFFORTS — unchanged behavior.
+  const codexActive = controls?.provider === "codex" && codexModels != null;
+  const modelList: ReadonlyArray<{ id: string; label: string }> = codexActive
+    ? codexModels!.map((m) => ({ id: m.id, label: m.displayName }))
+    : models;
+  const codexEfforts = codexActive && controls ? codexEffortsFor(controls.model, codexModels) : null;
+  const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
   const [dragOver, setDragOver] = useState(false);
   const promptRef = useRef<PromptEditorHandle>(null);
   // Aborting a turn isn't instant (the SDK has to drain buffered output), and the status only flips a moment later — so without
@@ -186,12 +197,17 @@ export function Composer({
                 title={t("composer.modelTitle")}
                 value={controls.model}
                 disabled={disabled}
-                onChange={(e) => controls.onModel?.(e.target.value)}
+                onChange={(e) => {
+                  const m = e.target.value;
+                  controls.onModel?.(m);
+                  // codex: picking a model pre-selects that model's default reasoning effort (parity with the spawn pickers).
+                  if (codexActive) { const de = codexDefaultEffort(m, codexModels); if (de) controls.onEffort?.(de); }
+                }}
               >
-                {models.map((m) => (
+                {modelList.map((m) => (
                   <option key={m.id} value={m.id}>{m.label}</option>
                 ))}
-                {!models.some((m) => m.id === controls.model) && <option value={controls.model}>{controls.model}</option>}
+                {!modelList.some((m) => m.id === controls.model) && controls.model && <option value={controls.model}>{controls.model}</option>}
               </Select>
               {controls.effort !== undefined && effortSupported(controls.model) && (
                 <Select
@@ -202,7 +218,7 @@ export function Composer({
                   disabled={disabled}
                   onChange={(e) => controls.onEffort?.(e.target.value)}
                 >
-                  {EFFORTS.map((ef) => (
+                  {effortOptions.map((ef) => (
                     <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                   ))}
                 </Select>
@@ -224,7 +240,7 @@ export function Composer({
             </>
           ) : (
             <span className="font-mono text-[11px] text-muted" title={t("composer.fixedModelTitle")}>
-              ◇ {models.find((m) => m.id === controls.model)?.label ?? controls.model}
+              ◇ {modelList.find((m) => m.id === controls.model)?.label ?? controls.model}
               {controls.effort !== undefined && effortSupported(controls.model) ? ` · ${t(effortLabelKey(controls.effort))}` : ""}
             </span>
           ))}

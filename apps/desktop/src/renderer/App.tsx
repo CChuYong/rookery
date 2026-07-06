@@ -704,21 +704,24 @@ export function App(): JSX.Element {
   const fleet = useMemo(() => Object.values(s.fleet), [s.fleet]); // used in RepoTree (Repos view)
   // Master composer model/effort controls — inline would be a new ref every render, breaking the Conversation memo. Keep the same ref
   // across unrelated re-renders like usage polling (deps: settings/active session/overrides only).
-  const masterControls = useMemo(
-    () =>
-      s.settings && s.activeSessionId
-        ? {
-            model: s.overrides[s.activeSessionId]?.model ?? s.settings.masterModel,
-            effort: s.overrides[s.activeSessionId]?.effort ?? s.settings.masterEffort,
-            permissionMode: s.overrides[s.activeSessionId]?.permissionMode ?? "bypassPermissions",
-            editable: true,
-            onModel: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { model: m }),
-            onEffort: (e: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { effort: e }),
-            onPermissionMode: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { permissionMode: m }),
-          }
-        : undefined,
-    [s.settings, s.activeSessionId, s.overrides],
-  );
+  const masterControls = useMemo(() => {
+    if (!(s.settings && s.activeSessionId)) return undefined;
+    const provider = s.sessions.find((x) => x.id === s.activeSessionId)?.provider;
+    // A codex session's default model is codexMasterModel, not the Claude masterModel — otherwise the composer
+    // shows a Claude id selected (and the codex-aware dropdown would have no matching option). The override wins
+    // when the user picked an explicit model at new-session / via the dropdown.
+    const defaultModel = provider === "codex" ? s.settings.codexMasterModel : s.settings.masterModel;
+    return {
+      provider,
+      model: s.overrides[s.activeSessionId]?.model ?? defaultModel,
+      effort: s.overrides[s.activeSessionId]?.effort ?? s.settings.masterEffort,
+      permissionMode: s.overrides[s.activeSessionId]?.permissionMode ?? "bypassPermissions",
+      editable: true,
+      onModel: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { model: m }),
+      onEffort: (e: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { effort: e }),
+      onPermissionMode: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { permissionMode: m }),
+    };
+  }, [s.settings, s.activeSessionId, s.overrides, s.sessions]);
   const activeSess = s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId) : undefined;
   const sessionName = activeSess ? activeSess.label || baseName(activeSess.cwd) || "session" : t("app.selectSession");
   const sessionReadOnly = (s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId)?.origin : undefined) === "slack";
@@ -753,6 +756,7 @@ export function App(): JSX.Element {
             browseDir={browseDir}
             commands={s.commands}
             controls={{
+              provider: activeSub.provider,
               model: activeSub.model ?? s.settings?.workerModel ?? "claude-opus-4-8",
               editable: activeSub.status === "running" || activeSub.status === "idle",
               onModel: (m) => subSetModel(activeSub.id, m),
@@ -1133,6 +1137,7 @@ export function App(): JSX.Element {
                       commands={s.commands}
                       controls={{
                         // while running, the model + permission mode can be changed live (query.setModel / query.setPermissionMode). effort can't → omitted.
+                        provider: activeSub.provider,
                         model: activeSub.model ?? s.settings?.workerModel ?? "claude-opus-4-8",
                         editable: activeSub.status === "running" || activeSub.status === "idle",
                         onModel: (m) => subSetModel(activeSub.id, m),
