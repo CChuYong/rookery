@@ -157,6 +157,45 @@ describe("McpBridge", () => {
     expect(res.status).toBe(404);
   });
 
+  it("ensureSession GCs the previous turn's transports when called again for an existing session key (per-turn child SIGKILL never sends DELETE)", async () => {
+    const bridge = new McpBridge({});
+    const { port, close } = await startHttpServer(bridge);
+    cleanup.push(close);
+
+    // Turn 1: the master's per-turn child connects and initializes — exactly what a real ephemeral
+    // codex child does. It is then abandoned WITHOUT closing (no client.close(), no DELETE) to mirror
+    // the child being SIGKILLed at turn end.
+    const first = bridge.ensureSession("session-a", () => [echoDef("v1")]);
+    const transport1 = new StreamableHTTPClientTransport(new URL(first.url("127.0.0.1", port)));
+    const client1 = new Client({ name: "test-client", version: "0.0.1" });
+    await client1.connect(transport1);
+    const tools1 = await client1.listTools();
+    expect(tools1.tools.map((t) => t.name)).toEqual(["echo"]);
+    const sid1 = transport1.sessionId;
+    expect(sid1).toBeTruthy();
+
+    // Turn 2: ensureSession() is called again for the SAME sessionKey (defsProvider swapped, token
+    // stable — same URL across turns, as the daemon relies on for a stable spawn arg).
+    const second = bridge.ensureSession("session-a", () => [echoDef("v2")]);
+    expect(second.token).toBe(first.token);
+
+    // The FIRST turn's mcp-session-id must no longer be callable — proof the transport itself was
+    // closed and forgotten (GC'd), not merely orphaned-but-still-live.
+    const res = await fetch(`http://127.0.0.1:${port}/mcp/${second.token}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "mcp-session-id": sid1! },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    expect([400, 404]).toContain(res.status);
+
+    // The NEXT turn's child connects fresh on the same URL and works normally — bounded at exactly
+    // one live transport for the key (the stale one was GC'd rather than left to accumulate).
+    const client2 = await connectClient(second.url("127.0.0.1", port));
+    cleanup.push(() => client2.close());
+    const tools2 = await client2.listTools();
+    expect(tools2.tools.map((t) => t.name)).toEqual(["echo"]); // v2 defs (still named "echo")
+  });
+
   it("re-resolves defsProvider across connects: a second initialize sees mutated defs", async () => {
     const bridge = new McpBridge({});
     const { port, close } = await startHttpServer(bridge);

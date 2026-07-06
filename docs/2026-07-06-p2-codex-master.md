@@ -1,6 +1,6 @@
 # 2026-07-06 — P2: Codex master (spec)
 
-> Status 2026-07-06: **implemented** — all 6 plan tasks + the T3b pricing-continuity fix landed on `feat/p2-codex-master` (bridge, `CodexBackend.startTurn`, tool-defs port, `AskUserQuestion` def, `sessions.provider` routing). Live smoke (bridge round-trip + resume with fresh `developerInstructions`) is pending — the controller runs it post-task, then routes to fable final review before merge.
+> Status 2026-07-06: **implemented** — all 6 plan tasks + the T3b pricing-continuity fix landed on `feat/p2-codex-master` (bridge, `CodexBackend.startTurn`, tool-defs port, `AskUserQuestion` def, `sessions.provider` routing). Live smoke PASS (bridge round-trip: rookery.remember stored via tools/call; resumed turn quoted the fresh developerInstructions memory; cumulative pricing verified).
 
 Phase 2 of `docs/2026-07-05-codex-backend-parity.md`: **master sessions runnable on OpenAI Codex** — the orchestrator itself, with its memory/repos/fleet/schedule control plane, on `codex app-server`. Workers (P1) and the desktop UX (P1.5) are done; this closes the last provider gap except per-source overlays.
 
@@ -79,3 +79,4 @@ Per-source capability overlays for codex (slack-thread tools), codex masters for
 - rmcp streamable-HTTP client quirks (0.x): the bridge must stay tolerant (404 discovery, stateful-only); pin behavior with the live smoke.
 - Silent-hang footgun if the bridge is down/unreachable mid-turn (codex-side, can't fix server-side): mitigate with a turn-level watchdog? v1: document; the master turn can be interrupted via stop.
 - Bridge tool handler exceptions must map to MCP tool errors (isError content), never crash the http server.
+- Bridge token rides the child argv (`-c mcp_servers.rookery.url=...`) — on multi-user Linux, `/proc/*/cmdline` exposes it to other local users while a turn runs (macOS unaffected); P2.5: move the URL into a per-session `CODEX_HOME` `config.toml`. Note: the `maxTurns` warning is inert for codex masters (`numTurns` = 1/turn — see §Provider plumbing), so it almost never fires there.

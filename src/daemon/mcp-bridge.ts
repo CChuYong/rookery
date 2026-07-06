@@ -60,6 +60,19 @@ export class McpBridge {
   ): { url: (host: string, port: number) => string; token: string } {
     const existing = this.sessions.get(sessionKey);
     if (existing) {
+      // Per-turn GC: a codex master turn's per-turn ephemeral child is SIGKILLed at turn end (see
+      // docs/2026-07-06-p2-codex-master.md), so it never sends an MCP DELETE and this transport's
+      // `onclose` never fires. ensureSession() is called again with the SAME sessionKey on the very
+      // next turn (token kept stable — see below), so without this GC every turn would leak one
+      // transport into the map, AND that stale transport's mcp-session-id would stay callable
+      // forever, still dispatching against this (now-stale) turn's defsProvider closure. Mirror
+      // release()'s transport-close loop, but only clear transports/defs — keep the session entry,
+      // its token, and the tokenIndex mapping (the URL must not change mid-lifetime).
+      for (const transport of existing.transports.values()) {
+        transport.onclose = undefined; // avoid the transport re-deleting itself mid-iteration
+        void transport.close().catch(() => {});
+      }
+      existing.transports.clear();
       existing.defsProvider = defsProvider;
       return { url: (host, port) => this.buildUrl(host, port, existing.token), token: existing.token };
     }

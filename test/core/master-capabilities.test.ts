@@ -64,4 +64,51 @@ describe("MasterAgent source capabilities", () => {
     expect(o.allowedTools).not.toContain("mcp__slack__read_thread");
     expect(o.systemPrompt?.append).not.toContain("SLACK_HINT_MARKER");
   });
+
+  // Task 1 (final-review fix wave): schedule tools now travel to codex masters via a caps.toolDefs
+  // channel instead of an opaque mcpServers entry — see master-agent.ts's doTurn toolDefs merge.
+  it("caps.toolDefs surfaces as an SDK mcpServer for claude, wrapped exactly like the base groups (memory/repos/fleet)", async () => {
+    const fakeDef = { name: "schedule_wakeup", description: "d", inputSchema: {}, handler: async () => ({ content: [] }) };
+    const o = await runWith(() => ({ toolDefs: { schedule: [fakeDef] } }));
+    expect(Object.keys(o.mcpServers ?? {}).sort()).toEqual(["fleet", "memory", "repos", "schedule"]);
+  });
+
+  it("caps.toolDefs merges into the RAW toolDefs record: caps wins a key collision with base, and the askUserQuestion group still can't be shadowed", async () => {
+    // A minimal capturing fake AgentBackend (mirrors master-agent.test.ts's pattern) so we can inspect
+    // the RAW MasterTurnOptions master-agent builds — ClaudeBackend wraps/strips toolDefs before the
+    // SDK options the `capture()` helper above sees, so that helper can't observe the merge directly.
+    function capturingBackend() {
+      let captured: { toolDefs?: Record<string, Array<{ name: string }>> } | undefined;
+      const backend = {
+        openSession: () => { throw new Error("not used"); },
+        startTurn: (_prompt: string, opts: { toolDefs?: Record<string, Array<{ name: string }>> }) => {
+          captured = opts;
+          async function* gen() {
+            yield { kind: "turn_end" as const, subtype: "success", costUsd: 0, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 };
+          }
+          const it = gen();
+          return Object.assign(it, { interrupt: async () => {}, setModel: async () => {}, setPermissionMode: async () => {}, supportedCommands: async () => [] });
+        },
+      };
+      return { backend, opts: () => captured };
+    }
+    const fakeDef = (name: string) => ({ name, description: "d", inputSchema: {}, handler: async () => ({ content: [] }) });
+
+    const base = deps(() => ({
+      toolDefs: {
+        memory: [fakeDef("FAKE_MEMORY_OVERRIDE")], // collides with the base "memory" group
+        schedule: [fakeDef("schedule_wakeup")], // caps' own additional group
+        askUserQuestion: [fakeDef("SHOULD_NOT_WIN")], // attempts to shadow the reserved ask group
+      },
+    }));
+    const cap = capturingBackend();
+    const fakeCanUseTool = (() => {}) as never;
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, backend: cap.backend as never, canUseTool: fakeCanUseTool } });
+    await master.runTurn("hi");
+
+    const toolDefs = cap.opts()?.toolDefs;
+    expect(toolDefs?.memory?.map((d) => d.name)).toEqual(["FAKE_MEMORY_OVERRIDE"]); // caps wins over base
+    expect(toolDefs?.schedule?.map((d) => d.name)).toEqual(["schedule_wakeup"]); // caps' own group passes through
+    expect(toolDefs?.askUserQuestion?.map((d) => d.name)).toEqual(["AskUserQuestion"]); // real ask group always wins, spread last
+  });
 });

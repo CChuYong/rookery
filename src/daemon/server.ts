@@ -43,7 +43,7 @@ import { makeHolder } from "../slack/holder.js";
 import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
 import type { SlackRefResolver } from "../slack/name-resolver.js";
 import { InteractionRegistry } from "../core/interaction-registry.js";
-import { createScheduleToolsServer, SCHEDULE_SERVER_NAME, SCHEDULE_TOOL_NAMES } from "../tools/schedule-tools.js";
+import { scheduleToolDefs, SCHEDULE_SERVER_NAME, SCHEDULE_TOOL_NAMES } from "../tools/schedule-tools.js";
 import type { SlackHandle } from "../slack/app.js";
 import { SlackController } from "../slack/controller.js";
 import { DEFAULT_USAGE_REFRESH_MS } from "../core/settings.js";
@@ -184,13 +184,19 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.
+    // Schedule travels the toolDefs channel (not mcpServers): codex ignores opts.mcpServers (it has no
+    // in-process MCP concept — see agent-backend.ts), so an opaque SDK server here would silently never
+    // reach a codex master. toolDefs is the provider-neutral twin — master-agent.ts's doTurn merges it
+    // into the same defs record the base memory/repos/fleet groups travel on, which the Claude adapter
+    // wraps with createSdkMcpServer (same factory chain, same version "0.0.1", byte-equivalent server)
+    // and the Codex adapter flattens onto the daemon MCP bridge, so codex masters now get schedule_* too.
     makeCapabilities: (externalKey, sessionId) => {
       const slackCaps = makeSlackCapabilities(externalKey, () => threadReaderHolder.get());
       return () => {
         const s = slackCaps?.() ?? {};
         return {
           ...s,
-          mcpServers: { ...s.mcpServers, [SCHEDULE_SERVER_NAME]: createScheduleToolsServer({ repos, reconcile: (id) => scheduler.reconcile(id), now: () => new Date() }, sessionId) },
+          toolDefs: { ...s.toolDefs, [SCHEDULE_SERVER_NAME]: scheduleToolDefs({ repos, reconcile: (id) => scheduler.reconcile(id), now: () => new Date() }, sessionId) },
           allowedTools: [...(s.allowedTools ?? []), ...SCHEDULE_TOOL_NAMES],
         };
       };

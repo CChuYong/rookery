@@ -3,6 +3,9 @@ import { CodexBackend } from "../../../src/core/codex/codex-backend.js";
 import { fakeCodexSpawn, type CodexStep } from "../../helpers/fake-codex.js";
 import type { AgentEvent, AgentStream, ProviderToolDef } from "../../../src/core/agent-backend.js";
 import { MessageQueue } from "../../../src/core/message-queue.js";
+import { openDb } from "../../../src/persistence/db.js";
+import { Repositories } from "../../../src/persistence/repositories.js";
+import { scheduleToolDefs } from "../../../src/tools/schedule-tools.js";
 
 async function collect(stream: AgentStream): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
@@ -149,6 +152,27 @@ describe("CodexBackend.startTurn", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.key).toBe("sess-1");
     expect(calls[0]!.defs().map((d) => d.name).sort()).toEqual(["list_repos", "remember"]);
+  });
+
+  // Task 1 (final-review fix wave): schedule tools now reach codex masters too — server.ts's
+  // makeCapabilities puts them on the caps.toolDefs channel (master-agent.ts merges it into the
+  // same RAW toolDefs record the base groups travel on), and this backend flattens the WHOLE
+  // toolDefs record onto the bridge (see startTurn below) — so the real scheduleToolDefs names must
+  // show up here, not just fakes.
+  it("real scheduleToolDefs names reach the bridge's flattened defs alongside base groups", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const { bridge, calls } = stubBridge();
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", bridge });
+    const repos = new Repositories(openDb(":memory:"));
+    const schedule = scheduleToolDefs({ repos, reconcile: () => {}, now: () => new Date() }, "sess-3");
+    const opts = baseOpts({
+      sessionKey: "sess-3",
+      toolDefs: { memory: [fakeToolDef("remember")], schedule },
+    });
+    await collect(b.startTurn("hi", opts as never));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.defs().map((d) => d.name).sort()).toEqual(["remember", "schedule_cancel", "schedule_list", "schedule_wakeup"]);
   });
 
   it("resume turn: thread/resume with threadId + UPDATED developerInstructions; session_id emitted early", async () => {

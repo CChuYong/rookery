@@ -44,6 +44,7 @@ export interface MasterAgentDeps {
 // Per-source turn capability that adds (+) or removes (−) on top of base. The core knows only this shape; the daemon (server.ts) decides what to put in.
 export interface TurnCapabilities {
   mcpServers?: Record<string, ProviderMcpServer>; // "+" additional MCP servers
+  toolDefs?: Record<string, ProviderToolDef[]>; // "+" additional in-process tool defs — provider-neutral twin of mcpServers; served to codex via the bridge and wrapped for claude
   allowedTools?: string[]; // "+" additional exposed tool names (mcp__server__tool format)
   systemPromptAppend?: string; // "+" system prompt fragment (recommend keeping it fixed within a session — stable cache prefix)
   denyTools?: string[]; // "−" tool names to remove from the base allowlist
@@ -326,16 +327,21 @@ export class MasterAgent {
         systemPromptAppend: this.buildSystemPrompt() + (caps.systemPromptAppend ? `\n\n${caps.systemPromptAppend}` : ""),
         resume: this.sdkSessionId,
         // Base in-process tool servers as RAW defs, travelling the provider-neutral port (P2 tool-port
-        // refactor): the Claude adapter wraps each group with createSdkMcpServer; a future Codex adapter
+        // refactor): the Claude adapter wraps each group with createSdkMcpServer; the Codex adapter
         // registers the same objects on the daemon MCP bridge. sessionKey keys that bridge registration.
-        // askUserQuestion is added only when an interaction channel (deps.canUseTool) is injected —
-        // ClaudeBackend strips this group (Claude keeps its NATIVE AskUserQuestion + canUseTool path);
-        // CodexBackend flattens it into the bridge like every other group, giving codex masters the
-        // same structured-question capability (spec: docs/2026-07-06-p2-codex-master.md §The MCP bridge).
+        // Merge order mirrors the mcpServers "+" convention (base < caps < ask): caps.toolDefs (the
+        // per-source overlay — e.g. server.ts's schedule_* group) is spread AFTER the base three, so it
+        // wins on a key collision; the askUserQuestion group is spread LAST of all so caps can never
+        // shadow it. askUserQuestion is added only when an interaction channel (deps.canUseTool) is
+        // injected — ClaudeBackend strips this group (Claude keeps its NATIVE AskUserQuestion +
+        // canUseTool path); CodexBackend flattens every group (base, caps, and this one) into the
+        // bridge, giving codex masters the same structured-question capability and the same caps-
+        // provided tools (spec: docs/2026-07-06-p2-codex-master.md §The MCP bridge).
         toolDefs: {
           memory: memoryToolDefs(repos),
           repos: repoToolDefs(repos),
           fleet: fleetToolDefs(fleet, repos, sessionId),
+          ...(caps.toolDefs ?? {}),
           ...(this.opts.deps.canUseTool
             ? {
                 askUserQuestion: [
