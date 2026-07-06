@@ -53,6 +53,28 @@ describe("makeCodexModelsProvider", () => {
     expect(req?.params).toEqual({ includeHidden: false });
   });
 
+  it("spawns the catalog child with the same CODEX_HOME/env the turn children use (findings [25]/[26])", async () => {
+    const fake = fakeCodexSpawn(() => [], { modelList: [GPT_5_5] });
+    const provider = makeCodexModelsProvider({ spawn: fake.spawn, env: () => ({ CODEX_HOME: "/redir" }) });
+    await provider.list();
+    expect(fake.spawns[0]?.env).toMatchObject({ CODEX_HOME: "/redir" });
+  });
+
+  it("provisions the in-app codexApiKey (account/login/start) before model/list so an api-key-only deploy authenticates (finding [25])", async () => {
+    const fake = fakeCodexSpawn(() => [], { modelList: [GPT_5_5], requiresOpenaiAuth: true });
+    const provider = makeCodexModelsProvider({ spawn: fake.spawn, env: () => ({ CODEX_HOME: "/redir" }), apiKey: () => "sk-test" });
+    const models = await provider.list();
+    expect(models).not.toBeNull();
+    expect(fake.requests.some((r) => r.method === "account/login/start")).toBe(true);
+  });
+
+  it("does not attempt apiKey provisioning when no in-app key is configured (uses ambient ~/.codex auth)", async () => {
+    const fake = fakeCodexSpawn(() => [], { modelList: [GPT_5_5], requiresOpenaiAuth: true });
+    await makeCodexModelsProvider({ spawn: fake.spawn }).list();
+    expect(fake.requests.some((r) => r.method === "account/login/start")).toBe(false);
+    expect(fake.requests.some((r) => r.method === "account/read")).toBe(false);
+  });
+
   it("drops data[] rows without an id", async () => {
     const fake = fakeCodexSpawn(() => [], { modelList: [GPT_5_5, { displayName: "no id" }] });
     const provider = makeCodexModelsProvider({ spawn: fake.spawn });

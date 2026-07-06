@@ -125,10 +125,20 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P1.5: an in-app codexApiKey (settings) redirects the child to a rookery-managed CODEX_HOME and
   // provisions auth.json via RPC (see codex-backend.ts pump()), leaving the user's ~/.codex untouched.
   const codexHomeDir = path.join(config.home, "codex-home");
+  // Shared codex auth resolvers — used by BOTH the turn children (CodexBackend below) and the model/list
+  // catalog child (makeCodexModelsProvider) so the catalog authenticates under the SAME account the turns
+  // run under (findings [25]/[26]). When an in-app codexApiKey is set the child is redirected to the
+  // rookery-managed CODEX_HOME (auth.json provisioned via RPC); otherwise it inherits the user's ~/.codex.
+  const codexApiKey = (): string | undefined => settings.codexApiKey();
+  const codexEnv = (): NodeJS.ProcessEnv | undefined => {
+    if (!settings.codexApiKey()) return undefined;
+    fs.mkdirSync(codexHomeDir, { recursive: true });
+    return { CODEX_HOME: codexHomeDir };
+  };
   const codexBackend = new CodexBackend({
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
-    apiKey: () => settings.codexApiKey(),
+    apiKey: codexApiKey,
     // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
     // fresh every turn, same as the other settings resolvers on this backend. 0/negative disables it
     // (see Settings.codexTurnIdleTimeoutMs's own comment for the fail-safe parse).
@@ -138,11 +148,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // startOrResumeThread(), a phase the idle watchdog above does NOT cover (it only arms after
     // turn/start's response).
     handshakeTimeoutMs: () => settings.codexHandshakeTimeoutMs(),
-    env: () => {
-      if (!settings.codexApiKey()) return undefined;
-      fs.mkdirSync(codexHomeDir, { recursive: true });
-      return { CODEX_HOME: codexHomeDir };
-    },
+    env: codexEnv,
     // P2.5 Track A (docs/2026-07-06-p25-codex-hardening.md): the closure materializes the per-session
     // CODEX_HOME (config.toml with the bridge url + auth.json passthrough, see codex-home.ts) and hands
     // the backend back just the directory path — core must not import daemon code, see codex-backend.ts's
@@ -304,7 +310,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const modelsProvider = { list: () => modelsList() };
   // Codex model/effort catalog (for the desktop Codex model picker): spawns a short-lived app-server
   // child and caches the first successful result for the daemon's lifetime (see codex-models-provider.ts).
-  const codexModelsProvider = makeCodexModelsProvider({ spawn: realCodexSpawn(() => settings.codexBin()) });
+  const codexModelsProvider = makeCodexModelsProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
 
   // Slack runtime config is resolved per call from settings (DB, tokens fall back to env). Tokens at connect time, the rest per message.
   const slackConfig = () => ({

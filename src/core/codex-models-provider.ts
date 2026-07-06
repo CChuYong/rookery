@@ -25,7 +25,16 @@ function mapModel(m: unknown): CodexModelInfo | null {
 // fetches its authoritative `model/list` catalog, and caches the first successful (non-empty) result
 // for the daemon's lifetime. A failure (spawn error / not authed / timeout / malformed / empty) returns
 // `null` and is NOT cached, so a later call (e.g. after installing/authing codex) retries live.
-export function makeCodexModelsProvider(opts: { spawn: CodexSpawn; timeoutMs?: number }): { list(): Promise<CodexModelInfo[] | null> } {
+export function makeCodexModelsProvider(opts: {
+  spawn: CodexSpawn;
+  timeoutMs?: number;
+  // Same resolvers CodexBackend's turn children use (server.ts wires them from the SAME closures).
+  // WITHOUT these the catalog child authenticated under the ambient ~/.codex account while turns run
+  // under the in-app codexApiKey / redirected CODEX_HOME — so an in-app-key-only deployment got a
+  // permanently null catalog, and a mixed setup showed the wrong account's models (findings [25]/[26]).
+  env?: () => NodeJS.ProcessEnv | undefined;
+  apiKey?: () => string | undefined;
+}): { list(): Promise<CodexModelInfo[] | null> } {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let cache: CodexModelInfo[] | null = null; // caches the first SUCCESS only
   return {
@@ -36,10 +45,18 @@ export function makeCodexModelsProvider(opts: { spawn: CodexSpawn; timeoutMs?: n
       try {
         // Inside the try so a synchronously-throwing spawn (or CodexClient ctor) also degrades to null,
         // not just async failures — every failure mode returns null, never rejects list().
-        client = new CodexClient(opts.spawn({}));
+        client = new CodexClient(opts.spawn({ env: opts.env?.() }));
         const timeout = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("codex model/list timed out")), timeoutMs); });
         await Promise.race([client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } }), timeout]);
         client.notify("initialized", {});
+        // Provision the in-app codexApiKey into the (redirected) CODEX_HOME once — same RPC path
+        // CodexBackend.openClient uses — so the catalog authenticates under the account the turns run
+        // under. No key set → skip and rely on the ambient ~/.codex auth (unchanged behavior).
+        const apiKey = opts.apiKey?.();
+        if (apiKey) {
+          const acct = (await Promise.race([client.request("account/read", {}), timeout])) as { requiresOpenaiAuth?: boolean } | null;
+          if (acct?.requiresOpenaiAuth) await Promise.race([client.request("account/login/start", { type: "apiKey", apiKey }), timeout]);
+        }
         const res = (await Promise.race([client.request("model/list", { includeHidden: false }), timeout])) as { data?: unknown };
         const rows = Array.isArray(res?.data) ? res.data : [];
         const models = rows.map(mapModel).filter((m): m is CodexModelInfo => m !== null);
