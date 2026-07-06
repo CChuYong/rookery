@@ -106,7 +106,7 @@ export function WorkerSpawnModal(p: {
     if (provider !== "codex" || effortOptions.includes(effort)) return;
     const preferred = (codexModels ? codexDefaultEffort(effectiveModel || p.codexDefaultModel || "", codexModels) : "") || effortOptions[0];
     if (preferred && preferred !== effort) setEffort(preferred);
-  }, [provider, effectiveModel, codexModels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [provider, effectiveModel, codexModels, p.codexDefaultModel]); // eslint-disable-line react-hooks/exhaustive-deps
   const spawn = () => {
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;

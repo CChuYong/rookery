@@ -94,7 +94,11 @@ export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: st
     fs.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 });
     fs.cpSync(src, dst, { recursive: true });
   } catch {
-    /* best-effort — the fork still runs, just without the source's conversation context */
+    // best-effort — the fork still runs, just without the source's conversation context. Remove any
+    // PARTIAL copy (a mid-copy ENOSPC / source-removed-mid-copy can leave a truncated rollout tree),
+    // so the forked session degrades to "no prior context" cleanly instead of resuming a corrupt
+    // rollout on every subsequent turn. The cleanup is itself guarded so this function still never throws.
+    try { fs.rmSync(dst, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 }
 

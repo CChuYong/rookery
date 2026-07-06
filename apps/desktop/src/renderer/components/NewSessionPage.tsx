@@ -104,7 +104,7 @@ export function NewSessionPage(p: {
     if (!isCodex || codexEffortOptions.includes(effort)) return;
     const preferred = (codexModels ? codexDefaultEffort(codexModel || p.codexDefaultModel || "", codexModels) : "") || codexEffortOptions[0];
     if (preferred && preferred !== effort) setEffort(preferred);
-  }, [isCodex, codexModel, codexModels]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isCodex, codexModel, codexModels, p.codexDefaultModel]); // eslint-disable-line react-hooks/exhaustive-deps
   // codex model field: a catalog-driven dropdown when codex.models.list succeeded, else today's free text
   // (daemon default, settings.codexMasterModel, when empty).
   const codexControls = isCodex && (
