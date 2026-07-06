@@ -723,6 +723,14 @@ export class CodexBackend implements AgentBackend {
     if (mode.sandbox !== "danger-full-access") {
       throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");
     }
+    // Fail loudly instead of silently no-oping (finding [20]): CodexBackend reaches tools ONLY via the
+    // toolDefs→bridge channel; the SDK-wrapped opts.mcpServers channel (Claude-only) is dropped here. No
+    // producer uses mcpServers today (schedule/slack-thread were migrated to toolDefs), so this guards the
+    // next capability author who follows the TurnCapabilities doc and ships an mcpServers-based tool that
+    // would work on Claude but never reach codex. Warn (not throw) so a stray value can't break a turn.
+    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+      console.warn(`[codex] ignoring ${Object.keys(opts.mcpServers).length} opts.mcpServers entr${Object.keys(opts.mcpServers).length === 1 ? "y" : "ies"} — codex masters reach tools via the toolDefs bridge only; expose tools as toolDefs instead`);
+    }
     let envOverride: NodeJS.ProcessEnv | undefined;
     if (opts.sessionKey && opts.toolDefs && this.deps.bridge) {
       const flattened = Object.values(opts.toolDefs).flat();

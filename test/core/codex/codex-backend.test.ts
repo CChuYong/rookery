@@ -86,6 +86,21 @@ describe("CodexBackend.openSession — translation", () => {
     }
   });
 
+  it("warns when a codex master turn is handed opts.mcpServers (silent no-op made loud — finding [20])", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
+      await collect(b.startTurn("hi", baseOpts({ mcpServers: { legacy: {} } }) as never));
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("mcpServers"))).toBe(true);
+      // and no warning when the channel is unused
+      warn.mockClear();
+      await collect(b.startTurn("hi", baseOpts() as never));
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("mcpServers"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("maps thread start options: cwd, model, effort, approval/sandbox from permissionMode", async () => {
     const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }]);
     const q = new MessageQueue(); q.push("x"); q.close();

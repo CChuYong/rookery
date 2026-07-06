@@ -153,7 +153,9 @@ export class Connection {
       }
       case "session.open": {
         // find-or-create by external key (e.g. Slack thread_ts). Same key → always the same session.
-        const session = this.sessions.getOrCreateByKey(msg.key, msg.cwd ?? process.cwd());
+        // provider is honored only on FIRST creation of the key (fixed for the session's lifetime),
+        // mirroring session.create — otherwise a keyed session opened over the wire is permanently claude (finding [24]).
+        const session = this.sessions.getOrCreateByKey(msg.key, msg.cwd ?? process.cwd(), msg.provider);
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;

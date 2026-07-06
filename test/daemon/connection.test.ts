@@ -149,6 +149,13 @@ describe("Connection", () => {
     expect(created[0]!.sessionId).toBe(created[1]!.sessionId);
   });
 
+  it("session.open honors an explicit provider on first creation of the key (finding [24])", async () => {
+    const { conn, sent, repos } = setup();
+    await conn.handleRaw(JSON.stringify({ type: "session.open", key: "thread-cx", cwd: "/work", provider: "codex" }));
+    const created = parsed(sent).find((m) => m.type === "session.created");
+    expect(repos.getSession(created!.sessionId as string)?.provider).toBe("codex"); // not the claude default
+  });
+
   it("runs a turn and streams agent events to the socket", async () => {
     const { conn, sent } = setup();
     await conn.handleRaw(JSON.stringify({ type: "session.create", cwd: "/work" }));

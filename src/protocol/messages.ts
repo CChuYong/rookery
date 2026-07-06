@@ -45,7 +45,7 @@ const automationInputSchema = z.object({
 export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.create"), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional() }),
-  z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
   z.object({ type: z.literal("session.send"), sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
