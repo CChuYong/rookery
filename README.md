@@ -92,13 +92,15 @@ npm -w apps/desktop run dev    # ROOKERY_NODE auto-injected
 
 ## Data Handling
 
-**What leaves your machine:** rookery sends the following to Anthropic's API for processing:
+**What leaves your machine:** rookery sends the following to an LLM provider for processing:
 - Master conversation prompts (your messages and the master's responses)
 - Repository source code paths referenced in sessions
 - Worker repository source code, diffs, and terminal output
 - If Slack is connected: channel message text that triggers automations or mentions
 
-**Authentication (API key):** An Anthropic API key is recommended. You can set it in-app (**Settings → Anthropic API key** — stored in the local DB, takes priority) or via the `ANTHROPIC_API_KEY` environment variable (env fallback). If neither is configured, the daemon falls back to Claude Code OAuth (`claude login`).
+**Which provider:** the destination depends on the **backend (provider)** chosen for each session/worker/automation/Slack thread. The default is **Anthropic** (Claude). A session, worker, automation, or Slack thread configured to run on **codex** instead routes the same prompts, code, diffs, and Slack text through a `codex app-server` child to **OpenAI**. The provider is selectable per surface (desktop New Session / Worker spawn / Automation form, the `--provider` CLI flag, and the `slackProvider` setting), so review it before sending sensitive code to a second vendor.
+
+**Authentication (API key):** For Claude, an Anthropic API key is recommended — set it in-app (**Settings → Anthropic API key** — stored in the local DB, takes priority) or via the `ANTHROPIC_API_KEY` environment variable (env fallback); if neither is configured, the daemon falls back to Claude Code OAuth (`claude login`). For codex, set an in-app codex API key (**Settings → Codex API key**) or authenticate the codex CLI (`codex login`, used as the fallback).
 
 **Local storage:** All rookery data lives under `~/.rookery` — conversation history, integration tokens (Slack, Linear), logs, and worker worktrees. The directory is hardened to mode `0700` on each boot; sensitive files (DB, WS token, PID file, daemon log) are set to `0600`.
 
@@ -131,11 +133,11 @@ nvm use 22 && node dist/index.js daemon
 - A worker's actual completion (`done`/`stopped`) happens in the background, so it arrives as a follow-up notification in the thread (`🤖 <id> → done`).
 - A `$cost · n turns` context block at the end of the turn.
 
-> Slack's SDK auth is separate from the master/worker Anthropic auth (API key or Claude Code OAuth).
+> Slack's SDK auth (bot/app tokens) is separate from the LLM-provider auth the session runs under. By default a Slack thread runs on Claude (Anthropic auth); set **`slackProvider: codex`** (Settings → Slack) to run Slack threads on codex instead — those use codex auth and send channel/thread text to OpenAI, and (like all codex masters) are **bypassPermissions-only**.
 
 ## Automation
 
-Rookery supports automation rules, each a **trigger** (`cron` | `slack`) + an **action** (`master` | `worker`), managed on the desktop **Automation** page. Cron rules fire on a schedule; Slack rules fire on matching channel messages (requires the `message.channels` subscription above). Per-automation model/effort are configurable. Untrusted Slack message text is substituted as `{{message}}` into the prompt.
+Rookery supports automation rules, each a **trigger** (`cron` | `slack`) + an **action** (`master` | `worker`), managed on the desktop **Automation** page. Cron rules fire on a schedule; Slack rules fire on matching channel messages (requires the `message.channels` subscription above). Per-automation **provider** (`claude` | `codex`), model, and effort are configurable — a codex-provider automation sends its prompt/repo data to OpenAI and runs unattended, and because codex masters are **bypassPermissions-only**, a codex master automation configured with a non-bypass `permission_mode` fails every run (surfaced in `last_error`). Untrusted Slack message text is substituted as `{{message}}` into the prompt.
 
 ## Integrations (spawn workers from GitHub issues / Linear tickets)
 
