@@ -70,9 +70,11 @@ export class SessionManager {
 
   private build(id: string, cwd: string, sdkSessionId: string | null, externalKey: string | null): Session {
     const { repos, bus, backends, masterModel, masterModelByProvider, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
+    // Single row read (was two separate getSession(id) calls) — same DB row backs both provider routing and origin below.
+    const row = repos.getSession(id);
     // Provider routing (P2, mirrors FleetOrchestrator's worker provider routing): pick the backend + the
     // model resolver by the row's persisted provider (default "claude" for pre-existing/unspecified rows).
-    const provider = repos.getSession(id)?.provider || "claude";
+    const provider = row?.provider || "claude";
     const backend = backends[provider] ?? backends["claude"]!;
     const modelForProvider = masterModelByProvider?.[provider] ?? masterModel;
     // Pass the resolver through as-is → MasterAgent resolves it per turn (Settings changes are reflected in cached sessions).
@@ -82,7 +84,7 @@ export class SessionManager {
     // Automation (unattended) sessions must never get a blocking approval/AskUserQuestion handler — a headless turn that
     // asks would hang forever (no client to answer), permanently wedging the cron in-flight guard. origin is persisted at
     // creation; fresh automation sessions are keyless so deriveOrigin(externalKey) alone would miss them → read the row.
-    const origin = repos.getSession(id)?.origin || deriveOrigin(externalKey).origin;
+    const origin = row?.origin || deriveOrigin(externalKey).origin;
     const canUseTool = origin === "automation" ? undefined : makeCanUseTool?.(externalKey, id); // session-bound approval/question callback (slack thread etc.). auto-allow if absent.
     const capabilities = makeCapabilities?.(externalKey, id); // session-bound per-source capability resolver (slack thread tools etc.). base only if absent.
     const master = new MasterAgent({

@@ -1,5 +1,7 @@
 # 2026-07-06 — P2: Codex master (spec)
 
+> Status 2026-07-06: **implemented** — all 6 plan tasks + the T3b pricing-continuity fix landed on `feat/p2-codex-master` (bridge, `CodexBackend.startTurn`, tool-defs port, `AskUserQuestion` def, `sessions.provider` routing). Live smoke (bridge round-trip + resume with fresh `developerInstructions`) is pending — the controller runs it post-task, then routes to fable final review before merge.
+
 Phase 2 of `docs/2026-07-05-codex-backend-parity.md`: **master sessions runnable on OpenAI Codex** — the orchestrator itself, with its memory/repos/fleet/schedule control plane, on `codex app-server`. Workers (P1) and the desktop UX (P1.5) are done; this closes the last provider gap except per-source overlays.
 
 ## De-risked by live spikes (2026-07-06, codex 0.142.5 — reference impls in `.superpowers/sdd/probe-mcp-*.mjs`)
