@@ -170,7 +170,8 @@ export interface WorkerRow {
   ticketUrl?: string | null;
   lastActivityTs?: number; // ms epoch of the worker's last message event (fleet.list snapshot); absent if it has none
   costUsd?: number;        // cumulative $ from the worker's last result event; absent if it never completed a turn
-  costBudgetUsd?: number | null; // lifetime USD cost ceiling (the sibling runaway guard to maxTurns); null/absent = unlimited
+  maxTurns?: number | null; // per-result turn cap (runaway guard) persisted on the worker; null/absent = no cap
+  costBudgetUsd?: number | null; // explicit per-worker lifetime USD ceiling override; null/absent = no per-worker override (the workerCostBudgetUsd settings default may still apply — see server.ts subFactory)
 }
 
 // Integration connection status (on-demand pull). github=gh auth, linear=key present + viewer verification.

@@ -676,7 +676,7 @@ export class FleetOrchestrator {
         ticketKey: r.ticket_key,
         ticketUrl: r.ticket_url,
         maxTurns: r.max_turns, // per-result turn cap, the sibling runaway guard to costBudgetUsd (WorkerRow protocol field)
-        costBudgetUsd: r.cost_budget_usd, // lifetime USD cost ceiling; null = unlimited
+        costBudgetUsd: r.cost_budget_usd, // explicit per-worker $ ceiling override; null = none set (the workerCostBudgetUsd settings default may still apply — see server.ts subFactory)
         ...(metrics.get(r.id) ?? {}), // lastActivityTs / costUsd from worker_events (absent when the worker has neither)
       }))
       .filter((x) => (filter?.status ? x.status === filter.status : true))
