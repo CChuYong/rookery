@@ -222,4 +222,24 @@ describe("protocol", () => {
     };
     expect(JSON.parse(serializeServerMessage(msg))).toEqual(msg);
   });
+
+  it("parses codex.models.list (reqId required)", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "codex.models.list", reqId: "cm1" }))).toEqual({
+      type: "codex.models.list",
+      reqId: "cm1",
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "codex.models.list" }))).toThrow(); // reqId missing → rejected
+  });
+
+  it("codex.models.result accepts a CodexModelInfo[] and null (couldn't fetch → desktop free-text fallback)", () => {
+    const withModels: ServerMessage = {
+      type: "codex.models.result",
+      reqId: "cm2",
+      models: [{ id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true }],
+    };
+    expect(JSON.parse(serializeServerMessage(withModels))).toEqual(withModels);
+
+    const nullModels: ServerMessage = { type: "codex.models.result", reqId: "cm3", models: null };
+    expect(JSON.parse(serializeServerMessage(nullModels))).toEqual(nullModels);
+  });
 });

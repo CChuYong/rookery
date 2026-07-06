@@ -29,6 +29,7 @@ export interface FakeCodexServerOpts {
   silentTurnStart?: boolean; // `turn/start` gets NO response AND no `turn/started`/other notification at all — exercises the
   // request→response idle-watchdog coverage window (cleanup wave B1): proves the watchdog fires even
   // when it never got a turnRes.turn.id (activeTurnId stays null on a first turn).
+  modelList?: unknown[]; // scripted `model/list` data[] rows (codex-models-provider.ts tests) — absent → responds with an empty data[]
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -84,6 +85,15 @@ export function fakeCodexSpawn(
           return;
         }
         if (msg.method === "initialized") return;
+        if (msg.method === "model/list") {
+          // Mirrors the real app-server's includeHidden contract: a request with includeHidden:false gets
+          // only non-hidden rows back (mapModel itself does no client-side hidden filtering — see
+          // codex-models-provider.ts — so this is where "hidden absent" actually comes from, same as prod).
+          const includeHidden = (msg.params as { includeHidden?: boolean } | undefined)?.includeHidden ?? true;
+          const rows = (opts.modelList ?? []).filter((m) => includeHidden || !(m as { hidden?: boolean })?.hidden);
+          send({ id: msg.id, result: { data: rows } });
+          return;
+        }
         if (msg.method === "thread/start" || msg.method === "thread/resume" || msg.method === "thread/fork") {
           if (msg.method === "thread/fork" && opts.silentForkHang) return; // never respond — exercises forkSession's timeout
           if ((msg.method === "thread/start" || msg.method === "thread/resume") && opts.silentThreadStart) return; // never respond — exercises the handshake-timeout test

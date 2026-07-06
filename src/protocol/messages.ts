@@ -99,6 +99,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional() }),
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
   z.object({ type: z.literal("models.list"), reqId: z.string() }),
+  z.object({ type: z.literal("codex.models.list"), reqId: z.string() }),
   z.object({ type: z.literal("settings.get"), reqId: z.string() }),
   z.object({
     type: z.literal("settings.set"),
@@ -180,6 +181,17 @@ export interface IntegrationsStatus {
   linear: { configured: boolean; valid?: boolean; user?: string };
 }
 
+// One available Codex model (from the app-server's `model/list` catalog) — structurally identical to
+// core/codex-models-provider.ts's CodexModelInfo, but re-declared here (not imported) so the protocol
+// stays transport-agnostic (no core import in messages.ts).
+export interface CodexModelInfo {
+  id: string;
+  displayName: string;
+  defaultEffort: string;
+  supportedEfforts: string[];
+  isDefault: boolean;
+}
+
 export type ServerMessage =
   | { type: "session.created"; sessionId: string; cwd: string; reqId?: string }
   | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string }>; reqId?: string }
@@ -202,6 +214,7 @@ export type ServerMessage =
   | { type: "fleet.spawn.result"; reqId: string; id: string }
   | { type: "usage.result"; reqId: string; usage: UsageSnapshot }
   | { type: "models.result"; reqId: string; models: Array<{ id: string; displayName: string }> }
+  | { type: "codex.models.result"; reqId: string; models: CodexModelInfo[] | null }
   | { type: "commands.result"; reqId: string; commands: SlashCommandInfo[] }
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
@@ -253,6 +266,7 @@ export interface RequestResultMap {
   "worker.checkpoints": Extract<ServerMessage, { type: "worker.checkpoints.result" }>;
   "usage.get": Extract<ServerMessage, { type: "usage.result" }>;
   "models.list": Extract<ServerMessage, { type: "models.result" }>;
+  "codex.models.list": Extract<ServerMessage, { type: "codex.models.result" }>;
   "commands.list": Extract<ServerMessage, { type: "commands.result" }>;
   "settings.get": Extract<ServerMessage, { type: "settings.result" }>;
   "settings.set": Extract<ServerMessage, { type: "settings.result" }>;

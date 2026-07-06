@@ -22,6 +22,7 @@ import type { SlackController } from "../slack/controller.js";
 import type { ModelInfo } from "../core/models-provider.js";
 import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
+import type { CodexModelInfo } from "../protocol/messages.js";
 
 export interface UsageProvider {
   snapshot(): UsageSnapshot;
@@ -29,6 +30,10 @@ export interface UsageProvider {
 
 export interface ModelsProvider {
   list(): Promise<ModelInfo[]>; // Available Claude models (for the settings model picker). Always non-empty (live or static fallback).
+}
+
+export interface CodexModelsProvider {
+  list(): Promise<CodexModelInfo[] | null>; // Available Codex models (app-server model/list catalog). null = couldn't fetch → desktop free-text fallback.
 }
 
 export interface SettingsProvider {
@@ -97,6 +102,7 @@ export class Connection {
     private readonly interactions?: InteractionResponder,
     private readonly automations?: AutomationProvider,
     private readonly resolveSlackRefs?: SlackRefResolverFn,
+    private readonly codexModels?: CodexModelsProvider,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -445,6 +451,12 @@ export class Connection {
         // Live list (when a provider is injected) or static fallback — so the UI model picker is never empty.
         const models = (await this.models?.list()) ?? STATIC_MODELS;
         this.reply({ type: "models.result", reqId: msg.reqId, models });
+        return;
+      }
+      case "codex.models.list": {
+        // null (no provider injected, or the fetch failed) → desktop degrades to free-text (no static fallback here — see codex-models-provider.ts).
+        const models = (await this.codexModels?.list()) ?? null;
+        this.reply({ type: "codex.models.result", reqId: msg.reqId, models });
         return;
       }
       case "settings.get": {

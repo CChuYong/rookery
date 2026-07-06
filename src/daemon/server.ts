@@ -28,6 +28,7 @@ import { RealLinearClient } from "../core/linear-client.js";
 import { UsageCollector } from "../core/usage.js";
 import { makeOAuthUsageProvider } from "../core/oauth-usage.js";
 import { makeModelsProvider } from "../core/models-provider.js";
+import { makeCodexModelsProvider } from "../core/codex-models-provider.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -301,6 +302,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // List of available models (for the settings picker): x-api-key if there's an API key, otherwise the Claude Code OAuth token (same token reader as usage). Static fallback on failure.
   const modelsList = makeModelsProvider({ apiKey: () => settings.anthropicApiKey() });
   const modelsProvider = { list: () => modelsList() };
+  // Codex model/effort catalog (for the desktop Codex model picker): spawns a short-lived app-server
+  // child and caches the first successful result for the daemon's lifetime (see codex-models-provider.ts).
+  const codexModelsProvider = makeCodexModelsProvider({ spawn: realCodexSpawn(() => settings.codexBin()) });
 
   // Slack runtime config is resolved per call from settings (DB, tokens fall back to env). Tokens at connect time, the rest per message.
   const slackConfig = () => ({
@@ -429,7 +433,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });
