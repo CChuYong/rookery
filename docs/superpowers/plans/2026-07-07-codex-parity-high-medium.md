@@ -70,6 +70,14 @@ Findings: [0] numTurns per-send, [9] worker cap, [4] master cap, [1] watchdog-vs
 - [13] AutomationForm: codex + null catalog → free-text (+ out-of-list option), not the Claude select.
 - Desktop typecheck + tests. Commit.
 
+## Unit G — packaged-app daemon PATH ([3], added after review)
+
+HIGH [3] was initially missed in unit planning and added during the review wave.
+
+**Files:** `apps/desktop/src/main/resolve-path.ts` (new, pure `withResolvedPath`), `apps/desktop/src/main/index.ts` (daemon spawn env). Test: `apps/desktop/test/resolve-path.test.ts`.
+
+**Fix:** A Finder-launched app inherits launchd's minimal PATH, so the daemon can't resolve a bare `codex`. Merge the well-known CLI install dirs (Homebrew, ~/.local/bin, npm-global, bun, ~/bin) onto PATH for the daemon child (codex/gh grandchildren inherit it). Appended (never shadow system), no-op on Windows, deterministic (no login-shell probe).
+
 ## Unit E — CLI --provider flag ([16])
 
 **Files:** `src/entrypoints/cli.ts`, `src/index.ts`. Test: none needed beyond typecheck (thin client), but add a parseArgs test if one exists.
