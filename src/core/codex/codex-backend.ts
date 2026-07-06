@@ -224,6 +224,11 @@ abstract class CodexSessionBase implements AgentStream {
   private armIdleWatchdog(): void {
     this.idleTimeoutMsForTurn = this.deps.idleTimeoutMs?.() ?? 0;
     this.clearIdleTimer();
+    // Defense-in-depth: a NEW turn must never inherit a stale grace timer from a previous turn's
+    // onIdleTimeout race (see onIdleTimeout's own turnDone===null guard for the primary fix). If
+    // some other path ever manages to leave graceTimer armed across a turn boundary, arming the
+    // next turn's watchdog clears it here so it can never dangle into (and kill) turn N+1.
+    if (this.graceTimer !== null) { clearTimeout(this.graceTimer); this.graceTimer = null; }
     if (this.idleTimeoutMsForTurn > 0) {
       this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
     }
@@ -261,6 +266,10 @@ abstract class CodexSessionBase implements AgentStream {
     } catch {
       /* best-effort — escalate to the grace/kill path regardless of interrupt's own outcome */
     }
+    // The turn may have completed during the interrupt round-trip (ack + turn/completed can arrive
+    // in one stdout batch). turnDone is nulled by both turn/completed and onClosed → null means the
+    // turn already ended, so do NOT arm the grace kill (it would dangle and false-kill a later turn).
+    if (this.turnDone === null) return;
     this.graceTimer = setTimeout(() => this.onGraceExpired(), CodexSessionBase.WATCHDOG_GRACE_MS);
   }
 

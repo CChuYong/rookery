@@ -642,6 +642,46 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
     }
   });
 
+  it("watchdog-driven interrupt racing turn/completed must not leave the grace timer dangling into the next turn (regression for the ordering hole in d813fef)", async () => {
+    vi.useFakeTimers();
+    try {
+      // NORMAL interrupt behavior (default fakeCodexSpawn opts, NOT silentInterrupt): the fake acks
+      // turn/interrupt AND immediately follows it with turn/completed(interrupted) — the exact
+      // same-batch race (ack + completion arriving together) the buggy code missed. Every "trips
+      // on..." test above uses silentInterrupt:true, which suppresses this very turn/completed and
+      // so never exercised this hole.
+      const fake = fakeCodexSpawn((_text, turn) =>
+        turn === 0
+          ? [{ kind: "command", id: "c1", command: "npm test" }] // starts a long op, then goes silent (quiet-but-alive) — never self-ends
+          : [{ kind: "turnEnd" }], // turn 2: an ordinary healthy turn
+      );
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue();
+      q.push("t1");
+      const seen: AgentEvent[] = [];
+      const done = (async () => { for await (const ev of b.openSession(q, baseOpts())) seen.push(ev); })();
+
+      await vi.advanceTimersByTimeAsync(1000); // idle window elapses on turn 1 → watchdog fires: interrupt() sent,
+      // the fake's ack + turn/completed(interrupted) both land in the same microtask batch — the race.
+
+      // Turn 1 in isolation: the interrupt-driven turn/completed already happened above. Advance well
+      // past WATCHDOG_GRACE_MS (5000ms) BEFORE turn 2 even starts — if the grace timer had dangled,
+      // THIS is where it would spuriously fire and fail the whole stream.
+      await vi.advanceTimersByTimeAsync(6000);
+
+      q.push("t2"); q.close(); // a second, ordinary turn — must complete cleanly if the session survived
+      await done;
+
+      const turnEnds = seen.filter((e) => e.kind === "turn_end") as Array<{ subtype: string; numTurns: number }>;
+      expect(turnEnds).toHaveLength(2);
+      expect(turnEnds[0]).toMatchObject({ subtype: "interrupted", numTurns: 1 });
+      expect(turnEnds[1]).toMatchObject({ subtype: "success", numTurns: 2 });
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("disarm on abort: no timeout notice afterward even past the original idle+grace window", async () => {
     vi.useFakeTimers();
     try {
