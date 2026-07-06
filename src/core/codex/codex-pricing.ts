@@ -18,8 +18,12 @@ const RATES: Record<string, { input: number; cachedInput: number; output: number
 export function turnCostUsd(model: string, usage: CodexTokenUsageBreakdown | undefined): number {
   const rate = RATES[model];
   if (!rate || !usage) return 0;
-  const input = ((usage.inputTokens ?? 0) - (usage.cachedInputTokens ?? 0)) * rate.input;
+  // Upstream aggregation clamps each field independently (see codex-backend.ts turnAccum), which
+  // can still leave cachedInputTokens > inputTokens for a given usage snapshot. Clamp both the
+  // per-field subtraction AND the total so a cache-heavier-than-input reading never bills negative
+  // (which would silently DECREASE the worker's cumulative cost).
+  const input = Math.max(0, (usage.inputTokens ?? 0) - (usage.cachedInputTokens ?? 0)) * rate.input;
   const cached = (usage.cachedInputTokens ?? 0) * rate.cachedInput;
   const output = (usage.outputTokens ?? 0) * rate.output;
-  return (input + cached + output) / 1_000_000;
+  return Math.max(0, (input + cached + output) / 1_000_000);
 }

@@ -29,4 +29,10 @@ describe("codex vocab", () => {
     expect(turnCostUsd("some-unknown", { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 })).toBe(0);
     expect(turnCostUsd("gpt-5.5", undefined)).toBe(0);
   });
+  it("clamps negative cost when cachedInputTokens exceeds inputTokens (asymmetric upstream clamping)", () => {
+    // input leg: max(0, 100-500)*5.00/1M = 0; cached leg still bills: 500*0.50/1M = 0.00025.
+    const cost = turnCostUsd("gpt-5.5", { inputTokens: 100, cachedInputTokens: 500, outputTokens: 0 });
+    expect(cost).toBeGreaterThanOrEqual(0);
+    expect(cost).toBeCloseTo(0.00025, 10);
+  });
 });

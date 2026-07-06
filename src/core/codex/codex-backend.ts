@@ -74,6 +74,11 @@ class CodexStream implements AgentStream {
   // the FIRST update only sets it (its one call is uncounted; the resume response carries no baseline).
   private prevTotal: CodexTokenUsageBreakdown | null;
   private turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  // Snapshotted once at construction, then re-snapshotted only when a turn/start actually carries a
+  // model override — pricing must bill the model the THREAD was actually running under for that turn,
+  // not whatever this.opts.model/defaultModel() resolve to NOW (mid-turn setModel, or a
+  // codexWorkerModel settings change mid-session, must not misprice an already-billed turn).
+  private billedModel: string;
 
   constructor(
     private readonly deps: CodexBackendDeps,
@@ -81,6 +86,7 @@ class CodexStream implements AgentStream {
     private readonly opts: AgentSessionOptions,
   ) {
     this.prevTotal = opts.resume ? null : { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };
+    this.billedModel = this.opts.model || this.deps.defaultModel();
   }
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
@@ -171,6 +177,9 @@ class CodexStream implements AgentStream {
         const effort = mapEffort(this.opts.effort);
         // Always explicit: sandbox/approval identical regardless of path (spawn vs live override),
         // and workspace-write is always network-on by rookery decision (spec Track E).
+        // The override actually changes the thread's model from THIS turn on — snapshot it for
+        // billing before the request so turn/completed prices against what actually ran.
+        if (this.overrideModel) this.billedModel = this.overrideModel;
         const turnRes = (await client.request("turn/start", {
           threadId,
           input,
@@ -282,7 +291,7 @@ class CodexStream implements AgentStream {
       this.channel.push({
         kind: "turn_end",
         subtype,
-        costUsd: turnCostUsd(this.overrideModel ?? (this.opts.model || this.deps.defaultModel()), this.turnAccum),
+        costUsd: turnCostUsd(this.billedModel, this.turnAccum),
         numTurns: this.cumTurns,
         durationMs: turn?.durationMs ?? 0,
         contextTokens: this.lastContextTokens,

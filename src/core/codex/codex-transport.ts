@@ -16,8 +16,9 @@ export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv }) => CodexTransport;
 // `bin` is a resolver (Settings-backed) so runtime changes apply to new sessions.
 // AUTH NOTE (verified against rust-v0.142.5 app-server/src/lib.rs:493): the app-server does NOT
 // read CODEX_API_KEY from env (that only works for `codex exec`). Auth comes from
-// $CODEX_HOME/auth.json (`codex login` / `codex login --with-api-key`). An in-app API-key setting
-// would need CODEX_HOME redirection + `account/login/start` provisioning — deferred to P1.5.
+// $CODEX_HOME/auth.json (`codex login` / `codex login --with-api-key`). An in-app key is supported
+// via the codexApiKey setting: server.ts redirects CODEX_HOME to <rookery home>/codex-home and
+// codex-backend.ts pump() provisions it once via account/login/start.
 export function realCodexSpawn(bin: () => string): CodexSpawn {
   return ({ env }) => {
     const child = nodeSpawn(bin(), ["app-server"], {

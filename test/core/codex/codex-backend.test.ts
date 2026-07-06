@@ -242,6 +242,33 @@ describe("CodexBackend — pricing aggregation", () => {
     expect(ends[0]!.costUsd).toBeCloseTo(1000 * 5 / 1e6 + 100 * 30 / 1e6, 10);
     expect(ends[1]!.costUsd).toBe(0); // clamped, not negative
   });
+
+  it("billedModel snapshots per thread: a mid-turn setModel prices the NEXT turn only, not the in-flight one", async () => {
+    const { backend: b } = backend((_t, turn) => turn === 0
+      ? [{ kind: "tokenUsage", last: { inputTokens: 1 }, total: { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 0 } }, { kind: "turnEnd" }]
+      : [{ kind: "tokenUsage", last: { inputTokens: 1 }, total: { inputTokens: 2000, cachedInputTokens: 0, outputTokens: 0 } }, { kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("t1");
+    const stream = b.openSession(q, baseOpts({ model: "gpt-5.5" }));
+    const seen: AgentEvent[] = [];
+    const done = (async () => {
+      for await (const ev of stream) {
+        seen.push(ev);
+        if (ev.kind === "turn_end" && (ev as { numTurns: number }).numTurns === 1) {
+          await stream.setModel("gpt-5.4-mini");
+          q.push("t2"); q.close();
+        }
+      }
+    })();
+    await done;
+    const ends = seen.filter((e) => e.kind === "turn_end") as Array<{ costUsd: number }>;
+    expect(ends).toHaveLength(2);
+    // turn 1's delta (1000 input tokens vs the zero baseline) is billed at gpt-5.5's input rate —
+    // the setModel call happens AFTER turn 1 settles, so it cannot reprice a turn already billed.
+    expect(ends[0]!.costUsd).toBeCloseTo(1000 * 5.0 / 1e6, 10);
+    // turn 2's delta (2000-1000=1000 input tokens) is billed at gpt-5.4-mini's input rate — the
+    // override took effect on turn 2's turn/start, so billedModel was re-snapshotted before it billed.
+    expect(ends[1]!.costUsd).toBeCloseTo(1000 * 0.75 / 1e6, 10);
+  });
 });
 
 describe("CodexBackend — fork timeout & explicit sandbox", () => {
