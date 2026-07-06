@@ -98,6 +98,15 @@ export function WorkerSpawnModal(p: {
   // includes `max`, a level codex has no equivalent for).
   const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effectiveModel || p.codexDefaultModel || "", codexModels) : null;
   const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
+  // Re-derive effort when the provider/model/catalog changes so a stale Claude level (e.g. 'max', which
+  // codex has no equivalent for) that isn't in the current effortOptions can't linger — it would render
+  // the controlled <select> blank in a real browser and get submitted as 'max' (only surviving via the
+  // daemon's mapEffort coercion). Snap to the model's catalog default, else the first valid option (finding [23]).
+  useEffect(() => {
+    if (provider !== "codex" || effortOptions.includes(effort)) return;
+    const preferred = (codexModels ? codexDefaultEffort(effectiveModel || p.codexDefaultModel || "", codexModels) : "") || effortOptions[0];
+    if (preferred && preferred !== effort) setEffort(preferred);
+  }, [provider, effectiveModel, codexModels]); // eslint-disable-line react-hooks/exhaustive-deps
   const spawn = () => {
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;

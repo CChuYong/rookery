@@ -97,6 +97,14 @@ export function NewSessionPage(p: {
   // or no catalog (null) falls back to the generic EFFORTS vocabulary so the selector is never empty.
   const codexEfforts = codexModels != null ? codexEffortsFor(codexModel || p.codexDefaultModel || "", codexModels) : null;
   const codexEffortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
+  // Re-derive effort on provider/model/catalog change so a stale Claude level (e.g. 'max') that isn't a
+  // valid codex option can't linger — it would render the select blank and be submitted as 'max' (finding
+  // [23], same as WorkerSpawnModal). Snap to the model's catalog default, else the first valid option.
+  useEffect(() => {
+    if (!isCodex || codexEffortOptions.includes(effort)) return;
+    const preferred = (codexModels ? codexDefaultEffort(codexModel || p.codexDefaultModel || "", codexModels) : "") || codexEffortOptions[0];
+    if (preferred && preferred !== effort) setEffort(preferred);
+  }, [isCodex, codexModel, codexModels]); // eslint-disable-line react-hooks/exhaustive-deps
   // codex model field: a catalog-driven dropdown when codex.models.list succeeded, else today's free text
   // (daemon default, settings.codexMasterModel, when empty).
   const codexControls = isCodex && (

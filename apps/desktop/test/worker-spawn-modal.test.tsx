@@ -10,19 +10,20 @@ const items: SourceItem[] = [
   { provider: "github", id: "2", identifier: "#2", title: "Second issue", url: "https://x/2", body: "" },
 ];
 
-function renderModal(searchSource = vi.fn().mockResolvedValue(items), extra: { codexDefaultModel?: string } = {}) {
+function renderModal(searchSource = vi.fn().mockResolvedValue(items), extra: { codexDefaultModel?: string; defaultEffort?: string } = {}) {
   const onSpawn = vi.fn();
   const onClose = vi.fn();
+  const { defaultEffort = "high", ...rest } = extra;
   render(
     <WorkerSpawnModal
       repo="app"
       defaultModel="claude-opus-4-8"
-      defaultEffort="high"
+      defaultEffort={defaultEffort}
       integrations={{ github: { available: true }, linear: { configured: false } }}
       searchSource={searchSource}
       onSpawn={onSpawn}
       onClose={onClose}
-      {...extra}
+      {...rest}
     />,
   );
   return { onSpawn, onClose, searchSource };
@@ -155,6 +156,20 @@ describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task
 
     fireEvent.change(modelField, { target: { value: "gpt-5.5" } });
     expect((screen.getByTitle("effort") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
+  });
+
+  it("re-derives + submits a valid codex effort on provider switch, not the stale Claude 'max' (finding [23])", () => {
+    // jsdom coerces a controlled <select value="max"> with no matching option to the first option, masking the
+    // real-browser blank — so assert the SUBMITTED effort instead: it must be a valid codex level for the default
+    // model, not 'max' (which only works because the daemon coerces it).
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const { onSpawn } = renderModal(undefined, { codexDefaultModel: "gpt-5.5", defaultEffort: "max" });
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByText("spawn"));
+    const effortArg = onSpawn.mock.calls[0]![3];
+    expect(effortArg).not.toBe("max");
+    expect(CODEX_MODELS[0].supportedEfforts).toContain(effortArg); // gpt-5.5's default (xhigh), a real level
   });
 
   it("codexModels null → the codex model field stays the free-text <Input> and effort shows the generic EFFORTS list", () => {

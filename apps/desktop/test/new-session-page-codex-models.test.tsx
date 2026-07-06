@@ -31,6 +31,17 @@ describe("NewSessionPage codex model+effort dropdown (Codex Model Picker Task 3)
     expect(screen.getByText("GPT-5.4")).toBeInTheDocument();
   });
 
+  it("submits a valid codex effort on provider switch, not a stale Claude 'max' (finding [23])", () => {
+    useStore.getState().setCodexModels(CODEX_MODELS);
+    const onStart = vi.fn();
+    render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="max" onStart={onStart} codexDefaultModel="gpt-5.5" />);
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.click(screen.getByLabelText("시작"));
+    const effort = onStart.mock.calls[0]![0].effort;
+    expect(effort).not.toBe("max"); // re-derived, not the stale Claude level
+    expect(CODEX_MODELS[0].supportedEfforts).toContain(effort); // gpt-5.5's default (xhigh)
+  });
+
   it("selecting a codex model updates the effort <Select>'s options to that model's supportedEfforts and pre-selects its defaultEffort", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={() => {}} codexDefaultModel="gpt-5.5" />);
