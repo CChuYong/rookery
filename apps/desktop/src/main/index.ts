@@ -11,6 +11,7 @@ import { TerminalManager } from "./terminal-manager.js";
 import type { PtyLike } from "./terminal-manager.js";
 import { WorkspaceManager } from "./workspace-manager.js";
 import { resolveWorkRoot } from "./resolve-root.js";
+import { withResolvedPath } from "./resolve-path.js";
 import { createAppLauncher, createCliLauncher, CLI_EDITORS, icnsFileName } from "./app-launcher.js";
 import { collectResources, parsePsRows } from "./resource-monitor.js";
 import type { PsRow, ProcessMetricLike } from "./resource-monitor.js";
@@ -93,7 +94,9 @@ const manager = new DaemonManager({
       const fd = secureHomeAndLog(HOME);
       const envFile = process.env.ROOKERY_ENV_FILE ?? resolve(dirname(entry), "..", ".env");
       const args = [...(fs.existsSync(envFile) ? [`--env-file=${envFile}`] : []), entry, "daemon"];
-      return spawn(node, args, { detached: true, stdio: ["ignore", fd, fd], env: process.env });
+      // Merge common CLI install dirs onto PATH so a Finder-launched app (minimal launchd PATH) can still
+      // resolve a bare `codex`/`gh` for codex spawns and worker git ops (finding [3]).
+      return spawn(node, args, { detached: true, stdio: ["ignore", fd, fd], env: withResolvedPath(process.env) });
     },
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     readPid: readDaemonPid,
