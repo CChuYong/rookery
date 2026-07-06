@@ -371,6 +371,42 @@ describe("CodexBackend — pricing aggregation", () => {
     // override took effect on turn 2's turn/start, so billedModel was re-snapshotted before it billed.
     expect(ends[1]!.costUsd).toBeCloseTo(1000 * 0.75 / 1e6, 10);
   });
+
+  it("master continuity: ONE CodexBackend persists the per-thread baseline across resumed turns (T3b)", async () => {
+    // Two SEPARATE per-turn ephemeral children (startTurn spawns fresh every call), but ONE backend
+    // instance — this is exactly the master's turn-by-turn shape (each turn: fresh child, resume:threadId).
+    const fake = fakeCodexSpawn((text) => text === "turn 1"
+      ? [{ kind: "tokenUsage", last: { inputTokens: 1000 }, total: { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 100 } }, { kind: "turnEnd" }]
+      : [{ kind: "tokenUsage", last: { inputTokens: 2000 }, total: { inputTokens: 2000, cachedInputTokens: 0, outputTokens: 200 } }, { kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+
+    const events1 = await collect(b.startTurn("turn 1", baseOpts({ model: "gpt-5.5" }) as never));
+    const end1 = events1.find((e) => e.kind === "turn_end") as { costUsd: number };
+    // Fresh session baseline is zeros: bills the full total (1000 input, 100 output).
+    expect(end1.costUsd).toBeCloseTo(1000 * 5.0 / 1e6 + 100 * 30.0 / 1e6, 10);
+
+    const events2 = await collect(b.startTurn("turn 2", baseOpts({ model: "gpt-5.5", resume: "th-1" }) as never));
+    const end2 = events2.find((e) => e.kind === "turn_end") as { costUsd: number };
+    // WITHOUT the fix, resume always seeds prevTotal=null, so this SINGLE update would be consumed as
+    // a baseline and price 0. WITH the fix, th-1's baseline was persisted after turn 1 (total
+    // {1000,0,100}), so turn 2's single update {2000,0,200} bills the DELTA: 1000 input + 100 output
+    // at gpt-5.5 = 0.008.
+    expect(end2.costUsd).toBeCloseTo(1000 * 5.0 / 1e6 + 100 * 30.0 / 1e6, 10);
+    expect(end2.costUsd).toBeCloseTo(0.008, 10);
+  });
+
+  it("cold map: a fresh backend's first-ever resume of a thread still consumes the baseline (costUsd 0, existing behavior made explicit)", async () => {
+    const fake = fakeCodexSpawn(() => [
+      { kind: "tokenUsage", last: { inputTokens: 100 }, total: { inputTokens: 50_000, cachedInputTokens: 10_000, outputTokens: 9_000 } },
+      { kind: "turnEnd" },
+    ]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    // No prior turn has ever run under this backend for "th-x" — totalsByThread is cold, so this
+    // falls back to prevTotal=null and the single update is consumed as the baseline, same as before T3b.
+    const events = await collect(b.startTurn("continue", baseOpts({ model: "gpt-5.5", resume: "th-x" }) as never));
+    const end = events.find((e) => e.kind === "turn_end") as { costUsd: number };
+    expect(end.costUsd).toBe(0);
+  });
 });
 
 describe("CodexBackend — fork timeout & explicit sandbox", () => {

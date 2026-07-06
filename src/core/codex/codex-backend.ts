@@ -87,8 +87,14 @@ abstract class CodexSessionBase implements AgentStream {
 
   // Per-turn billing accumulator: deltas of the thread-cumulative tokenUsage.total between
   // updates (multi-call turns sum every call — see docs/2026-07-06-p15-codex-followups.md Track B).
-  // Fresh session: baseline zeros (thread totals start at 0). Resumed session: baseline null —
-  // the FIRST update only sets it (its one call is uncounted; the resume response carries no baseline).
+  // Fresh session: baseline zeros (thread totals start at 0). Resumed session: baseline seeded from
+  // the backend's totalsByThread map (T3b fix) — a WARM entry means the same daemon process priced
+  // this thread's previous turn, so its recorded cumulative total is the correct baseline and the
+  // first tokenUsage/updated of THIS turn is billed normally instead of silently consumed. A COLD
+  // map (no entry — first resume ever seen by this process, e.g. right after a daemon restart) falls
+  // back to null: the FIRST update only sets the baseline (its one call is uncounted; bounded,
+  // accepted — same as the pre-fix behavior, now scoped to "once per daemon lifetime" instead of
+  // "every single turn").
   protected prevTotal: CodexTokenUsageBreakdown | null;
   protected turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   // Snapshotted once at construction, then re-snapshotted only when a turn/start actually carries a
@@ -100,8 +106,14 @@ abstract class CodexSessionBase implements AgentStream {
   constructor(
     protected readonly deps: CodexBackendDeps,
     protected readonly opts: AgentSessionOptions,
+    // Backend-owned, daemon-lifetime map of threadId -> last-known cumulative tokenUsage.total
+    // (T3b fix). Shared by reference across every stream this backend ever constructs — see
+    // CodexBackend.totalsByThread for the persistence/eviction rationale.
+    private readonly totalsByThread: Map<string, CodexTokenUsageBreakdown>,
   ) {
-    this.prevTotal = opts.resume ? null : { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };
+    this.prevTotal = opts.resume
+      ? (this.totalsByThread.get(opts.resume) ?? null)
+      : { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };
     this.billedModel = this.opts.model || this.deps.defaultModel();
   }
 
@@ -321,6 +333,11 @@ abstract class CodexSessionBase implements AgentStream {
         contextTokens: this.lastContextTokens,
         contextWindow: this.contextWindow,
       });
+      // Persist this thread's latest cumulative total (T3b fix) so the NEXT resumed turn — a master's
+      // next startTurn(resume:...) call, or a worker's rehydrate-resume — seeds prevTotal from here
+      // instead of null. Applies to both fresh and resumed sessions alike: prevTotal is only ever null
+      // when this thread has never completed a turn under this daemon process.
+      if (this.threadId && this.prevTotal) this.totalsByThread.set(this.threadId, this.prevTotal);
       this.turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }; // reset per turn, including failed/interrupted
       if (this.turnDone) { const d = this.turnDone; this.turnDone = null; d(); }
       return;
@@ -374,8 +391,9 @@ class CodexWorkerStream extends CodexSessionBase {
     deps: CodexBackendDeps,
     private readonly input: AsyncIterable<string>,
     opts: AgentSessionOptions,
+    totalsByThread: Map<string, CodexTokenUsageBreakdown>,
   ) {
-    super(deps, opts);
+    super(deps, opts, totalsByThread);
   }
 
   protected async pump(): Promise<void> {
@@ -416,8 +434,9 @@ class CodexTurnStream extends CodexSessionBase {
     private readonly prompt: string,
     opts: MasterTurnOptions,
     private readonly spawnArgs: string[] | undefined,
+    totalsByThread: Map<string, CodexTokenUsageBreakdown>,
   ) {
-    super(deps, opts);
+    super(deps, opts, totalsByThread);
   }
 
   protected async pump(): Promise<void> {
@@ -437,10 +456,20 @@ class CodexTurnStream extends CodexSessionBase {
 }
 
 export class CodexBackend implements AgentBackend {
+  // T3b fix: per-thread cumulative-usage baseline (thread/tokenUsage/updated's `.total`), persisted
+  // across turns. CodexBackend is a daemon singleton (one instance for the whole process, injected
+  // once in server.ts), so this map outlives any single stream/turn and is shared by every session
+  // core it constructs — a master's Nth startTurn(resume:...) call sees what its (N-1)th call wrote.
+  // A daemon restart empties this map, which just re-triggers the pre-existing cold-baseline
+  // consumption for that thread's next turn — bounded and accepted (same as a worker's first turn
+  // after a restart). No eviction: the key space is the set of threads with a live/recent rookery
+  // session (masters + workers), which is bounded by the fleet/session population, not unbounded churn.
+  private readonly totalsByThread = new Map<string, CodexTokenUsageBreakdown>();
+
   constructor(private readonly deps: CodexBackendDeps) {}
 
   openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
-    return new CodexWorkerStream(this.deps, input, opts);
+    return new CodexWorkerStream(this.deps, input, opts, this.totalsByThread);
   }
 
   // Per-turn ephemeral child (P2 — docs/2026-07-06-p2-codex-master.md). Rejects SYNCHRONOUSLY for
@@ -457,7 +486,7 @@ export class CodexBackend implements AgentBackend {
       const { url } = this.deps.bridge.ensureSession(opts.sessionKey, () => flattened);
       spawnArgs = ["-c", `mcp_servers.rookery.url="${url}"`];
     }
-    return new CodexTurnStream(this.deps, prompt, opts, spawnArgs);
+    return new CodexTurnStream(this.deps, prompt, opts, spawnArgs, this.totalsByThread);
   }
 
   private static readonly FORK_TIMEOUT_MS = 15_000;
