@@ -1020,6 +1020,13 @@ export function App(): JSX.Element {
                 .then((r) => { if (r) useStore.getState().setAuthStatus(r); })
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
             }}
+            onSaveCodexKey={(key) => {
+              // Unlike anthropicApiKey there's no auth-status probe to refetch — codex has no live "currently
+              // active" indicator (SettingsPage's own local "saved" note is the only feedback, see its codex tab).
+              void client?.request({ type: "settings.set", settings: { codexApiKey: key } })
+                .then(() => toast.success(tRef.current("toast.keySaved")))
+                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+            }}
           />
         ) : overlay === "newSession" ? (
           <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />

@@ -724,6 +724,27 @@ describe("Connection — integrations / source.search", () => {
     expect(JSON.stringify(sent.at(-1))).not.toContain("sk-test");
     expect(sent.at(-1).settings.masterModel).toBe("m");
   });
+
+  // Task 5 daemon pickup: codexApiKey previously flowed through the generic apply() path with no trim
+  // normalization, unlike its siblings (anthropicApiKey/linearApiKey/slack tokens ~:455-462).
+  it("settings.set stores codexApiKey trimmed of surrounding whitespace", async () => {
+    const sent: any[] = [];
+    const repos0 = new Repositories(openDb(":memory:"));
+    const settings = new Settings(repos0, loadConfig({}));
+    const { conn } = makeConnWith(sent, { settings });
+    await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "z", settings: { codexApiKey: "  sk-test  " } }));
+    expect(settings.codexApiKey()).toBe("sk-test");
+  });
+
+  it("settings.set with a whitespace-only codexApiKey clears the stored secret", async () => {
+    const sent: any[] = [];
+    const repos0 = new Repositories(openDb(":memory:"));
+    const settings = new Settings(repos0, loadConfig({}));
+    settings.setCodexApiKey("sk-existing");
+    const { conn } = makeConnWith(sent, { settings });
+    await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "w", settings: { codexApiKey: "   " } }));
+    expect(settings.codexApiKey()).toBeUndefined();
+  });
 });
 
 describe("Connection automation routes", () => {

@@ -37,6 +37,7 @@ export interface SettingsProvider {
   setLinearApiKey(key: string | undefined): void;
   setAnthropicApiKey(key: string | undefined): void;
   anthropicApiKey(): string | undefined;
+  setCodexApiKey(key: string | undefined): void;
   setSlackBotToken(token: string | undefined): void;
   setSlackAppToken(token: string | undefined): void;
 }
@@ -450,13 +451,14 @@ export class Connection {
       }
       case "settings.set": {
         if (!this.settings) return this.reply({ type: "error", message: "settings unavailable", reqId: msg.reqId });
-        // Secrets (linear/anthropic/slack tokens) are handled separately, outside SettingsValues, so they aren't echoed. null/empty string → delete the key.
-        const { linearApiKey, anthropicApiKey, slackBotToken, slackAppToken, ...rest } = msg.settings;
+        // Secrets (linear/anthropic/codex/slack tokens) are handled separately, outside SettingsValues, so they aren't echoed. null/empty string → delete the key.
+        const { linearApiKey, anthropicApiKey, codexApiKey, slackBotToken, slackAppToken, ...rest } = msg.settings;
         if (linearApiKey !== undefined) this.settings.setLinearApiKey(linearApiKey?.trim() || undefined);
         if (anthropicApiKey !== undefined) {
           this.settings.setAnthropicApiKey(anthropicApiKey?.trim() || undefined);
           applyApiKeyToEnv(this.settings); // update process.env live so the SDK/models-provider pick up the new key without a restart
         }
+        if (codexApiKey !== undefined) this.settings.setCodexApiKey(codexApiKey?.trim() || undefined);
         let slackTokenChanged = false;
         if (slackBotToken !== undefined) { this.settings.setSlackBotToken(slackBotToken?.trim() || undefined); slackTokenChanged = true; }
         if (slackAppToken !== undefined) { this.settings.setSlackAppToken(slackAppToken?.trim() || undefined); slackTokenChanged = true; }

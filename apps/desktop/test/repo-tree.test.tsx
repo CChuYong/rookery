@@ -272,6 +272,32 @@ describe("RepoTree right-side cluster yields to the '⋯' button on hover (final
   });
 });
 
+describe("RepoTree provider badge (Codex)", () => {
+  it("shows a 'Codex' badge on a fleet row whose provider is codex", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[{ ...worker, id: "w4", provider: "codex" }] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+      />,
+    );
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+  });
+
+  it("shows no badge on a fleet row whose provider is absent (claude default)", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[worker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+      />,
+    );
+    expect(screen.queryByText("Codex")).toBeNull();
+  });
+});
+
 describe("RepoTree fleet-provided cost (no open needed)", () => {
   beforeEach(() => useStore.setState({ workerLogs: {} }));
 

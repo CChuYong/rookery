@@ -33,3 +33,16 @@ export function StatusBadge({ status }: { status: string }): JSX.Element {
     </span>
   );
 }
+
+// Codex worker-provider badge (fleet-tree row + worker header). "Codex" is a literal proper noun, not translated —
+// same convention as e.g. "GitHub"/"Linear" elsewhere in the settings page. Static (no status coloring, unlike
+// StatusBadge above): absent/"claude" (the default) renders no badge at all — this is a visual-default opt-in,
+// not a claude badge/no-badge pair.
+export function ProviderBadge({ provider }: { provider?: string }): JSX.Element | null {
+  if (provider !== "codex") return null;
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-md border border-line px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted">
+      Codex
+    </span>
+  );
+}

@@ -62,6 +62,47 @@ describe("SettingsPage Anthropic API key input", () => {
   });
 });
 
+describe("SettingsPage Codex tab", () => {
+  it("is reachable via the tab bar and shows the codexBin/codexWorkerModel fields", () => {
+    render(<SettingsPage {...base} />);
+    fireEvent.click(screen.getByText("Codex"));
+    expect(screen.getByDisplayValue("codex")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("gpt-5.5")).toBeInTheDocument();
+  });
+
+  it("editing codexBin lands in the onSave(f) payload", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.change(screen.getByDisplayValue("codex"), { target: { value: "/usr/local/bin/codex" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexBin: "/usr/local/bin/codex" }));
+  });
+
+  it("renders the codexApiKey field as a masked (password) input", () => {
+    render(<SettingsPage {...base} />);
+    fireEvent.click(screen.getByText("Codex"));
+    const input = screen.getByPlaceholderText("sk-…");
+    expect(input).toHaveAttribute("type", "password");
+  });
+
+  it("calls onSaveCodexKey with the typed key, clears the field, and shows a saved note (no auth-status probe)", () => {
+    const onSaveCodexKey = vi.fn();
+    render(<SettingsPage {...base} onSaveCodexKey={onSaveCodexKey} />);
+    fireEvent.click(screen.getByText("Codex"));
+    const input = screen.getByPlaceholderText("sk-…");
+    fireEvent.change(input, { target: { value: "sk-codex-abc" } });
+    // Not dirty (no f-backed field touched) → the general Save button reads "저장됨", so "저장" uniquely
+    // identifies this dedicated key-save button (mirrors the Anthropic-key block's single-match idiom).
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSaveCodexKey).toHaveBeenCalledWith("sk-codex-abc");
+    expect(input).toHaveValue("");
+    // Same placeholder pattern the slack token fields use to indicate "already saved" (no separate auth-status check for codex).
+    expect(screen.getByPlaceholderText("저장됨 — 교체하려면 새 값을 입력하세요")).toBeInTheDocument();
+  });
+});
+
 // ─── unsaved-changes guard on close (audit #18) ────────────────────────────
 describe("SettingsPage unsaved-changes guard", () => {
   const closeBtn = (): HTMLElement => screen.getByLabelText("설정 닫기"); // ko fallback aria-label

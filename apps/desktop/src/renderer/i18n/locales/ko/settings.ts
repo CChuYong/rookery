@@ -93,4 +93,13 @@ export default {
   "settings.unsavedBody": "이대로 닫으면 변경 내용이 사라져요.",
   "settings.confirmSave": "저장하고 닫기",
   "settings.confirmDiscard": "버리고 닫기",
+  "settings.tabCodex": "Codex",
+  "settings.codexTitle": "Codex 워커 백엔드",
+  "settings.codexDesc": "워커 스폰 시 백엔드로 Codex를 고르면 사용되는 설정이에요.",
+  "settings.codexBin": "Codex 바이너리 경로",
+  "settings.codexBinHint": "데스크톱 앱이 띄운 데몬 프로세스는 흔히 ~/.local/bin이 PATH에 없어요 — 절대경로를 입력하세요.",
+  "settings.codexWorkerModel": "Codex 워커 기본 모델",
+  "settings.codexWorkerModelHint": "새 Codex 워커부터 적용돼요.",
+  "settings.codexApiKey": "Codex API 키",
+  "settings.codexApiKeyHint": "비워두면 codex login(~/.codex/auth.json)을 사용합니다.",
 } satisfies Catalog;

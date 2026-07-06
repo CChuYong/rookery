@@ -32,6 +32,18 @@ describe("WorkerHeader ticket link", () => {
   });
 });
 
+describe("WorkerHeader provider badge (Codex)", () => {
+  it("renders a 'Codex' badge when the worker's provider is codex", () => {
+    render(<WorkerHeader {...baseProps} worker={{ id: "w4", label: "t", repoPath: "/r", status: "running", branch: "rookery/a0", model: null, provider: "codex" } as never} />);
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+  });
+
+  it("renders no badge when the worker's provider is absent (claude default)", () => {
+    render(<WorkerHeader {...baseProps} worker={{ id: "w5", label: "t", repoPath: "/r", status: "running", branch: "rookery/a0", model: null } as never} />);
+    expect(screen.queryByText("Codex")).toBeNull();
+  });
+});
+
 describe("WorkerHeader terminology (reserved-word contract)", () => {
   beforeEach(() => { usePrefsStore.setState({ localePref: "system" }); });
   it("labels a worker 'Worker', never the reserved 'Agent'", () => {

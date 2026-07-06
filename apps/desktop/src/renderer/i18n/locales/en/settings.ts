@@ -93,4 +93,13 @@ export default {
   "settings.unsavedBody": "Closing now will discard your edits.",
   "settings.confirmSave": "Save & close",
   "settings.confirmDiscard": "Discard & close",
+  "settings.tabCodex": "Codex",
+  "settings.codexTitle": "Codex worker backend",
+  "settings.codexDesc": "Used when a worker is spawned with Codex chosen as its backend.",
+  "settings.codexBin": "Codex binary path",
+  "settings.codexBinHint": "Desktop-spawned daemons often lack ~/.local/bin on PATH — use an absolute path.",
+  "settings.codexWorkerModel": "Codex worker default model",
+  "settings.codexWorkerModelHint": "Applies from new Codex workers.",
+  "settings.codexApiKey": "Codex API key",
+  "settings.codexApiKeyHint": "Leave blank to use codex login (~/.codex/auth.json).",
 } satisfies Catalog;

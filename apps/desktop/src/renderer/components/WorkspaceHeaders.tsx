@@ -1,6 +1,6 @@
 import { SquareTerminal, PanelRight, Ticket, RotateCcw } from "lucide-react";
 import { cn } from "../lib/cn.js";
-import { StatusBadge } from "./StatusBadge.js";
+import { StatusBadge, ProviderBadge } from "./StatusBadge.js";
 import { CheckpointMenu } from "./CheckpointMenu.js";
 import type { Checkpoint } from "./CheckpointMenu.js";
 import { SessionMetrics } from "./SessionMetrics.js";
@@ -77,6 +77,7 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
   return (
     <div className="drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
       <StatusBadge status={worker.status} />
+      <ProviderBadge provider={worker.provider} />
       <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.workerEyebrow")}</span>
       <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" title={worker.label}>{worker.label}</span>
       <span className="shrink-0 font-mono text-[11px] text-muted/80">{worker.branch ?? `rookery/${worker.id.slice(0, 8)}`}</span>

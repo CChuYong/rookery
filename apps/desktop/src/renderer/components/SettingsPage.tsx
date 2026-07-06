@@ -28,10 +28,10 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-type Tab = "general" | "slack" | "claude" | "integration";
+type Tab = "general" | "slack" | "claude" | "codex" | "integration";
 
-// Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Integration tabs.
-export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void }): JSX.Element {
+// Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Claude | Codex | Integration tabs.
+export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void }): JSX.Element {
   const t = useT();
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
@@ -41,6 +41,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const [slackBot, setSlackBot] = useState("");
   const [slackApp, setSlackApp] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [codexKey, setCodexKey] = useState("");
+  // Codex has no auth-status probe (unlike Anthropic's live check above) — this local flag is the only signal
+  // that a key was saved this session, driving the same "saved" placeholder idiom the slack token fields use.
+  const [codexKeySaved, setCodexKeySaved] = useState(false);
   const models = useStore((s) => s.models); // live model list (initialized from the static fallback if none)
 
   // Slack on/off toggle: the request is fire-and-forget from here, so between the click and the daemon's slack.status
@@ -85,6 +89,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     { value: "general", label: t("settings.tabGeneral") },
     { value: "slack", label: "Slack" },
     { value: "claude", label: "Claude" },
+    { value: "codex", label: t("settings.tabCodex") },
     { value: "integration", label: t("settings.integrations") },
   ];
 
@@ -355,9 +360,38 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 </section>
               );
             })()}
+
+            {tab === "codex" && (
+              <section>
+                <h2 className="text-[13px] font-semibold">{t("settings.codexTitle")}</h2>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.codexDesc")}</p>
+
+                <div className="mt-4 flex flex-col gap-3.5">
+                  <Field label={t("settings.codexBin")} hint={t("settings.codexBinHint")}>
+                    <Input value={f.codexBin ?? ""} placeholder="codex" onChange={(e) => setF({ ...f, codexBin: e.target.value })} />
+                  </Field>
+                  <Field label={t("settings.codexWorkerModel")} hint={t("settings.codexWorkerModelHint")}>
+                    <Input value={f.codexWorkerModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
+                  </Field>
+                </div>
+
+                {/* Unlike anthropicApiKey there is no auth-status probe for codex, so we can't show "currently
+                    set from a prior session" — the placeholder only flips to the saved note locally, right after
+                    this session's own save (same idiom the slack token fields use). */}
+                <div className="mt-5 flex flex-col gap-3.5">
+                  <Field label={t("settings.codexApiKey")} hint={t("settings.codexApiKeyHint")}>
+                    <Input type="password" placeholder={codexKeySaved ? t("settings.secretSaved") : "sk-…"} value={codexKey} onChange={(e) => setCodexKey(e.target.value)} />
+                  </Field>
+                  <div className="flex justify-end">
+                    <Button variant="outline" size="sm" disabled={!codexKey.trim()} onClick={() => { p.onSaveCodexKey?.(codexKey.trim()); setCodexKey(""); setCodexKeySaved(true); }}>{t("common.save")}</Button>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
 
-          {/* Save the General/Slack form settings (tokens/Linear/toggles have their own buttons). Hidden on read-only tabs (Integration, Claude) which have no f-backed fields. */}
+          {/* Save the General/Slack/Codex form settings (tokens/Linear/toggles have their own buttons). Hidden on
+              read-only tabs (Integration, Claude) which have no f-backed fields. */}
           {tab !== "integration" && tab !== "claude" && (
             <div className="mt-7 flex items-center justify-end gap-2 border-t border-line pt-4">
               <Button variant="primary" disabled={!dirty} onClick={() => p.onSave(f)}>{dirty ? t("common.save") : t("common.saved")}</Button>

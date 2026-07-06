@@ -9,6 +9,7 @@ import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
 import { WorkerCost, FleetBurn } from "../components/WorkerCost.js";
+import { ProviderBadge } from "../components/StatusBadge.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { useT, useLocale } from "../i18n/provider.js";
 
@@ -148,6 +149,7 @@ function RepoTreeImpl(p: {
           {/* right-side indicators (cost/tag/unread) yield to the '⋯' overflow button on hover — otherwise the
               absolutely-positioned button overlaps them and the tag's full-word title becomes unreachable (audit
               final-review F1). Same idiom as Sessions.tsx's OriginBadge/unread-dot hover yield. */}
+          {sub.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><ProviderBadge provider={sub.provider} /></span>}
           <span className="shrink-0 transition-opacity group-hover:opacity-0"><WorkerCost workerId={sub.id} fleetCost={sub.costUsd} /></span>
           {/* colorblind-safe short tag stays as the visible glyph (rail/dot alt-channel), but the title carries the
               full localized word — same label source as the header StatusBadge, so tree and header never disagree
