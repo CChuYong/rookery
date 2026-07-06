@@ -102,6 +102,28 @@ describe("runCli resilience (CLI-1)", () => {
     const parsed = sent.map((d) => JSON.parse(d) as { type: string; text?: string });
     expect(parsed.some((m) => m.type === "session.send" && m.text === "hello")).toBe(true);
   });
+
+  it("[16] sends session.create with provider when opts.provider is set (codex CLI session)", async () => {
+    const handlers: Record<string, Array<(...a: unknown[]) => void>> = {};
+    const sent: string[] = [];
+    const fakeWs: WebSocketLike = {
+      on(ev, cb) { (handlers[ev] ??= []).push(cb); },
+      send(d) { sent.push(d); },
+      close() { for (const cb of handlers["close"] ?? []) cb(); },
+    };
+    const emit = (ev: string, ...args: unknown[]) => { for (const cb of handlers[ev] ?? []) cb(...args); };
+    const input = Readable.from([]); // immediate EOF — no turns, just observe session.create
+    const output = new Writable({ write(_c, _e, cb) { cb(); } });
+
+    const done = runCli({ host: "h", port: 1, cwd: "/x", input, output, connect: () => fakeWs, provider: "codex" });
+    emit("open");
+    await new Promise((r) => setImmediate(r));
+    emit("message", JSON.stringify({ type: "session.created", sessionId: "s1", cwd: "/x" }));
+    await done;
+
+    const create = sent.map((d) => JSON.parse(d) as { type: string; provider?: string }).find((m) => m.type === "session.create");
+    expect(create?.provider).toBe("codex");
+  });
 });
 
 describe("runCli localization (client-local strings)", () => {

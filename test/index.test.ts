@@ -11,6 +11,13 @@ describe("parseArgs", () => {
   it("treats unknown commands as cli", () => {
     expect(parseArgs(["chat"])).toEqual({ command: "cli" });
   });
+  it("parses --provider codex (finding [16])", () => {
+    expect(parseArgs(["--provider", "codex"])).toEqual({ command: "cli", provider: "codex" });
+    expect(parseArgs(["--provider=codex"])).toEqual({ command: "cli", provider: "codex" });
+  });
+  it("ignores an invalid --provider value (no provider field)", () => {
+    expect(parseArgs(["--provider", "bogus"])).toEqual({ command: "cli" });
+  });
 });
 
 describe("resolveEnvFilePath (CLI-ENVFILE)", () => {

@@ -86,6 +86,7 @@ export async function runCli(opts: {
   input: NodeJS.ReadableStream;
   output: NodeJS.WritableStream;
   token?: string;
+  provider?: "claude" | "codex"; // backend for the CLI-created master session (finding [16]); absent → daemon default (claude)
   connect?: (url: string) => WebSocketLike;
 }): Promise<void> {
   const url = `ws://${opts.host}:${opts.port}/ws${opts.token ? `?token=${encodeURIComponent(opts.token)}` : ""}`;
@@ -97,7 +98,7 @@ export async function runCli(opts: {
     ws.on("error", (err) => reject(err));
   });
 
-  ws.send(JSON.stringify({ type: "session.create", cwd: opts.cwd }));
+  ws.send(JSON.stringify({ type: "session.create", cwd: opts.cwd, ...(opts.provider ? { provider: opts.provider } : {}) }));
 
   // CLI-4: session.created readiness signal. So the first line of piped stdin isn't lost by arriving before sessionId,
   // we wait for this before starting the input loop.

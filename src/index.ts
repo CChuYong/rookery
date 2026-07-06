@@ -10,8 +10,18 @@ import { startDaemon } from "./daemon/server.js";
 import { loadOrCreateToken } from "./daemon/auth.js";
 import { runCli } from "./entrypoints/cli.js";
 
-export function parseArgs(argv: string[]): { command: "daemon" | "cli" } {
-  return { command: argv[0] === "daemon" ? "daemon" : "cli" };
+export function parseArgs(argv: string[]): { command: "daemon" | "cli"; provider?: "claude" | "codex" } {
+  const command = argv[0] === "daemon" ? "daemon" : "cli";
+  // `--provider claude|codex` (or `--provider=…`) picks the CLI-created master session's backend
+  // (finding [16]) — without it the CLI thin client could only ever create claude sessions, unlike
+  // desktop/Slack. An unrecognized value is ignored (the daemon defaults an absent provider to claude).
+  let provider: "claude" | "codex" | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const v = a === "--provider" ? argv[i + 1] : a.startsWith("--provider=") ? a.slice("--provider=".length) : undefined;
+    if (v === "claude" || v === "codex") provider = v;
+  }
+  return { command, ...(provider ? { provider } : {}) };
 }
 
 // Path resolution so the daemon loads the repo .env consistently no matter how it
@@ -94,7 +104,7 @@ async function ensureDaemon(host: string, port: number, home: string): Promise<v
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const { command } = parseArgs(argv);
+  const { command, provider } = parseArgs(argv);
   installProcessGuards(); // keep a stray rejection/exception from killing the resident daemon (log-then-survive)
   loadEnvFileIfPresent(); // apply .env before loading config (consistent across CLI/daemon/desktop paths, CLI-ENVFILE)
   const config = loadConfig();
@@ -142,6 +152,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     input: process.stdin,
     output: process.stdout,
     token: loadOrCreateToken(config.tokenPath), // read the token the daemon already wrote in ensureDaemon
+    provider, // --provider claude|codex (undefined → daemon defaults to claude)
   });
 }
 
