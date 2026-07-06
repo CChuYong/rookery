@@ -93,7 +93,10 @@ export function WorkerSpawnModal(p: {
   const effectiveModel = provider === "codex" ? codexModel : model;
   // Codex effort options come from the selected model's catalog entry when the catalog was fetched; unknown model
   // or no catalog (null) falls back to the generic EFFORTS vocabulary so the selector is never empty.
-  const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effectiveModel, codexModels) : null;
+  // When no model is picked yet (codexModel === ""), resolve efforts off the daemon default model (p.codexDefaultModel)
+  // — same idiom as NewSessionPage — so the "" selection offers that model's real efforts, not the generic EFFORTS (which
+  // includes `max`, a level codex has no equivalent for).
+  const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effectiveModel || p.codexDefaultModel || "", codexModels) : null;
   const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
   const spawn = () => {
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.

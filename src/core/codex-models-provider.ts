@@ -43,7 +43,8 @@ export function makeCodexModelsProvider(opts: { spawn: CodexSpawn; timeoutMs?: n
         const res = (await Promise.race([client.request("model/list", { includeHidden: false }), timeout])) as { data?: unknown };
         const rows = Array.isArray(res?.data) ? res.data : [];
         const models = rows.map(mapModel).filter((m): m is CodexModelInfo => m !== null);
-        // hidden rows are excluded server-side by includeHidden:false (mapModel has no hidden pass-through, so no client filter needed).
+        // hidden rows are excluded primarily server-side by includeHidden:false; mapModel ALSO drops any
+        // hidden:true row as defense-in-depth (see mapModel), so a leaked hidden row can't reach the picker.
         if (models.length === 0) return null; // empty catalog = treat as failure, don't cache → retry later
         cache = models;
         return cache;

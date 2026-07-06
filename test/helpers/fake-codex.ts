@@ -87,8 +87,8 @@ export function fakeCodexSpawn(
         if (msg.method === "initialized") return;
         if (msg.method === "model/list") {
           // Mirrors the real app-server's includeHidden contract: a request with includeHidden:false gets
-          // only non-hidden rows back (mapModel itself does no client-side hidden filtering — see
-          // codex-models-provider.ts — so this is where "hidden absent" actually comes from, same as prod).
+          // only non-hidden rows back (the primary hidden exclusion; the provider's mapModel additionally
+          // drops any hidden:true row as defense-in-depth — see codex-models-provider.ts).
           const includeHidden = (msg.params as { includeHidden?: boolean } | undefined)?.includeHidden ?? true;
           const rows = (opts.modelList ?? []).filter((m) => includeHidden || !(m as { hidden?: boolean })?.hidden);
           send({ id: msg.id, result: { data: rows } });

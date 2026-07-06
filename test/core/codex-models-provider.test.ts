@@ -47,8 +47,8 @@ describe("makeCodexModelsProvider", () => {
     expect(models).toEqual([
       { id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["xhigh", "low", "medium", "high"], isDefault: true },
     ]);
-    // The hidden row's absence comes from the server honoring includeHidden:false (mapModel itself has
-    // no client-side hidden filter) — assert the provider actually requests that flag.
+    // The hidden row's absence comes primarily from the server honoring includeHidden:false (mapModel
+    // also drops hidden:true as defense-in-depth) — assert the provider actually requests that flag.
     const req = fake.requests.find((r) => r.method === "model/list");
     expect(req?.params).toEqual({ includeHidden: false });
   });
