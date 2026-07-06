@@ -17,6 +17,7 @@ export interface FakeCodexServerOpts {
   threadId?: string;
   failThreadStart?: boolean; // reject thread/start (spawn/handshake failure path)
   dieAfterTurns?: number;    // simulate process death after N completed turns
+  silentForkHang?: boolean; // thread/fork requests get NO response at all (fork-timeout test)
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -61,6 +62,7 @@ export function fakeCodexSpawn(
         if (msg.method === "initialize") { send({ id: msg.id, result: { userAgent: "fake" } }); return; }
         if (msg.method === "initialized") return;
         if (msg.method === "thread/start" || msg.method === "thread/resume" || msg.method === "thread/fork") {
+          if (msg.method === "thread/fork" && opts.silentForkHang) return; // never respond — exercises forkSession's timeout
           if (opts.failThreadStart) { send({ id: msg.id, error: { code: -32000, message: "no auth" } }); return; }
           const id = msg.method === "thread/fork" ? `${threadId}-fork` : threadId;
           send({ method: "thread/started", params: { thread: { id } } });

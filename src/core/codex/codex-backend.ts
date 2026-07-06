@@ -155,14 +155,17 @@ class CodexStream implements AgentStream {
         const text = r.value;
         const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
         const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
-        const modeOverride = this.overrideMode ? mapPermissionMode(this.overrideMode) : null;
+        const currentMode = mapPermissionMode(this.overrideMode ?? this.opts.permissionMode);
         const effort = mapEffort(this.opts.effort);
+        // Always explicit: sandbox/approval identical regardless of path (spawn vs live override),
+        // and workspace-write is always network-on by rookery decision (spec Track E).
         const turnRes = (await client.request("turn/start", {
           threadId,
           input,
           ...(this.overrideModel ? { model: this.overrideModel } : {}),
           ...(effort ? { effort } : {}),
-          ...(modeOverride ? { approvalPolicy: modeOverride.approvalPolicy, sandboxPolicy: sandboxPolicyFor(modeOverride.sandbox) } : {}),
+          approvalPolicy: currentMode.approvalPolicy,
+          sandboxPolicy: sandboxPolicyFor(currentMode.sandbox),
         })) as { turn?: { id?: string } };
         // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
         // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
@@ -329,19 +332,31 @@ export class CodexBackend implements AgentBackend {
     throw new Error("Codex master sessions are not supported yet (P1 is worker-only; see docs/2026-07-06-p1-codex-worker-backend.md)");
   }
 
+  private static readonly FORK_TIMEOUT_MS = 15_000;
+
   // Fork a thread via an ephemeral app-server child (used by FleetOrchestrator fork routing).
   async forkSession(threadId: string): Promise<{ sessionId: string }> {
     const transport = this.deps.spawn({});
     const client = new CodexClient(transport);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A hung ephemeral child must not wedge the worker.fork request forever.
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`codex fork timed out after ${CodexBackend.FORK_TIMEOUT_MS / 1000}s`)), CodexBackend.FORK_TIMEOUT_MS);
+    });
     try {
-      await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
-      client.notify("initialized", {});
-      const res = (await client.request("thread/fork", { threadId })) as CodexThreadStartResponse;
-      const id = res.thread?.id;
-      if (!id) throw new Error("codex: thread/fork returned no thread id");
-      return { sessionId: id };
+      return await Promise.race([this.doFork(client, threadId), timeout]);
     } finally {
+      if (timer) clearTimeout(timer);
       client.close();
     }
+  }
+
+  private async doFork(client: CodexClient, threadId: string): Promise<{ sessionId: string }> {
+    await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
+    client.notify("initialized", {});
+    const res = (await client.request("thread/fork", { threadId })) as CodexThreadStartResponse;
+    const id = res.thread?.id;
+    if (!id) throw new Error("codex: thread/fork returned no thread id");
+    return { sessionId: id };
   }
 }

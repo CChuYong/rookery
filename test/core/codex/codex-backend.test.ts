@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { CodexBackend } from "../../../src/core/codex/codex-backend.js";
 import { fakeCodexSpawn, type CodexStep } from "../../helpers/fake-codex.js";
 import type { AgentEvent, AgentStream } from "../../../src/core/agent-backend.js";
@@ -144,7 +144,9 @@ describe("CodexBackend — controls and edges", () => {
     })();
     await done;
     const turnStarts = requests.filter((r) => r.method === "turn/start");
-    expect(turnStarts[0]!.params).not.toHaveProperty("sandboxPolicy");
+    // Always-explicit policy: turn 1 carries the SPAWN mode's policy (bypassPermissions →
+    // dangerFullAccess), turn 2 carries the override's (plan → readOnly).
+    expect(turnStarts[0]!.params).toMatchObject({ approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } });
     expect(turnStarts[1]!.params).toMatchObject({ model: "gpt-5.5-mini", approvalPolicy: "never", sandboxPolicy: { type: "readOnly", networkAccess: false } });
   });
 
@@ -239,5 +241,31 @@ describe("CodexBackend — pricing aggregation", () => {
     const ends = events.filter((e) => e.kind === "turn_end") as Array<{ costUsd: number }>;
     expect(ends[0]!.costUsd).toBeCloseTo(1000 * 5 / 1e6 + 100 * 30 / 1e6, 10);
     expect(ends[1]!.costUsd).toBe(0); // clamped, not negative
+  });
+});
+
+describe("CodexBackend — fork timeout & explicit sandbox", () => {
+  it("forkSession rejects after the timeout when the child never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [], { silentForkHang: true }); // new opt: thread/fork gets NO response
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+      const p = b.forkSession("th-1");
+      const assertion = expect(p).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("every turn/start carries explicit approvalPolicy + sandboxPolicy derived from the CURRENT mode", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const q = new MessageQueue(); q.push("t1"); q.close();
+    await collect(b.openSession(q, baseOpts({ permissionMode: "acceptEdits" })));
+    const turn = fake.requests.find((r) => r.method === "turn/start")!.params as Record<string, unknown>;
+    expect(turn.approvalPolicy).toBe("never");
+    expect(turn.sandboxPolicy).toMatchObject({ type: "workspaceWrite", networkAccess: true }); // rookery decision: workspace-write is always network-on
   });
 });
