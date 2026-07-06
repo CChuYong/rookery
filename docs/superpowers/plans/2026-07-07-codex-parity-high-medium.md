@@ -82,11 +82,12 @@ Findings: [0] numTurns per-send, [9] worker cap, [4] master cap, [1] watchdog-vs
 
 **Fix:** State that codex-provider sessions/workers/Slack threads/automations transmit prompts/code/diffs to OpenAI; document `slackProvider`, per-automation `provider`, and the codex-requires-bypassPermissions constraint. Commit.
 
-## Verification
+## Verification — DONE (2026-07-07)
 
-- Root: `npm run typecheck && npm test`.
-- Desktop: `npm -w apps/desktop run typecheck && npm -w apps/desktop test`.
-- Final adversarial review pass (subagent) over the branch diff.
+- Root: `npm run typecheck` clean, `npm test` = **886 passed**.
+- Desktop: `npm -w apps/desktop run typecheck` clean, `npm -w apps/desktop test` = **883 passed**.
+- All 18 findings (HIGH 4 + MEDIUM 14) implemented via TDD across 6 commits on `fix/codex-parity-high-medium`.
+- Final adversarial review pass (fable subagent) over the branch diff.
 
 ## Out of scope (LOW, deferred)
 
