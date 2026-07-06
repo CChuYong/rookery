@@ -12,7 +12,7 @@ describe("WorkerSpawnModal", () => {
     fireEvent.change(screen.getByTitle(/base 브랜치/), { target: { value: "dev" } });
     fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "do it" } });
     fireEvent.click(screen.getByText("spawn"));
-    expect(onSpawn).toHaveBeenCalledWith("do it", "", "claude-opus-4-8", "high", "dev", undefined, "bypassPermissions"); // no ticket → undefined; default permission
+    expect(onSpawn).toHaveBeenCalledWith("do it", "", "claude-opus-4-8", "high", "dev", undefined, "bypassPermissions", undefined); // no ticket → undefined; default permission; default provider (claude) → undefined
   });
 
   it("defaults permission to bypassPermissions and threads the selected mode (plan) through onSpawn", () => {
@@ -25,7 +25,7 @@ describe("WorkerSpawnModal", () => {
     expect(screen.queryByText("Accept Edits")).toBeNull();
     fireEvent.change(sel, { target: { value: "plan" } });
     fireEvent.click(screen.getByText("spawn"));
-    expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "claude-opus-4-8", "high", undefined, undefined, "plan"]);
+    expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "claude-opus-4-8", "high", undefined, undefined, "plan", undefined]);
   });
 
   it("passes the selected ticket {key,url} to onSpawn", async () => {
@@ -76,7 +76,7 @@ describe("WorkerSpawnModal", () => {
     render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     // task left empty (default), click spawn
     fireEvent.click(screen.getByText("spawn"));
-    expect(onSpawn).toHaveBeenCalledWith("", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions");
+    expect(onSpawn).toHaveBeenCalledWith("", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions", undefined);
   });
 
   it("non-empty task → spawn button still calls onSpawn with trimmed task", () => {
@@ -84,7 +84,7 @@ describe("WorkerSpawnModal", () => {
     render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "fix the bug" } });
     fireEvent.click(screen.getByText("spawn"));
-    expect(onSpawn).toHaveBeenCalledWith("fix the bug", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions");
+    expect(onSpawn).toHaveBeenCalledWith("fix the bug", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions", undefined);
   });
 
   it("shows the results dropdown only while the search box is focused", async () => {

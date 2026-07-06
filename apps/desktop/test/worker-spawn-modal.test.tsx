@@ -8,7 +8,7 @@ const items: SourceItem[] = [
   { provider: "github", id: "2", identifier: "#2", title: "Second issue", url: "https://x/2", body: "" },
 ];
 
-function renderModal(searchSource = vi.fn().mockResolvedValue(items)) {
+function renderModal(searchSource = vi.fn().mockResolvedValue(items), extra: { codexDefaultModel?: string } = {}) {
   const onSpawn = vi.fn();
   const onClose = vi.fn();
   render(
@@ -20,6 +20,7 @@ function renderModal(searchSource = vi.fn().mockResolvedValue(items)) {
       searchSource={searchSource}
       onSpawn={onSpawn}
       onClose={onClose}
+      {...extra}
     />,
   );
   return { onSpawn, onClose, searchSource };
@@ -84,5 +85,35 @@ describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
     fireEvent.mouseDown(secondOption);
     fireEvent.click(secondOption);
     expect(screen.getByText("#2")).toBeInTheDocument();
+  });
+});
+
+describe("WorkerSpawnModal provider selector (P1.5 task 4)", () => {
+  it("defaults to claude — onSpawn's trailing provider arg is undefined (wire-minimal)", () => {
+    const { onSpawn } = renderModal();
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn).toHaveBeenCalledTimes(1);
+    expect(onSpawn.mock.calls[0]![7]).toBeUndefined();
+  });
+
+  it("selecting codex passes provider \"codex\" as onSpawn's trailing arg", () => {
+    const { onSpawn } = renderModal();
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByText("spawn"));
+    expect(onSpawn.mock.calls[0]![7]).toBe("codex");
+  });
+
+  it("switching to codex swaps the model <Select> for a free-text <Input> with the codexDefaultModel placeholder", () => {
+    renderModal(undefined, { codexDefaultModel: "gpt-5.5" });
+    // Claude mode: the model field is a native <select> (the Claude model catalog).
+    expect(screen.getByTitle("이 워커 모델 (기본 설정과 무관)").tagName).toBe("SELECT");
+
+    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+
+    const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
+    expect(modelField.tagName).toBe("INPUT");
+    expect(modelField).toHaveAttribute("placeholder", "gpt-5.5");
   });
 });

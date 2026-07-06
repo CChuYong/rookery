@@ -20,18 +20,25 @@ export function WorkerSpawnModal(p: {
   repo: string;
   defaultModel: string;
   defaultEffort: string;
+  codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, e.g. settings.codexWorkerModel)
   branches?: string[]; // base branch candidates (picker hidden if absent)
   integrations?: IntegrationsStatus; // only connected integrations enable GitHub/Linear modes
   searchSource?: (provider: SourceProviderId, query: string) => Promise<SourceItem[]>; // search issues/tickets
-  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string) => void;
+  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string) => void;
   onClose: () => void;
 }): JSX.Element {
   const t = useT();
   const [mode, setMode] = useState<Mode>("direct");
   const [task, setTask] = useState("");
   const [label, setLabel] = useState("");
+  // Agent backend for this worker. Default "claude" (wire-minimal: the spawn() builder below sends `undefined`
+  // for claude and only sends an explicit value for "codex", matching the daemon's provider?: "claude"|"codex" contract).
+  const [provider, setProvider] = useState<"claude" | "codex">("claude");
   // Starts from the defaults, but this is an override that applies only to this spawn. (The default settings are not touched.)
   const [model, setModel] = useState(p.defaultModel);
+  // Free-text codex model (kept in separate state from `model` so switching provider back and forth doesn't
+  // clobber either field's value — the Claude <Select> and the codex <Input> remember their own last value).
+  const [codexModel, setCodexModel] = useState("");
   const [effort, setEffort] = useState(p.defaultEffort);
   const [permissionMode, setPermissionMode] = useState("bypassPermissions"); // worker SDK permission mode (bypass | plan); changeable later in the composer
   const models = useStore((s) => s.models); // live model list (static fallback if absent)
@@ -79,8 +86,21 @@ export function WorkerSpawnModal(p: {
   const clearSelected = () => { setSelected(null); setQ(""); };
 
   const { closing, dismiss } = useDismissTransition(p.onClose);
+  // The model text actually in play for this spawn — the Claude catalog selection, or the free-text codex field.
+  const effectiveModel = provider === "codex" ? codexModel : model;
   const spawn = () => {
-    p.onSpawn(task.trim(), label.trim(), model, effortSupported(model) ? effort : undefined, base || undefined, selected ? { key: selected.identifier, url: selected.url } : undefined, permissionMode);
+    // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
+    const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
+    p.onSpawn(
+      task.trim(),
+      label.trim(),
+      spawnModel,
+      effortSupported(effectiveModel) ? effort : undefined,
+      base || undefined,
+      selected ? { key: selected.identifier, url: selected.url } : undefined,
+      permissionMode,
+      provider === "claude" ? undefined : provider, // wire-minimal: absent means claude
+    );
     dismiss();
   };
   useModalKeys(dismiss, spawn);
@@ -112,14 +132,31 @@ export function WorkerSpawnModal(p: {
         />
 
         <div className="flex flex-col gap-2">
+          {/* Agent backend for this worker — copies the permissionMode hardcoded-<option> idiom below. */}
+          <Select size="sm" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
+            <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+            <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+          </Select>
           <div className="flex gap-2">
-            <Select size="sm" className="flex-1" value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")}>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-              {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
-            </Select>
-            {effortSupported(model) && (
+            {provider === "codex" ? (
+              // codex has no fixed model catalog on the desktop side — free text, daemon default when empty.
+              <Input
+                size="sm"
+                className="flex-1"
+                value={codexModel}
+                onChange={(e) => setCodexModel(e.target.value)}
+                placeholder={p.codexDefaultModel}
+                title={t("workerSpawnModal.modelTitle")}
+              />
+            ) : (
+              <Select size="sm" className="flex-1" value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")}>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+                {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
+              </Select>
+            )}
+            {effortSupported(effectiveModel) && (
               <Select size="sm" className="w-28" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
                 {EFFORTS.map((ef) => (
                   <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
