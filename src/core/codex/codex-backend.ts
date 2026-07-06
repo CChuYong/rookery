@@ -50,6 +50,26 @@ export function formatDuration(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
 }
 
+// Serialize an MCP tool-call result's content blocks (item.result.content — the v2 McpToolCallResult
+// shape, an array of MCP content blocks, typically {type:"text", text}) into a transcript string so a
+// codex master persists the real tool output like a Claude master does, instead of the bare status.
+// Falls back to `fallback` (the item status) when there is no readable content — older/other codex
+// builds, non-text content, or a webSearch with no result payload. Exported for a direct unit test.
+export function serializeMcpResult(result: unknown, fallback: string): string {
+  if (result && typeof result === "object") {
+    const content = (result as { content?: unknown }).content;
+    if (Array.isArray(content)) {
+      const parts = content
+        .map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string"
+          ? (c as { text: string }).text
+          : typeof c === "string" ? c : ""))
+        .filter((s) => s.length > 0);
+      if (parts.length > 0) return parts.join("\n");
+    }
+  }
+  return fallback;
+}
+
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
 
 type PermissionPair = ReturnType<typeof mapPermissionMode>;
@@ -105,7 +125,6 @@ abstract class CodexSessionBase implements AgentStream {
   protected threadId: string | null = null;
   protected activeTurnId: string | null = null;
   protected turnDone: (() => void) | null = null;
-  protected cumTurns = 0;
   protected lastContextTokens = 0;
   protected contextWindow = 0;
   protected overrideModel: string | null = null;
@@ -136,7 +155,16 @@ abstract class CodexSessionBase implements AgentStream {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimeoutMsForTurn = 0;
+  // Set while a blocking interaction (AskUserQuestion / approval) is outstanding for the current turn
+  // (finding [1]): the child goes silent awaiting a human, which is legitimate — not a wedge — so the
+  // watchdog is suspended for exactly that window. arm/reset are no-ops while paused; resume re-arms.
+  private watchdogPaused = false;
   private static readonly WATCHDOG_GRACE_MS = 5000;
+  // Bound on how long onIdleTimeout waits for the graceful turn/interrupt to ACK before escalating to
+  // the grace→kill path (finding [7]): a child that is silent AND unresponsive to turn/interrupt would
+  // otherwise leave the interrupt await pending forever, so the grace timer never arms and the wedged
+  // turn never gets killed. This races that await so escalation always proceeds.
+  private static readonly WATCHDOG_INTERRUPT_ACK_MS = 2000;
   // Snapshotted once at construction, then re-snapshotted only when a turn/start actually carries a
   // model override — pricing must bill the model the THREAD was actually running under for that turn,
   // not whatever this.opts.model/defaultModel() resolve to NOW (mid-turn setModel, or a
@@ -284,6 +312,7 @@ abstract class CodexSessionBase implements AgentStream {
     // some other path ever manages to leave graceTimer armed across a turn boundary, arming the
     // next turn's watchdog clears it here so it can never dangle into (and kill) turn N+1.
     if (this.graceTimer !== null) { clearTimeout(this.graceTimer); this.graceTimer = null; }
+    if (this.watchdogPaused) return; // a blocking interaction is outstanding — resume re-arms it
     if (this.idleTimeoutMsForTurn > 0) {
       this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
     }
@@ -292,11 +321,33 @@ abstract class CodexSessionBase implements AgentStream {
   // Any inbound notification is progress (item/*/outputDelta included — handleNotification calls
   // this before it does anything else, unconditionally). A no-op when no watchdog is currently armed
   // (disabled turn, or already fired/disarmed) — an event arriving outside an armed turn must not
-  // spuriously start one.
+  // spuriously start one. Also a no-op while paused (a blocking interaction owns the silence).
   private resetIdleWatchdog(): void {
+    if (this.watchdogPaused) return;
     if (this.idleTimer === null) return;
     clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
+  }
+
+  // Pause/resume the idle watchdog while a blocking interaction (AskUserQuestion / approval) is
+  // outstanding for the current turn — the master's ask closure drives these (finding [1]). Entering
+  // that closure PROVES the MCP bridge delivered the tools/call, so the ensuing silence (the human
+  // thinking) is legitimate, not a wedge; a genuinely wedged bridge never reaches the closure, so the
+  // watchdog still fires normally. No-ops for a stream with no watchdog (idleTimeoutMs 0/absent).
+  pauseIdleWatchdog(): void {
+    this.watchdogPaused = true;
+    this.clearIdleTimer();
+  }
+
+  resumeIdleWatchdog(): void {
+    if (!this.watchdogPaused) return;
+    this.watchdogPaused = false;
+    // Re-arm a fresh full window only if a turn is still active (turnDone guards against re-arming after
+    // the turn already ended/torn down) and the watchdog is enabled for this turn.
+    if (this.turnDone !== null && this.idleTimeoutMsForTurn > 0) {
+      this.clearIdleTimer();
+      this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
+    }
   }
 
   private clearIdleTimer(): void {
@@ -316,10 +367,17 @@ abstract class CodexSessionBase implements AgentStream {
   // window for turn/completed to actually arrive before escalating to a hard kill.
   private async onIdleTimeout(): Promise<void> {
     this.idleTimer = null;
+    // Best-effort graceful interrupt, but bounded: a child that never answers turn/interrupt (wedged
+    // AND unresponsive) must not leave this await pending forever, or the grace→kill escalation below
+    // never arms (finding [7]). Race the interrupt against a short ack timeout so escalation proceeds.
+    let ackTimer: ReturnType<typeof setTimeout> | undefined;
+    const ackTimeout = new Promise<void>((resolve) => { ackTimer = setTimeout(resolve, CodexSessionBase.WATCHDOG_INTERRUPT_ACK_MS); });
     try {
-      await this.interrupt();
+      await Promise.race([this.interrupt(), ackTimeout]);
     } catch {
       /* best-effort — escalate to the grace/kill path regardless of interrupt's own outcome */
+    } finally {
+      if (ackTimer) clearTimeout(ackTimer);
     }
     // The turn may have completed during the interrupt round-trip (ack + turn/completed can arrive
     // in one stdout batch). turnDone is nulled by both turn/completed and onClosed → null means the
@@ -414,7 +472,7 @@ abstract class CodexSessionBase implements AgentStream {
       turnId?: string;
       itemId?: string;
       delta?: string;
-      item?: { type?: string; id?: string; text?: string; command?: string; cwd?: string; status?: string; aggregatedOutput?: string | null; server?: string; tool?: string; arguments?: unknown; query?: string; changes?: unknown };
+      item?: { type?: string; id?: string; text?: string; command?: string; cwd?: string; status?: string; aggregatedOutput?: string | null; server?: string; tool?: string; arguments?: unknown; query?: string; changes?: unknown; result?: unknown };
       tokenUsage?: CodexThreadTokenUsage;
       error?: { message?: string };
     };
@@ -456,7 +514,7 @@ abstract class CodexSessionBase implements AgentStream {
       } else if (item.type === "fileChange") {
         this.channel.push({ kind: "tool_result", toolUseId: item.id, isError: item.status !== "completed", content: item.status ?? "", parentToolUseId: null });
       } else if (item.type === "mcpToolCall" || item.type === "webSearch") {
-        this.channel.push({ kind: "tool_result", toolUseId: item.id, isError: item.status != null && item.status !== "completed", content: item.status ?? "done", parentToolUseId: null });
+        this.channel.push({ kind: "tool_result", toolUseId: item.id, isError: item.status != null && item.status !== "completed", content: serializeMcpResult(item.result, item.status ?? "done"), parentToolUseId: null });
       }
       return; // reasoning/userMessage/plan/etc.: dropped (deltas already flowed; user echo is Worker-side)
     }
@@ -485,21 +543,24 @@ abstract class CodexSessionBase implements AgentStream {
     }
     if (method === "turn/completed") {
       const turn = p?.turn;
-      // Correlate to the active turn: a duplicate/late completion must not inflate numTurns,
-      // emit a phantom turn_end, or settle the NEXT turn's turnDone early.
+      // Correlate to the active turn: a duplicate/late completion must not emit a phantom turn_end
+      // or settle the NEXT turn's turnDone early.
       if (this.activeTurnId && turn?.id && turn.id !== this.activeTurnId) return;
       this.activeTurnId = null;
       this.disarmIdleWatchdog(); // the turn is over — no more silence to guard against until the NEXT turn/start
       if (turn?.status === "failed" && turn.error?.message) {
         this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexError", params: { message: turn.error.message }, text: t(DEFAULT_LOCALE, "notice.codexError", { message: turn.error.message }) } });
       }
-      this.cumTurns += 1;
       const subtype = turn?.status === "failed" ? "error" : turn?.status === "interrupted" ? "interrupted" : "success";
       this.channel.push({
         kind: "turn_end",
         subtype,
         costUsd: turnCostUsd(this.billedModel, this.turnAccum),
-        numTurns: this.cumTurns,
+        // PER-SEND per the port contract (agent-backend.ts): one turn/completed = one send. Codex
+        // exposes no finer sub-turn agentic-loop count, so this is always 1 (consumers accumulate
+        // their own lifetime total — worker.ts/master-agent.ts). Emitting a session-cumulative value
+        // here would inflate that total quadratically AND false-trip the per-send maxTurns cap.
+        numTurns: 1,
         durationMs: turn?.durationMs ?? 0,
         contextTokens: this.lastContextTokens,
         contextWindow: this.contextWindow,

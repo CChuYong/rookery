@@ -8,6 +8,8 @@ import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { MasterAgent } from "../../src/core/master-agent.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
+import { InteractionRegistry } from "../../src/core/interaction-registry.js";
+import type { AgentStream, MasterTurnOptions } from "../../src/core/agent-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
 function deps(queryFn: ReturnType<typeof fakeQuery>) {
@@ -896,5 +898,94 @@ describe("MasterAgent", () => {
     const results = events.filter((e) => e.type === "master.result") as Array<{ costUsd: number; numTurns: number }>;
     expect(results.at(-1)!.costUsd).toBeCloseTo(1.0); // 0.5 (seeded) + 0.5 (this turn) — not a reset to 0.5
     expect(results.at(-1)!.numTurns).toBe(4);
+  });
+});
+
+// Codex turn-lifecycle parity: the Claude SDK throws on abort and drives canUseTool with a per-call
+// signal; the codex backend ends the stream cleanly on abort and blocks on the master's own ask closure.
+// These verify the master compensates so codex sessions get the same interrupted-notice and interaction
+// cleanup a Claude session gets, and that the ask closure brackets the codex idle watchdog.
+describe("MasterAgent — codex turn-lifecycle parity", () => {
+  // A minimal fake AgentBackend whose master stream we fully control (unlike ClaudeBackend + fakeQuery,
+  // which always throws on abort). `onStart` receives the built MasterTurnOptions + a `record` array so a
+  // test can drive the turn (fire the ask def, end cleanly on abort, etc.).
+  function controllableBackend(makeGen: (opts: MasterTurnOptions, record: string[]) => AsyncGenerator<unknown>) {
+    const record: string[] = [];
+    const backend = {
+      openSession: () => { throw new Error("n/a"); },
+      startTurn: (_prompt: string, opts: MasterTurnOptions): AgentStream => {
+        const it = makeGen(opts, record);
+        return Object.assign(it, {
+          interrupt: async () => {},
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          supportedCommands: async () => [],
+          pauseIdleWatchdog: () => { record.push("pause"); },
+          resumeIdleWatchdog: () => { record.push("resume"); },
+        }) as unknown as AgentStream;
+      },
+    };
+    return { backend, record };
+  }
+
+  it("[5] records notice.interrupted when a codex-style stream ends CLEANLY (no throw) after a stop", async () => {
+    const base = deps(fakeQuery([]));
+    const { backend } = controllableBackend((opts) => (async function* () {
+      yield { kind: "text_delta", text: "working…" };
+      // Codex parity: on abort the stream ends cleanly (returns), it does NOT throw like the Claude SDK.
+      await new Promise<void>((resolve) => {
+        if (opts.abortController.signal.aborted) return resolve();
+        opts.abortController.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    })());
+    const events: CoreEvent[] = [];
+    base.bus.subscribe("s1", (e) => events.push(e));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, backend: backend as never } });
+    const turn = master.runTurn("go");
+    await new Promise((r) => setTimeout(r, 0));
+    await master.stop();
+    await expect(turn).resolves.toBeUndefined();
+    expect(events.some((e) => e.type === "master.notice" && /중단/.test((e as { text?: string }).text ?? ""))).toBe(true);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  it("[10] retires a pending AskUserQuestion when the turn ends without a user stop (crash/watchdog-kill parity)", async () => {
+    const base = deps(fakeQuery([]));
+    const registry = new InteractionRegistry(base.bus);
+    const { backend } = controllableBackend((opts) => (async function* () {
+      // Simulate codex calling AskUserQuestion via the bridge: fire the def handler (do NOT await — it
+      // blocks on a human answer that never comes), then let the turn complete with it still pending.
+      const handler = opts.toolDefs?.askUserQuestion?.[0]?.handler as ((a: unknown, e: unknown) => Promise<unknown>) | undefined;
+      void handler?.({ questions: [{ question: "Proceed?", options: [{ label: "yes" }, { label: "no" }] }] }, {});
+      await Promise.resolve(); // let request() register the pending interaction + emit interaction.request
+      yield { kind: "turn_end", subtype: "success", costUsd: 0, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 };
+    })());
+    const events: CoreEvent[] = [];
+    base.bus.subscribe("s1", (e) => events.push(e));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, backend: backend as never, canUseTool: registry.canUseToolFor("s1") as never } });
+    await master.runTurn("go");
+    // The turn completed with the interaction never answered — the master's finally must abort the turn's
+    // controller so the registry retires the card (interaction.resolved), not leave it dangling forever.
+    expect(events.some((e) => e.type === "interaction.request")).toBe(true);
+    expect(events.some((e) => e.type === "interaction.resolved")).toBe(true);
+  });
+
+  it("[1] brackets the ask closure with pauseIdleWatchdog/resumeIdleWatchdog (codex watchdog isn't tripped mid-question)", async () => {
+    const base = deps(fakeQuery([]));
+    const registry = new InteractionRegistry(base.bus);
+    let requestId: string | undefined;
+    base.bus.subscribe("s1", (e) => { if (e.type === "interaction.request") requestId = (e as { requestId: string }).requestId; });
+    const { backend, record } = controllableBackend((opts, rec) => (async function* () {
+      const handler = opts.toolDefs?.askUserQuestion?.[0]?.handler as ((a: unknown, e: unknown) => Promise<unknown>) | undefined;
+      const p = handler?.({ questions: [{ question: "Proceed?", options: [{ label: "yes" }] }] }, {});
+      await Promise.resolve();
+      rec.push("answer"); // marker: pause must precede this, resume must follow
+      if (requestId) registry.respond(requestId, { answers: { Proceed: "yes" } });
+      await p; // wait for the closure (and thus resume) to complete
+      yield { kind: "turn_end", subtype: "success", costUsd: 0, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 };
+    })());
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, backend: backend as never, canUseTool: registry.canUseToolFor("s1") as never } });
+    await master.runTurn("go");
+    expect(record).toEqual(["pause", "answer", "resume"]);
   });
 });

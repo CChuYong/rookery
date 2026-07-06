@@ -7,6 +7,7 @@ export type CodexStep =
   | { kind: "agentMessage"; text: string; id?: string }
   | { kind: "command"; id: string; command: string; output?: string; failed?: boolean }
   | { kind: "fileChange"; id: string; failed?: boolean }
+  | { kind: "mcpToolCall"; id: string; server?: string; tool?: string; result?: { content?: unknown[] }; failed?: boolean }
   | { kind: "tokenUsage"; last: { inputTokens: number; cachedInputTokens?: number }; total?: { inputTokens: number; cachedInputTokens?: number; outputTokens?: number }; contextWindow?: number }
   | { kind: "errorNote"; message: string }
   | { kind: "requestApproval"; id: string } // emits a server→client commandExecution approval request
@@ -23,6 +24,9 @@ export interface FakeCodexServerOpts {
   // turn/completed — leaves the turn wedged so the watchdog's grace-window kill path can be exercised
   // (P2.5 Track B; the default behavior below auto-completes on interrupt, which is right for the
   // ordinary interrupt()-path tests but wrong for testing the kill escalation).
+  deadInterrupt?: boolean; // turn/interrupt gets NO response at all (not even an ack) — the child is wedged
+  // AND unresponsive to requests, so interrupt()'s `await client.request("turn/interrupt")` would hang
+  // forever. Exercises onIdleTimeout's ack-timeout race that must still arm the grace→kill escalation.
   silentInitialize?: boolean; // the `initialize` request never gets a response — stalls openClient() (P3-remaining Track A handshake-timeout test)
   silentThreadStart?: boolean; // `thread/start`/`thread/resume` never get a response — stalls startOrResumeThread() (same test)
   initializeDelayMs?: number; // `initialize` responds after a real setTimeout delay instead of immediately — a genuinely SLOW (but completing) handshake, for proving handshakeTimeoutMs:0 truly disables the race rather than just never happening to trip it
@@ -104,6 +108,7 @@ export function fakeCodexSpawn(
           return;
         }
         if (msg.method === "turn/interrupt") {
+          if (opts.deadInterrupt) return; // no response at all — interrupt()'s request await would hang forever
           send({ id: msg.id, result: {} });
           if (opts.silentInterrupt) return; // ack'd but wedged — no turn/completed ever follows
           send({ method: "turn/completed", params: { threadId, turn: { id: currentTurnId ?? `turn-${turnCount}`, status: "interrupted", durationMs: 5 } } });
@@ -129,6 +134,9 @@ export function fakeCodexSpawn(
             } else if (step.kind === "fileChange") {
               send({ method: "item/started", params: { threadId, turnId, item: { type: "fileChange", id: step.id, changes: [], status: "inProgress" } } });
               send({ method: "item/completed", params: { threadId, turnId, item: { type: "fileChange", id: step.id, changes: [], status: step.failed ? "failed" : "completed" } } });
+            } else if (step.kind === "mcpToolCall") {
+              send({ method: "item/started", params: { threadId, turnId, item: { type: "mcpToolCall", id: step.id, server: step.server, tool: step.tool, status: "inProgress" } } });
+              send({ method: "item/completed", params: { threadId, turnId, item: { type: "mcpToolCall", id: step.id, server: step.server, tool: step.tool, status: step.failed ? "failed" : "completed", ...(step.result ? { result: step.result } : {}) } } });
             } else if (step.kind === "tokenUsage") {
               send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { last: step.last, total: step.total ?? step.last, modelContextWindow: step.contextWindow ?? null } } });
             } else if (step.kind === "errorNote") {

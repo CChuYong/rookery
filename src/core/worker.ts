@@ -333,7 +333,9 @@ export class Worker {
           });
           // maxTurns cap: PER-SEND guard — ev.numTurns is this send's agentic-loop count (per-send, see above),
           // so this caps a single runaway send, NOT the lifetime total. (A lifetime cap would compare cumTurns.)
-          // null/undefined → unlimited.
+          // null/undefined → unlimited. NOTE (codex parity): a codex backend exposes no sub-turn loop count,
+          // so its ev.numTurns is always 1 — this cap is inherently inert on codex (it never trips for cap>1).
+          // costBudgetUsd below is the codex runaway guard; maxTurns is a Claude-only per-send guard.
           const cap = this.opts.deps.maxTurns;
           if (cap != null && ev.numTurns >= cap) {
             this.record({ kind: "notice", text: `Turn cap reached (maxTurns=${cap}, num_turns=${ev.numTurns}) — stopping worker.` });

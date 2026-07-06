@@ -145,7 +145,7 @@ export class MasterAgent {
   private cumTurns = 0;
   // Abort handle for the in-progress turn (null if none). Same abort + interrupt pattern as the worker.
   private currentAbort: AbortController | null = null;
-  private currentQuery: { interrupt(): Promise<void> } | null = null;
+  private currentQuery: { interrupt(): Promise<void>; pauseIdleWatchdog?(): void; resumeIdleWatchdog?(): void } | null = null;
   // Session teardown in progress (SessionManager.delete). Queued turns must not start (their DB writes would
   // race the row cascade → FK violations) and new worker notifications must not chain ghost SDK turns.
   private closing = false;
@@ -346,9 +346,19 @@ export class MasterAgent {
           ...(this.opts.deps.canUseTool
             ? {
                 askUserQuestion: [
-                  askUserQuestionDef((input) =>
-                    (this.opts.deps.canUseTool as RealCanUseToolSig)("AskUserQuestion", input, { toolUseID: randomUUID(), signal: abort.signal }),
-                  ),
+                  askUserQuestionDef(async (input) => {
+                    // Codex parity (finding [1]): bracket the human wait with pause/resume so a codex
+                    // master's idle watchdog doesn't kill a turn that is legitimately blocked awaiting an
+                    // answer. Entering this closure proves the MCP bridge delivered the tools/call, so the
+                    // ensuing silence is the human thinking, not a wedge. No-op on Claude (its stream has
+                    // no watchdog and never invokes this def — it keeps its native AskUserQuestion).
+                    this.currentQuery?.pauseIdleWatchdog?.();
+                    try {
+                      return await (this.opts.deps.canUseTool as RealCanUseToolSig)("AskUserQuestion", input, { toolUseID: randomUUID(), signal: abort.signal });
+                    } finally {
+                      this.currentQuery?.resumeIdleWatchdog?.();
+                    }
+                  }),
                 ] as ProviderToolDef[],
               }
             : {}),
@@ -414,7 +424,9 @@ export class MasterAgent {
             contextTokens: ev.contextTokens,
             contextWindow: ev.contextWindow,
           });
-          // maxTurns: warning-only for master (no abort).
+          // maxTurns: warning-only for master (no abort). NOTE (codex parity): a codex master turn is
+          // single-shot with no sub-turn loop count, so ev.numTurns is always 1 — this warning is
+          // inherently inert on codex (never fires for cap>1). costBudgetUsd below is the codex guard.
           const masterCap = override?.maxTurns;
           if (masterCap != null && ev.numTurns >= masterCap) {
             const params = { max: masterCap, turns: ev.numTurns };
@@ -426,6 +438,14 @@ export class MasterAgent {
             this.recordEvent({ type: "master.notice", sessionId, code: "notice.costBudget", params, text: t(DEFAULT_LOCALE, "notice.costBudget", params) });
           }
         }
+      }
+      // Codex parity (finding [5]): a user stop closes the codex stream CLEANLY (its for-await exits
+      // without throwing), so the catch's interrupted-notice path below never runs. Record the same
+      // marker here on a clean-but-aborted exit — the Claude SDK reaches the catch by throwing instead.
+      if (abort.signal.aborted) {
+        this.flushThinking();
+        this.recordEvent({ type: "master.notice", sessionId, code: "notice.interrupted", params: undefined, text: t(DEFAULT_LOCALE, "notice.interrupted") });
+        return;
       }
     } catch (err) {
       // If the abort is from a user stop, it's not a turn failure. Now that the stream loop has fully drained (after all deltas),
@@ -439,6 +459,12 @@ export class MasterAgent {
       throw err; // Let runTurn reject → the catch in connection.ts/handle-incoming surfaces the turn failure (MS-2). turnChain is protected by runTurn's .catch.
     } finally {
       this.flushThinking(); // Persist the trailing thinking summary too (a step that ended without an answer)
+      // Codex parity (finding [10]): retire any interaction armed on this turn's signal. A codex turn can
+      // die by watchdog-kill or child crash WITHOUT the abort controller ever firing (only stop() aborts
+      // it), which would leave a pending AskUserQuestion card dangling forever and its eventual answer
+      // discarded. Aborting unconditionally at turn end denies-and-retires it on every exit path; it is a
+      // no-op when nothing is pending, and harmless after a completed turn (the stream is already torn down).
+      abort.abort();
       this.currentAbort = null; // Turn end → release the abort handle (subsequent stop() is a no-op)
       this.currentQuery = null;
       bus.emit({ type: "master.status", sessionId, status: "idle" }); // Turn end (success/failure/abort all)

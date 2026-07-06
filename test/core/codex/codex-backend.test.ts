@@ -48,14 +48,17 @@ describe("CodexBackend.openSession — translation", () => {
     expect(events.at(-1)).toEqual({ kind: "turn_end", subtype: "success", costUsd: 0.00405, numTurns: 1, durationMs: 42, contextTokens: 1000, contextWindow: 272000 });
   });
 
-  it("synthesizes CUMULATIVE numTurns across turns (port contract — worker maxTurns cap)", async () => {
+  it("emits PER-SEND numTurns=1 across turns (port contract — consumers accumulate their own total)", async () => {
+    // Codex exposes no sub-turn agentic-loop count, so each turn/completed is one send = numTurns 1.
+    // A cumulative series here would (a) inflate the worker's lifetime total quadratically once
+    // worker.ts accumulates it, and (b) false-trip the per-send maxTurns cap at the Nth send.
     const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
     const q = new MessageQueue();
     q.push("t1"); q.push("t2"); q.push("t3");
     q.close();
     const events = await collect(b.openSession(q, baseOpts()));
     const turns = events.filter((e) => e.kind === "turn_end");
-    expect(turns.map((t) => (t as { numTurns: number }).numTurns)).toEqual([1, 2, 3]);
+    expect(turns.map((t) => (t as { numTurns: number }).numTurns)).toEqual([1, 1, 1]);
   });
 
   it("maps thread start options: cwd, model, effort, approval/sandbox from permissionMode", async () => {
@@ -283,7 +286,7 @@ describe("CodexBackend — controls and edges", () => {
     const done = (async () => {
       for await (const ev of stream) {
         seen.push(ev);
-        if (ev.kind === "turn_end" && (ev as { numTurns: number }).numTurns === 1) {
+        if (ev.kind === "turn_end" && seen.filter((e) => e.kind === "turn_end").length === 1) {
           await stream.setModel("gpt-5.5-mini");
           await stream.setPermissionMode("plan");
           q.push("t2"); q.close();
@@ -323,6 +326,31 @@ describe("CodexBackend — controls and edges", () => {
     await collect(stream);
     await expect(stream.supportedCommands()).resolves.toEqual([]);
     await expect(b.forkSession("th-1")).resolves.toEqual({ sessionId: "th-1-fork" });
+  });
+
+  it("mcpToolCall item/completed serializes result.content into tool_result (not the bare status)", async () => {
+    // Parity with Claude masters, which persist the actual tool output. Codex reports it in
+    // item.result.content (MCP content blocks); the decode must serialize it, not drop it for status.
+    const { backend: b } = backend(() => [
+      { kind: "mcpToolCall", id: "t1", server: "rookery", tool: "list_workers", result: { content: [{ type: "text", text: "worker a1: idle" }, { type: "text", text: "worker a2: running" }] } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    const result = events.find((e) => e.kind === "tool_result") as { content: string; isError: boolean };
+    expect(result.content).toBe("worker a1: idle\nworker a2: running");
+    expect(result.isError).toBe(false);
+  });
+
+  it("mcpToolCall with no result.content falls back to the status string", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "mcpToolCall", id: "t1", server: "rookery", tool: "x" },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    const result = events.find((e) => e.kind === "tool_result") as { content: string };
+    expect(result.content).toBe("completed");
   });
 
   it("a stale turn/completed (id ≠ active turn id) is dropped: exactly one turn_end, numTurns:1", async () => {
@@ -401,7 +429,7 @@ describe("CodexBackend — pricing aggregation", () => {
     const done = (async () => {
       for await (const ev of stream) {
         seen.push(ev);
-        if (ev.kind === "turn_end" && (ev as { numTurns: number }).numTurns === 1) {
+        if (ev.kind === "turn_end" && seen.filter((e) => e.kind === "turn_end").length === 1) {
           await stream.setModel("gpt-5.4-mini");
           q.push("t2"); q.close();
         }
@@ -557,6 +585,32 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
     }
   });
 
+  it("escalates to grace-kill even when the wedged child never answers turn/interrupt (interrupt await must not block the escalation)", async () => {
+    // Finding [7]: onIdleTimeout awaited interrupt() unbounded; a child that is silent AND unresponsive
+    // to turn/interrupt (deadInterrupt) left that await pending forever, so the grace→kill timer was
+    // never armed and the turn stayed wedged. The ack-timeout race must let escalation proceed.
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "starting…" }], { deadInterrupt: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("do the task");
+      const seen: AgentEvent[] = [];
+      const collected = (async () => { for await (const ev of b.openSession(q, baseOpts())) seen.push(ev); })();
+      const rejection = expect(collected).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(1000); // idle window → onIdleTimeout → turn/interrupt sent (no response, hangs)
+      await vi.advanceTimersByTimeAsync(2000); // ack-timeout elapses → escalation proceeds despite the hung interrupt
+      await vi.advanceTimersByTimeAsync(5000); // grace window → kill + fail
+      await rejection;
+
+      expect(fake.requests.some((r) => r.method === "turn/interrupt")).toBe(true);
+      expect(fake.killed.some(Boolean)).toBe(true);
+      const notice = seen.find((e) => e.kind === "push") as { push: { code?: string } } | undefined;
+      expect(notice?.push).toMatchObject({ code: "notice.codexTurnTimeout", params: { seconds: 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("closes the request→response window: fires even when turn/start itself never responds and no notification of any kind ever arrives (cleanup wave B1)", async () => {
     // Before the cleanup wave, armIdleWatchdog() was called AFTER `await client.request("turn/start", …)`
     // resolved — so a child wedged between receiving turn/start and answering it (before any
@@ -602,6 +656,30 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
     }
   });
 
+  it("pauseIdleWatchdog suspends the watchdog (a blocking AskUserQuestion awaiting a human is not killed); resume re-arms it", async () => {
+    // Finding [1]: while the master's ask closure blocks on a human answer the codex child is silent,
+    // so the idle watchdog would kill the turn at ~120s. The master pauses the watchdog for that window.
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "asking…" }], { silentInterrupt: true }); // turn never self-ends
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("x");
+      const seen: AgentEvent[] = [];
+      const stream = b.openSession(q, baseOpts());
+      const collected = (async () => { try { for await (const ev of stream) seen.push(ev); } catch { /* fails once resumed→killed */ } })();
+      stream.pauseIdleWatchdog?.(); // as the master's ask closure does when the tools/call arrives
+      await vi.advanceTimersByTimeAsync(10_000); // 10× the idle window — paused, so it must NOT trip
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+      stream.resumeIdleWatchdog?.(); // human answered → resume
+      await vi.advanceTimersByTimeAsync(1000); // fresh idle window → interrupt
+      await vi.advanceTimersByTimeAsync(5000); // grace → kill
+      await collected;
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("healthy turn completes normally under the SAME tiny timeout — no timeout notice", async () => {
     vi.useFakeTimers();
     try {
@@ -633,7 +711,7 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
       const done = (async () => {
         for await (const ev of b.openSession(q, baseOpts())) {
           events.push(ev);
-          if (ev.kind === "turn_end" && (ev as { numTurns: number }).numTurns === 1) {
+          if (ev.kind === "turn_end" && events.filter((e) => e.kind === "turn_end").length === 1) {
             await vi.advanceTimersByTimeAsync(900); // idle gap between turns — watchdog is disarmed here, must not trip
             q.push("t2"); q.close();
           }
@@ -753,7 +831,7 @@ describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
       const turnEnds = seen.filter((e) => e.kind === "turn_end") as Array<{ subtype: string; numTurns: number }>;
       expect(turnEnds).toHaveLength(2);
       expect(turnEnds[0]).toMatchObject({ subtype: "interrupted", numTurns: 1 });
-      expect(turnEnds[1]).toMatchObject({ subtype: "success", numTurns: 2 });
+      expect(turnEnds[1]).toMatchObject({ subtype: "success", numTurns: 1 }); // per-send: each turn is 1, not cumulative
       expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
     } finally {
       vi.useRealTimers();

@@ -48,6 +48,12 @@ export interface AgentStream extends AsyncIterable<AgentEvent> {
   setModel(model: string): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   supportedCommands(): Promise<SlashCommandInfo[]>;
+  // Optional: suspend/resume a provider's per-turn inactivity watchdog while a blocking interaction
+  // (AskUserQuestion / approval) awaits a human — the master brackets its ask closure with these so a
+  // long human think-time isn't mistaken for a wedged turn. Only the Codex adapter has such a watchdog;
+  // Claude omits these (callers use `?.()`), which is a no-op there by design.
+  pauseIdleWatchdog?(): void;
+  resumeIdleWatchdog?(): void;
 }
 
 export interface AgentSessionOptions {
