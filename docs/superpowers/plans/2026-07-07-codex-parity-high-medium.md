@@ -97,6 +97,15 @@ HIGH [3] was initially missed in unit planning and added during the review wave.
 - All 18 findings (HIGH 4 + MEDIUM 14) implemented via TDD across 6 commits on `fix/codex-parity-high-medium`.
 - Final adversarial review pass (fable subagent) over the branch diff.
 
-## Out of scope (LOW, deferred)
+## LOW wave — DONE (2026-07-07, 7 of 10; [22]/[27] already folded into D/F earlier)
 
-[18] codex $0 pricing for unlisted models, [19] tool_progress, [20] mcpServers seam no-op, [21] seedCodexHome try/catch, [22] worker default model (folded into D opportunistically), [23] effort-select blank, [24] session.open provider, [25]/[26] models-catalog auth divergence, [27] README Slack/automation (folded into F opportunistically).
+Processed after the HIGH/MED merge, TDD, on the same branch. Root/desktop suites green (896/889), both typecheck clean. Fable review of the wave caught 2 refinements (partial fork-seed cleanup [21]; missing effort dep [23]) — applied.
+
+- [18] `isRatedModel` + one-time daemon-log warn when billing a codex model with no RATES entry ($0/inert-budget blind spot).
+- [21] seedCodexHomeFromSource try/catch + partial-dst cleanup (never-throw contract).
+- [24] `session.open` gains a provider field (mirrors session.create).
+- [20] loud daemon-log guard when a codex master turn is handed `opts.mcpServers` (silent no-op → warning).
+- [25]/[26] model/list catalog child authenticates under the turn account (shared `codexEnv`/`codexApiKey` resolvers + auth.json provisioning).
+- [23] re-derive codex effort on provider/model/catalog change (WorkerSpawnModal + NewSessionPage; Composer variant held — App.tsx-coupled).
+
+**Held (deliberate):** [19] tool_progress — cosmetic (UI animations already prevent "looks hung"); a synthetic per-item elapsed-timer adds leak/watchdog-interaction risk to an intricate hot path for no functional gain. Composer's [23] variant — needs masterControls-side effort clamping (broader).
