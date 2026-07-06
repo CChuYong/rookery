@@ -14,6 +14,7 @@ function mapModel(m: unknown): CodexModelInfo | null {
   const o = m as { id?: unknown; displayName?: unknown; defaultReasoningEffort?: unknown; supportedReasoningEfforts?: unknown; isDefault?: unknown; hidden?: unknown };
   const id = typeof o.id === "string" ? o.id : "";
   if (!id) return null;
+  if (o.hidden === true) return null; // defense-in-depth: drop hidden rows even if includeHidden:false ever leaks one (spec §①)
   const supported = Array.isArray(o.supportedReasoningEfforts)
     ? o.supportedReasoningEfforts.map((e) => (typeof e === "object" && e && typeof (e as { reasoningEffort?: unknown }).reasoningEffort === "string" ? (e as { reasoningEffort: string }).reasoningEffort : "")).filter(Boolean)
     : [];
@@ -30,10 +31,13 @@ export function makeCodexModelsProvider(opts: { spawn: CodexSpawn; timeoutMs?: n
   return {
     async list() {
       if (cache) return cache;
-      const client = new CodexClient(opts.spawn({}));
+      let client: CodexClient | undefined;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("codex model/list timed out")), timeoutMs); });
       try {
+        // Inside the try so a synchronously-throwing spawn (or CodexClient ctor) also degrades to null,
+        // not just async failures — every failure mode returns null, never rejects list().
+        client = new CodexClient(opts.spawn({}));
+        const timeout = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("codex model/list timed out")), timeoutMs); });
         await Promise.race([client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } }), timeout]);
         client.notify("initialized", {});
         const res = (await Promise.race([client.request("model/list", { includeHidden: false }), timeout])) as { data?: unknown };
@@ -47,7 +51,7 @@ export function makeCodexModelsProvider(opts: { spawn: CodexSpawn; timeoutMs?: n
         return null; // codex missing / not authed / timeout / malformed → null (NOT cached)
       } finally {
         if (timer) clearTimeout(timer);
-        client.close();
+        client?.close();
       }
     },
   };
