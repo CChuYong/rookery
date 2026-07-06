@@ -8,6 +8,8 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
 import { useDraftStore } from "../store/drafts.js";
+import { Select, Input } from "../ui/input.js";
+import { EFFORTS, effortLabelKey, effortSupported } from "../lib/models.js";
 
 // New master session — full page (entire main area). The input field is identical to the chat composer (markdown, file attachments, @ prefill, / skills).
 // Start with it empty for an empty session. @ and / operate live against the repo/folder (cwd) picked below (if none selected, the daemon's default cwd).
@@ -20,7 +22,8 @@ export function NewSessionPage(p: {
   repos: Array<{ name: string; path: string }>;
   defaultModel: string;
   defaultEffort: string;
-  onStart: (opts: { cwd?: string; prompt?: string; model: string; effort: string }) => void;
+  codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, settings.codexMasterModel)
+  onStart: (opts: { cwd?: string; prompt?: string; model: string; effort: string; provider?: string }) => void;
   onClose?: () => void; // if absent, hide the close button (when shown as the default screen with no session)
   browseDir?: (dir: string, cwd?: string) => Promise<BrowseResult>; // @ file autocomplete (relative to the selected cwd)
   loadCommands?: (cwd?: string) => Promise<SlashCommand[]>; // / skill candidates (relative to the selected cwd)
@@ -36,6 +39,13 @@ export function NewSessionPage(p: {
   const [model, setModel] = useState(p.defaultModel);
   const [effort, setEffort] = useState(p.defaultEffort);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
+  // Agent backend for this new session. Default "claude" (wire-minimal: onStart sends `undefined` for claude and
+  // only an explicit value for "codex" — same idiom as WorkerSpawnModal's provider selector).
+  const [provider, setProvider] = useState<"claude" | "codex">("claude");
+  // Free-text codex model — kept separate from `model` so switching provider back and forth doesn't clobber
+  // either field's last value (same idiom as WorkerSpawnModal's codexModel state).
+  const [codexModel, setCodexModel] = useState("");
+  const isCodex = provider === "codex";
 
   // Preserve the typed prompt across page close/reopen and session-create failures — same draft-store wiring as ConversationPane,
   // but with a fixed key since this page isn't per-session. Read non-reactively (only at mount); this page remounts (key={pageId}) on reopen.
@@ -50,7 +60,14 @@ export function NewSessionPage(p: {
     return () => { live = false; };
   }, [cwd]);
 
-  const start = (prompt: string): void => p.onStart({ cwd: cwd.trim() || undefined, prompt: prompt.trim() || undefined, model, effort });
+  const start = (prompt: string): void =>
+    p.onStart({
+      cwd: cwd.trim() || undefined,
+      prompt: prompt.trim() || undefined,
+      model: isCodex ? codexModel.trim() : model,
+      effort,
+      provider: isCodex ? "codex" : undefined, // wire-minimal: absent means claude
+    });
   const pick = async (): Promise<void> => { const dir = await window.rookery.pickDirectory(); if (dir) setCwd(dir); };
   const browseDir = p.browseDir ? (dir: string) => p.browseDir!(dir, cwd || undefined) : undefined;
   const folderName = cwd ? baseName(cwd) : (p.defaultFolder ? baseName(p.defaultFolder) : t("newSessionPage.defaultFolder"));
@@ -60,6 +77,30 @@ export function NewSessionPage(p: {
     <button onClick={() => void pick()} title={cwd || p.defaultFolder || t("newSessionPage.daemonDefaultFolder")} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors hover:bg-raised hover:text-fg">
       <Folder size={12} className="shrink-0" /> <span className="truncate">{folderName}</span>
     </button>
+  );
+
+  // Agent-backend selector (WorkerSpawnModal idiom, reused i18n keys). Rendered in the same leftSlot row as the
+  // folder picker — the Composer's own model/effort controls live inside a shared component (not a standalone
+  // <Select> like the modal), so rather than changing Composer's API, codex's free-text model field + its own
+  // effort <Select> render here too and the Composer's `controls` prop is omitted entirely when codex (see below).
+  const providerSelector = (
+    <Select size="xs" className="w-auto min-w-0 text-fg-dim" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
+      <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+      <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+    </Select>
+  );
+  // codex has no fixed model catalog on the desktop side — free text, daemon default (settings.codexMasterModel) when empty.
+  const codexControls = isCodex && (
+    <>
+      <Input size="xs" className="w-28 min-w-0 text-fg-dim" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
+      {effortSupported(codexModel || p.codexDefaultModel || "") && (
+        <Select size="xs" className="min-w-0 text-fg-dim" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
+          {EFFORTS.map((ef) => (
+            <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+          ))}
+        </Select>
+      )}
+    </>
   );
 
   return (
@@ -102,13 +143,13 @@ export function NewSessionPage(p: {
             allowEmpty // start with it empty for an empty session
             sendLabel={t("newSessionPage.sendLabel")}
             placeholder={t("newSessionPage.placeholder")}
-            controls={{ model, effort, editable: true, onModel: setModel, onEffort: setEffort }}
+            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort }}
             commands={commands}
             browseDir={browseDir}
             onAttachFile={p.onAttachFile}
             onDropFiles={p.onDropFiles}
             onEscape={p.onClose}
-            leftSlot={folderPicker}
+            leftSlot={<>{folderPicker}{providerSelector}{codexControls}</>}
             className="rounded-2xl border-line bg-surface/70 px-3 py-2.5"
             initialText={initialText}
             onDraftChange={onDraftChange}

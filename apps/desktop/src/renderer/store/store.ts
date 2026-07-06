@@ -13,7 +13,7 @@ import { MODELS } from "../lib/models.js";
 import type { ModelOption } from "../lib/models.js";
 
 interface Store extends AppState {
-  sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean }>;
+  sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean; provider?: string }>;
   // ── Single location (navigation) model — overlay/showRepos/activeSessionId/activeWorkerId together form one Location.
   // All transitions go through navigate/goBack/goForward (browser-style history). canBack/Fwd derive from navBack/navFwd.length.
   overlay: Overlay; // Main-area full page (settings/new session/automation) — null means the normal session/Repos view

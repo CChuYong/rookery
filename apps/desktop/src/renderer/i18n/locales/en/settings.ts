@@ -100,6 +100,8 @@ export default {
   "settings.codexBinHint": "Desktop-spawned daemons often lack ~/.local/bin on PATH — use an absolute path.",
   "settings.codexWorkerModel": "Codex worker default model",
   "settings.codexWorkerModelHint": "Applies from new Codex workers.",
+  "settings.codexMasterModel": "Codex master default model",
+  "settings.codexMasterModelHint": "Applies from new Codex master sessions.",
   "settings.codexApiKey": "Codex API key",
   "settings.codexApiKeyHint": "Leave blank to use codex login (~/.codex/auth.json).",
 } satisfies Catalog;

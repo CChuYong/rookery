@@ -100,6 +100,8 @@ export default {
   "settings.codexBinHint": "데스크톱 앱이 띄운 데몬 프로세스는 흔히 ~/.local/bin이 PATH에 없어요 — 절대경로를 입력하세요.",
   "settings.codexWorkerModel": "Codex 워커 기본 모델",
   "settings.codexWorkerModelHint": "새 Codex 워커부터 적용돼요.",
+  "settings.codexMasterModel": "Codex 마스터 기본 모델",
+  "settings.codexMasterModelHint": "새 Codex 마스터 세션부터 적용돼요.",
   "settings.codexApiKey": "Codex API 키",
   "settings.codexApiKeyHint": "비워두면 codex login(~/.codex/auth.json)을 사용합니다.",
 } satisfies Catalog;

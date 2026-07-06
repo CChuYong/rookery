@@ -534,12 +534,12 @@ export function App(): JSX.Element {
     }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchFleet(); });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
-  const startSession = (opts: { cwd?: string; prompt?: string; model: string; effort: string }) => {
+  const startSession = (opts: { cwd?: string; prompt?: string; model: string; effort: string; provider?: string }) => {
     navigate({ overlay: null });
     const c = client;
     if (!c) return;
     void c
-      .request({ type: "session.create", ...(opts.cwd ? { cwd: opts.cwd } : {}) })
+      .request({ type: "session.create", ...(opts.cwd ? { cwd: opts.cwd } : {}), ...(opts.provider ? { provider: opts.provider as "claude" | "codex" } : {}) })
       .then((r) =>
         c.request({ type: "session.list" }).then((lr) => {
           useStore.getState().setSessions(lr.sessions ?? []);
@@ -1029,7 +1029,7 @@ export function App(): JSX.Element {
             }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-5.5"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -1166,7 +1166,7 @@ export function App(): JSX.Element {
           )
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-5.5"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : dockable && masterRender ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <SessionHeader

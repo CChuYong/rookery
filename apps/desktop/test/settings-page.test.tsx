@@ -63,11 +63,12 @@ describe("SettingsPage Anthropic API key input", () => {
 });
 
 describe("SettingsPage Codex tab", () => {
-  it("is reachable via the tab bar and shows the codexBin/codexWorkerModel fields", () => {
+  it("is reachable via the tab bar and shows the codexBin/codexWorkerModel/codexMasterModel fields", () => {
     render(<SettingsPage {...base} />);
     fireEvent.click(screen.getByText("Codex"));
     expect(screen.getByDisplayValue("codex")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("gpt-5.5")).toBeInTheDocument();
+    // codexWorkerModel and codexMasterModel share the same "gpt-5.5" fixture default → two inputs match.
+    expect(screen.getAllByDisplayValue("gpt-5.5")).toHaveLength(2);
   });
 
   it("editing codexBin lands in the onSave(f) payload", () => {
@@ -78,6 +79,18 @@ describe("SettingsPage Codex tab", () => {
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexBin: "/usr/local/bin/codex" }));
+  });
+
+  it("editing codexMasterModel lands in the onSave(f) payload", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Codex"));
+    // Disambiguate from the codexWorkerModel field (same default value) via its own label text. Regex because the
+    // Field component's accessible name also folds in the trailing hint text, e.g. "...모델 새 Codex 마스터...".
+    fireEvent.change(screen.getByLabelText(/Codex 마스터 기본 모델/), { target: { value: "gpt-6-mini" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexMasterModel: "gpt-6-mini" }));
   });
 
   it("renders the codexApiKey field as a masked (password) input", () => {

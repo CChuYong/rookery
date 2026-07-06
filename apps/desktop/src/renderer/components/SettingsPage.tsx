@@ -373,6 +373,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   <Field label={t("settings.codexWorkerModel")} hint={t("settings.codexWorkerModelHint")}>
                     <Input value={f.codexWorkerModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
                   </Field>
+                  <Field label={t("settings.codexMasterModel")} hint={t("settings.codexMasterModelHint")}>
+                    <Input value={f.codexMasterModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
+                  </Field>
                 </div>
 
                 {/* Unlike anthropicApiKey there is no auth-status probe for codex, so we can't show "currently
