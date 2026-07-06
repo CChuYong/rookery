@@ -1,5 +1,7 @@
 # 2026-07-06 — Codex model/effort picker (design)
 
+> **Status (2026-07-06): implemented.** Daemon `codex.models.list` → `src/core/codex-models-provider.ts` (cached, `null` on failure); desktop `codexModels` store + `codexEffortsFor`/`codexDefaultEffort` helpers; model/effort dropdowns across all 4 surfaces (WorkerSpawnModal, NewSessionPage, AutomationForm, SettingsPage defaults) with a `""` "use daemon default" option + free-text fallback when the catalog can't be fetched. Live-verified against codex 0.142.5.
+
 Replace the free-text Codex model input with a proper dropdown driven by the codex app-server's `model/list` catalog, with a per-model reasoning-effort selector — bringing Codex to parity with the existing Claude model picker (Claude-Code-style). Live-verified: the installed codex **0.142.5** `app-server` implements `model/list`.
 
 ## Motivation
