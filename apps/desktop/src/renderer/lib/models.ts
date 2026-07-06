@@ -1,3 +1,5 @@
+import type { CodexModelInfo } from "@daemon/protocol/messages.js";
+
 // A single model option. The live (daemon models.list) and static fallback both use the same shape.
 export type ModelOption = { id: string; label: string };
 
@@ -23,4 +25,16 @@ export function modelLabel(id: string): string {
 // effort is unsupported on Haiku (API 400) — the UI also hides the effort selector in that case.
 export function effortSupported(model: string): boolean {
   return !/haiku/i.test(model);
+}
+
+// The chosen codex model's supported reasoning-effort tokens, or [] if the model is unknown
+// (or the catalog itself couldn't be fetched, i.e. list === null).
+export function codexEffortsFor(model: string, list: CodexModelInfo[] | null): string[] {
+  return list?.find((m) => m.id === model)?.supportedEfforts ?? [];
+}
+
+// The chosen codex model's default effort, or undefined if unknown / the catalog is null / the
+// model's defaultEffort is an empty string (the `|| undefined` guard normalizes "" to "not set").
+export function codexDefaultEffort(model: string, list: CodexModelInfo[] | null): string | undefined {
+  return list?.find((m) => m.id === model)?.defaultEffort || undefined;
 }

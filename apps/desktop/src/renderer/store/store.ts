@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { CoreEvent, WorkerEventData, SlackStatus } from "@daemon/core/events.js";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
 import type { SettingsValues } from "@daemon/core/settings.js";
-import type { IntegrationsStatus, WorkerRow } from "@daemon/protocol/messages.js";
+import type { IntegrationsStatus, WorkerRow, CodexModelInfo } from "@daemon/protocol/messages.js";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import { emptyState, reduceEvent, applySubEvent, seedSessionLog } from "./reduce.js";
@@ -50,6 +50,11 @@ interface Store extends AppState {
   // List of available models (live from the daemon's models.list, or the static fallback). Shared by the settings, spawn, and session model pickers.
   models: ModelOption[];
   setModels: (models: ModelOption[]) => void;
+  // Live codex model/effort catalog (from the daemon's codex.models.list), or null if it couldn't be fetched
+  // (codex missing/unauthed/timeout) — unlike `models`, null is stored as-is (no static fallback): a null list
+  // means the 4 codex model/effort surfaces degrade to today's free-text input rather than guessing a stale list.
+  codexModels: CodexModelInfo[] | null;
+  setCodexModels: (codexModels: CodexModelInfo[] | null) => void;
   // Linear/GitHub integration connection status (on-demand pull). Used by the spawn dialog and the settings integrations section.
   integrations: IntegrationsStatus | null;
   setIntegrations: (i: IntegrationsStatus) => void;
@@ -154,6 +159,8 @@ export const useStore = create<Store>((set, get) => ({
   setSettings: (settings) => set({ settings }),
   models: [...MODELS], // Initialize with the static fallback (no flicker) → swapped to live when models.list arrives
   setModels: (models) => set({ models: models.length ? models : [...MODELS] }),
+  codexModels: null,
+  setCodexModels: (codexModels) => set({ codexModels }),
   integrations: null,
   setIntegrations: (integrations) => set({ integrations }),
   authStatus: null,
