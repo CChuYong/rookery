@@ -55,12 +55,14 @@ export function NewSessionPage(p: {
   const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, text), []);
 
   // When the selected repo/folder (cwd) changes, reload that cwd's skills (live). If none selected, the daemon's default cwd.
+  // Codex has no slash-command catalog, so skip the probe entirely for a codex new session (finding [6]) — otherwise the
+  // composer would offer Claude commands codex can't run, and the probe spawns a wasted Claude query.
   useEffect(() => {
-    if (!p.loadCommands) return;
+    if (!p.loadCommands || isCodex) { setCommands([]); return; }
     let live = true;
     void p.loadCommands(cwd || undefined).then((c) => { if (live) setCommands(c); }).catch(() => { if (live) setCommands([]); });
     return () => { live = false; };
-  }, [cwd]);
+  }, [cwd, isCodex]);
 
   const start = (prompt: string): void =>
     p.onStart({

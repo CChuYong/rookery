@@ -465,19 +465,23 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     scheduler.stop();
     clearInterval(heartbeat);
     await slack.stop(); // stop accepting new Slack-triggered turns before draining the in-flight ones
-    // Finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master turns.
-    // Otherwise writing to a closed DB raises a 'database is not open' unhandled rejection. Crucially this
-    // runs BEFORE the http-server teardown below (finding [15]): a codex master turn reaches its in-process
-    // tools over the MCP bridge mounted on THIS http server, so the bridge must stay reachable for the
-    // drain grace window — otherwise an in-flight codex turn loses tool connectivity mid-tool-call, hangs
-    // on its idle watchdog until the drain times out, and its late persistence then races db.close(). A
-    // Claude master turn (in-process SDK MCP) doesn't need the http server, so this ordering only helps.
-    await fleet.close(5000);
-    await sessions.drain(5000);
-    // Now tear down the transport. Destroy sockets immediately instead of a graceful close (ensures the
-    // close() Promise doesn't wait forever), then the WS server, then the http server (and its bridge).
+    // Close the ADMISSION path first: terminate the desktop WS clients and close the WS server, so no client
+    // can start a fresh turn (session.send / fleet.spawn) during the drain below that would then race
+    // db.close() — this is the original ordering's admission guarantee, preserved. Crucially this does NOT
+    // kill the codex MCP bridge: the bridge is plain HTTP handled by httpServer (still listening until the
+    // teardown further down), a SEPARATE channel from these WebSocket sockets, so wss.close() leaves it
+    // reachable. (In noServer mode wss is attached via httpServer's 'upgrade' event and does not own it.)
     for (const ws of wss.clients) ws.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
+    // Now finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master
+    // turns. This runs while httpServer is STILL listening (finding [15]): a codex master turn reaches its
+    // in-process tools over the MCP bridge on that http server, so the bridge must stay reachable for the
+    // drain grace window — otherwise an in-flight codex turn loses tool connectivity mid-tool-call, hangs on
+    // its idle watchdog until the drain times out, and its late persistence then races db.close(). A Claude
+    // master turn (in-process SDK MCP) doesn't need the http server, so this only helps.
+    await fleet.close(5000);
+    await sessions.drain(5000);
+    // Drain done → tear down the http server (and with it the now-idle MCP bridge), then close the DB last.
     httpServer.closeAllConnections?.(); // Node 18.2+: forcibly close any remaining keep-alive connections
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     db.close();
