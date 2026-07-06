@@ -34,7 +34,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { Connection } from "./connection.js";
 import { McpBridge } from "./mcp-bridge.js";
-import { materializeCodexHome, removeCodexHome } from "./codex-home.js";
+import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource } from "./codex-home.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -202,9 +202,27 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const nameResolverHolder = makeHolder<SlackRefResolver>();
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
+  // P3 Track A (docs/2026-07-06-p3-codex-fork-automation.md): forks a codex MASTER session. Unlike
+  // fleet's codex fork (workers share one CODEX_HOME, so a plain forkSession(threadId) suffices),
+  // a codex master's rollouts live in a per-session CODEX_HOME — the fork child must run there
+  // (thread/fork looks up threadId in the CWD it's spawned with), and the NEW session's home must be
+  // pre-seeded with the source's sessions/ tree (parent + forked rollout) so context survives (the
+  // forked rollout is a delta referencing the parent — see codex-home.ts seedCodexHomeFromSource).
+  // Only reachable via SessionManager's forkSession router below — the fleet/worker one is unchanged.
+  const forkCodexMaster = async (sourceThreadId: string, opts?: { sourceSessionId?: string; newSessionId?: string }): Promise<{ sessionId: string }> => {
+    const sourceSessionId = opts?.sourceSessionId;
+    const newSessionId = opts?.newSessionId;
+    if (!sourceSessionId || !newSessionId) throw new Error("cannot fork codex session: missing sourceSessionId/newSessionId");
+    const sourceHome = path.join(config.home, "codex-homes", sourceSessionId);
+    if (!fs.existsSync(sourceHome)) throw new Error("cannot fork codex session: source CODEX_HOME missing (run a turn first)");
+    const { sessionId: forkedUuid } = await codexBackend.forkSession(sourceThreadId, { env: { ...process.env, CODEX_HOME: sourceHome } });
+    seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId);
+    return { sessionId: forkedUuid };
+  };
   const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel,
-    // Fork routing by provider (mirrors fleet's forkSession above): codex forks via an ephemeral app-server child; claude keeps the SDK's own (eager) forkSession.
-    forkSession: (provider, id, opts) => (provider === "codex" ? codexBackend.forkSession(id) : sdkForkSession(id, opts)),
+    // Fork routing by provider: codex routes through forkCodexMaster (per-session CODEX_HOME
+    // relocation, see above); claude keeps the SDK's own (eager) forkSession.
+    forkSession: (provider, id, opts) => (provider === "codex" ? forkCodexMaster(id, opts) : sdkForkSession(id, opts)),
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.

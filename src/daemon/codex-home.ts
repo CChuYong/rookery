@@ -73,6 +73,23 @@ export function materializeCodexHome(rookeryHome: string, sessionKey: string, br
   return dir;
 }
 
+// P3 Track A (docs/2026-07-06-p3-codex-fork-automation.md) — seeds a freshly-forked codex master
+// session's per-session CODEX_HOME with the SOURCE session's ENTIRE `sessions/` tree (parent +
+// forked rollouts). `thread/fork` writes the forked rollout into whatever CODEX_HOME the fork child
+// ran in (the source's home — see server.ts's forkCodexMaster), and that forked rollout is a DELTA
+// that references the parent rollout: copying only the forked file would let `thread/resume` find the
+// thread but lose conversation context (verified in `.superpowers/sdd/probe-fork-home2.mjs`). Copying
+// the whole tree preserves context. Best-effort: a missing source `sessions/` dir (e.g. the source
+// home was GC'd) is a silent no-op — the fork still runs, just without prior context — and this must
+// never throw (called after the ephemeral fork child has already succeeded).
+export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: string, newSessionId: string): void {
+  const src = path.join(rookeryHome, "codex-homes", sourceSessionId, "sessions");
+  if (!fs.existsSync(src)) return;
+  const dst = path.join(rookeryHome, "codex-homes", newSessionId, "sessions");
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.cpSync(src, dst, { recursive: true });
+}
+
 // Best-effort cleanup on session delete (item 6) — never throws. Removes the whole per-session
 // CODEX_HOME (config.toml + auth.json + any codex-written rollout/session state under it).
 export function removeCodexHome(rookeryHome: string, sessionKey: string): void {

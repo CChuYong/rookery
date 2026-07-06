@@ -215,22 +215,38 @@ describe("SessionManager", () => {
     expect(repos.getSession(orig.id)!.label).toBe("My session");
   });
 
-  // P2.5 Track A moved codex master turns to a per-session CODEX_HOME, whose rollouts the ephemeral
-  // fork child (shared home) can't see — forking a codex master is guarded off until P3 (rollout relocation).
-  it("fork() of a codex session throws a clear not-yet-supported error and never calls forkSession", async () => {
+  // P3 Track A: codex master fork now WORKS (was P2.5's not-yet-supported guard) — the fork router
+  // (server.ts forkCodexMaster) relocates the per-session CODEX_HOME so the ephemeral fork child can
+  // see the source thread, then seeds the new session's home with the source's rollouts. SessionManager
+  // itself just needs to (a) generate the new id BEFORE calling forkSession, so the router has it, and
+  // (b) pass sourceSessionId/newSessionId through — the routing/seeding logic lives in the daemon.
+  it("fork() of a codex session succeeds — the router receives sourceSessionId/newSessionId and the new session inherits provider codex", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
     const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
-    const forkCalls: Array<{ provider: string; id: string }> = [];
-    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, id: sdkSessionId }); return { sessionId: "forked-thread" }; };
+    const forkCalls: Array<{ provider: string; sdkSessionId: string; opts?: { title?: string; sourceSessionId?: string; newSessionId?: string } }> = [];
+    const forkSession = async (provider: string, sdkSessionId: string, opts?: { title?: string; sourceSessionId?: string; newSessionId?: string }) => {
+      forkCalls.push({ provider, sdkSessionId, opts });
+      return { sessionId: "forked-uuid" };
+    };
     let n = 0;
     const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]), codex: fakeBackend([]) }, masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
     const orig = sm.create("/work/repo", { provider: "codex" }); // s0
     repos.setSdkSessionId(orig.id, "thread-1");
+    repos.setSessionLabel(orig.id, "My codex session");
+    repos.addSessionEvent({ sessionId: orig.id, seq: 0, type: "message", payloadJson: '{"role":"user"}' });
 
-    await expect(sm.fork(orig.id)).rejects.toThrow(/codex.*not supported|not supported.*codex/i);
-    expect(forkCalls).toEqual([]); // never reaches the fork child
+    const forked = await sm.fork(orig.id); // s1 — the new id is generated BEFORE forkSession is called (P3 ordering)
+
+    expect(forkCalls).toEqual([{ provider: "codex", sdkSessionId: "thread-1", opts: { title: "My codex session (fork)", sourceSessionId: "s0", newSessionId: "s1" } }]);
+    expect(forked.id).toBe("s1");
+    const row = repos.getSession(forked.id)!;
+    expect(row.provider).toBe("codex"); // fork inherits the source's provider
+    expect(row.sdk_session_id).toBe("forked-uuid");
+    expect(row.label).toBe("My codex session (fork)");
+    expect(repos.listSessionEvents(forked.id)).toHaveLength(1); // transcript copied
+    expect(repos.getSession(orig.id)!.sdk_session_id).toBe("thread-1"); // original untouched
   });
 
   it("fork() throws when the source session never ran a turn (no sdk_session_id)", async () => {

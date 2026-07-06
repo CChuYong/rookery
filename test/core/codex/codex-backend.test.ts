@@ -456,6 +456,24 @@ describe("CodexBackend — pricing aggregation", () => {
 });
 
 describe("CodexBackend — fork timeout & explicit sandbox", () => {
+  // P3 Track A: the daemon's codex MASTER fork router passes an explicit env override so the
+  // ephemeral fork child runs in the SOURCE session's per-session CODEX_HOME (where thread/fork can
+  // find the thread) instead of the shared home — verify the override reaches the spawn verbatim.
+  it("forkSession threads an explicit env override into the ephemeral spawn", async () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    await b.forkSession("th-1", { env: { CODEX_HOME: "/x" } });
+    expect(fake.spawns[0]!.env).toEqual({ CODEX_HOME: "/x" });
+  });
+
+  // No opts (worker/claude fork paths): falls back to deps.env() exactly as before P3.
+  it("forkSession with no opts falls back to deps.env() (existing behavior, unchanged)", async () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", env: () => ({ CODEX_HOME: "/shared" }) });
+    await b.forkSession("th-1");
+    expect(fake.spawns[0]!.env).toEqual({ CODEX_HOME: "/shared" });
+  });
+
   it("forkSession rejects after the timeout when the child never answers", async () => {
     vi.useFakeTimers();
     try {

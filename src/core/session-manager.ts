@@ -23,7 +23,10 @@ export function deriveOrigin(externalKey: string | null): { origin: string; orig
 // Forks a session's SDK conversation into a new branch, routed by the SOURCE session's provider
 // (e.g. "claude" → SDK forkSession, "codex" → CodexBackend.forkSession — same routing shape as
 // FleetOrchestrator's forkSession, see fleet-orchestrator.ts). Injected at the composition root.
-export type ForkFn = (provider: string, sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
+// P3 Track A: sourceSessionId/newSessionId are carried so the codex router (server.ts) can relocate
+// the per-session CODEX_HOME's rollouts into the new session's home (see codex-home.ts
+// seedCodexHomeFromSource) — the claude router ignores both fields.
+export type ForkFn = (provider: string, sdkSessionId: string, opts?: { title?: string; sourceSessionId?: string; newSessionId?: string }) => Promise<{ sessionId: string }>;
 
 export interface SessionManagerDeps {
   repos: Repositories;
@@ -135,13 +138,15 @@ export class SessionManager {
     const label = row.label?.trim() || row.cwd.split(/[\\/]/).filter(Boolean).pop() || sessionId;
     const forkLabel = `${label} (fork)`;
     const provider = row.provider || "claude";
-    // P2.5: codex master turns run in a per-session CODEX_HOME whose rollouts the ephemeral fork
-    // child (shared home) can't see — forking a codex master is deferred to P3 (rollout relocation).
-    if (provider === "codex") {
-      throw new Error("forking a codex session is not supported yet (P3) — the per-session CODEX_HOME rollout cannot be relocated by the fork child");
-    }
-    const { sessionId: forkedUuid } = await this.deps.forkSession(provider, row.sdk_session_id, { title: forkLabel });
+    // P3 Track A: generate the new session id FIRST — the codex fork router (server.ts) needs it up
+    // front to seed the new session's per-session CODEX_HOME from the source's rollouts (see
+    // codex-home.ts seedCodexHomeFromSource) BEFORE that new session's row/master even exist.
     const id = this.idgen();
+    const { sessionId: forkedUuid } = await this.deps.forkSession(provider, row.sdk_session_id, {
+      title: forkLabel,
+      sourceSessionId: sessionId,
+      newSessionId: id,
+    });
     // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
     this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
     this.deps.repos.setSdkSessionId(id, forkedUuid);

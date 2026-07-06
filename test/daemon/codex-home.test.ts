@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { materializeCodexHome, removeCodexHome } from "../../src/daemon/codex-home.js";
+import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource } from "../../src/daemon/codex-home.js";
 
 describe("materializeCodexHome", () => {
   const dirs: string[] = [];
@@ -143,6 +143,35 @@ describe("materializeCodexHome", () => {
     const dir = materializeCodexHome(rookeryHome, "sess-1", "http://url-2", { apiKeySet: false, realCodexHome });
     const authLinkPath = path.join(dir, "auth.json");
     expect(fs.lstatSync(authLinkPath).isSymbolicLink()).toBe(true);
+  });
+});
+
+describe("seedCodexHomeFromSource", () => {
+  it("copies the source's entire sessions/ tree (nested rollout included) into the new session's home", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const srcSessions = path.join(rookeryHome, "codex-homes", "src-1", "sessions", "2026", "07", "06");
+      fs.mkdirSync(srcSessions, { recursive: true });
+      fs.writeFileSync(path.join(srcSessions, "rollout-parent.jsonl"), '{"type":"parent"}\n');
+
+      seedCodexHomeFromSource(rookeryHome, "src-1", "new-1");
+
+      const dst = path.join(rookeryHome, "codex-homes", "new-1", "sessions", "2026", "07", "06", "rollout-parent.jsonl");
+      expect(fs.existsSync(dst)).toBe(true);
+      expect(fs.readFileSync(dst, "utf8")).toBe('{"type":"parent"}\n');
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op (never throws) when the source sessions/ dir is missing", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      expect(() => seedCodexHomeFromSource(rookeryHome, "never-existed", "new-1")).not.toThrow();
+      expect(fs.existsSync(path.join(rookeryHome, "codex-homes", "new-1"))).toBe(false);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
   });
 });
 

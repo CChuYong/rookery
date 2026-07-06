@@ -595,9 +595,13 @@ export class CodexBackend implements AgentBackend {
 
   private static readonly FORK_TIMEOUT_MS = 15_000;
 
-  // Fork a thread via an ephemeral app-server child (used by FleetOrchestrator fork routing).
-  async forkSession(threadId: string): Promise<{ sessionId: string }> {
-    const transport = this.deps.spawn({ env: this.deps.env?.() });
+  // Fork a thread via an ephemeral app-server child (used by FleetOrchestrator fork routing, and by
+  // the daemon's codex MASTER fork router — P3 Track A). `opts.env`, when present, overrides the
+  // default env entirely (not merged) — the master router passes `{ CODEX_HOME: sourceHome }` so the
+  // fork child runs in the SOURCE session's per-session home (where thread/fork can find the thread);
+  // worker/claude callers pass no opts, so `deps.env?.()` (the shared home) is unchanged.
+  async forkSession(threadId: string, opts?: { env?: NodeJS.ProcessEnv }): Promise<{ sessionId: string }> {
+    const transport = this.deps.spawn({ env: opts?.env ?? this.deps.env?.() });
     const client = new CodexClient(transport);
     let timer: ReturnType<typeof setTimeout> | undefined;
     // A hung ephemeral child must not wedge the worker.fork request forever.
