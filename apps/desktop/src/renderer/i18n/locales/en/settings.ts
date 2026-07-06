@@ -104,4 +104,10 @@ export default {
   "settings.codexMasterModelHint": "Applies from new Codex master sessions.",
   "settings.codexApiKey": "Codex API key",
   "settings.codexApiKeyHint": "Leave blank to use codex login (~/.codex/auth.json).",
+  "settings.codexTurnIdleTimeoutMs": "Codex turn idle timeout (ms)",
+  "settings.codexTurnIdleTimeoutMsHint": "0 disables the per-turn watchdog.",
+  "settings.codexHandshakeTimeoutMs": "Codex handshake timeout (ms)",
+  "settings.codexHandshakeTimeoutMsHint": "0 disables the handshake/startup timeout.",
+  "settings.slackProvider": "Slack agent backend",
+  "settings.slackProviderHint": "Codex Slack sessions require bypassPermissions.",
 } satisfies Catalog;

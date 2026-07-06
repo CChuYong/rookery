@@ -266,6 +266,13 @@ export function AutomationForm(p: {
                 <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
                 <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
               </Select>
+              {/* codex + a non-bypass permissionMode builds an automation that fails every run (per the P2 guard) —
+                  mirrors the bypassWarning span's styling below (theme run token, data-testid for tests). */}
+              {provider === "codex" && permissionMode !== "bypassPermissions" && (
+                <p className="text-[11px] text-run/90" data-testid="codex-bypass-warning">
+                  {t("automationForm.codexBypassWarning")}
+                </p>
+              )}
             </label>
 
             {/* Model select */}

@@ -104,4 +104,10 @@ export default {
   "settings.codexMasterModelHint": "새 Codex 마스터 세션부터 적용돼요.",
   "settings.codexApiKey": "Codex API 키",
   "settings.codexApiKeyHint": "비워두면 codex login(~/.codex/auth.json)을 사용합니다.",
+  "settings.codexTurnIdleTimeoutMs": "Codex 턴 유휴 타임아웃(ms)",
+  "settings.codexTurnIdleTimeoutMsHint": "0으로 설정하면 턴별 워치독을 비활성화합니다.",
+  "settings.codexHandshakeTimeoutMs": "Codex 핸드셰이크 타임아웃(ms)",
+  "settings.codexHandshakeTimeoutMsHint": "0으로 설정하면 핸드셰이크/시작 타임아웃을 비활성화합니다.",
+  "settings.slackProvider": "Slack 에이전트 백엔드",
+  "settings.slackProviderHint": "Codex Slack 세션은 bypassPermissions가 필요합니다.",
 } satisfies Catalog;

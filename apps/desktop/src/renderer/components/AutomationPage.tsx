@@ -7,6 +7,7 @@ import type { TFunc } from "../i18n/provider.js";
 import { Button } from "../ui/button.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { ProviderBadge } from "./StatusBadge.js";
 import { cn } from "../lib/cn.js";
 import { referencedVars } from "../lib/automation-vars.js";
 import { RunAutomationDialog } from "./RunAutomationDialog.js";
@@ -132,6 +133,7 @@ export function AutomationPage(p: {
                     <div className="flex items-center gap-2">
                       <span className="truncate text-[13px] font-medium text-fg">{a.name}</span>
                       <span className="shrink-0 rounded-full border border-line px-1.5 py-0.5 text-[10px] text-muted">{a.action.kind === "master" ? t("automationPage.typeMaster") : t("automationPage.typeWorker")}</span>
+                      <ProviderBadge provider={a.provider} />
                       {a.corrupt && <span className="shrink-0 rounded-full border border-fail px-1.5 py-0.5 text-[10px] text-fail">{t("automationPage.corrupt")}</span>}
                     </div>
                     <div className="mt-0.5 truncate font-mono text-[11px] text-muted">

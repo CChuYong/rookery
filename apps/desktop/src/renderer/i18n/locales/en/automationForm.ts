@@ -9,5 +9,6 @@ export default {
   "automationForm.maxTurns": "Max turns",
   "automationForm.maxTurnsHint": "Leave empty for no limit (worker action only).",
   "automationForm.bypassWarning": "bypassPermissions runs all tools without approval in unattended mode. Only use with trusted triggers.",
+  "automationForm.codexBypassWarning": "Codex sessions require bypassPermissions — this automation will fail every run.",
   "automationForm.modelDefaultOption": "Default",
 } satisfies Catalog;

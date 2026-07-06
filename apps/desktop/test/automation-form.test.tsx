@@ -267,4 +267,27 @@ describe("AutomationForm", () => {
     const providerSelect = screen.getByLabelText("에이전트 백엔드") as HTMLSelectElement;
     expect(providerSelect.value).toBe("codex");
   });
+
+  // ── Task 3 (Track C): codex + non-bypass permissionMode warning ──
+
+  it("shows the codex-bypass warning for provider codex + permissionMode plan", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("권한 모드"), { target: { value: "plan" } });
+    expect(screen.getByTestId("codex-bypass-warning")).toBeInTheDocument();
+  });
+
+  it("hides the codex-bypass warning for provider codex + permissionMode bypassPermissions (default)", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    // permissionMode stays at its default (bypassPermissions)
+    expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
+  });
+
+  it("hides the codex-bypass warning for provider claude + permissionMode plan", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("권한 모드"), { target: { value: "plan" } });
+    // provider stays at its default (claude)
+    expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
+  });
 });

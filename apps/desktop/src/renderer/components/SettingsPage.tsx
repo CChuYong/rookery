@@ -248,6 +248,12 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       <option value="en">English</option>
                     </Select>
                   </Field>
+                  <Field label={t("settings.slackProvider")} hint={t("settings.slackProviderHint")}>
+                    <Select size="md" className="w-full" value={f.slackProvider ?? "claude"} onChange={(e) => setF({ ...f, slackProvider: e.target.value })}>
+                      <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+                      <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+                    </Select>
+                  </Field>
                   <label className="flex items-center gap-2 select-none">
                     <input type="checkbox" className="accent-accent" checked={f.workerSlackRelayEnabled === "1"} onChange={(e) => setF({ ...f, workerSlackRelayEnabled: e.target.checked ? "1" : "0" })} />
                     <span className="text-[12px] text-fg-dim">{t("settings.workerRelay")}</span>
@@ -375,6 +381,12 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   </Field>
                   <Field label={t("settings.codexMasterModel")} hint={t("settings.codexMasterModelHint")}>
                     <Input value={f.codexMasterModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
+                  </Field>
+                  <Field label={t("settings.codexTurnIdleTimeoutMs")} hint={t("settings.codexTurnIdleTimeoutMsHint")}>
+                    <Input value={f.codexTurnIdleTimeoutMs ?? ""} placeholder="120000" onChange={(e) => setF({ ...f, codexTurnIdleTimeoutMs: e.target.value })} />
+                  </Field>
+                  <Field label={t("settings.codexHandshakeTimeoutMs")} hint={t("settings.codexHandshakeTimeoutMsHint")}>
+                    <Input value={f.codexHandshakeTimeoutMs ?? ""} placeholder="30000" onChange={(e) => setF({ ...f, codexHandshakeTimeoutMs: e.target.value })} />
                   </Field>
                 </div>
 

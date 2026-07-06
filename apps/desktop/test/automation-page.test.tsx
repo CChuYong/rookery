@@ -323,6 +323,24 @@ it("delete click opens a confirm dialog and does NOT call onDelete until confirm
   expect(onDelete).toHaveBeenCalledWith("s1");
 });
 
+// ─── Task 3 (Track C): codex ProviderBadge on automation rows ──────────────
+
+it("a codex automation row shows the ProviderBadge; a claude row does not", () => {
+  const codexJob: Automation = { ...cronJob, id: "cx1", name: "codex-job", provider: "codex" };
+  render(
+    <AutomationPage
+      automations={[cronJob, codexJob]}
+      onRun={() => Promise.resolve()}
+      onToggle={() => Promise.resolve()}
+      onDelete={() => {}}
+      onEdit={() => {}}
+      onNew={() => {}}
+    />,
+  );
+  // only the codex row renders the "Codex" badge — the claude (cronJob) row does not
+  expect(screen.getAllByText("Codex")).toHaveLength(1);
+});
+
 it("delete confirm dialog Cancel closes without calling onDelete", async () => {
   const onDelete = vi.fn();
   render(

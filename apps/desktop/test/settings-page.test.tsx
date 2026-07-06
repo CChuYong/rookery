@@ -114,6 +114,56 @@ describe("SettingsPage Codex tab", () => {
     // Same placeholder pattern the slack token fields use to indicate "already saved" (no separate auth-status check for codex).
     expect(screen.getByPlaceholderText("저장됨 — 교체하려면 새 값을 입력하세요")).toBeInTheDocument();
   });
+
+  // ── Task 3 (Track C): codexTurnIdleTimeoutMs / codexHandshakeTimeoutMs fields ──
+
+  it("shows the codexTurnIdleTimeoutMs and codexHandshakeTimeoutMs fields with values from settings", () => {
+    render(<SettingsPage {...base} />);
+    fireEvent.click(screen.getByText("Codex"));
+    expect(screen.getByDisplayValue("120000")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("30000")).toBeInTheDocument();
+  });
+
+  it("editing codexTurnIdleTimeoutMs lands in the onSave(f) payload", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Codex"));
+    // scope by label to avoid ambiguity with other Codex-tab fields
+    fireEvent.change(screen.getByLabelText(/Codex 턴 유휴 타임아웃/), { target: { value: "60000" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexTurnIdleTimeoutMs: "60000" }));
+  });
+
+  it("editing codexHandshakeTimeoutMs lands in the onSave(f) payload", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.change(screen.getByLabelText(/Codex 핸드셰이크 타임아웃/), { target: { value: "5000" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexHandshakeTimeoutMs: "5000" }));
+  });
+});
+
+// ── Task 3 (Track C): slackProvider select in the Slack tab ──
+describe("SettingsPage Slack tab — slackProvider", () => {
+  it("shows the slackProvider select defaulted to the settings value (claude)", () => {
+    render(<SettingsPage {...base} />);
+    fireEvent.click(screen.getByText("Slack"));
+    const select = screen.getByLabelText(/Slack 에이전트 백엔드/) as HTMLSelectElement;
+    expect(select.value).toBe("claude");
+  });
+
+  it("selecting codex lands in the onSave(f) payload", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Slack"));
+    fireEvent.change(screen.getByLabelText(/Slack 에이전트 백엔드/), { target: { value: "codex" } });
+    const saveButtons = screen.getAllByText("저장"); // ko fallback
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ slackProvider: "codex" }));
+  });
 });
 
 // ─── unsaved-changes guard on close (audit #18) ────────────────────────────
