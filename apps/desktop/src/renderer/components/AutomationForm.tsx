@@ -255,25 +255,28 @@ export function AutomationForm(p: {
                 workerSpawnModal.providerClaude/providerCodex i18n keys (proper nouns, fit as-is). Model select
                 below is deliberately left unchanged for codex: it already accepts free-text/unknown ids as a raw
                 option, so a codex model override typed/selected there flows through unmodified — no special-casing. */}
-            <label className="flex flex-col gap-1">
-              <span className="text-[12px] text-fg-dim">{t("automationForm.provider")}</span>
-              <Select
-                size="md"
-                className="w-full"
-                value={provider}
-                onChange={(e) => setProvider(e.target.value as "claude" | "codex")}
-              >
-                <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
-                <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
-              </Select>
+            <div className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1">
+                <span className="text-[12px] text-fg-dim">{t("automationForm.provider")}</span>
+                <Select
+                  size="md"
+                  className="w-full"
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as "claude" | "codex")}
+                >
+                  <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+                  <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+                </Select>
+              </label>
               {/* codex + a non-bypass permissionMode builds an automation that fails every run (per the P2 guard) —
-                  mirrors the bypassWarning span's styling below (theme run token, data-testid for tests). */}
+                  mirrors the bypassWarning block's structure below (<p> as a sibling of the <label>, not nested
+                  inside it — nesting would make a click on the warning focus the select). */}
               {provider === "codex" && permissionMode !== "bypassPermissions" && (
                 <p className="text-[11px] text-run/90" data-testid="codex-bypass-warning">
                   {t("automationForm.codexBypassWarning")}
                 </p>
               )}
-            </label>
+            </div>
 
             {/* Model select */}
             <label className="flex flex-col gap-1">

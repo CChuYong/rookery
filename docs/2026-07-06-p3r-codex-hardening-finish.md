@@ -1,5 +1,7 @@
 # 2026-07-06 — P3-remaining: Codex hardening finish (spec)
 
+> Status 2026-07-06: **implemented** — handshake/thread-start timeout, `stripRookeryBlock` sub-table strip, sub-second rounding, orphan `codex-homes/` boot GC, `onSessionDelete` relocation into `SessionManager.delete`, desktop `codexHandshakeTimeoutMs`/`slackProvider` fields + AutomationForm codex hint + AutomationPage provider badge — all unit-covered; no live smoke needed for this wave.
+
 Closes the Codex-track backlog (user pick "#3 only, finish it"). All mechanical hardening/UX — no new architecture, no spike needed.
 
 ## Scope
