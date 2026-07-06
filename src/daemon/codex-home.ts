@@ -86,7 +86,7 @@ export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: st
   const src = path.join(rookeryHome, "codex-homes", sourceSessionId, "sessions");
   if (!fs.existsSync(src)) return;
   const dst = path.join(rookeryHome, "codex-homes", newSessionId, "sessions");
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 });
   fs.cpSync(src, dst, { recursive: true });
 }
 

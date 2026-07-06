@@ -30,6 +30,7 @@ One row per master conversation.
 | `origin` | TEXT | nullable | Source: `ui` \| `slack` \| `automation` |
 | `origin_ref` | TEXT | nullable | Identifier within the source (slack thread key / automation id) |
 | `pinned_at` | TEXT | nullable | Pin timestamp for the sidebar 'pinned' section |
+| `provider` | TEXT | NOT NULL, default `'claude'` | Which `AgentBackend` runs this session: `claude`\|`codex` (P2) |
 
 ### `messages`
 Text-only transcript (used for text + `last_activity`). Tool/thinking/metrics events live in `session_events`.
@@ -82,6 +83,7 @@ One row per spawned worker (fleet member).
 | `permission_mode` | TEXT | NOT NULL, default `'bypassPermissions'` | SDK permission mode (`bypassPermissions`\|`plan`), live-changeable |
 | `max_turns` | INTEGER | nullable | Per-result turn cap (unattended runaway guard). NULL = unlimited. Survives restart/fork. |
 | `effort` | TEXT | nullable | Spawn-time effort override. NULL = global default. Survives restart/fork. |
+| `provider` | TEXT | NOT NULL, default `'claude'` | Which `AgentBackend` runs this worker: `claude`\|`codex` (P1) |
 
 Index: `idx_workers_session (session_id)`.
 
@@ -166,6 +168,7 @@ Automation rules = trigger + action (see AGENTS.md §Automation).
 | `created_at` | TEXT | NOT NULL | ISO timestamp |
 | `permission_mode` | TEXT | nullable | NULL = `bypassPermissions` (current behavior) |
 | `max_turns` | INTEGER | nullable | NULL = unlimited |
+| `provider` | TEXT | NOT NULL, default `'claude'` | Which `AgentBackend` runs the session/worker this automation creates: `claude`\|`codex` (P3) |
 
 ### `pending_notifications`
 Worker-completion notification queue (per session). Enqueued when an armed (`notify_armed`) worker settles.

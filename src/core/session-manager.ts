@@ -108,8 +108,10 @@ export class SessionManager {
 
   // If opts.origin is explicit (automation fresh etc.) use it as-is, otherwise derive from the externalKey prefix.
   // opts.provider (P2): which AgentBackend this session runs on ("claude" | "codex"). Absent → repos.createSession
-  // defaults to "claude". (P2.5 Track C: the slack path now passes this via getOrCreateByKey when
-  // settings.slackProvider()==="codex"; automation-origin still never passes it — deferred to P3.)
+  // defaults to "claude". (P2.5 Track C: the slack path passes this via getOrCreateByKey when
+  // settings.slackProvider()==="codex"; P3: automation-origin now passes it too via runAutomationAction.
+  // Note: an existing keyed session's provider is fixed at creation and not retroactively changed by a
+  // later call's arg — see getOrCreateByKey below.)
   create(cwd: string, opts: { externalKey?: string; origin?: string; originRef?: string | null; provider?: string } = {}): Session {
     const id = this.idgen();
     const src = opts.origin ? { origin: opts.origin, originRef: opts.originRef ?? null } : deriveOrigin(opts.externalKey ?? null);
