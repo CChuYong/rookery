@@ -18,6 +18,7 @@ describe("Settings", () => {
       codexWorkerModel: "gpt-5.5",
       codexMasterModel: "gpt-5.5",
       codexBin: "codex",
+      codexTurnIdleTimeoutMs: "120000",
       slackCwd: process.cwd(),
       slackAllowedUsers: "",
       slackAllowAll: "0",
@@ -53,6 +54,20 @@ describe("Settings", () => {
     expect(s.all().codexMasterModel).toBe("gpt-5.5-mini");
     s.apply({ codexMasterModel: null });
     expect(s.codexMasterModel()).toBe("gpt-5.5");
+  });
+
+  it("codexTurnIdleTimeoutMs: settings-only default (parsed number), overridable, 0 is a valid override (not coerced), clears to default", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.codexTurnIdleTimeoutMs()).toBe(120000);
+    expect(s.all().codexTurnIdleTimeoutMs).toBe("120000");
+    s.apply({ codexTurnIdleTimeoutMs: "30000" });
+    expect(s.codexTurnIdleTimeoutMs()).toBe(30000);
+    s.apply({ codexTurnIdleTimeoutMs: "0" }); // deliberate disable — must NOT fall back to the default
+    expect(s.codexTurnIdleTimeoutMs()).toBe(0);
+    s.apply({ codexTurnIdleTimeoutMs: "not-a-number" }); // malformed → fail safe to the default, never NaN
+    expect(s.codexTurnIdleTimeoutMs()).toBe(120000);
+    s.apply({ codexTurnIdleTimeoutMs: null });
+    expect(s.codexTurnIdleTimeoutMs()).toBe(120000);
   });
 
   it("slackLocale: defaults to ko, overridable, clears to default", () => {

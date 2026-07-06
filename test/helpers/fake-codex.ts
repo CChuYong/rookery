@@ -19,6 +19,10 @@ export interface FakeCodexServerOpts {
   dieAfterTurns?: number;    // simulate process death after N completed turns
   silentForkHang?: boolean; // thread/fork requests get NO response at all (fork-timeout test)
   requiresOpenaiAuth?: boolean; // account/read answer for in-app apiKey provisioning tests (default false)
+  silentInterrupt?: boolean; // turn/interrupt is ack'd (so interrupt() itself doesn't hang) but NEVER followed by
+  // turn/completed — leaves the turn wedged so the watchdog's grace-window kill path can be exercised
+  // (P2.5 Track B; the default behavior below auto-completes on interrupt, which is right for the
+  // ordinary interrupt()-path tests but wrong for testing the kill escalation).
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -75,6 +79,7 @@ export function fakeCodexSpawn(
         }
         if (msg.method === "turn/interrupt") {
           send({ id: msg.id, result: {} });
+          if (opts.silentInterrupt) return; // ack'd but wedged — no turn/completed ever follows
           send({ method: "turn/completed", params: { threadId, turn: { id: currentTurnId ?? `turn-${turnCount}`, status: "interrupted", durationMs: 5 } } });
           turnCount++; // the interrupted turn is now done — the next turn/start gets a fresh id
           return;

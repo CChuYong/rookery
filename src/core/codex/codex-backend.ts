@@ -19,6 +19,14 @@ export interface CodexBackendDeps {
   // config.toml/auth.json under `<rookery home>/codex-homes/<sessionKey>/`) and hands back just the
   // path (see docs/2026-07-06-p2-codex-master.md for the original bridge wiring).
   bridge?: { ensureSession(key: string, defs: () => ProviderToolDef[]): { codexHome: string } };
+  // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
+  // ONCE per turn (server.ts passes `() => settings.codexTurnIdleTimeoutMs()`), matching the
+  // model/effort resolver convention (re-evaluated per turn, not snapshotted). A turn armed with this
+  // timeout fails (after a graceful turn/interrupt, then a short kill grace) if it goes totally
+  // silent — no inbound notification of any kind — for that long. 0 (or ≤0), or the dep being absent
+  // entirely, DISABLES the watchdog: no timer is ever armed. Lives in the shared CodexSessionBase
+  // turn wait, so it applies to BOTH the worker's long-lived stream and the master's single-turn one.
+  idleTimeoutMs?: () => number;
 }
 
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
@@ -99,6 +107,15 @@ abstract class CodexSessionBase implements AgentStream {
   // "every single turn").
   protected prevTotal: CodexTokenUsageBreakdown | null;
   protected turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  // Per-turn inactivity watchdog state (P2.5 Track B). `idleTimer` is the "no notification of any
+  // kind for N ms" timer, armed at turn/start and reset on every inbound notification. `graceTimer`
+  // is the short second-chance window after the watchdog's OWN turn/interrupt, before it escalates
+  // to a hard kill. `idleTimeoutMsForTurn` is resolved ONCE per turn (see armIdleWatchdog) so a reset
+  // mid-turn reuses the same window rather than re-querying the settings resolver on every event.
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimeoutMsForTurn = 0;
+  private static readonly WATCHDOG_GRACE_MS = 5000;
   // Snapshotted once at construction, then re-snapshotted only when a turn/start actually carries a
   // model override — pricing must bill the model the THREAD was actually running under for that turn,
   // not whatever this.opts.model/defaultModel() resolve to NOW (mid-turn setModel, or a
@@ -162,7 +179,7 @@ abstract class CodexSessionBase implements AgentStream {
     const client = new CodexClient(transport);
     this.client = client;
     this.clientClosedP = new Promise((resolve) => { this.resolveClientClosed = resolve; });
-    this.onAbort = () => client.close();
+    this.onAbort = () => { this.disarmIdleWatchdog(); client.close(); }; // P2.5 Track B: abort disarms too, not just a graceful interrupt
     abort.signal.addEventListener("abort", this.onAbort, { once: true });
     client.onClosed((err) => {
       this.clientClosed = true;
@@ -194,9 +211,69 @@ abstract class CodexSessionBase implements AgentStream {
   // via CodexClient's own `closed` guard), and releases anything still parked on clientClosedP
   // (safety net in case onClosed never fired). Always called from pump()'s outer finally.
   protected teardownClient(): void {
+    this.disarmIdleWatchdog(); // every stream-exit path clears both timers — no dangling timer keeps the event loop alive
     this.opts.abortController.signal.removeEventListener("abort", this.onAbort);
     this.client?.close();
     this.resolveClientClosed();
+  }
+
+  // Arms the per-turn inactivity watchdog: resolves the timeout ONCE for this turn (a settings
+  // resolver, re-evaluated per turn like model/effort — not mid-turn) and, if positive, starts a
+  // timer that fires after that many ms of TOTAL silence (no inbound notification of any kind).
+  // 0/negative/absent disables it entirely — no timer is ever created for this turn.
+  private armIdleWatchdog(): void {
+    this.idleTimeoutMsForTurn = this.deps.idleTimeoutMs?.() ?? 0;
+    this.clearIdleTimer();
+    if (this.idleTimeoutMsForTurn > 0) {
+      this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
+    }
+  }
+
+  // Any inbound notification is progress (item/*/outputDelta included — handleNotification calls
+  // this before it does anything else, unconditionally). A no-op when no watchdog is currently armed
+  // (disabled turn, or already fired/disarmed) — an event arriving outside an armed turn must not
+  // spuriously start one.
+  private resetIdleWatchdog(): void {
+    if (this.idleTimer === null) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
+  }
+
+  private clearIdleTimer(): void {
+    if (this.idleTimer !== null) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+  }
+
+  // Full watchdog teardown (both timers). Called on turn/completed, on an explicit interrupt()/abort,
+  // and from every stream-exit path (teardownClient) — see each call site's own comment.
+  protected disarmIdleWatchdog(): void {
+    this.clearIdleTimer();
+    if (this.graceTimer !== null) { clearTimeout(this.graceTimer); this.graceTimer = null; }
+  }
+
+  // The idle timer fired: this turn has been totally silent for idleTimeoutMsForTurn. Send a
+  // graceful turn/interrupt (best-effort — reuses the same public interrupt() an external caller
+  // would use, which also means it targets whatever activeTurnId is current) and arm a short grace
+  // window for turn/completed to actually arrive before escalating to a hard kill.
+  private async onIdleTimeout(): Promise<void> {
+    this.idleTimer = null;
+    try {
+      await this.interrupt();
+    } catch {
+      /* best-effort — escalate to the grace/kill path regardless of interrupt's own outcome */
+    }
+    this.graceTimer = setTimeout(() => this.onGraceExpired(), CodexSessionBase.WATCHDOG_GRACE_MS);
+  }
+
+  // The graceful interrupt didn't produce turn/completed within the grace window either — the turn
+  // is genuinely wedged (bridge unreachable / rmcp client stalled). Kill the child and fail the
+  // stream. The notice MUST be pushed before fail(): EventChannel silently drops any push once
+  // done=true, so pushing after fail() would lose the notice.
+  private onGraceExpired(): void {
+    this.graceTimer = null;
+    const seconds = Math.round(this.idleTimeoutMsForTurn / 1000);
+    this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexTurnTimeout", params: { seconds }, text: t(DEFAULT_LOCALE, "notice.codexTurnTimeout", { seconds }) } });
+    this.channel.fail(new Error(`codex turn timed out after ${seconds}s of inactivity`));
+    this.client?.close();
   }
 
   // thread/start (fresh) or thread/resume (opts.resume set) — same param assembly either way,
@@ -243,10 +320,16 @@ abstract class CodexSessionBase implements AgentStream {
     // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
     // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
     if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
-    await turnEnded; // resolves on turn/completed (any status) or client close
+    this.armIdleWatchdog(); // P2.5 Track B — arm right as we start awaiting this turn's completion
+    try {
+      await turnEnded; // resolves on turn/completed (any status), a watchdog-triggered kill, or an external client close
+    } finally {
+      this.disarmIdleWatchdog(); // covers every resolution path (redundant with turn/completed's own disarm, but never dangling)
+    }
   }
 
   private handleNotification(method: string, params: unknown): void {
+    this.resetIdleWatchdog(); // ANY inbound notification is progress (P2.5 Track B) — unconditional, before thread filtering/dispatch
     const p = params as {
       threadId?: string;
       thread?: { id?: string };
@@ -329,6 +412,7 @@ abstract class CodexSessionBase implements AgentStream {
       // emit a phantom turn_end, or settle the NEXT turn's turnDone early.
       if (this.activeTurnId && turn?.id && turn.id !== this.activeTurnId) return;
       this.activeTurnId = null;
+      this.disarmIdleWatchdog(); // the turn is over — no more silence to guard against until the NEXT turn/start
       if (turn?.status === "failed" && turn.error?.message) {
         this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexError", params: { message: turn.error.message }, text: t(DEFAULT_LOCALE, "notice.codexError", { message: turn.error.message }) } });
       }
@@ -372,6 +456,7 @@ abstract class CodexSessionBase implements AgentStream {
   // still null and interrupt() no-ops — a tiny dead window Claude's SDK interrupt doesn't have;
   // acceptable best-effort (the turn then runs to completion).
   async interrupt(): Promise<void> {
+    this.disarmIdleWatchdog(); // an explicit interrupt (ours from the watchdog, or an external caller's) always disarms
     if (!this.client || !this.threadId || !this.activeTurnId) return;
     try {
       await this.client.request("turn/interrupt", { threadId: this.threadId, turnId: this.activeTurnId });

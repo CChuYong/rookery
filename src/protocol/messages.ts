@@ -108,6 +108,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       codexWorkerModel: z.string().nullable().optional(), // codex worker default model (settings-only)
       codexMasterModel: z.string().nullable().optional(), // codex master default model (settings-only)
       codexBin: z.string().nullable().optional(), // codex CLI binary/path used to spawn `codex app-server`
+      codexTurnIdleTimeoutMs: z.string().nullable().optional(), // per-turn codex watchdog inactivity timeout (ms); 0 disables
       masterEffort: effortField,
       workerEffort: effortField,
       slackCwd: z.string().nullable().optional(), // Slack session cwd

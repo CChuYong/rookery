@@ -18,6 +18,7 @@ export const KO = {
   "notice.workerFailed": "⚠️ 워커 {label} 실패",
   "notice.workerStopped": "⏹ 워커 {label} 종료",
   "notice.codexError": "Codex 오류: {message}",
+  "notice.codexTurnTimeout": "⏱ Codex 턴이 {seconds}초 동안 응답이 없어 중단됨",
   // interaction.* — approval/answer summaries + SDK deny reasons
   "interaction.approved": "✅ 승인됨",
   "interaction.rejected": "🚫 거부됨",
@@ -64,6 +65,7 @@ export const EN: Record<keyof typeof KO, string> = {
   "notice.workerFailed": "⚠️ Worker {label} failed",
   "notice.workerStopped": "⏹ Worker {label} stopped",
   "notice.codexError": "Codex error: {message}",
+  "notice.codexTurnTimeout": "⏱ Codex turn stopped after {seconds}s of no response",
   "interaction.approved": "✅ Approved",
   "interaction.rejected": "🚫 Denied",
   "interaction.denied": "The user denied it.",

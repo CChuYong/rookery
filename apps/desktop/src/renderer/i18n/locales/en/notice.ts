@@ -13,4 +13,5 @@ export default {
   "notice.workerFailed": "⚠️ Worker {label} failed",
   "notice.workerStopped": "⏹ Worker {label} stopped",
   "notice.codexError": "Codex error: {message}",
+  "notice.codexTurnTimeout": "⏱ Codex turn stopped after {seconds}s of no response",
 } satisfies Catalog;

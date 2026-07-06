@@ -128,6 +128,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
     apiKey: () => settings.codexApiKey(),
+    // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
+    // fresh every turn, same as the other settings resolvers on this backend. 0/negative disables it
+    // (see Settings.codexTurnIdleTimeoutMs's own comment for the fail-safe parse).
+    idleTimeoutMs: () => settings.codexTurnIdleTimeoutMs(),
     env: () => {
       if (!settings.codexApiKey()) return undefined;
       fs.mkdirSync(codexHomeDir, { recursive: true });

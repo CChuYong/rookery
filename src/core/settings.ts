@@ -14,6 +14,10 @@ export const DEFAULT_CODEX_WORKER_MODEL = "gpt-5.5";
 // "no env/config fallback" convention; symmetric master/worker split, same default value).
 export const DEFAULT_CODEX_MASTER_MODEL = "gpt-5.5";
 export const DEFAULT_CODEX_BIN = "codex";
+// Codex per-turn inactivity watchdog default (P2.5 Track B, settings-only — mirrors
+// DEFAULT_USAGE_REFRESH_MS's shape: a raw string in the settings table/echoed SettingsValues, ""
+// meaning "use the default"). 0 (or a non-positive parse) disables the watchdog entirely.
+export const DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS = 120000;
 
 // Settings that can be changed at runtime. Use the value stored in the DB (settings table) if present, otherwise the config/hardcoded default.
 // All kept as strings (parsing happens on the consumer side) → keeps SettingsPatch/the protocol simple. Slack tokens are secret, so they're not here (separate setter).
@@ -26,6 +30,7 @@ export interface SettingsValues {
   codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-5.5".
   codexMasterModel: string; // codex master default model (settings-only, no env/config fallback). default "gpt-5.5".
   codexBin: string; // codex CLI binary/path used to spawn `codex app-server` (settings-only). default "codex".
+  codexTurnIdleTimeoutMs: string; // per-turn codex watchdog inactivity timeout, ms as a raw string (settings-only). 0 disables. default "120000".
   slackCwd: string; // cwd for Slack-originated sessions (settings-only, defaults to process.cwd())
   slackAllowedUsers: string; // user ids allowed to get responses (comma-separated, settings-only)
   slackAllowAll: string; // "1" allows everyone (settings-only, fail-closed default "0")
@@ -82,6 +87,21 @@ export class Settings {
 
   codexBin(): string {
     return this.repos.getSetting("codexBin") ?? DEFAULT_CODEX_BIN;
+  }
+
+  // Per-turn codex watchdog inactivity timeout (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md).
+  // Unlike other numeric-ish settings (e.g. usageRefreshMs, which stays a raw string echoed via
+  // all() and is parsed by its one consumer at the server.ts call site), this getter returns the
+  // PARSED number directly: it's injected straight into CodexBackendDeps.idleTimeoutMs (`() =>
+  // number`), which codex-backend.ts calls fresh every turn (the model/effort resolver convention —
+  // re-evaluated per turn, not snapshotted). Missing setting → the default; present but non-numeric
+  // → also the default (fail safe, never NaN). "0" (or a negative override) is a valid, DELIBERATE
+  // value meaning "disable the watchdog" and is passed through as-is, not coerced to the default.
+  codexTurnIdleTimeoutMs(): number {
+    const raw = this.repos.getSetting("codexTurnIdleTimeoutMs");
+    if (raw === undefined) return DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS;
   }
 
   // Linear API key (integration secret). Kept out of SettingsValues to isolate it from being echoed via settings.result.
@@ -194,6 +214,7 @@ export class Settings {
       codexWorkerModel: this.codexWorkerModel(),
       codexMasterModel: this.codexMasterModel(),
       codexBin: this.codexBin(),
+      codexTurnIdleTimeoutMs: String(this.codexTurnIdleTimeoutMs()), // echoed as a raw string, mirroring usageRefreshMs's shape
       slackCwd: this.slackCwd(),
       slackAllowedUsers: this.slackAllowedUsers(),
       slackAllowAll: this.slackAllowAll(),

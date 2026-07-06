@@ -481,6 +481,186 @@ describe("CodexBackend — fork timeout & explicit sandbox", () => {
   });
 });
 
+describe("CodexBackend — per-turn inactivity watchdog (P2.5 Track B)", () => {
+  // A "silent turn" is just an ordinary responder that never scripts a `turnEnd` step — the existing
+  // fake already leaves such a turn open server-side forever (see fake-codex.ts's comment on that).
+  // Combined with `silentInterrupt`, the watchdog's OWN turn/interrupt also goes unanswered, so the
+  // grace-window kill path actually fires instead of the interrupt resolving the turn.
+
+  it("trips on total silence: interrupts, then (no turn/completed within grace) kills the client and fails the stream with the timeout notice", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "starting…" }], { silentInterrupt: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("do the task");
+      const seen: AgentEvent[] = [];
+      const collected = (async () => { for await (const ev of b.openSession(q, baseOpts())) seen.push(ev); })();
+      const rejection = expect(collected).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(1000); // idle window elapses with only the one delta seen → turn/interrupt sent
+      await vi.advanceTimersByTimeAsync(5000); // grace window elapses with no turn/completed → kill + fail
+      await rejection;
+
+      expect(fake.requests.some((r) => r.method === "turn/interrupt")).toBe(true);
+      const notice = seen.find((e) => e.kind === "push") as { push: { code?: string; params?: unknown } } | undefined;
+      expect(notice?.push).toMatchObject({ code: "notice.codexTurnTimeout", params: { seconds: 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("trips on a master (startTurn) turn too — the watchdog lives in the shared base, not just the worker path", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "…" }], { silentInterrupt: true });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const collected = collect(b.startTurn("hi", baseOpts() as never));
+      const rejection = expect(collected).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(5000);
+      await rejection;
+      expect(fake.requests.some((r) => r.method === "turn/interrupt")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("healthy turn completes normally under the SAME tiny timeout — no timeout notice", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [
+        { kind: "reasoningDelta", text: "hmm" },
+        { kind: "agentDelta", text: "he" },
+        { kind: "agentMessage", text: "hello" },
+        { kind: "command", id: "c1", command: "ls" },
+        { kind: "turnEnd", durationMs: 5 },
+      ]);
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("do it"); q.close();
+      const events = await collect(b.openSession(q, baseOpts()));
+      await vi.advanceTimersByTimeAsync(1000); // no dangling timer should fire after a clean completion
+      expect(events.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+      expect(events.at(-1)).toMatchObject({ kind: "turn_end", subtype: "success" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("multi-turn worker session: idle time BETWEEN turns (just under the timeout) never trips — each turn arms/disarms independently", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("t1");
+      const events: AgentEvent[] = [];
+      const done = (async () => {
+        for await (const ev of b.openSession(q, baseOpts())) {
+          events.push(ev);
+          if (ev.kind === "turn_end" && (ev as { numTurns: number }).numTurns === 1) {
+            await vi.advanceTimersByTimeAsync(900); // idle gap between turns — watchdog is disarmed here, must not trip
+            q.push("t2"); q.close();
+          }
+        }
+      })();
+      await done;
+      const turnEnds = events.filter((e) => e.kind === "turn_end");
+      expect(turnEnds).toHaveLength(2);
+      expect(events.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("0 disables the watchdog: no timer ever armed even across a long silence; the turn only ends when explicitly interrupted", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "…" }]); // never self-ends
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 0 });
+      const q = new MessageQueue(); q.push("slow task");
+      const stream = b.openSession(q, baseOpts());
+      const seen: AgentEvent[] = [];
+      const done = (async () => {
+        for await (const ev of stream) {
+          seen.push(ev);
+          if (ev.kind === "text_delta") {
+            await vi.advanceTimersByTimeAsync(10 * 60_000); // 10 minutes of total silence — must be a no-op
+            await stream.interrupt(); // the only thing that ends this turn
+          }
+          if (ev.kind === "turn_end") q.close();
+        }
+      })();
+      await done;
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+      expect(seen.at(-1)).toMatchObject({ kind: "turn_end", subtype: "interrupted" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("no idleTimeoutMs dep at all behaves like 0 (disabled) — backward compatible with existing deps callers", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "…" }]);
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // no idleTimeoutMs at all
+      const q = new MessageQueue(); q.push("x");
+      const stream = b.openSession(q, baseOpts());
+      const seen: AgentEvent[] = [];
+      const done = (async () => {
+        for await (const ev of stream) {
+          seen.push(ev);
+          if (ev.kind === "text_delta") { await vi.advanceTimersByTimeAsync(5 * 60_000); await stream.interrupt(); }
+          if (ev.kind === "turn_end") q.close();
+        }
+      })();
+      await done;
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disarm on explicit interrupt(): no timeout notice afterward even past the original idle+grace window", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "…" }]); // never self-ends; default fake auto-completes on interrupt
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("x");
+      const stream = b.openSession(q, baseOpts());
+      const seen: AgentEvent[] = [];
+      const done = (async () => {
+        for await (const ev of stream) {
+          seen.push(ev);
+          if (ev.kind === "text_delta") await stream.interrupt();
+          if (ev.kind === "turn_end") q.close();
+        }
+      })();
+      await done;
+      await vi.advanceTimersByTimeAsync(10_000); // well past idle+grace — must be a no-op, the watchdog was disarmed
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+      expect(seen.at(-1)).toMatchObject({ kind: "turn_end", subtype: "interrupted" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disarm on abort: no timeout notice afterward even past the original idle+grace window", async () => {
+    vi.useFakeTimers();
+    try {
+      const abortController = new AbortController();
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "…" }]); // never self-ends
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("x");
+      const stream = b.openSession(q, baseOpts({ abortController }));
+      const seen: AgentEvent[] = [];
+      const done = (async () => { for await (const ev of stream) { seen.push(ev); if (ev.kind === "text_delta") abortController.abort(); } })();
+      await expect(done).resolves.toBeUndefined(); // abort ends the stream silently (no throw) — Claude parity
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(seen.some((e) => e.kind === "push" && (e as { push: { code?: string } }).push.code === "notice.codexTurnTimeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("CodexBackend — in-app apiKey provisioning", () => {
   it("apiKey set + requiresOpenaiAuth:true → account/read then account/login/start (before thread/start)", async () => {
     const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { requiresOpenaiAuth: true });
