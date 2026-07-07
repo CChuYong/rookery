@@ -106,6 +106,15 @@ Processed after the HIGH/MED merge, TDD, on the same branch. Root/desktop suites
 - [24] `session.open` gains a provider field (mirrors session.create).
 - [20] loud daemon-log guard when a codex master turn is handed `opts.mcpServers` (silent no-op → warning).
 - [25]/[26] model/list catalog child authenticates under the turn account (shared `codexEnv`/`codexApiKey` resolvers + auth.json provisioning).
-- [23] re-derive codex effort on provider/model/catalog change (WorkerSpawnModal + NewSessionPage; Composer variant held — App.tsx-coupled).
+- [23] codex effort resolution — see the follow-up refactor below for the full/proper fix.
 
-**Held (deliberate):** [19] tool_progress — cosmetic (UI animations already prevent "looks hung"); a synthetic per-item elapsed-timer adds leak/watchdog-interaction risk to an intricate hot path for no functional gain. Composer's [23] variant — needs masterControls-side effort clamping (broader).
+### [23] proper refactor (2026-07-07, replaces the initial per-surface patches)
+
+Per user request ("정석대로, not a stopgap"), the effort handling was unified rather than patched per surface:
+- `lib/models.ts` `effectiveEffort(provider, model, choice, codexModels)` — single pure resolver (render-time, no state-syncing effects) returning the model-valid effort. Exhaustively unit-tested.
+- `lib/master-controls.ts` `resolveMasterControls()` — the master composer's model/effort/permission VALUES as a pure tested function (was untested inline in App.tsx). Effort resolved against the effective model (`override.model.trim() || defaultModel`), mirroring the daemon.
+- WorkerSpawnModal + NewSessionPage: dropped the `useEffect` band-aid (React anti-pattern) for render-time derivation via `effectiveEffort`.
+- App.tsx master **send**: transmits `resolveMasterControls(...).effort` (re-resolved fresh at send time → live settings preserved), closing the display-vs-actual divergence (daemon's mapEffort coerces per-provider not per-model, so a raw undefined effort could run a level the codex model lacks, e.g. xhigh on gpt-5.4).
+- All three effort surfaces + the send now resolve through one helper. **Opus-reviewed twice (refactor + send follow-ups): CLEAN, no regression** (claude send verified equivalent; client defaultModel == daemon deps.model()).
+
+**Held (deliberate):** [19] tool_progress — cosmetic (UI animations already prevent "looks hung"); a synthetic per-item elapsed-timer adds leak/watchdog-interaction risk to an intricate hot path for no functional gain.
