@@ -28,7 +28,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-type Tab = "general" | "slack" | "claude" | "codex" | "integration";
+type Tab = "general" | "slack" | "models" | "integration";
+type ModelsProvider = "claude" | "codex";
 
 // Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Claude | Codex | Integration tabs.
 export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void }): JSX.Element {
@@ -36,6 +37,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
   const [tab, setTab] = useState<Tab>("general");
+  // Which provider's config the "Models" tab shows — a pill sub-toggle inside that tab. Ephemeral
+  // (defaults to Claude each open), matching the top-level `tab`'s non-persisted behavior.
+  const [modelsProvider, setModelsProvider] = useState<ModelsProvider>("claude");
   const [f, setF] = useState<SettingsValues>(p.settings);
   const [linKey, setLinKey] = useState("");
   const [slackBot, setSlackBot] = useState("");
@@ -89,9 +93,13 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const tabs: Array<SegmentItem<Tab>> = [
     { value: "general", label: t("settings.tabGeneral") },
     { value: "slack", label: "Slack" },
+    { value: "models", label: t("settings.tabModels") },
+    { value: "integration", label: t("settings.integrations") },
+  ];
+  // Sub-toggle items for the Models tab (pill grammar — an in-form selection, distinct from the nav-tier underline tabs).
+  const modelsProviders: Array<SegmentItem<ModelsProvider>> = [
     { value: "claude", label: "Claude" },
     { value: "codex", label: t("settings.tabCodex") },
-    { value: "integration", label: t("settings.integrations") },
   ];
 
   return (
@@ -138,28 +146,14 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   </div>
                 </section>
 
+                {/* Worker model/effort defaults moved to Models → per provider. The cost budget is
+                    provider-agnostic (applies to Claude AND Codex workers), so it stays here in General. */}
                 <section className="mt-8">
-                  <h2 className="text-[13px] font-semibold">{t("settings.workerModelEffort")}</h2>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.workerModelEffortDesc")}</p>
-                  <div className="mt-4 flex flex-col gap-3.5">
-                    <div className="grid grid-cols-[1fr_120px] gap-2.5">
-                      <Field label={t("settings.workerModel")} hint={t("settings.applyNewWorker")}>
-                        <Select size="md" className="w-full" value={f.workerModel} onChange={(e) => setF({ ...f, workerModel: e.target.value })}>
-                          {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
-                          {!models.some((m) => m.id === f.workerModel) && <option value={f.workerModel}>{f.workerModel}</option>}
-                        </Select>
-                      </Field>
-                      <Field label={t("settings.effort")}>
-                        <Select size="md" className="w-full" value={f.workerEffort} disabled={!effortSupported(f.workerModel)} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
-                          {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
-                        </Select>
-                      </Field>
-                    </div>
-                    <div className="max-w-[220px]">
-                      <Field label={t("settings.workerCostBudgetUsd")} hint={t("settings.workerCostBudgetUsdHint")}>
-                        <Input type="number" value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
-                      </Field>
-                    </div>
+                  <h2 className="text-[13px] font-semibold">{t("settings.workerBudget")}</h2>
+                  <div className="mt-3 max-w-[220px]">
+                    <Field label={t("settings.workerCostBudgetUsd")} hint={t("settings.workerCostBudgetUsdHint")}>
+                      <Input type="number" value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
+                    </Field>
                   </div>
                 </section>
 
@@ -332,7 +326,19 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
               </section>
             )}
 
-            {tab === "claude" && (() => {
+            {tab === "models" && (
+              <>
+                {/* pill sub-toggle (in-form selection) — visually distinct from the nav-tier underline tabs above */}
+                <Segment
+                  items={modelsProviders}
+                  value={modelsProvider}
+                  onChange={setModelsProvider}
+                  variant="pill"
+                  className="mb-6 max-w-[280px]"
+                  itemClassName="px-3 py-1.5 text-[12px] font-medium"
+                />
+
+                {modelsProvider === "claude" && (() => {
               const a = p.authStatus;
               // While authStatus is still null (loading, or a silently-swallowed request failure), don't default to
               // method="none" — that renders a confident "No auth active" even when a key is actually working (audit #15).
@@ -342,6 +348,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
               const label = checking ? t("settings.checking") : method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
               const desc = method === "api-key" ? t("settings.claudeApiKeyActive") : method === "oauth" ? t("settings.claudeSubscriptionActive") : t("settings.claudeNoneActive");
               return (
+                <>
                 <section>
                   <h2 className="text-[13px] font-semibold">{t("settings.claudeAuthTitle")}</h2>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.claudeAuthDesc")}</p>
@@ -370,10 +377,30 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     </div>
                   </div>
                 </section>
+
+                {/* Claude worker defaults — moved from General so the Claude sub-tab is provider-complete. */}
+                <section className="mt-8">
+                  <h2 className="text-[13px] font-semibold">{t("settings.workerModelEffort")}</h2>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.workerModelEffortDesc")}</p>
+                  <div className="mt-4 grid grid-cols-[1fr_120px] gap-2.5">
+                    <Field label={t("settings.workerModel")} hint={t("settings.applyNewWorker")}>
+                      <Select size="md" className="w-full" value={f.workerModel} onChange={(e) => setF({ ...f, workerModel: e.target.value })}>
+                        {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
+                        {!models.some((m) => m.id === f.workerModel) && <option value={f.workerModel}>{f.workerModel}</option>}
+                      </Select>
+                    </Field>
+                    <Field label={t("settings.effort")}>
+                      <Select size="md" className="w-full" value={f.workerEffort} disabled={!effortSupported(f.workerModel)} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
+                        {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
+                      </Select>
+                    </Field>
+                  </div>
+                </section>
+                </>
               );
             })()}
 
-            {tab === "codex" && (
+            {modelsProvider === "codex" && (
               <section>
                 <h2 className="text-[13px] font-semibold">{t("settings.codexTitle")}</h2>
                 <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.codexDesc")}</p>
@@ -433,11 +460,14 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 </div>
               </section>
             )}
+              </>
+            )}
           </div>
 
-          {/* Save the General/Slack/Codex form settings (tokens/Linear/toggles have their own buttons). Hidden on
-              read-only tabs (Integration, Claude) which have no f-backed fields. */}
-          {tab !== "integration" && tab !== "claude" && (
+          {/* Save the General/Slack/Models form settings (tokens/Linear/toggles have their own buttons). Hidden only
+              on the Integration tab, which has no f-backed fields. (Models is now f-backed: Claude worker model/effort
+              + all codex fields; the Anthropic/Codex API keys keep their own save buttons.) */}
+          {tab !== "integration" && (
             <div className="mt-7 flex items-center justify-end gap-2 border-t border-line pt-4">
               <Button variant="primary" disabled={!dirty} onClick={() => p.onSave(f)}>{dirty ? t("common.save") : t("common.saved")}</Button>
             </div>

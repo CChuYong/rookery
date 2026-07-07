@@ -15,7 +15,7 @@ const base = {
 describe("SettingsPage Anthropic API key input", () => {
   it("renders the API key input as a masked (password) field in the Claude tab", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Claude")); // switch to the Claude tab
+    fireEvent.click(screen.getByText("모델")); // switch to the Claude tab
     const input = screen.getByPlaceholderText(/sk-ant-/);
     expect(input).toBeInTheDocument();
     expect(input).toHaveAttribute("type", "password");
@@ -24,7 +24,7 @@ describe("SettingsPage Anthropic API key input", () => {
   it("calls onSaveAnthropicKey with the trimmed key when Save is clicked", () => {
     const onSaveAnthropicKey = vi.fn();
     render(<SettingsPage {...base} onSaveAnthropicKey={onSaveAnthropicKey} />);
-    fireEvent.click(screen.getByText("Claude"));
+    fireEvent.click(screen.getByText("모델"));
     const input = screen.getByPlaceholderText(/sk-ant-/);
     fireEvent.change(input, { target: { value: "  sk-ant-abc123  " } });
     // There are multiple Save buttons; click the one in the Claude tab section
@@ -37,7 +37,7 @@ describe("SettingsPage Anthropic API key input", () => {
   it("clears the input field after saving", () => {
     const onSaveAnthropicKey = vi.fn();
     render(<SettingsPage {...base} onSaveAnthropicKey={onSaveAnthropicKey} />);
-    fireEvent.click(screen.getByText("Claude"));
+    fireEvent.click(screen.getByText("모델"));
     const input = screen.getByPlaceholderText(/sk-ant-/);
     fireEvent.change(input, { target: { value: "sk-ant-xyz" } });
     const saveButtons = screen.getAllByText("저장");
@@ -47,7 +47,7 @@ describe("SettingsPage Anthropic API key input", () => {
 
   it("Save button is disabled when the input is blank", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Claude"));
+    fireEvent.click(screen.getByText("모델"));
     const saveButtons = screen.getAllByText("저장");
     const lastSave = saveButtons[saveButtons.length - 1]!;
     expect(lastSave).toBeDisabled();
@@ -55,7 +55,7 @@ describe("SettingsPage Anthropic API key input", () => {
 
   it("does not call onSaveAnthropicKey when the prop is not provided (no crash)", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Claude"));
+    fireEvent.click(screen.getByText("모델"));
     const input = screen.getByPlaceholderText(/sk-ant-/);
     fireEvent.change(input, { target: { value: "sk-ant-test" } });
     const saveButtons = screen.getAllByText("저장");
@@ -67,7 +67,7 @@ describe("SettingsPage Anthropic API key input", () => {
 describe("SettingsPage Codex tab", () => {
   it("is reachable via the tab bar and shows the codexBin/codexWorkerModel/codexMasterModel fields", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     expect(screen.getByDisplayValue("codex")).toBeInTheDocument();
     // codexWorkerModel and codexMasterModel share the same "gpt-5.5" fixture default → two inputs match.
     expect(screen.getAllByDisplayValue("gpt-5.5")).toHaveLength(2);
@@ -76,7 +76,7 @@ describe("SettingsPage Codex tab", () => {
   it("editing codexBin lands in the onSave(f) payload", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     fireEvent.change(screen.getByDisplayValue("codex"), { target: { value: "/usr/local/bin/codex" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
@@ -86,7 +86,7 @@ describe("SettingsPage Codex tab", () => {
   it("editing codexMasterModel lands in the onSave(f) payload", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     // Disambiguate from the codexWorkerModel field (same default value) via its own label text. Regex because the
     // Field component's accessible name also folds in the trailing hint text, e.g. "...모델 새 Codex 마스터...".
     fireEvent.change(screen.getByLabelText(/Codex 마스터 기본 모델/), { target: { value: "gpt-6-mini" } });
@@ -97,7 +97,7 @@ describe("SettingsPage Codex tab", () => {
 
   it("renders the codexApiKey field as a masked (password) input", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     const input = screen.getByPlaceholderText("sk-…");
     expect(input).toHaveAttribute("type", "password");
   });
@@ -105,7 +105,7 @@ describe("SettingsPage Codex tab", () => {
   it("calls onSaveCodexKey with the typed key, clears the field, and shows a saved note (no auth-status probe)", () => {
     const onSaveCodexKey = vi.fn();
     render(<SettingsPage {...base} onSaveCodexKey={onSaveCodexKey} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     const input = screen.getByPlaceholderText("sk-…");
     fireEvent.change(input, { target: { value: "sk-codex-abc" } });
     // Not dirty (no f-backed field touched) → the general Save button reads "저장됨", so "저장" uniquely
@@ -121,7 +121,7 @@ describe("SettingsPage Codex tab", () => {
 
   it("shows the codexTurnIdleTimeoutMs and codexHandshakeTimeoutMs fields with values from settings", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     expect(screen.getByDisplayValue("120000")).toBeInTheDocument();
     expect(screen.getByDisplayValue("30000")).toBeInTheDocument();
   });
@@ -129,7 +129,7 @@ describe("SettingsPage Codex tab", () => {
   it("editing codexTurnIdleTimeoutMs lands in the onSave(f) payload", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     // scope by label to avoid ambiguity with other Codex-tab fields
     fireEvent.change(screen.getByLabelText(/Codex 턴 유휴 타임아웃/), { target: { value: "60000" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
@@ -140,7 +140,7 @@ describe("SettingsPage Codex tab", () => {
   it("editing codexHandshakeTimeoutMs lands in the onSave(f) payload", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     fireEvent.change(screen.getByLabelText(/Codex 핸드셰이크 타임아웃/), { target: { value: "5000" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
@@ -162,7 +162,7 @@ describe("SettingsPage Codex tab — model defaults as selects (Codex Model Pick
   it("codexModels seeded → codexWorkerModel/codexMasterModel render as <Select>s listing the catalog + the '' default option", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
 
     const workerSelect = screen.getByLabelText(/Codex 워커 기본 모델/) as HTMLSelectElement;
     const masterSelect = screen.getByLabelText(/Codex 마스터 기본 모델/) as HTMLSelectElement;
@@ -179,7 +179,7 @@ describe("SettingsPage Codex tab — model defaults as selects (Codex Model Pick
     useStore.getState().setCodexModels(CODEX_MODELS);
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
 
     fireEvent.change(screen.getByLabelText(/Codex 워커 기본 모델/), { target: { value: "gpt-5.4" } });
     fireEvent.change(screen.getByLabelText(/Codex 마스터 기본 모델/), { target: { value: "" } });
@@ -190,7 +190,7 @@ describe("SettingsPage Codex tab — model defaults as selects (Codex Model Pick
 
   it("codexModels null → codexWorkerModel/codexMasterModel stay free-text <Input>s", () => {
     render(<SettingsPage {...base} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     const workerField = screen.getByLabelText(/Codex 워커 기본 모델/);
     const masterField = screen.getByLabelText(/Codex 마스터 기본 모델/);
     expect(workerField.tagName).toBe("INPUT");
@@ -200,7 +200,7 @@ describe("SettingsPage Codex tab — model defaults as selects (Codex Model Pick
   it("an out-of-list saved value (e.g. gpt-preview) is preserved as a selectable option", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     render(<SettingsPage {...base} settings={{ ...base.settings, codexWorkerModel: "gpt-preview" }} />);
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     const workerSelect = screen.getByLabelText(/Codex 워커 기본 모델/) as HTMLSelectElement;
     expect(workerSelect.value).toBe("gpt-preview");
     expect(within(workerSelect).getByText("gpt-preview")).toBeInTheDocument();

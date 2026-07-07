@@ -13,10 +13,10 @@ describe("SettingsPage language section", () => {
   beforeEach(() => { usePrefsStore.setState({ localePref: "system" }); });
   it("changing the language select flips the whole page locale instantly", () => {
     render(<I18nProvider systemLocale="ko-KR"><SettingsPage {...base} /></I18nProvider>);
-    expect(screen.getByText("워커 기본 모델 / 강도")).toBeInTheDocument();
+    expect(screen.getByText("워커 비용 예산")).toBeInTheDocument(); // a General-tab heading (workerBudget)
     act(() => { fireEvent.change(screen.getByDisplayValue("시스템 기본값"), { target: { value: "en" } }); });
-    expect(screen.getByText("Default worker model / effort")).toBeInTheDocument();
-    expect(screen.queryByText("워커 기본 모델 / 강도")).toBeNull();
+    expect(screen.getByText("Worker cost budget")).toBeInTheDocument();
+    expect(screen.queryByText("워커 비용 예산")).toBeNull();
     expect(usePrefsStore.getState().localePref).toBe("en");
   });
 });

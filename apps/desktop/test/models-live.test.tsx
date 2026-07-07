@@ -29,9 +29,10 @@ describe("live models (UI)", () => {
   it("SettingsPage renders model <option>s from the live store list (not the hardcoded one)", () => {
     useStore.getState().setModels([{ id: "claude-opus-4-7", label: "Opus 4.7 (live)" }]);
     render(<SettingsPage {...settingsProps} />);
-    // Worker select (General tab) renders the live label.
+    // Worker model default now lives under Models → Claude (default sub-tab).
+    fireEvent.click(screen.getByText("모델"));
     expect(screen.getAllByText("Opus 4.7 (live)").length).toBeGreaterThanOrEqual(1);
-    // Master default moved to the Slack tab — switch and verify it uses the live list too.
+    // Master default is on the Slack tab — switch and verify it uses the live list too.
     fireEvent.click(screen.getByRole("tab", { name: "Slack" }));
     expect(screen.getAllByText("Opus 4.7 (live)").length).toBeGreaterThanOrEqual(1);
   });
