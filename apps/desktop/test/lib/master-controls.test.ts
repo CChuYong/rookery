@@ -29,6 +29,14 @@ describe("resolveMasterControls", () => {
     expect(v.effort).toBe("max"); // no catalog to clamp against → generic vocab, unchanged
   });
 
+  it("resolves effort against the DEFAULT model when the model override is the empty 'use default' pick", () => {
+    // ov.model="" ("use default") + masterEffort 'max' must derive off codexMasterModel (gpt-5.5), not off ""
+    // (which would passthrough 'max' and diverge from what the daemon actually runs).
+    const v = resolveMasterControls({ provider: "codex", override: { model: "" }, ...SETTINGS, codexModels: CODEX });
+    expect(v.model).toBe(""); // display keeps the "use default" option
+    expect(v.effort).toBe("xhigh"); // effort resolved for the real default model gpt-5.5, not blank/'max'
+  });
+
   it("an explicit override wins for model/effort/permissionMode, but an invalid codex effort override is still re-derived", () => {
     const v = resolveMasterControls({
       provider: "codex",
