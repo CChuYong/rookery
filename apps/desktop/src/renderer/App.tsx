@@ -5,6 +5,7 @@ import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import { useStore } from "./store/store.js";
 import { baseName } from "./lib/path.js";
+import { resolveMasterControls } from "./lib/master-controls.js";
 import { useShallow } from "zustand/react/shallow";
 import { WsClient } from "./ws/client.js";
 import type { SocketLike } from "./ws/client.js";
@@ -147,6 +148,7 @@ type AppSelected = Pick<
   | "sessionFilter"
   | "setSessionFilter"
   | "authStatus"
+  | "codexModels"
 >;
 
 export function App(): JSX.Element {
@@ -187,6 +189,7 @@ export function App(): JSX.Element {
         automationsLoadFailed: st.automationsLoadFailed,
         sessionFilter: st.sessionFilter,
         setSessionFilter: st.setSessionFilter,
+        codexModels: st.codexModels,
       }),
     ),
   );
@@ -713,26 +716,24 @@ export function App(): JSX.Element {
   const masterControls = useMemo(() => {
     if (!(s.settings && s.activeSessionId)) return undefined;
     const provider = s.sessions.find((x) => x.id === s.activeSessionId)?.provider;
-    // A codex session's default model is codexMasterModel, not the Claude masterModel — otherwise the composer
-    // shows a Claude id selected (and the codex-aware dropdown would have no matching option). The override wins
-    // when the user picked an explicit model at new-session / via the dropdown.
-    const defaultModel = provider === "codex" ? s.settings.codexMasterModel : s.settings.masterModel;
-    return {
+    // Codex-aware model/effort/permission resolution lives in the tested pure resolver; here we only add the
+    // store-mutating handlers. (Effort re-derivation for finding [23] + bypass-only modes for [2] are in there.)
+    const values = resolveMasterControls({
       provider,
-      model: s.overrides[s.activeSessionId]?.model ?? defaultModel,
-      effort: s.overrides[s.activeSessionId]?.effort ?? s.settings.masterEffort,
-      permissionMode: s.overrides[s.activeSessionId]?.permissionMode ?? "bypassPermissions",
-      // Codex masters are bypassPermissions-only (the daemon rejects any other mode at turn start), so a
-      // codex session's composer must offer ONLY bypass — otherwise one click on Plan/Default makes every
-      // subsequent send fail (finding [2]). Claude masters keep the full mode list (key omitted → Composer
-      // falls back to all four PERMISSION_MODES).
-      ...(provider === "codex" ? { permissionModes: ["bypassPermissions"] as const } : {}),
+      override: s.overrides[s.activeSessionId],
+      masterModel: s.settings.masterModel,
+      codexMasterModel: s.settings.codexMasterModel,
+      masterEffort: s.settings.masterEffort,
+      codexModels: s.codexModels,
+    });
+    return {
+      ...values,
       editable: true,
       onModel: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { model: m }),
       onEffort: (e: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { effort: e }),
       onPermissionMode: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { permissionMode: m }),
     };
-  }, [s.settings, s.activeSessionId, s.overrides, s.sessions]);
+  }, [s.settings, s.activeSessionId, s.overrides, s.sessions, s.codexModels]);
   const activeSess = s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId) : undefined;
   const sessionName = activeSess ? activeSess.label || baseName(activeSess.cwd) || "session" : t("app.selectSession");
   const sessionReadOnly = (s.activeSessionId ? s.sessions.find((x) => x.id === s.activeSessionId)?.origin : undefined) === "slack";

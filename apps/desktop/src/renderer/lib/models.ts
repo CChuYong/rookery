@@ -38,3 +38,19 @@ export function codexEffortsFor(model: string, list: CodexModelInfo[] | null): s
 export function codexDefaultEffort(model: string, list: CodexModelInfo[] | null): string | undefined {
   return list?.find((m) => m.id === model)?.defaultEffort || undefined;
 }
+
+// The effort actually in play for a (provider, model), given the user's current `choice`. This is the
+// single source of truth every effort surface resolves through at RENDER time (not via state-syncing
+// effects), so a stale/foreign level can never render a blank <select> or get submitted:
+//  - claude, or codex with no catalog efforts (null catalog / unknown model): pass `choice` through — the
+//    UI shows the generic EFFORTS vocabulary, and the daemon accepts/haiku-drops it as before.
+//  - codex with catalog efforts: keep `choice` if it's a valid level for the model; otherwise re-derive to
+//    the model's catalog default effort, falling back to its first supported level. This is what fixes a
+//    Claude-vocab default like 'max' being shown/sent on a codex model that has no such level (finding [23]).
+export function effectiveEffort(provider: string, model: string, choice: string, list: CodexModelInfo[] | null): string {
+  if (provider !== "codex") return choice;
+  const efforts = codexEffortsFor(model, list);
+  if (efforts.length === 0) return choice; // free-text / model unknown to the catalog → generic vocab
+  if (efforts.includes(choice)) return choice;
+  return codexDefaultEffort(model, list) ?? efforts[0];
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EFFORTS, effortLabelKey, codexEffortsFor, codexDefaultEffort } from "../../src/renderer/lib/models.js";
+import { EFFORTS, effortLabelKey, codexEffortsFor, codexDefaultEffort, effectiveEffort } from "../../src/renderer/lib/models.js";
 import { catalogs } from "../../src/renderer/i18n/catalog.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
@@ -61,5 +61,36 @@ describe("codexDefaultEffort", () => {
 
   it("returns undefined when the model's defaultEffort is empty string (the || undefined guard)", () => {
     expect(codexDefaultEffort("gpt-5.4-mini", CODEX_MODELS_FIXTURE)).toBeUndefined();
+  });
+});
+
+// The single source of truth for "the effort actually in play" — derived at render time (no effect-syncing).
+// Every effort surface (master composer via App.tsx masterControls, WorkerSpawnModal, NewSessionPage) resolves
+// through this, so a Claude-vocab level (e.g. 'max') can never render blank or be submitted on a codex model.
+describe("effectiveEffort", () => {
+  it("passes the choice through for claude (any vocab, including 'max')", () => {
+    expect(effectiveEffort("claude", "claude-opus-4-8", "max", CODEX_MODELS_FIXTURE)).toBe("max");
+  });
+
+  it("passes the choice through for codex when the catalog is null (free-text / generic vocab)", () => {
+    expect(effectiveEffort("codex", "gpt-5.5", "max", null)).toBe("max");
+  });
+
+  it("passes the choice through for a codex model that has no catalog efforts", () => {
+    expect(effectiveEffort("codex", "gpt-5.4-mini", "max", CODEX_MODELS_FIXTURE)).toBe("max"); // supportedEfforts []
+  });
+
+  it("keeps a codex choice that is valid for the model", () => {
+    expect(effectiveEffort("codex", "gpt-5.5", "high", CODEX_MODELS_FIXTURE)).toBe("high");
+  });
+
+  it("re-derives an invalid codex choice to the model's default effort", () => {
+    expect(effectiveEffort("codex", "gpt-5.5", "max", CODEX_MODELS_FIXTURE)).toBe("xhigh"); // 'max' not supported → gpt-5.5 default
+    expect(effectiveEffort("codex", "gpt-5.4", "xhigh", CODEX_MODELS_FIXTURE)).toBe("medium"); // 'xhigh' not in gpt-5.4 → its default
+  });
+
+  it("falls back to the first supported effort when the model has no default effort", () => {
+    const model: CodexModelInfo = { id: "gpt-x", displayName: "X", defaultEffort: "", supportedEfforts: ["low", "medium"], isDefault: false };
+    expect(effectiveEffort("codex", "gpt-x", "max", [model])).toBe("low");
   });
 });

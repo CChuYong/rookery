@@ -10,7 +10,7 @@ import { baseName } from "../lib/path.js";
 import { useDraftStore } from "../store/drafts.js";
 import { useStore } from "../store/store.js";
 import { Select, Input } from "../ui/input.js";
-import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
+import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 
 // New master session — full page (entire main area). The input field is identical to the chat composer (markdown, file attachments, @ prefill, / skills).
 // Start with it empty for an empty session. @ and / operate live against the repo/folder (cwd) picked below (if none selected, the daemon's default cwd).
@@ -69,7 +69,7 @@ export function NewSessionPage(p: {
       cwd: cwd.trim() || undefined,
       prompt: prompt.trim() || undefined,
       model: isCodex ? codexModel.trim() || undefined : model,
-      effort,
+      effort: currentEffort,
       provider: isCodex ? "codex" : undefined, // wire-minimal: absent means claude
     });
   const pick = async (): Promise<void> => { const dir = await window.rookery.pickDirectory(); if (dir) setCwd(dir); };
@@ -95,16 +95,13 @@ export function NewSessionPage(p: {
   );
   // Codex effort options come from the selected model's catalog entry when the catalog was fetched; unknown model
   // or no catalog (null) falls back to the generic EFFORTS vocabulary so the selector is never empty.
-  const codexEfforts = codexModels != null ? codexEffortsFor(codexModel || p.codexDefaultModel || "", codexModels) : null;
+  const effortModel = codexModel || p.codexDefaultModel || "";
+  const codexEfforts = codexModels != null ? codexEffortsFor(effortModel, codexModels) : null;
   const codexEffortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
-  // Re-derive effort on provider/model/catalog change so a stale Claude level (e.g. 'max') that isn't a
-  // valid codex option can't linger — it would render the select blank and be submitted as 'max' (finding
-  // [23], same as WorkerSpawnModal). Snap to the model's catalog default, else the first valid option.
-  useEffect(() => {
-    if (!isCodex || codexEffortOptions.includes(effort)) return;
-    const preferred = (codexModels ? codexDefaultEffort(codexModel || p.codexDefaultModel || "", codexModels) : "") || codexEffortOptions[0];
-    if (preferred && preferred !== effort) setEffort(preferred);
-  }, [isCodex, codexModel, codexModels, p.codexDefaultModel]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The effort actually in play, derived at render time (no state-syncing effect): a stale Claude-vocab level
+  // (e.g. the 'max' default) on a codex model re-derives to the model's catalog default, so the <select> never
+  // renders blank and onStart never submits a level the model lacks (finding [23]). Claude passes through.
+  const currentEffort = effectiveEffort(isCodex ? "codex" : "claude", effortModel, effort, codexModels);
   // codex model field: a catalog-driven dropdown when codex.models.list succeeded, else today's free text
   // (daemon default, settings.codexMasterModel, when empty).
   const codexControls = isCodex && (
@@ -135,8 +132,8 @@ export function NewSessionPage(p: {
       ) : (
         <Input size="xs" className="w-28 min-w-0 text-fg-dim" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
       )}
-      {effortSupported(codexModel || p.codexDefaultModel || "") && (
-        <Select size="xs" className="min-w-0 text-fg-dim" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
+      {effortSupported(effortModel) && (
+        <Select size="xs" className="min-w-0 text-fg-dim" value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
           {codexEffortOptions.map((ef) => (
             <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
           ))}

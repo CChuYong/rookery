@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
-import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
+import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
@@ -96,17 +96,16 @@ export function WorkerSpawnModal(p: {
   // When no model is picked yet (codexModel === ""), resolve efforts off the daemon default model (p.codexDefaultModel)
   // — same idiom as NewSessionPage — so the "" selection offers that model's real efforts, not the generic EFFORTS (which
   // includes `max`, a level codex has no equivalent for).
-  const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effectiveModel || p.codexDefaultModel || "", codexModels) : null;
+  // The codex model whose effort vocabulary applies — the picked model, or the daemon default when the
+  // field is still "" (same idiom as effortOptions/NewSessionPage).
+  const effortModel = effectiveModel || p.codexDefaultModel || "";
+  const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effortModel, codexModels) : null;
   const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;
-  // Re-derive effort when the provider/model/catalog changes so a stale Claude level (e.g. 'max', which
-  // codex has no equivalent for) that isn't in the current effortOptions can't linger — it would render
-  // the controlled <select> blank in a real browser and get submitted as 'max' (only surviving via the
-  // daemon's mapEffort coercion). Snap to the model's catalog default, else the first valid option (finding [23]).
-  useEffect(() => {
-    if (provider !== "codex" || effortOptions.includes(effort)) return;
-    const preferred = (codexModels ? codexDefaultEffort(effectiveModel || p.codexDefaultModel || "", codexModels) : "") || effortOptions[0];
-    if (preferred && preferred !== effort) setEffort(preferred);
-  }, [provider, effectiveModel, codexModels, p.codexDefaultModel]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The effort actually in play, derived at render time (no state-syncing effect): for a codex model a stale
+  // Claude-vocab level (e.g. the 'max' default) re-derives to the model's catalog default, so the <select>
+  // never renders blank and spawn() never submits a level the model lacks (finding [23]). The raw `effort`
+  // state keeps the user's last explicit choice untouched (so switching provider back to claude restores it).
+  const currentEffort = effectiveEffort(provider, effortModel, effort, codexModels);
   const spawn = () => {
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
@@ -116,7 +115,7 @@ export function WorkerSpawnModal(p: {
       task.trim(),
       label.trim(),
       spawnModel,
-      effortSupported(effectiveModel) ? effort : undefined,
+      effortSupported(effectiveModel) ? currentEffort : undefined,
       base || undefined,
       selected ? { key: selected.identifier, url: selected.url } : undefined,
       permissionMode,
@@ -205,7 +204,7 @@ export function WorkerSpawnModal(p: {
               </Select>
             )}
             {effortSupported(effectiveModel) && (
-              <Select size="sm" className="w-28" value={effort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
+              <Select size="sm" className="w-28" value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
                 {effortOptions.map((ef) => (
                   <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                 ))}
