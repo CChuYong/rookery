@@ -596,9 +596,18 @@ export function App(): JSX.Element {
     const clientMsgId = crypto.randomUUID();
     st.pushPending(sid, { clientMsgId, text }); // pending bubble: immediately "in progress" (stop button) → switches to committed when the daemon's user echo arrives
     const ov = st.overrides[sid] ?? {}; // per-session override (backend uses defaults if absent)
+    // Send the SAME effort the composer displays, re-derived fresh from the current settings + catalog so a
+    // codex session never sends a level its model lacks. The daemon's mapEffort coerces per-PROVIDER, not
+    // per-model ('max'→'xhigh' always), so raw ov.effort=undefined would run the masterEffort default coerced
+    // to a level the model may not support (e.g. gpt-5.4 has no xhigh) — diverging from the shown effort.
+    // Re-resolving here (not pinning) keeps live settings changes reflected. Claude passes its choice through.
+    const provider = st.sessions.find((x) => x.id === sid)?.provider;
+    const sendEffort = st.settings
+      ? resolveMasterControls({ provider, override: ov, masterModel: st.settings.masterModel, codexMasterModel: st.settings.codexMasterModel, masterEffort: st.settings.masterEffort, codexModels: st.codexModels }).effort
+      : ov.effort;
     // request(): a rejected send (unknown session, runTurn throw, disconnected) rolls the pending bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished while the composer stayed stuck busy.
-    void client?.request({ type: "session.send", sessionId: sid, text, model: ov.model, effort: ov.effort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
+    void client?.request({ type: "session.send", sessionId: sid, text, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
       useStore.getState().dropPending(sid, clientMsgId);
       toast.error(tRef.current("toast.sendFailed"), String(e));
     });
