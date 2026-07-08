@@ -6,6 +6,7 @@ import type { EventBus } from "./events.js";
 import type { GitOps } from "./git-ops.js";
 import type { SlashCommandInfo } from "./agent-backend.js";
 import { truncateBytes } from "./truncate.js";
+import { buildHandoffSeed } from "./handoff.js";
 
 const DIFF_MAX_BYTES = 512 * 1024; // byte cap before sending a diff directly as a single WS frame (git-diff-no-chunking)
 
@@ -36,6 +37,8 @@ export type WorkerFactory = (opts: {
   maxTurns?: number; // per-result turn cap passed through to Worker
   costBudgetUsd?: number; // lifetime USD cost ceiling passed through to Worker
   provider?: string; // which AgentBackend runs this worker ('claude' | 'codex'). Fixed once running.
+  handoffSeed?: string; // cross-provider fork: the source transcript, prepended to this worker's FIRST turn's backend text (not echoed). See handoff.ts.
+  handoffFromProvider?: string; // cross-provider fork marker → the worker clears the DB marker once its sdk_session_id is assigned.
 }) => WorkerLike;
 
 export interface FleetDeps {
@@ -71,6 +74,7 @@ interface Entry {
   effort?: string; // persisted spawn-time effort override → materialize restores it
   provider?: string; // which AgentBackend runs this worker ('claude' | 'codex') → materialize/fork restore it
   resumeSessionId?: string; // if present, "resumable but not yet started (lazy)" state — materialize on first send/await
+  handoffFromProvider?: string; // cross-provider fork: source provider whose transcript seeds this worker's first turn (built into handoffSeed at materialize)
   pendingLabel?: boolean; // task-less spawn: relabel from the first send() message (not from spawn)
 }
 
@@ -124,7 +128,11 @@ export class FleetOrchestrator {
 
   // lazy resume: on first send/await, actually start the SDK session (factory+resume) → register the flow.
   private materialize(id: string, e: Entry): WorkerLike {
-    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, costBudgetUsd: e.costBudgetUsd, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, onTurnStart: () => this.checkpoint(id) });
+    // Cross-provider handoff worker: build the one-shot seed from the copied transcript for its first turn.
+    const handoffSeed = e.handoffFromProvider
+      ? buildHandoffSeed(this.deps.repos.listWorkerEvents(id).map((r) => { try { return { type: r.type, payload: JSON.parse(r.payload_json) as unknown }; } catch { return { type: r.type, payload: {} }; } }), e.handoffFromProvider)
+      : undefined;
+    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, costBudgetUsd: e.costBudgetUsd, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, handoffSeed, handoffFromProvider: e.handoffFromProvider, onTurnStart: () => this.checkpoint(id) });
     agent.resume();
     e.agent = agent;
     e.resumeSessionId = undefined;
@@ -177,6 +185,7 @@ export class FleetOrchestrator {
         effort: row.effort ?? undefined,
         provider: row.provider ?? undefined,
         resumeSessionId,
+        handoffFromProvider: row.handoff_from_provider ?? undefined, // survives restart → the first post-restart turn still seeds
       });
     }
   }
@@ -203,21 +212,27 @@ export class FleetOrchestrator {
   // Fork a worker: copy its SDK conversation into a new branch + duplicate its full worktree state (committed history via a
   // branch off the source's HEAD, plus uncommitted/untracked via checkpoint→restore) + copy its transcript. The fork is
   // registered as a lazy-resumable entry (resumes the forked SDK session in its own worktree on first send). Source untouched.
-  async fork(id: string): Promise<{ id: string }> {
+  async fork(id: string, target?: { provider?: string; model?: string; effort?: string }): Promise<{ id: string }> {
     const src = this.deps.repos.getWorker(id);
     if (!src) throw new Error(`Unknown worker: ${id}`);
     // A restore in flight is mid-checkout on the source worktree — checkpointing it now would snapshot a half-rewritten
     // tree into the fork (silent corruption). Reject before any git work; retry once the restore finishes.
     if (this.restoring.has(id)) throw new Error(`worker ${id} is mid-restore; retry when the restore finishes`);
-    if (!src.sdk_session_id) throw new Error("this worker has no SDK session yet — nothing to fork");
     if (!src.worktree_path || !this.exists(src.worktree_path)) throw new Error("this worker's worktree is gone — cannot fork");
-    if (!this.deps.forkSession) throw new Error("worker forking is not available");
+    const srcProvider = src.provider ?? "claude";
+    // Cross-provider handoff: no native resume handle crosses providers → start a FRESH worker on the target
+    // backend (same worktree snapshot as a native fork), seed its first turn from the copied transcript.
+    const handoff = !!target?.provider && target.provider !== srcProvider;
+    if (!handoff && !src.sdk_session_id) throw new Error("this worker has no SDK session yet — nothing to fork");
+    if (handoff && this.deps.repos.listWorkerEvents(id).length === 0) throw new Error("nothing to hand off — this worker has no transcript yet");
+    if (!handoff && !this.deps.forkSession) throw new Error("worker forking is not available");
     const newId = this.idgen();
     const branch = `rookery/${newId}`;
     const worktreePath = path.join(this.deps.worktreesDir, newId);
-    const label = `${src.label} (fork)`;
-    const provider = src.provider ?? "claude";
-    const { sessionId: forkedUuid } = await this.deps.forkSession(provider, src.sdk_session_id, { title: label });
+    const label = handoff ? `${src.label} (→ ${target!.provider})` : `${src.label} (fork)`;
+    const provider = handoff ? target!.provider! : srcProvider;
+    // Native fork only in the same-provider path; a handoff has no cross-provider handle to copy.
+    const forkedUuid = handoff ? null : (await this.deps.forkSession!(srcProvider, src.sdk_session_id!, { title: label })).sessionId;
     // Snapshot the source worktree's full state (tracked + untracked) → overlay it onto the fork so uncommitted work carries over.
     let snapSha: string | null = null;
     try { snapSha = await this.deps.git.checkpoint(src.worktree_path, `refs/rookery/fork/${newId}`); } catch { snapSha = null; }
@@ -230,20 +245,25 @@ export class FleetOrchestrator {
       // Persist the new worker (diff base = the source's base, so the fork's diff shows the same body of work).
       // The fork inherits the source's provider — a codex worker's fork must also run on codex.
       this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined, provider });
-      this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
-      if (src.model) this.deps.repos.setWorkerModel(newId, src.model);
+      if (forkedUuid) this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
+      if (handoff) this.deps.repos.setWorkerHandoffFrom(newId, srcProvider);
+      // A handoff can override model/effort (dialog choice); a same-provider fork inherits the source's.
+      const model = handoff ? target!.model ?? undefined : src.model ?? undefined;
+      const effort = handoff ? target!.effort ?? undefined : src.effort ?? undefined;
+      if (model) this.deps.repos.setWorkerModel(newId, model);
       if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
       if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
       if (src.cost_budget_usd != null) this.deps.repos.setWorkerCostBudgetUsd(newId, src.cost_budget_usd);
-      if (src.effort) this.deps.repos.setWorkerEffort(newId, src.effort);
+      if (effort) this.deps.repos.setWorkerEffort(newId, effort);
       this.deps.repos.copyWorkerEvents(id, newId);
-      // Register a lazy-resumable entry (like rehydrate) → idle; materializes (resumes the forked SDK session) on first send.
+      // Register a lazy-resumable entry (like rehydrate) → idle; materializes on first send. A same-provider
+      // fork resumes the forked SDK session; a handoff has no resume handle and seeds its first turn instead.
       this.deps.repos.setWorkerStatus(newId, "idle", true);
       this.entries.set(newId, {
         homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
-        status: "idle", label, model: src.model ?? undefined, permissionMode: src.permission_mode ?? undefined,
-        maxTurns: src.max_turns ?? undefined, costBudgetUsd: src.cost_budget_usd ?? undefined, effort: src.effort ?? undefined, provider,
-        resumeSessionId: forkedUuid,
+        status: "idle", label, model, permissionMode: src.permission_mode ?? undefined,
+        maxTurns: src.max_turns ?? undefined, costBudgetUsd: src.cost_budget_usd ?? undefined, effort, provider,
+        resumeSessionId: forkedUuid ?? undefined, handoffFromProvider: handoff ? srcProvider : undefined,
       });
       this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
       return { id: newId };

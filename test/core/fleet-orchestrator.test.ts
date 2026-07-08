@@ -93,6 +93,43 @@ describe("FleetOrchestrator", () => {
     expect(repos.getWorker("src")!.sdk_session_id).toBe("src-sdk"); // source untouched
   });
 
+  it("cross-provider fork() snapshots the worktree, swaps provider, sets the handoff marker, no native fork", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build feature", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", provider: "claude" });
+    repos.setWorkerSdkSessionId("src", "src-sdk");
+    repos.addWorkerEvent({ workerId: "src", seq: 0, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "did work" }) });
+    const bus = new EventBus();
+    const git = new FakeGitOps({ checkpointSha: "snap0" });
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    const forkCalls: unknown[] = [];
+    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, sdkSessionId }); return { sessionId: "forked-uuid" }; };
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk0" });
+
+    const { id } = await fleet.fork("src", { provider: "codex" });
+
+    const w = repos.getWorker(id)!;
+    expect(w.provider).toBe("codex");
+    expect(w.handoff_from_provider).toBe("claude");
+    expect(w.sdk_session_id).toBeNull(); // no native handle across providers
+    expect(forkCalls).toHaveLength(0); // native forkSession NOT called
+    expect(git.calls).toContain("addWorktree /repo /wt/fk0 rookery/fk0 rookery/src"); // worktree still created
+    expect(git.calls).toContain("restoreCheckpoint /wt/fk0 snap0"); // uncommitted work still carried
+    expect(repos.listWorkerEvents(id)).toHaveLength(1); // transcript copied
+    expect(fleet.status(id)).toBe("idle");
+    expect(repos.getWorker("src")!.sdk_session_id).toBe("src-sdk"); // source untouched
+  });
+
+  it("cross-provider fork() rejects when the source worker has no transcript yet", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "w", worktreePath: "/wt/src", branch: "rookery/src", provider: "claude" });
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "x" }), exists: () => true, idgen: () => "fk0" });
+    await expect(fleet.fork("src", { provider: "codex" })).rejects.toThrow(/nothing to hand off/);
+  });
+
   it("fork() inherits the source worker's cost_budget_usd (mirror max_turns inheritance)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "home", cwd: "/x" });
