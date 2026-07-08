@@ -48,6 +48,33 @@ describe("CodexBackend.openSession — translation", () => {
     expect(events.at(-1)).toEqual({ kind: "turn_end", subtype: "success", costUsd: 0.00405, numTurns: 1, durationMs: 42, contextTokens: 1000, contextWindow: 272000 });
   });
 
+  it("maps codex item/commandExecution/outputDelta to a tool_progress heartbeat (finding [19])", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "command", id: "c1", command: "npm run build", progress: ["chunk1", "chunk2"], output: "done" },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue();
+    q.push("go");
+    q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    const progress = events.filter((e) => e.kind === "tool_progress");
+    expect(progress.length).toBeGreaterThanOrEqual(1); // ≤1/sec throttle: two same-second deltas → one emit
+    expect(progress[0]).toMatchObject({ kind: "tool_progress", toolUseId: "c1" });
+    expect(typeof (progress[0] as { elapsedSec: number }).elapsedSec).toBe("number");
+  });
+
+  it("maps codex item/mcpToolCall/progress to a tool_progress heartbeat too (finding [19])", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "mcpToolCall", id: "m1", server: "s", tool: "t", progress: ["working…"], result: { content: [] } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue();
+    q.push("go");
+    q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    expect(events.some((e) => e.kind === "tool_progress" && (e as { toolUseId: string }).toolUseId === "m1")).toBe(true);
+  });
+
   it("emits PER-SEND numTurns=1 across turns (port contract — consumers accumulate their own total)", async () => {
     // Codex exposes no sub-turn agentic-loop count, so each turn/completed is one send = numTurns 1.
     // A cumulative series here would (a) inflate the worker's lifetime total quadratically once

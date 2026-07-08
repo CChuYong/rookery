@@ -129,6 +129,12 @@ abstract class CodexSessionBase implements AgentStream {
   protected threadId: string | null = null;
   protected activeTurnId: string | null = null;
   protected turnDone: (() => void) | null = null;
+  // Tool-progress heartbeat (finding [19]): codex streams item/*/outputDelta|progress while a shell/MCP tool
+  // runs. We map those to the same tool_progress the Claude SDK emits (an elapsedSec-ticking in-progress tool
+  // card). Start time per tool item id (set at item/started) + last emitted second (≤1/sec throttle). For a
+  // worker these span turns (CodexSessionBase is per-session), so they're cleared at item/completed AND turn end.
+  private readonly toolStartMs = new Map<string, number>();
+  private readonly toolLastProgressSec = new Map<string, number>();
   protected lastContextTokens = 0;
   protected contextWindow = 0;
   protected overrideModel: string | null = null;
@@ -333,6 +339,25 @@ abstract class CodexSessionBase implements AgentStream {
     this.idleTimer = setTimeout(() => { void this.onIdleTimeout(); }, this.idleTimeoutMsForTurn);
   }
 
+  // Emit a tool_progress heartbeat for an active tool item (finding [19]), throttled to at most one per
+  // wall-clock second per item so a chatty command doesn't flood the bus. No-op if the item isn't a tracked
+  // tool (never item/started, or already item/completed).
+  private pushToolProgress(itemId: string | undefined): void {
+    const startMs = itemId ? this.toolStartMs.get(itemId) : undefined;
+    if (itemId === undefined || startMs === undefined) return;
+    const elapsedSec = Math.round((Date.now() - startMs) / 1000);
+    if (this.toolLastProgressSec.get(itemId) === elapsedSec) return; // same second → skip (≤1/sec)
+    this.toolLastProgressSec.set(itemId, elapsedSec);
+    this.channel.push({ kind: "tool_progress", toolUseId: itemId, elapsedSec });
+  }
+
+  // Drop a finished/abandoned tool item's progress state.
+  private clearToolProgress(itemId?: string): void {
+    if (itemId) { this.toolStartMs.delete(itemId); this.toolLastProgressSec.delete(itemId); return; }
+    this.toolStartMs.clear();
+    this.toolLastProgressSec.clear();
+  }
+
   // Pause/resume the idle watchdog while a blocking interaction (AskUserQuestion / approval) is
   // outstanding for the current turn — the master's ask closure drives these (finding [1]). Entering
   // that closure PROVES the MCP bridge delivered the tools/call, so the ensuing silence (the human
@@ -499,6 +524,14 @@ abstract class CodexSessionBase implements AgentStream {
       if (typeof p?.delta === "string") this.channel.push({ kind: "thinking_delta", text: p.delta });
       return;
     }
+    // Tool-progress heartbeat (finding [19]): a shell/MCP tool streams these while it runs → tool_progress with
+    // the tool's elapsed seconds, throttled to ≤1/sec (Claude parity). item/fileChange/outputDelta is deprecated
+    // (server no longer emits it), so only these two matter. A silent tool emits nothing here — bounded by the
+    // idle watchdog, same as before (this method already reset it above at :471).
+    if (method === "item/commandExecution/outputDelta" || method === "item/mcpToolCall/progress") {
+      this.pushToolProgress(p?.itemId);
+      return;
+    }
     if (method === "item/started") {
       const item = p?.item;
       if (!item?.id) return;
@@ -506,11 +539,14 @@ abstract class CodexSessionBase implements AgentStream {
       else if (item.type === "fileChange") this.channel.push({ kind: "tool_use", id: item.id, name: "apply_patch", input: { changes: item.changes }, parentToolUseId: null });
       else if (item.type === "mcpToolCall") this.channel.push({ kind: "tool_use", id: item.id, name: `${item.server ?? "mcp"}.${item.tool ?? "tool"}`, input: item.arguments, parentToolUseId: null });
       else if (item.type === "webSearch") this.channel.push({ kind: "tool_use", id: item.id, name: "web_search", input: { query: item.query }, parentToolUseId: null });
+      else return; // non-tool item (agentMessage/reasoning/…): no progress tracking
+      this.toolStartMs.set(item.id, Date.now()); // begin the elapsed-time clock for this tool's progress heartbeat
       return;
     }
     if (method === "item/completed") {
       const item = p?.item;
       if (!item?.id) return;
+      this.clearToolProgress(item.id); // tool finished → stop its progress heartbeat
       if (item.type === "agentMessage") {
         if (item.text) this.channel.push({ kind: "message", role: "assistant", text: item.text, parentToolUseId: null });
       } else if (item.type === "commandExecution") {
@@ -552,6 +588,7 @@ abstract class CodexSessionBase implements AgentStream {
       if (this.activeTurnId && turn?.id && turn.id !== this.activeTurnId) return;
       this.activeTurnId = null;
       this.disarmIdleWatchdog(); // the turn is over — no more silence to guard against until the NEXT turn/start
+      this.clearToolProgress(); // drop any tool-progress state (belt-and-suspenders: an interrupted tool never got item/completed)
       if (turn?.status === "failed" && turn.error?.message) {
         this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexError", params: { message: turn.error.message }, text: t(DEFAULT_LOCALE, "notice.codexError", { message: turn.error.message }) } });
       }

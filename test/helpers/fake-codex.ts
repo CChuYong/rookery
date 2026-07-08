@@ -5,9 +5,9 @@ export type CodexStep =
   | { kind: "agentDelta"; text: string }
   | { kind: "reasoningDelta"; text: string }
   | { kind: "agentMessage"; text: string; id?: string }
-  | { kind: "command"; id: string; command: string; output?: string; failed?: boolean }
+  | { kind: "command"; id: string; command: string; output?: string; failed?: boolean; progress?: string[] } // progress[] → item/commandExecution/outputDelta between start and complete (tool_progress heartbeat, finding [19])
   | { kind: "fileChange"; id: string; failed?: boolean }
-  | { kind: "mcpToolCall"; id: string; server?: string; tool?: string; result?: { content?: unknown[] }; failed?: boolean }
+  | { kind: "mcpToolCall"; id: string; server?: string; tool?: string; result?: { content?: unknown[] }; failed?: boolean; progress?: string[] } // progress[] → item/mcpToolCall/progress between start and complete
   | { kind: "tokenUsage"; last: { inputTokens: number; cachedInputTokens?: number }; total?: { inputTokens: number; cachedInputTokens?: number; outputTokens?: number }; contextWindow?: number }
   | { kind: "errorNote"; message: string }
   | { kind: "requestApproval"; id: string } // emits a server→client commandExecution approval request
@@ -132,12 +132,14 @@ export function fakeCodexSpawn(
             else if (step.kind === "agentMessage") send({ method: "item/completed", params: { threadId, turnId, item: { type: "agentMessage", id: step.id ?? "m1", text: step.text } } });
             else if (step.kind === "command") {
               send({ method: "item/started", params: { threadId, turnId, item: { type: "commandExecution", id: step.id, command: step.command, status: "inProgress" } } });
+              for (const d of step.progress ?? []) send({ method: "item/commandExecution/outputDelta", params: { threadId, turnId, itemId: step.id, delta: d } });
               send({ method: "item/completed", params: { threadId, turnId, item: { type: "commandExecution", id: step.id, command: step.command, status: step.failed ? "failed" : "completed", aggregatedOutput: step.output ?? "" } } });
             } else if (step.kind === "fileChange") {
               send({ method: "item/started", params: { threadId, turnId, item: { type: "fileChange", id: step.id, changes: [], status: "inProgress" } } });
               send({ method: "item/completed", params: { threadId, turnId, item: { type: "fileChange", id: step.id, changes: [], status: step.failed ? "failed" : "completed" } } });
             } else if (step.kind === "mcpToolCall") {
               send({ method: "item/started", params: { threadId, turnId, item: { type: "mcpToolCall", id: step.id, server: step.server, tool: step.tool, status: "inProgress" } } });
+              for (const d of step.progress ?? []) send({ method: "item/mcpToolCall/progress", params: { threadId, turnId, itemId: step.id, message: d } });
               send({ method: "item/completed", params: { threadId, turnId, item: { type: "mcpToolCall", id: step.id, server: step.server, tool: step.tool, status: step.failed ? "failed" : "completed", ...(step.result ? { result: step.result } : {}) } } });
             } else if (step.kind === "tokenUsage") {
               send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { last: step.last, total: step.total ?? step.last, modelContextWindow: step.contextWindow ?? null } } });
