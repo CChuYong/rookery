@@ -5,7 +5,7 @@ import { EventBus } from "../../src/core/events.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
-import { createFleetToolsServer, FLEET_SERVER_NAME, FLEET_TOOL_NAMES, formatTranscript, spawnWorkerImpl } from "../../src/tools/fleet-tools.js";
+import { createFleetToolsServer, fleetToolDefs, FLEET_SERVER_NAME, FLEET_TOOL_NAMES, formatTranscript, spawnWorkerImpl } from "../../src/tools/fleet-tools.js";
 
 function fleet() {
   const repos = new Repositories(openDb(":memory:"));
@@ -39,6 +39,33 @@ describe("fleet tools", () => {
     const workers = repos.listAllWorkers();
     expect(workers).toHaveLength(1);
     expect(workers[0]!.provider).toBe("codex");
+  });
+
+  it("list_workers tags each worker with its provider and supports a provider filter (interop QW2/QW6)", async () => {
+    const { repos, fo } = fleet();
+    repos.createWorker({ id: "cw", sessionId: "s1", repoPath: "/a", label: "alpha", provider: "claude" });
+    repos.createWorker({ id: "cx", sessionId: "s1", repoPath: "/b", label: "beta", provider: "codex" });
+    const defs = fleetToolDefs(fo, repos, "s1");
+    const list = defs.find((d) => d.name === "list_workers")!;
+    const allText = ((await list.handler({} as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(allText).toContain("codex"); // provider now shown, not dropped
+    expect(allText).toContain("claude");
+    // provider filter narrows it (mirrors the status/repo filters)
+    const codexText = ((await list.handler({ provider: "codex" } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(codexText).toContain("cx");
+    expect(codexText).not.toContain("cw");
+  });
+
+  it("get_worker_status includes the worker's provider (interop QW2)", async () => {
+    const { repos, fo } = fleet();
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    await spawnWorkerImpl(fo, repos, "s1", { repo: "app", task: "x", provider: "codex" });
+    await fo.waitAllSettled();
+    const wid = repos.listAllWorkers()[0]!.id;
+    const defs = fleetToolDefs(fo, repos, "s1");
+    const status = defs.find((d) => d.name === "get_worker_status")!;
+    const out = ((await status.handler({ id: wid } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out).toContain("codex");
   });
 
   it("spawn_worker's costBudgetUsd param reaches fleet.spawn and persists on the worker row", async () => {

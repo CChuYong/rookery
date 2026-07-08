@@ -128,12 +128,12 @@ export function fleetToolDefs(
 
   const list = tool(
     "list_workers",
-    "List all workers in the fleet (global).",
-    { status: z.string().optional(), repo: z.string().optional() },
+    "List all workers in the fleet (global). Each line shows the worker's agent backend so a mixed claude/codex fleet is legible; filter by `provider` to enumerate just one backend.",
+    { status: z.string().optional(), repo: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() },
     async (args) => {
       const repoPath = args.repo ? repos.getRepoByName(args.repo)?.path : undefined;
-      const items = fleet.list({ status: args.status, repoPath });
-      const body = items.length === 0 ? "No workers." : items.map((a) => `${a.id} [${a.status}] ${a.label} ${a.branch ?? ""}`.trim()).join("\n");
+      const items = fleet.list({ status: args.status, repoPath }).filter((a) => !args.provider || a.provider === args.provider);
+      const body = items.length === 0 ? "No workers." : items.map((a) => `${a.id} [${a.status}·${a.provider}] ${a.label} ${a.branch ?? ""}`.trim()).join("\n");
       return text(body);
     },
     { annotations: { readOnlyHint: true } },
@@ -141,11 +141,11 @@ export function fleetToolDefs(
 
   const status = tool(
     "get_worker_status",
-    "Status of one worker.",
+    "Status of one worker (with its agent backend).",
     { id: z.string() },
     async (args) => {
       try {
-        return text(`${args.id}: ${fleet.status(args.id)}`);
+        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})`);
       } catch (err) {
         return errorText(String(err));
       }
