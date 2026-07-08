@@ -414,6 +414,10 @@ export class MasterAgent {
           if (ev.sessionId !== this.sdkSessionId) {
             this.sdkSessionId = ev.sessionId;
             repos.setSdkSessionId(sessionId, ev.sessionId);
+            // Cross-provider handoff (T4/review[2]): clear the marker the moment the native session exists —
+            // the seed is now baked into turn-1's user message. Mirrors worker.ts; clearing here (not at clean
+            // completion) means an aborted first turn won't re-inject the seed on the resumed turn (double-bake).
+            if (handoffFrom) repos.setSessionHandoffFrom(sessionId, null);
           }
         } else if (ev.kind === "push") {
           if (ev.push.kind === "commands") {
@@ -454,10 +458,8 @@ export class MasterAgent {
           }
         }
       }
-      // Cross-provider handoff (T4): the seed is now baked into this turn's user message in the target's
-      // native session, so clear the marker — but only on a clean completion. An aborted turn leaves it set
-      // so the next attempt re-injects (idempotent; the seed is rebuilt from the unchanged copied events).
-      if (handoffFrom && !abort.signal.aborted) repos.setSessionHandoffFrom(sessionId, null);
+      // (Cross-provider handoff marker is cleared at the session_id event above, the moment the native
+      // session exists — see review[2]. No post-loop clear needed.)
       // Codex parity (finding [5]): a user stop closes the codex stream CLEANLY (its for-await exits
       // without throwing), so the catch's interrupted-notice path below never runs. Record the same
       // marker here on a clean-but-aborted exit — the Claude SDK reaches the catch by throwing instead.

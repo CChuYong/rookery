@@ -130,6 +130,45 @@ describe("FleetOrchestrator", () => {
     await expect(fleet.fork("src", { provider: "codex" })).rejects.toThrow(/nothing to hand off/);
   });
 
+  it("cross-provider fork materializes on the first send (no native resume handle → keyed off the handoff marker)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "w", worktreePath: "/wt/src", branch: "rookery/src", provider: "claude" });
+    repos.setWorkerSdkSessionId("src", "src-sdk");
+    repos.addWorkerEvent({ workerId: "src", seq: 0, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "did work" }) });
+    const bus = new EventBus();
+    const git = new FakeGitOps({ checkpointSha: "snap0" });
+    let materialized: { handoffSeed?: string; handoffFromProvider?: string; sdkSessionId?: string | null } | undefined;
+    const sends: string[] = [];
+    const factory = (o: { handoffSeed?: string; handoffFromProvider?: string; sdkSessionId?: string | null }): WorkerLike => {
+      materialized = o;
+      return { start: () => {}, send: (t: string) => sends.push(t), resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: () => new Promise<void>(() => {}) };
+    };
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "x" }), exists: () => true, idgen: () => "fk0" });
+
+    const { id } = await fleet.fork("src", { provider: "codex" });
+    expect(() => fleet.send(id, "continue please")).not.toThrow(); // was: "Worker fk0 is not running"
+    expect(materialized).toBeDefined(); // materialized despite no resumeSessionId
+    expect(materialized!.sdkSessionId ?? null).toBeNull(); // no cross-provider handle
+    expect(materialized!.handoffFromProvider).toBe("claude"); // seed plumbing reaches the worker
+    expect(typeof materialized!.handoffSeed).toBe("string");
+    expect(sends).toContain("continue please");
+  });
+
+  it("rehydrate keeps a pending handoff worker resumable (idle), not orphaned, despite a null sdk_session_id", () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    // a handoff worker persisted before its first turn: worktree exists, NO sdk_session_id, marker set.
+    repos.createWorker({ id: "hw", sessionId: "home", repoPath: "/repo", label: "w", worktreePath: "/wt/hw", branch: "rookery/hw", provider: "codex" });
+    repos.setWorkerHandoffFrom("hw", "claude");
+    repos.setWorkerStatus("hw", "idle", true);
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt", exists: () => true });
+    fleet.rehydrate();
+    expect(fleet.status("hw")).toBe("idle"); // resumable, NOT orphaned
+    expect(repos.getWorker("hw")!.status).not.toBe("orphaned");
+  });
+
   it("fork() inherits the source worker's cost_budget_usd (mirror max_turns inheritance)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "home", cwd: "/x" });

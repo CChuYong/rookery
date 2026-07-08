@@ -155,12 +155,13 @@ export class FleetOrchestrator {
       // 'provisioning' is a worker the daemon died mid-spawn on (never got an sdk_session) → it falls to the orphaned branch
       // below, so it shows as a dead worker (diff/discard) instead of a stuck spinner.
       if (status === "running" || status === "idle" || status === "stopped" || status === "provisioning") {
-        // resume condition: a saved SDK session + the worktree actually exists. If either is missing it's a zombie →
+        // resume condition: a saved SDK session (OR a pending cross-provider handoff, which has no sdk_session_id
+        // until its first turn) + the worktree actually exists. If neither handle is present it's a zombie →
         // orphaned (diff/discard only). Resuming when the worktree is gone would advertise a dead worker as healthy.
-        if (row.sdk_session_id && this.exists(row.worktree_path)) {
+        if ((row.sdk_session_id || row.handoff_from_provider) && this.exists(row.worktree_path)) {
           // LAZY: don't start the SDK session, just mark it "resumable" → boot is light, and restored agents that go unused cost 0.
           // Actual resume happens on first send/await (materialize). To the user it appears idle (ready).
-          resumeSessionId = row.sdk_session_id;
+          resumeSessionId = row.sdk_session_id ?? undefined; // handoff worker: null here, but handoffFromProvider (set below) drives its materialize
           status = "idle";
           // also update DB to idle — fleet.list (UI) reads DB status, so without this the 'stopped'/'running' stamped at shutdown
           // would still show (in particular graceful shutdown makes fleet.close turn everything 'stopped', dropping every worker to STOP).
@@ -247,9 +248,11 @@ export class FleetOrchestrator {
       this.deps.repos.createWorker({ id: newId, sessionId: src.session_id, repoPath: src.repo_path, label, worktreePath, branch, base: src.base ?? undefined, provider });
       if (forkedUuid) this.deps.repos.setWorkerSdkSessionId(newId, forkedUuid);
       if (handoff) this.deps.repos.setWorkerHandoffFrom(newId, srcProvider);
-      // A handoff can override model/effort (dialog choice); a same-provider fork inherits the source's.
-      const model = handoff ? target!.model ?? undefined : src.model ?? undefined;
-      const effort = handoff ? target!.effort ?? undefined : src.effort ?? undefined;
+      // A dialog-chosen model/effort wins for BOTH paths (the Fork dialog lets you edit them even on a
+      // same-provider fork); otherwise a handoff falls back to the backend default and a same-provider fork
+      // inherits the source's.
+      const model = target?.model ?? (handoff ? undefined : src.model ?? undefined);
+      const effort = target?.effort ?? (handoff ? undefined : src.effort ?? undefined);
       if (model) this.deps.repos.setWorkerModel(newId, model);
       if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
       if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
@@ -466,7 +469,9 @@ export class FleetOrchestrator {
     // don't materialize during a shutdown drain — prevents a race where resume→consume writes to a closed DB (A2).
     // don't materialize a TERMINAL entry (e.g. a user-stopped lazy/rehydrated worker still holding resumeSessionId) —
     // otherwise send would silently resurrect it under bypassPermissions while the DB/list still show it stopped (split-brain).
-    if (!e.agent && e.resumeSessionId && !this.closing && !FleetOrchestrator.isTerminal(e.status)) this.materialize(id, e);
+    // A cross-provider handoff entry has NO resumeSessionId (no native handle crosses providers) — it materializes
+    // fresh and seeds its first turn instead, so the handoff marker is an equally valid materialize trigger.
+    if (!e.agent && (e.resumeSessionId || e.handoffFromProvider) && !this.closing && !FleetOrchestrator.isTerminal(e.status)) this.materialize(id, e);
     if (!e.agent) throw new Error(`Worker ${id} is not running (its session ended, likely a daemon restart).`);
     return e as Entry & { agent: WorkerLike };
   }

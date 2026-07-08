@@ -21,13 +21,18 @@ describe("buildHandoffSeed", () => {
     expect(out).toMatch(/older .*truncated/i);
   });
 
-  it("renders thinking/tool events compactly (best-effort, not perfect replay)", () => {
+  it("renders thinking/tool events compactly (best-effort, not perfect replay) — master AND worker tool shapes", () => {
     const out = buildHandoffSeed(
-      [{ type: "master.thinking", payload: { kind: "thinking", text: "pondering" } }, { type: "master.tool", payload: { kind: "tool", name: "Bash" } }],
+      [
+        { type: "master.thinking", payload: { kind: "thinking", text: "pondering" } },
+        { type: "master.tool", payload: { kind: "tool", name: "Bash" } },
+        { type: "tool_use", payload: { kind: "tool_use", name: "Edit" } }, // worker tool event shape
+      ],
       "claude",
     );
     expect(out).toContain("pondering");
     expect(out).toContain("Bash");
+    expect(out).toContain("Edit"); // worker tool name surfaced, not a bare "tool_use"
   });
 
   it("returns empty string for no events (caller skips injection)", () => {

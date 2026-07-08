@@ -11,7 +11,8 @@ function lineOf(e: { type: string; payload: unknown }): string {
   const p = (e.payload ?? {}) as { kind?: string; role?: string; content?: string; text?: string; name?: string };
   if (p.role && typeof p.content === "string") return `${p.role}: ${p.content}`;
   if (p.kind === "thinking" && typeof p.text === "string") return `assistant (thinking): ${p.text}`;
-  if (p.kind === "tool" || e.type.endsWith(".tool")) return `assistant (tool ${p.name ?? ""})`.trim();
+  // master tool events: kind "tool" / type "master.tool"; worker tool events: kind "tool_use" / type "tool_use".
+  if (p.kind === "tool" || p.kind === "tool_use" || e.type.endsWith(".tool") || e.type === "tool_use") return `assistant (tool ${p.name ?? ""})`.trim();
   if (typeof p.text === "string") return p.text;
   return e.type;
 }
