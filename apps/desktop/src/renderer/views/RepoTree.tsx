@@ -196,13 +196,12 @@ function RepoTreeImpl(p: {
             <div className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-[12.5px] font-medium text-fg-dim">{headerInner}</div>
           )}
           {opts.canAdd && (
-            // Stays in the layout + tab order (opacity, not display:none) so it's keyboard-reachable — the hover-only
-            // '+' was the sole GUI entry point for spawning a worker and was invisible to keyboard users (audit #3).
+            // Primary repo action: visible at rest, not gated behind row hover.
             <button
               onClick={() => p.onNewSub(key)}
               aria-label={t("repoTree.spawnWorker")}
               title={t("repoTree.spawnWorker")}
-              className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+              className="flex h-6 w-6 items-center justify-center rounded text-muted transition-colors hover:text-accent"
             >
               <Plus size={13} />
             </button>
@@ -212,7 +211,7 @@ function RepoTreeImpl(p: {
               onClick={() => setRemoveConfirm({ name: key })}
               aria-label={t("repoTree.removeRepo")}
               title={t("repoTree.removeRepo")}
-              className="flex h-6 w-6 items-center justify-center rounded text-muted opacity-0 transition-opacity hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+              className="flex h-6 w-6 items-center justify-center rounded text-muted transition-colors hover:text-fail"
             >
               <Trash2 size={12} />
             </button>

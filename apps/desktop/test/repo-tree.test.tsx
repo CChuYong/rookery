@@ -11,7 +11,7 @@ const worker = { id: "w1", label: "worker1", repoPath: "/code/app", status: "idl
 const fallbackWorker = { id: "w2", label: "app", repoPath: "/code/app", status: "idle", branch: "rookery/w2", model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null };
 
 describe("RepoTree repo-header affordances (audit #3, #19)", () => {
-  it("spawn (+) and remove (trash) buttons are focusable — not display:none — and expose their aria-labels", () => {
+  it("spawn (+) and remove (trash) buttons are always visible and expose their aria-labels", () => {
     render(
       <RepoTree
         repos={[repo] as never}
@@ -25,9 +25,13 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
     );
     const spawnBtn = screen.getByRole("button", { name: "워커 스폰…" });
     const removeBtn = screen.getByRole("button", { name: "레포 등록 해제" });
-    // Kept in the layout + tab order (opacity-based reveal), not display:none.
+    // These are primary repo actions, so they should not depend on hover/focus reveal.
     expect(spawnBtn.className).not.toMatch(/\bhidden\b/);
     expect(removeBtn.className).not.toMatch(/\bhidden\b/);
+    expect(spawnBtn.className).not.toMatch(/\bopacity-0\b/);
+    expect(removeBtn.className).not.toMatch(/\bopacity-0\b/);
+    expect(spawnBtn.className).not.toMatch(/\bgroup-hover:opacity-100\b/);
+    expect(removeBtn.className).not.toMatch(/\bgroup-hover:opacity-100\b/);
     expect(spawnBtn).not.toHaveAttribute("disabled");
     expect(removeBtn).not.toHaveAttribute("disabled");
   });
