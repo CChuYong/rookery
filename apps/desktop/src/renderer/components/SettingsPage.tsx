@@ -51,6 +51,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const [codexKeySaved, setCodexKeySaved] = useState(false);
   const models = useStore((s) => s.models); // live model list (initialized from the static fallback if none)
   const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text fallback for the defaults below
+  const codexAuthStatus = useStore((s) => s.codexAuthStatus); // codex backend auth readiness (codex.authStatus); null = still probing / probe failed → "checking"
 
   // Slack on/off toggle: the request is fire-and-forget from here, so between the click and the daemon's slack.status
   // event landing (prop change) the button showed no feedback at all (audit #53). `busy` covers that window; a fallback
@@ -405,6 +406,36 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 <h2 className="text-[13px] font-semibold">{t("settings.codexTitle")}</h2>
                 <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.codexDesc")}</p>
 
+                {/* Auth-readiness card — parity with the Claude sub-tab. codexAuthStatus == null → "checking"
+                    (don't render a confident "not authenticated" while the probe is still in flight). */}
+                {(() => {
+                  const a = codexAuthStatus;
+                  const checking = a == null;
+                  const method = a?.method ?? "none";
+                  const ready = a?.ready ?? false;
+                  const dotCls = checking || !ready ? "bg-stop" : method === "api-key" ? "bg-accent" : "bg-pr";
+                  const label = checking
+                    ? t("settings.checking")
+                    : method === "chatgpt"
+                      ? t("settings.codexMethodChatgpt")
+                      : method === "api-key"
+                        ? t("settings.codexMethodApiKey")
+                        : method === "bedrock"
+                          ? t("settings.codexMethodBedrock")
+                          : t("settings.codexMethodNone");
+                  const desc = ready ? t("settings.codexAuthReady") : t("settings.codexAuthNone");
+                  return (
+                    <div className="mt-3 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
+                        <span className="text-[13px] font-medium text-fg">{label}</span>
+                        {a?.hint && <span className="font-mono text-[11px] text-muted">{a.hint}</span>}
+                      </div>
+                      {!checking && <p className="mt-1 text-[11px] leading-relaxed text-muted">{desc}</p>}
+                    </div>
+                  );
+                })()}
+
                 <div className="mt-4 flex flex-col gap-3.5">
                   <Field label={t("settings.codexBin")} hint={t("settings.codexBinHint")}>
                     <Input value={f.codexBin ?? ""} placeholder="codex" onChange={(e) => setF({ ...f, codexBin: e.target.value })} />
@@ -447,9 +478,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   </Field>
                 </div>
 
-                {/* Unlike anthropicApiKey there is no auth-status probe for codex, so we can't show "currently
-                    set from a prior session" — the placeholder only flips to the saved note locally, right after
-                    this session's own save (same idiom the slack token fields use). */}
+                {/* The masked field can't show "set from a prior session" (the key is write-only), so the
+                    placeholder flips to a local saved note after this session's own save. The readiness card
+                    above IS the live "currently authenticated" signal (refetched after a save, see App.tsx). */}
                 <div className="mt-5 flex flex-col gap-3.5">
                   <Field label={t("settings.codexApiKey")} hint={t("settings.codexApiKeyHint")}>
                     <Input type="password" placeholder={codexKeySaved ? t("settings.secretSaved") : "sk-…"} value={codexKey} onChange={(e) => setCodexKey(e.target.value)} />

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { CoreEvent, WorkerEventData, SlackStatus } from "@daemon/core/events.js";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
 import type { SettingsValues } from "@daemon/core/settings.js";
-import type { IntegrationsStatus, WorkerRow, CodexModelInfo } from "@daemon/protocol/messages.js";
+import type { IntegrationsStatus, WorkerRow, CodexModelInfo, CodexAuthStatus } from "@daemon/protocol/messages.js";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import { emptyState, reduceEvent, applySubEvent, seedSessionLog } from "./reduce.js";
@@ -55,6 +55,8 @@ interface Store extends AppState {
   // means the 4 codex model/effort surfaces degrade to today's free-text input rather than guessing a stale list.
   codexModels: CodexModelInfo[] | null;
   setCodexModels: (codexModels: CodexModelInfo[] | null) => void;
+  codexAuthStatus: CodexAuthStatus | null; // codex backend auth readiness (codex.authStatus); null = not yet probed / probe failed → "unknown"
+  setCodexAuthStatus: (codexAuthStatus: CodexAuthStatus | null) => void;
   // Linear/GitHub integration connection status (on-demand pull). Used by the spawn dialog and the settings integrations section.
   integrations: IntegrationsStatus | null;
   setIntegrations: (i: IntegrationsStatus) => void;
@@ -161,6 +163,8 @@ export const useStore = create<Store>((set, get) => ({
   setModels: (models) => set({ models: models.length ? models : [...MODELS] }),
   codexModels: null,
   setCodexModels: (codexModels) => set({ codexModels }),
+  codexAuthStatus: null,
+  setCodexAuthStatus: (codexAuthStatus) => set({ codexAuthStatus }),
   integrations: null,
   setIntegrations: (integrations) => set({ integrations }),
   authStatus: null,

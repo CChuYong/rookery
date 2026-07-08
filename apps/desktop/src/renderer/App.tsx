@@ -461,6 +461,7 @@ export function App(): JSX.Element {
       void c.request({ type: "settings.get" }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => {});
       void c.request({ type: "models.list" }).then((r) => useStore.getState().setModels((r.models ?? []).map((m) => ({ id: m.id, label: m.displayName })))).catch(() => {});
       void c.request({ type: "codex.models.list" }).then((r) => useStore.getState().setCodexModels(r.models ?? null)).catch(() => {});
+      void c.request({ type: "codex.authStatus" }).then((r) => useStore.getState().setCodexAuthStatus(r.status)).catch(() => {});
       void c.request({ type: "integrations.status" }).then((r) => useStore.getState().setIntegrations({ github: r.github, linear: r.linear })).catch(() => {});
       void c.request({ type: "auth.status" }).then((r) => useStore.getState().setAuthStatus(r)).catch(() => {});
       void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true));
@@ -1047,10 +1048,11 @@ export function App(): JSX.Element {
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
             }}
             onSaveCodexKey={(key) => {
-              // Unlike anthropicApiKey there's no auth-status probe to refetch — codex has no live "currently
-              // active" indicator (SettingsPage's own local "saved" note is the only feedback, see its codex tab).
+              // Refetch the codex auth probe after saving — the new key provisions the redirected CODEX_HOME,
+              // so the Codex sub-tab's readiness card reflects the change (mirrors onSaveAnthropicKey).
               void client?.request({ type: "settings.set", settings: { codexApiKey: key } })
-                .then(() => toast.success(tRef.current("toast.keySaved")))
+                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "codex.authStatus" }); })
+                .then((r) => { if (r) useStore.getState().setCodexAuthStatus(r.status); })
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
             }}
           />
