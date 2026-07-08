@@ -1,5 +1,7 @@
 # Cross-provider fork (provider handoff) Implementation Plan
 
+> **STATUS: COMPLETE (T1–T8)** on branch `feat/codex-auth-probe` (stacked on the codex auth-probe, whose `codexAuthStatus` the Fork dialog's "Fork to Codex" gate consumes). TDD, commit per task. Root: typecheck clean + 935 tests. Desktop: typecheck clean + 919 tests. Not merged to main. T8 (desktop dialog) built by an Opus subagent, reviewed + gates re-run independently.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let a user fork a master session or worker onto the *other* agent backend ("continue this Claude conversation on Codex", and vice-versa), carrying full prior context.
