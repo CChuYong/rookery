@@ -1200,6 +1200,7 @@ export function App(): JSX.Element {
               name={sessionName}
               sessionId={s.activeSessionId}
               cwd={activeSess?.cwd}
+              provider={activeSess?.provider}
               readOnly={sessionReadOnly}
               running={!!(s.activeSessionId && s.running[s.activeSessionId])}
               termPageKey={termPageKey}
@@ -1219,6 +1220,7 @@ export function App(): JSX.Element {
               name={sessionName}
               sessionId={s.activeSessionId}
               cwd={activeSess?.cwd}
+              provider={activeSess?.provider}
               readOnly={sessionReadOnly}
               running={!!(s.activeSessionId && s.running[s.activeSessionId])}
               termPageKey={termPageKey}

@@ -2,6 +2,7 @@ import { memo, useRef, useState } from "react";
 import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "../components/ContextMenu.js";
+import { ProviderBadge } from "../components/StatusBadge.js";
 import { Collapse } from "../components/Collapse.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { baseName } from "../lib/path.js";
@@ -11,7 +12,7 @@ import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
 import type { Locale } from "../i18n/types.js";
 
-type Session = { id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean };
+type Session = { id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean; provider?: string };
 type SourceKind = "all" | "ui" | "slack" | "automation";
 export type SourceFilter = { source: SourceKind; automationId?: string | null };
 type AutomationLite = { id: string; name: string };
@@ -223,7 +224,9 @@ function SessionsImpl(p: {
                 folder-name labels (audit #46, secondary-text scope; auto-title from the first message is deferred). */}
             {fallbackNamed && <span className="truncate text-[10.5px] leading-tight text-muted/70">{activityLabel(new Date(s.lastActivity).getTime(), Date.now(), t, locale)}</span>}
           </span>
-          {/* right-side indicators (badge/unread) yield space to the action buttons on hover. The badge only shows in 'All' (tabs already indicate the source). */}
+          {/* right-side indicators (badge/unread) yield space to the action buttons on hover. Provider badge shows in every
+              view (codex-only; a mixed claude/codex list must be scannable at a glance); the origin badge only in 'All'. */}
+          {s.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><ProviderBadge provider={s.provider} /></span>}
           {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><OriginBadge origin={s.origin} /></span>}
           {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0" />}
         </button>

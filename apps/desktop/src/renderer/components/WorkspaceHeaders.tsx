@@ -101,8 +101,8 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
 }
 
 // Master (session) view header: session name + slack badge + #id + running chip + (toggles/stats).
-export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, dock }: {
-  name: string; sessionId: string | null; cwd?: string; readOnly: boolean; running: boolean;
+export function SessionHeader({ name, sessionId, cwd, provider, readOnly, running, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, dock }: {
+  name: string; sessionId: string | null; cwd?: string; provider?: string; readOnly: boolean; running: boolean;
   termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void; dock?: boolean;
 }): JSX.Element {
   const t = useT();
@@ -112,6 +112,7 @@ export function SessionHeader({ name, sessionId, cwd, readOnly, running, termPag
       <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" title={name}>{name}</span>
       {readOnly && <span className="shrink-0 rounded border border-nochg/30 bg-nochg/12 px-1.5 py-0.5 font-mono text-[10px] uppercase text-nochg">{t("workspaceHeaders.slackReadOnly")}</span>}
       {sessionId && <span className="shrink-0 font-mono text-[11px] text-muted/80">#{sessionId.slice(-6)}</span>}
+      <ProviderBadge provider={provider} />
       {/* Master turn in progress = a "working" pulse chip (same signature as the worker StatusBadge running state) */}
       {running && (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-run/25 bg-run/12 px-2 py-0.5 text-[10px] font-medium text-run">

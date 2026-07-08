@@ -4,6 +4,16 @@ import { Sessions } from "../src/renderer/views/Sessions.js";
 
 const mk = (over: Record<string, unknown>) => ({ id: "s1", cwd: "/code/app", status: "active", lastActivity: new Date().toISOString(), origin: "ui", ...over });
 
+describe("Sessions provider badge (interop QW1)", () => {
+  it("shows a Codex badge on a codex-provider session row, none on a claude one", () => {
+    const { unmount } = render(<Sessions sessions={[mk({ id: "s1", label: "cxsess", provider: "codex" })] as never} activeId={null} onSelect={() => {}} />);
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    unmount();
+    render(<Sessions sessions={[mk({ id: "s2", label: "clsess" })] as never} activeId={null} onSelect={() => {}} />);
+    expect(screen.queryByText("Codex")).toBeNull();
+  });
+});
+
 describe("Sessions context menu + archive", () => {
   it("right-click → rename/archive/delete; archive calls onArchive; delete confirms then onDelete", () => {
     const onArchive = vi.fn();

@@ -44,6 +44,17 @@ describe("WorkerHeader provider badge (Codex)", () => {
   });
 });
 
+describe("SessionHeader provider badge (Codex) — interop QW1", () => {
+  it("renders a 'Codex' badge when the master session's provider is codex", () => {
+    render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" provider="codex" />);
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+  });
+  it("renders no badge for a claude/absent-provider session", () => {
+    render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" />);
+    expect(screen.queryByText("Codex")).toBeNull();
+  });
+});
+
 describe("WorkerHeader terminology (reserved-word contract)", () => {
   beforeEach(() => { usePrefsStore.setState({ localePref: "system" }); });
   it("labels a worker 'Worker', never the reserved 'Agent'", () => {
