@@ -105,6 +105,8 @@ export default {
   "settings.codexMethodNone": "Not authenticated",
   "settings.codexAuthReady": "Authenticated — Codex masters and workers can run.",
   "settings.codexAuthNone": "No authentication detected. Run codex login in a terminal, or set an API key below.",
+  "settings.codexAuthUnavailable": "Couldn't check",
+  "settings.codexAuthUnavailableDesc": "Couldn't determine the Codex auth status. Make sure codex is installed and the binary path above is correct.",
   "settings.codexDesc": "Used when a worker is spawned with Codex chosen as its backend.",
   "settings.codexBin": "Codex binary path",
   "settings.codexBinHint": "Desktop-spawned daemons often lack ~/.local/bin on PATH — use an absolute path.",

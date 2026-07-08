@@ -461,7 +461,7 @@ export function App(): JSX.Element {
       void c.request({ type: "settings.get" }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => {});
       void c.request({ type: "models.list" }).then((r) => useStore.getState().setModels((r.models ?? []).map((m) => ({ id: m.id, label: m.displayName })))).catch(() => {});
       void c.request({ type: "codex.models.list" }).then((r) => useStore.getState().setCodexModels(r.models ?? null)).catch(() => {});
-      void c.request({ type: "codex.authStatus" }).then((r) => useStore.getState().setCodexAuthStatus(r.status)).catch(() => {});
+      void c.request({ type: "codex.authStatus" }).then((r) => useStore.getState().setCodexAuthStatus(r.status ?? "unavailable")).catch(() => useStore.getState().setCodexAuthStatus("unavailable"));
       void c.request({ type: "integrations.status" }).then((r) => useStore.getState().setIntegrations({ github: r.github, linear: r.linear })).catch(() => {});
       void c.request({ type: "auth.status" }).then((r) => useStore.getState().setAuthStatus(r)).catch(() => {});
       void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true));
@@ -1052,7 +1052,7 @@ export function App(): JSX.Element {
               // so the Codex sub-tab's readiness card reflects the change (mirrors onSaveAnthropicKey).
               void client?.request({ type: "settings.set", settings: { codexApiKey: key } })
                 .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "codex.authStatus" }); })
-                .then((r) => { if (r) useStore.getState().setCodexAuthStatus(r.status); })
+                .then((r) => { if (r) useStore.getState().setCodexAuthStatus(r.status ?? "unavailable"); })
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
             }}
           />

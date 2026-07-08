@@ -55,8 +55,12 @@ interface Store extends AppState {
   // means the 4 codex model/effort surfaces degrade to today's free-text input rather than guessing a stale list.
   codexModels: CodexModelInfo[] | null;
   setCodexModels: (codexModels: CodexModelInfo[] | null) => void;
-  codexAuthStatus: CodexAuthStatus | null; // codex backend auth readiness (codex.authStatus); null = not yet probed / probe failed → "unknown"
-  setCodexAuthStatus: (codexAuthStatus: CodexAuthStatus | null) => void;
+  // codex backend auth readiness (codex.authStatus). Tri-state: null = not probed yet (transient "checking");
+  // "unavailable" = the probe ran but couldn't determine (codex missing/broken — distinct from a stuck spinner,
+  // since unlike Claude's always-resolving probe, codex's returns null when the app-server can't be spawned);
+  // object = a real status. A not-authed codex still resolves to { method:"none" }, NOT "unavailable".
+  codexAuthStatus: CodexAuthStatus | "unavailable" | null;
+  setCodexAuthStatus: (codexAuthStatus: CodexAuthStatus | "unavailable" | null) => void;
   // Linear/GitHub integration connection status (on-demand pull). Used by the spawn dialog and the settings integrations section.
   integrations: IntegrationsStatus | null;
   setIntegrations: (i: IntegrationsStatus) => void;

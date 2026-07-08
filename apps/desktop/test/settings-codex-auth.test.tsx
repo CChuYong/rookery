@@ -43,6 +43,15 @@ describe("SettingsPage — Codex auth-readiness card (auth probe)", () => {
     expect(screen.getByText(/Codex 마스터\/워커를 실행/)).toBeInTheDocument();
   });
 
+  it("distinguishes a failed probe ('unavailable') from 'not authenticated' — points at the binary path, not codex login", () => {
+    useStore.getState().setCodexAuthStatus("unavailable");
+    render(<SettingsPage {...base} authStatus={null} />);
+    openCodex();
+    expect(screen.getByText("확인 불가")).toBeInTheDocument();
+    expect(screen.getByText(/바이너리 경로가 맞는지/)).toBeInTheDocument();
+    expect(screen.queryByText("인증 없음")).toBeNull(); // NOT the not-authenticated state
+  });
+
   it("renders 'not authenticated' with the login guidance when the probe reports none", () => {
     useStore.getState().setCodexAuthStatus({ method: "none", ready: false, hint: null });
     render(<SettingsPage {...base} authStatus={null} />);

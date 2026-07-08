@@ -106,6 +106,8 @@ export default {
   "settings.codexMethodNone": "인증 없음",
   "settings.codexAuthReady": "인증됨 — Codex 마스터/워커를 실행할 수 있어요.",
   "settings.codexAuthNone": "인증이 감지되지 않았어요. 터미널에서 codex login을 실행하거나 아래에 API 키를 설정하세요.",
+  "settings.codexAuthUnavailable": "확인 불가",
+  "settings.codexAuthUnavailableDesc": "Codex 인증 상태를 확인할 수 없어요. codex가 설치돼 있고 위의 바이너리 경로가 맞는지 확인하세요.",
   "settings.codexBin": "Codex 바이너리 경로",
   "settings.codexBinHint": "데스크톱 앱이 띄운 데몬 프로세스는 흔히 ~/.local/bin이 PATH에 없어요 — 절대경로를 입력하세요.",
   "settings.codexWorkerModel": "Codex 워커 기본 모델",

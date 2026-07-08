@@ -410,26 +410,30 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     (don't render a confident "not authenticated" while the probe is still in flight). */}
                 {(() => {
                   const a = codexAuthStatus;
-                  const checking = a == null;
-                  const method = a?.method ?? "none";
-                  const ready = a?.ready ?? false;
-                  const dotCls = checking || !ready ? "bg-stop" : method === "api-key" ? "bg-accent" : "bg-pr";
+                  const checking = a == null; // still probing (transient)
+                  const unavailable = a === "unavailable"; // probe couldn't run (codex missing/broken) — not "not authenticated"
+                  const st = checking || unavailable ? null : a;
+                  const method = st?.method ?? "none";
+                  const ready = st?.ready ?? false;
+                  const dotCls = checking || unavailable || !ready ? "bg-stop" : method === "api-key" ? "bg-accent" : "bg-pr";
                   const label = checking
                     ? t("settings.checking")
-                    : method === "chatgpt"
-                      ? t("settings.codexMethodChatgpt")
-                      : method === "api-key"
-                        ? t("settings.codexMethodApiKey")
-                        : method === "bedrock"
-                          ? t("settings.codexMethodBedrock")
-                          : t("settings.codexMethodNone");
-                  const desc = ready ? t("settings.codexAuthReady") : t("settings.codexAuthNone");
+                    : unavailable
+                      ? t("settings.codexAuthUnavailable")
+                      : method === "chatgpt"
+                        ? t("settings.codexMethodChatgpt")
+                        : method === "api-key"
+                          ? t("settings.codexMethodApiKey")
+                          : method === "bedrock"
+                            ? t("settings.codexMethodBedrock")
+                            : t("settings.codexMethodNone");
+                  const desc = unavailable ? t("settings.codexAuthUnavailableDesc") : ready ? t("settings.codexAuthReady") : t("settings.codexAuthNone");
                   return (
                     <div className="mt-3 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         <span className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
                         <span className="text-[13px] font-medium text-fg">{label}</span>
-                        {a?.hint && <span className="font-mono text-[11px] text-muted">{a.hint}</span>}
+                        {st?.hint && <span className="font-mono text-[11px] text-muted">{st.hint}</span>}
                       </div>
                       {!checking && <p className="mt-1 text-[11px] leading-relaxed text-muted">{desc}</p>}
                     </div>
