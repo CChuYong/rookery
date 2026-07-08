@@ -20,6 +20,7 @@ export interface FakeCodexServerOpts {
   dieAfterTurns?: number;    // simulate process death after N completed turns
   silentForkHang?: boolean; // thread/fork requests get NO response at all (fork-timeout test)
   requiresOpenaiAuth?: boolean; // account/read answer for in-app apiKey provisioning tests (default false)
+  account?: { type: string; email?: string | null; planType?: string } | null; // account/read's `account` object (codex-auth-provider.ts). After account/login/start the fake flips to an authed apiKey account (mirrors provisioning).
   silentInterrupt?: boolean; // turn/interrupt is ack'd (so interrupt() itself doesn't hang) but NEVER followed by
   // turn/completed — leaves the turn wedged so the watchdog's grace-window kill path can be exercised
   // (P2.5 Track B; the default behavior below auto-completes on interrupt, which is right for the
@@ -62,6 +63,7 @@ export function fakeCodexSpawn(
     let exitCb: (i: { code: number | null; message?: string }) => void = () => {};
     let killed = false;
     let turnCount = 0;
+    let provisioned = false; // set once account/login/start is called → subsequent account/read reports an authed apiKey account (mirrors real provisioning)
     let currentTurnId: string | null = null; // the most recently turn/start-ed turn's id — turn/interrupt targets THIS, not a recomputed/advanced counter
     const send = (o: unknown) => { if (!killed) queueMicrotask(() => { if (!killed) lineCb(JSON.stringify(o)); }); };
     const transport: CodexTransport = {
@@ -163,8 +165,13 @@ export function fakeCodexSpawn(
           }
           return;
         }
-        if (msg.method === "account/read") { send({ id: msg.id, result: { requiresOpenaiAuth: opts.requiresOpenaiAuth ?? false } }); return; }
-        if (msg.method === "account/login/start") { send({ id: msg.id, result: {} }); return; }
+        if (msg.method === "account/read") {
+          const account = provisioned ? { type: "apiKey" } : (opts.account ?? null);
+          const requiresOpenaiAuth = provisioned ? false : (opts.requiresOpenaiAuth ?? false);
+          send({ id: msg.id, result: { account, requiresOpenaiAuth } });
+          return;
+        }
+        if (msg.method === "account/login/start") { provisioned = true; send({ id: msg.id, result: {} }); return; }
         // any other request: generic empty result
         send({ id: msg.id, result: {} });
       },
