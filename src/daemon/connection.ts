@@ -168,7 +168,7 @@ export class Connection {
       case "session.fork": {
         // Fork a master session → a new session with the original's SDK context + copied transcript. Replies like session.create so the client navigates to it.
         try {
-          const session = await this.sessions.fork(msg.sessionId);
+          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider });
           this.subscribe(session.id);
           this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         } catch (err) {
@@ -391,7 +391,7 @@ export class Connection {
       case "worker.fork": {
         // Fork a worker → a new worker carrying the source's SDK context + full worktree state + transcript. Replies like fleet.spawn so the client navigates to it.
         try {
-          const { id } = await this.fleet.fork(msg.id);
+          const { id } = await this.fleet.fork(msg.id, { provider: msg.provider, model: msg.model, effort: msg.effort });
           this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
         } catch (err) {
           this.reply({ type: "error", message: err instanceof Error ? err.message : String(err), reqId: msg.reqId });

@@ -51,6 +51,7 @@ type FleetOverride = {
   transcript?: (id: string, sinceSeq?: number) => Array<{ seq: number; type: string; payload: unknown }>;
   send?: (id: string, text: string) => void;
   spawn?: (input: { homeSessionId: string; repoPath: string; label: string; task: string; base?: string; permissionMode?: string; costBudgetUsd?: number }) => { id: string };
+  fork?: (id: string, target?: { provider?: string; model?: string; effort?: string }) => Promise<{ id: string }>;
 };
 
 function makeConn(sent: any[], overrides: { fleet?: FleetOverride }): Connection {
@@ -268,6 +269,29 @@ describe("Connection", () => {
     await conn.handleRaw(JSON.stringify({ type: "codex.models.list", reqId: "cx2" }));
     const msg = parsed(sent).find((m) => m.type === "codex.models.result");
     expect(msg!.models).toEqual([{ id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true }]);
+  });
+
+  it("session.fork forwards the target provider → a cross-provider handoff session (provider + marker set)", async () => {
+    const { conn, sent, repos } = setup();
+    repos.createSession({ id: "src", cwd: "/x", provider: "claude" });
+    repos.addSessionEvent({ sessionId: "src", seq: 0, type: "master.message", payloadJson: JSON.stringify({ kind: "message", role: "user", content: "hi" }) });
+    await conn.handleRaw(JSON.stringify({ type: "session.fork", sessionId: "src", reqId: "sf", provider: "codex" }));
+    const created = parsed(sent).find((m) => m.type === "session.created");
+    expect(created).toBeTruthy();
+    const row = repos.getSession(created!.sessionId)!;
+    expect(row.provider).toBe("codex");
+    expect(row.handoff_from_provider).toBe("claude");
+  });
+
+  it("worker.fork forwards provider/model/effort to fleet.fork as the target", async () => {
+    const calls: Array<{ id: string; target?: unknown }> = [];
+    const sent: string[] = [];
+    const conn = makeConn(sent, { fleet: { fork: async (id, target) => { calls.push({ id, target }); return { id: "nw" }; } } });
+    await conn.handleRaw(JSON.stringify({ type: "worker.fork", reqId: "wf", id: "src", provider: "codex", model: "gpt-5.5", effort: "high" }));
+    expect(calls[0]!.target).toEqual({ provider: "codex", model: "gpt-5.5", effort: "high" });
+    // makeConn's socket pushes already-parsed objects (not JSON strings) into `sent`.
+    const res = (sent as unknown as Array<Record<string, unknown>>).find((m) => m.type === "fleet.spawn.result");
+    expect(res!.id).toBe("nw");
   });
 
   it("codex.authStatus replies null when no provider is injected", async () => {

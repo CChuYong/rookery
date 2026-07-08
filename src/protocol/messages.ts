@@ -44,7 +44,10 @@ const automationInputSchema = z.object({
 
 export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.create"), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
-  z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional() }),
+  // provider absent = same-provider native fork (backward compatible). provider set & different = cross-provider
+  // handoff (docs/2026-07-08-cross-provider-fork-design.md). Master model/effort are a client-side per-session
+  // override applied after the fork (no session column), so they are not carried here.
+  z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
   z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
@@ -93,7 +96,9 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.interrupt"), id: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("worker.checkpoints"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("worker.restore"), reqId: z.string(), id: z.string(), seq: z.number() }),
-  z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string() }),
+  // provider set & different from the source = cross-provider handoff; workers persist model/effort (columns),
+  // so those ride along here (unlike session.fork). Absent provider = same-provider native fork.
+  z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string(), provider: z.enum(["claude", "codex"]).optional(), model: z.string().optional(), effort: z.string().optional() }),
   z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
   // Slash command/skill candidates. If workerId is given, probe within that live session; otherwise probe by cwd.
   z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
