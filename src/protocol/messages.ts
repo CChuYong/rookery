@@ -100,6 +100,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
   z.object({ type: z.literal("models.list"), reqId: z.string() }),
   z.object({ type: z.literal("codex.models.list"), reqId: z.string() }),
+  z.object({ type: z.literal("codex.authStatus"), reqId: z.string() }),
   z.object({ type: z.literal("settings.get"), reqId: z.string() }),
   z.object({
     type: z.literal("settings.set"),
@@ -192,6 +193,14 @@ export interface CodexModelInfo {
   isDefault: boolean;
 }
 
+// Codex backend auth-readiness — structurally identical to core/codex-auth-provider.ts's CodexAuthStatus,
+// re-declared here (not imported) for the same transport-agnostic reason as CodexModelInfo above.
+export interface CodexAuthStatus {
+  method: "api-key" | "chatgpt" | "bedrock" | "none";
+  ready: boolean;
+  hint: string | null;
+}
+
 export type ServerMessage =
   | { type: "session.created"; sessionId: string; cwd: string; reqId?: string }
   | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string }>; reqId?: string }
@@ -215,6 +224,7 @@ export type ServerMessage =
   | { type: "usage.result"; reqId: string; usage: UsageSnapshot }
   | { type: "models.result"; reqId: string; models: Array<{ id: string; displayName: string }> }
   | { type: "codex.models.result"; reqId: string; models: CodexModelInfo[] | null }
+  | { type: "codex.authStatus.result"; reqId: string; status: CodexAuthStatus | null }
   | { type: "commands.result"; reqId: string; commands: SlashCommandInfo[] }
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
@@ -267,6 +277,7 @@ export interface RequestResultMap {
   "usage.get": Extract<ServerMessage, { type: "usage.result" }>;
   "models.list": Extract<ServerMessage, { type: "models.result" }>;
   "codex.models.list": Extract<ServerMessage, { type: "codex.models.result" }>;
+  "codex.authStatus": Extract<ServerMessage, { type: "codex.authStatus.result" }>;
   "commands.list": Extract<ServerMessage, { type: "commands.result" }>;
   "settings.get": Extract<ServerMessage, { type: "settings.result" }>;
   "settings.set": Extract<ServerMessage, { type: "settings.result" }>;

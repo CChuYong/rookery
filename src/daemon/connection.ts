@@ -22,7 +22,7 @@ import type { SlackController } from "../slack/controller.js";
 import type { ModelInfo } from "../core/models-provider.js";
 import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
-import type { CodexModelInfo } from "../protocol/messages.js";
+import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
 
 export interface UsageProvider {
   snapshot(): UsageSnapshot;
@@ -34,6 +34,10 @@ export interface ModelsProvider {
 
 export interface CodexModelsProvider {
   list(): Promise<CodexModelInfo[] | null>; // Available Codex models (app-server model/list catalog). null = couldn't fetch → desktop free-text fallback.
+}
+
+export interface CodexAuthProvider {
+  status(): Promise<CodexAuthStatus | null>; // Codex backend auth readiness (app-server account/read). null = couldn't probe → desktop shows "unknown".
 }
 
 export interface SettingsProvider {
@@ -103,6 +107,7 @@ export class Connection {
     private readonly automations?: AutomationProvider,
     private readonly resolveSlackRefs?: SlackRefResolverFn,
     private readonly codexModels?: CodexModelsProvider,
+    private readonly codexAuth?: CodexAuthProvider,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -465,6 +470,12 @@ export class Connection {
         // null (no provider injected, or the fetch failed) → desktop degrades to free-text (no static fallback here — see codex-models-provider.ts).
         const models = (await this.codexModels?.list()) ?? null;
         this.reply({ type: "codex.models.result", reqId: msg.reqId, models });
+        return;
+      }
+      case "codex.authStatus": {
+        // null (no provider injected, or the probe failed/timed out) → desktop shows "unknown" (see codex-auth-provider.ts).
+        const status = (await this.codexAuth?.status()) ?? null;
+        this.reply({ type: "codex.authStatus.result", reqId: msg.reqId, status });
         return;
       }
       case "settings.get": {

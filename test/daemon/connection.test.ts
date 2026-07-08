@@ -270,6 +270,31 @@ describe("Connection", () => {
     expect(msg!.models).toEqual([{ id: "gpt-5.5", displayName: "GPT-5.5", defaultEffort: "xhigh", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: true }]);
   });
 
+  it("codex.authStatus replies null when no provider is injected", async () => {
+    const { conn, sent } = setup();
+    await conn.handleRaw(JSON.stringify({ type: "codex.authStatus", reqId: "ca1" }));
+    const msg = parsed(sent).find((m) => m.type === "codex.authStatus.result");
+    expect(msg).toBeTruthy();
+    expect(msg!.reqId).toBe("ca1");
+    expect(msg!.status).toBeNull();
+  });
+
+  it("codex.authStatus returns the injected provider's status", async () => {
+    const sent: string[] = [];
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet }, () => `s${n++}`);
+    const socket: ClientSocket = { send: (d) => sent.push(d) };
+    const codexAuth = { status: async () => ({ method: "chatgpt" as const, ready: true, hint: "u@x.io · plus" }) };
+    const conn = new Connection(socket, sm, bus, fleet, repos, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, codexAuth);
+    await conn.handleRaw(JSON.stringify({ type: "codex.authStatus", reqId: "ca2" }));
+    const msg = parsed(sent).find((m) => m.type === "codex.authStatus.result");
+    expect(msg!.status).toEqual({ method: "chatgpt", ready: true, hint: "u@x.io · plus" });
+  });
+
   it("repos.register rejects an unsafe base ref (.. range), matching the MCP tool's isSafeGitRef gate", async () => {
     const { conn, sent } = setup();
     await conn.handleRaw(JSON.stringify({ type: "repos.register", reqId: "rr1", name: "app", path: "/code/app", description: "d", base: "main..HEAD" }));
