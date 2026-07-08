@@ -10,6 +10,8 @@ export default {
   "onboarding.workerDesc": "마스터가 띄우는 일꾼들. 각자 격리된 worktree에서 독립적으로 작업해요.",
   "onboarding.memory": "메모리",
   "onboarding.memoryDesc": "대화와 결정을 기억해 다음 작업에 활용해요.",
+  "onboarding.backends": "백엔드",
+  "onboarding.backendsDesc": "세션·워커·자동화마다 Claude 또는 Codex를 골라 실행해요.",
   "onboarding.skip": "건너뛰기",
   "onboarding.back": "이전",
   "onboarding.next": "다음",

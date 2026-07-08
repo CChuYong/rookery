@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import { Sparkles, Bot, Users, Brain, ArrowRight } from "lucide-react";
+import { Sparkles, Bot, Users, Brain, Boxes, ArrowRight } from "lucide-react";
 import { useT } from "../i18n/provider.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
@@ -57,6 +57,7 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
               <ConceptRow icon={<Bot size={16} />} title={t("onboarding.master")} desc={t("onboarding.masterDesc")} />
               <ConceptRow icon={<Users size={16} />} title={t("onboarding.worker")} desc={t("onboarding.workerDesc")} />
               <ConceptRow icon={<Brain size={16} />} title={t("onboarding.memory")} desc={t("onboarding.memoryDesc")} />
+              <ConceptRow icon={<Boxes size={16} />} title={t("onboarding.backends")} desc={t("onboarding.backendsDesc")} />
             </div>
           </div>
         )}

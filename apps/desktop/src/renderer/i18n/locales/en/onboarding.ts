@@ -10,6 +10,8 @@ export default {
   "onboarding.workerDesc": "Workers the master spawns — each works independently in an isolated worktree.",
   "onboarding.memory": "Memory",
   "onboarding.memoryDesc": "Remembers conversations and decisions to use in later work.",
+  "onboarding.backends": "Backends",
+  "onboarding.backendsDesc": "Run each session, worker, or automation on Claude or Codex — your pick.",
   "onboarding.skip": "Skip",
   "onboarding.back": "Back",
   "onboarding.next": "Next",

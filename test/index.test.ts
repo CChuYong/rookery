@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseArgs, resolveEnvFilePath, formatProcessError } from "../src/index.js";
+import { parseArgs, resolveEnvFilePath, formatProcessError, formatUsage } from "../src/index.js";
+
+describe("formatUsage (CLI --help)", () => {
+  it("documents the --provider claude|codex flag and the daemon command (interop QW7)", () => {
+    const u = formatUsage();
+    expect(u).toContain("--provider");
+    expect(u).toContain("codex");
+    expect(u).toContain("daemon");
+  });
+});
 
 describe("parseArgs", () => {
   it("defaults to cli", () => {

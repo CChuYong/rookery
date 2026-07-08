@@ -32,6 +32,12 @@ describe("OnboardingModal", () => {
     expect(skip).not.toBeDisabled();
   });
 
+  it("(f) the concept step introduces the Backends (Claude/Codex) concept (interop QW4)", () => {
+    render(<OnboardingModal onFinish={() => Promise.resolve()} />);
+    fireEvent.click(screen.getByRole("button", { name: /다음/ })); // advance to the concept step
+    expect(screen.getByText("백엔드")).toBeInTheDocument(); // onboarding.backends (ko)
+  });
+
   it("(e) a rejecting onFinish (Get started) shows the inline error and re-enables the button (audit #7)", async () => {
     const onFinish = vi.fn(() => Promise.reject(new Error("boom")));
     render(<OnboardingModal onFinish={onFinish} />);

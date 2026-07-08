@@ -103,7 +103,27 @@ async function ensureDaemon(host: string, port: number, home: string): Promise<v
   throw new Error(`daemon did not become healthy in time — see ${logPath}`);
 }
 
+// CLI usage text (interop QW7) — documents the `--provider` flag so switching the CLI-created session's
+// backend is self-discoverable instead of undocumented. Exported for a direct unit test.
+export function formatUsage(): string {
+  return [
+    "rookery — orchestrator daemon + thin CLI client",
+    "",
+    "Usage:",
+    "  rookery [--provider <claude|codex>]   Start the CLI (auto-starts a daemon if none is running)",
+    "  rookery daemon                        Run the daemon in the foreground",
+    "",
+    "Options:",
+    "  --provider <claude|codex>             Agent backend for the CLI-created master session (default: claude)",
+    "  -h, --help                            Show this help",
+  ].join("\n");
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(formatUsage() + "\n");
+    return;
+  }
   const { command, provider } = parseArgs(argv);
   installProcessGuards(); // keep a stray rejection/exception from killing the resident daemon (log-then-survive)
   loadEnvFileIfPresent(); // apply .env before loading config (consistent across CLI/daemon/desktop paths, CLI-ENVFILE)
