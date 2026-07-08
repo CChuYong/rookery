@@ -477,7 +477,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     )}
                   </Field>
                   <Field label={t("settings.codexTurnIdleTimeoutMs")} hint={t("settings.codexTurnIdleTimeoutMsHint")}>
-                    <Input type="number" value={f.codexTurnIdleTimeoutMs ?? ""} placeholder="120000" onChange={(e) => setF({ ...f, codexTurnIdleTimeoutMs: e.target.value })} />
+                    <Input type="number" value={f.codexTurnIdleTimeoutMs ?? ""} placeholder="0" onChange={(e) => setF({ ...f, codexTurnIdleTimeoutMs: e.target.value })} />
                   </Field>
                   <Field label={t("settings.codexHandshakeTimeoutMs")} hint={t("settings.codexHandshakeTimeoutMsHint")}>
                     <Input type="number" value={f.codexHandshakeTimeoutMs ?? ""} placeholder="30000" onChange={(e) => setF({ ...f, codexHandshakeTimeoutMs: e.target.value })} />

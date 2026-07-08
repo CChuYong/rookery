@@ -16,8 +16,8 @@ export const DEFAULT_CODEX_MASTER_MODEL = "gpt-5.5";
 export const DEFAULT_CODEX_BIN = "codex";
 // Codex per-turn inactivity watchdog default (P2.5 Track B, settings-only — mirrors
 // DEFAULT_USAGE_REFRESH_MS's shape: a raw string in the settings table/echoed SettingsValues, ""
-// meaning "use the default"). 0 (or a non-positive parse) disables the watchdog entirely.
-export const DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS = 120000;
+// meaning "use the default"). Default off; users who want the watchdog can opt in with a positive ms value.
+export const DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS = 0;
 // Codex pre-turn handshake+thread-start timeout default (P3-remaining Track A — a child wedged
 // during openClient (spawn+initialize+provisioning) or startOrResumeThread never trips the
 // per-turn idle watchdog above, since that only arms AFTER turn/start's response). Mirrors
@@ -36,7 +36,7 @@ export interface SettingsValues {
   codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-5.5".
   codexMasterModel: string; // codex master default model (settings-only, no env/config fallback). default "gpt-5.5".
   codexBin: string; // codex CLI binary/path used to spawn `codex app-server` (settings-only). default "codex".
-  codexTurnIdleTimeoutMs: string; // per-turn codex watchdog inactivity timeout, ms as a raw string (settings-only). 0 disables. default "120000".
+  codexTurnIdleTimeoutMs: string; // per-turn codex watchdog inactivity timeout, ms as a raw string (settings-only). 0 disables. default "0".
   codexHandshakeTimeoutMs: string; // pre-turn codex handshake+thread-start timeout, ms as a raw string (settings-only). 0 disables. default "30000".
   slackCwd: string; // cwd for Slack-originated sessions (settings-only, defaults to process.cwd())
   slackAllowedUsers: string; // user ids allowed to get responses (comma-separated, settings-only)

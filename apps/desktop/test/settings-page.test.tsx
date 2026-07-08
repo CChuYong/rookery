@@ -5,7 +5,7 @@ import { useStore } from "../src/renderer/store/store.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 const base = {
-  settings: { masterName: "rookery", masterModel: "m", workerModel: "w", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "x", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex", codexTurnIdleTimeoutMs: "120000", codexHandshakeTimeoutMs: "30000", slackProvider: "claude", workerCostBudgetUsd: "" },
+  settings: { masterName: "rookery", masterModel: "m", workerModel: "w", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "x", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex", codexTurnIdleTimeoutMs: "0", codexHandshakeTimeoutMs: "30000", slackProvider: "claude", workerCostBudgetUsd: "" },
   onSave: () => {},
   onClose: () => {},
   slack: "off" as const,
@@ -122,7 +122,7 @@ describe("SettingsPage Codex tab", () => {
   it("shows the codexTurnIdleTimeoutMs and codexHandshakeTimeoutMs fields with values from settings", () => {
     render(<SettingsPage {...base} />);
     fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
-    expect(screen.getByDisplayValue("120000")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("0")).toBeInTheDocument();
     expect(screen.getByDisplayValue("30000")).toBeInTheDocument();
   });
 
