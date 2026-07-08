@@ -138,18 +138,38 @@ export class SessionManager {
 
   // Fork a master session: copy its SDK conversation into a new branch + duplicate its transcript, so the fork carries
   // full context and shows the same history, then diverges from the next turn. The original is untouched.
-  async fork(sessionId: string): Promise<Session> {
+  async fork(sessionId: string, target?: { provider?: string }): Promise<Session> {
     const row = this.deps.repos.getSession(sessionId);
     if (!row) throw new Error(`unknown session: ${sessionId}`);
-    if (!row.sdk_session_id) throw new Error("this session has no completed turn yet — nothing to fork");
-    if (!this.deps.forkSession) throw new Error("session forking is not available");
+    const srcProvider = row.provider || "claude";
     const label = row.label?.trim() || row.cwd.split(/[\\/]/).filter(Boolean).pop() || sessionId;
-    const forkLabel = `${label} (fork)`;
-    const provider = row.provider || "claude";
     // P3 Track A: generate the new session id FIRST — the codex fork router (server.ts) needs it up
     // front to seed the new session's per-session CODEX_HOME from the source's rollouts (see
     // codex-home.ts seedCodexHomeFromSource) BEFORE that new session's row/master even exist.
     const id = this.idgen();
+
+    // Cross-provider handoff: no native resume handle crosses providers, so start a FRESH target session,
+    // copy the transcript for UI history, and mark it so the first turn bakes the source transcript into
+    // turn 1 (master-agent.ts). Model/effort are NOT persisted here (no session column) — the client
+    // applies them as a per-session override after the fork. See docs/2026-07-08-cross-provider-fork-design.md.
+    if (target?.provider && target.provider !== srcProvider) {
+      if (this.deps.repos.listSessionEvents(sessionId).length === 0) {
+        throw new Error("nothing to hand off — this session has no conversation yet");
+      }
+      const forkLabel = `${label} (→ ${target.provider})`;
+      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider: target.provider });
+      this.deps.repos.copySessionEvents(sessionId, id);
+      this.deps.repos.setSessionHandoffFrom(id, srcProvider);
+      this.deps.repos.setSessionLabel(id, forkLabel);
+      this.deps.bus.emit({ type: "session.label", sessionId: id, label: forkLabel }); // live UI label
+      return this.build(id, row.cwd, null, null); // no sdk_session_id yet — established on the first turn
+    }
+
+    // Same-provider fork (native path): copy the SDK conversation into a new branch.
+    if (!row.sdk_session_id) throw new Error("this session has no completed turn yet — nothing to fork");
+    if (!this.deps.forkSession) throw new Error("session forking is not available");
+    const forkLabel = `${label} (fork)`;
+    const provider = srcProvider;
     const { sessionId: forkedUuid } = await this.deps.forkSession(provider, row.sdk_session_id, {
       title: forkLabel,
       sourceSessionId: sessionId,

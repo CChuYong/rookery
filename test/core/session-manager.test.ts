@@ -257,6 +257,57 @@ describe("SessionManager", () => {
     expect(repos.getSession(orig.id)!.label).toBe("My session");
   });
 
+  it("cross-provider fork creates a target-provider session with a handoff marker and NO native fork", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const forkCalls: unknown[] = [];
+    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, sdkSessionId }); return { sessionId: "forked-uuid" }; };
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const orig = sm.create("/work/repo"); // s0 — claude by default
+    repos.setSdkSessionId(orig.id, "orig-sdk");
+    repos.addSessionEvent({ sessionId: orig.id, seq: 0, type: "master.message", payloadJson: JSON.stringify({ kind: "message", role: "user", content: "hi" }) });
+
+    const forked = await sm.fork(orig.id, { provider: "codex" }); // s1
+
+    const row = repos.getSession(forked.id)!;
+    expect(row.provider).toBe("codex");
+    expect(row.handoff_from_provider).toBe("claude");
+    expect(row.sdk_session_id).toBeNull(); // no native handle across providers
+    expect(forkCalls).toHaveLength(0); // native forkSession NOT called
+    expect(repos.listSessionEvents(forked.id)).toHaveLength(1); // transcript copied for UI history
+    expect(repos.getSession(orig.id)!.sdk_session_id).toBe("orig-sdk"); // source untouched
+  });
+
+  it("cross-provider fork rejects when the source has no conversation yet", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const forkSession = async () => ({ sessionId: "x" });
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const orig = sm.create("/work/repo");
+    await expect(sm.fork(orig.id, { provider: "codex" })).rejects.toThrow(/nothing to hand off/);
+  });
+
+  it("same-provider fork still takes the native path (backward compatible)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const forkCalls: unknown[] = [];
+    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, sdkSessionId }); return { sessionId: "forked-uuid" }; };
+    let n = 0;
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet, forkSession }, () => `s${n++}`);
+    const orig = sm.create("/work/repo");
+    repos.setSdkSessionId(orig.id, "orig-sdk");
+    await sm.fork(orig.id, { provider: "claude" }); // same provider as source
+    expect(forkCalls).toHaveLength(1); // native forkSession called
+  });
+
   // P3 Track A: codex master fork now WORKS (was P2.5's not-yet-supported guard) — the fork router
   // (server.ts forkCodexMaster) relocates the per-session CODEX_HOME so the ephemeral fork child can
   // see the source thread, then seeds the new session's home with the source's rollouts. SessionManager
