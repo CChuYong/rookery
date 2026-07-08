@@ -57,6 +57,30 @@ describe("buildWorkerNotice provider attribution (interop QW3)", () => {
 });
 
 describe("MasterAgent", () => {
+  it("bakes the handoff seed into the FIRST turn's prompt but echoes only the user text, then clears the marker", async () => {
+    let prompt = "";
+    const { master, d } = makeMaster({ onPrompt: (p) => { prompt = p; } });
+    d.repos.setSessionHandoffFrom("s1", "claude");
+    d.repos.addSessionEvent({ sessionId: "s1", seq: 0, type: "master.message", payloadJson: JSON.stringify({ kind: "message", role: "user", content: "earlier ctx" }) });
+
+    await master.runTurn("continue please");
+
+    expect(prompt).toContain("earlier ctx"); // seed baked into the provider prompt
+    expect(prompt).toContain("continue please");
+    // the persisted/echoed user event for THIS turn is the clean user text; the seed (fence) must not leak
+    // into it. ("earlier ctx" legitimately remains as the copied history event — that's the displayed transcript.)
+    const userEvents = d.repos.listSessionEvents("s1").filter((e) => { try { return JSON.parse(e.payload_json).role === "user"; } catch { return false; } });
+    expect(userEvents.some((e) => JSON.parse(e.payload_json).content === "continue please")).toBe(true);
+    expect(userEvents.some((e) => (JSON.parse(e.payload_json).content ?? "").includes("<prior-conversation"))).toBe(false);
+    expect(d.repos.getSession("s1")!.handoff_from_provider).toBeNull(); // cleared after the turn
+
+    // a second turn no longer injects the seed
+    prompt = "";
+    await master.runTurn("second");
+    expect(prompt).not.toContain("earlier ctx");
+    expect(prompt).toContain("second");
+  });
+
   it("auto-labels the session from the first user message (once, best-effort)", async () => {
     const calls: string[] = [];
     const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]));

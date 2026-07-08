@@ -10,6 +10,7 @@ import { fleetToolDefs, FLEET_TOOL_NAMES } from "../tools/fleet-tools.js";
 import { askUserQuestionDef, type AskChannelResult } from "../tools/ask-user-question-def.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { truncateBytes } from "./truncate.js";
+import { buildHandoffSeed } from "./handoff.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
 
 // Structural signature of the SDK's CanUseTool — defined locally (not imported) to keep this module
@@ -306,6 +307,17 @@ export class MasterAgent {
     repos.setSessionStatus(sessionId, "running"); // Persist — seeds the running indicator via session.list on reconnect
     try {
       this.thinking.reset(); // Turn start — clear leftover thinking buffer from the previous turn
+      // Cross-provider handoff (T4): on the FIRST turn of a handed-off session, prepend the source transcript
+      // to the PROVIDER prompt (not the UI echo below) so it bakes into turn-1's conversation — durable across
+      // resumes. Built BEFORE the user-echo so the just-recorded user message isn't included in its own seed.
+      // System-injected (notices) turns carry no user message, so they skip this.
+      const handoffFrom = opts?.notices ? null : repos.getSession(sessionId)?.handoff_from_provider ?? null;
+      let promptText = userText;
+      if (handoffFrom) {
+        const events = repos.listSessionEvents(sessionId).map((e) => { try { return { type: e.type, payload: JSON.parse(e.payload_json) as unknown }; } catch { return { type: e.type, payload: {} }; } });
+        const seed = buildHandoffSeed(events, handoffFrom);
+        if (seed) promptText = `${seed}\n\n${userText}`;
+      }
       if (opts?.notices) {
         // System-injected worker-completion turn: record clean per-worker notices (code+params, re-localized by clients);
         // the model still receives `userText` (the tagged prompt) below. Not a user message, and don't relabel the session.
@@ -317,7 +329,7 @@ export class MasterAgent {
         // Auto-generate a label from the first message (run concurrently so it doesn't block the response, finalized with await at the end of the turn).
         labelDone = this.maybeLabel(userText);
       }
-      const stream = this.opts.deps.backend.startTurn(userText, {
+      const stream = this.opts.deps.backend.startTurn(promptText, {
         cwd: this.opts.cwd,
         model,
         abortController: abort, // Abort signal — abort() from stop()
@@ -442,6 +454,10 @@ export class MasterAgent {
           }
         }
       }
+      // Cross-provider handoff (T4): the seed is now baked into this turn's user message in the target's
+      // native session, so clear the marker — but only on a clean completion. An aborted turn leaves it set
+      // so the next attempt re-injects (idempotent; the seed is rebuilt from the unchanged copied events).
+      if (handoffFrom && !abort.signal.aborted) repos.setSessionHandoffFrom(sessionId, null);
       // Codex parity (finding [5]): a user stop closes the codex stream CLEANLY (its for-await exits
       // without throwing), so the catch's interrupted-notice path below never runs. Record the same
       // marker here on a clean-but-aborted exit — the Claude SDK reaches the catch by throwing instead.
