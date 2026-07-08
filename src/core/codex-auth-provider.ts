@@ -7,7 +7,7 @@ import type { CodexSpawn } from "./codex/codex-transport.js";
 // human-readable detail (chatgpt email + plan), null otherwise. Re-declared structurally in messages.ts
 // (protocol stays transport-agnostic, no core import there), like CodexModelInfo.
 export interface CodexAuthStatus {
-  method: "api-key" | "chatgpt" | "bedrock" | "none";
+  method: "api-key" | "chatgpt" | "bedrock" | "other" | "none";
   ready: boolean;
   hint: string | null;
 }
@@ -29,12 +29,17 @@ export function mapCodexAuth(res: AccountRead): CodexAuthStatus {
   const ready = res?.requiresOpenaiAuth === false && acct != null;
   if (!ready || !acct) return { method: "none", ready: false, hint: null };
   if (acct.type === "chatgpt") {
-    const plan = acct.planType ? ` · ${acct.planType}` : "";
-    return { method: "chatgpt", ready: true, hint: (acct.email ?? "ChatGPT") + plan };
+    // No fabricated brand fallback for a null email — the "chatgpt" label already names the provider, so
+    // an email-less account just carries the plan (or no hint), avoiding a hardcoded i18n-bypassing string.
+    const parts = [acct.email, acct.planType].filter((p): p is string => !!p);
+    return { method: "chatgpt", ready: true, hint: parts.length ? parts.join(" · ") : null };
   }
   if (acct.type === "apiKey") return { method: "api-key", ready: true, hint: null };
   if (acct.type === "amazonBedrock") return { method: "bedrock", ready: true, hint: null };
-  return { method: "none", ready: false, hint: null };
+  // Authenticated (requiresOpenaiAuth:false + an account) but an unrecognized type (a future codex account
+  // kind beyond the current 3) → still ready, since openClient only gates on requiresOpenaiAuth. Reporting
+  // "none" here would falsely show "Not authenticated" for an account a real turn authenticates fine.
+  return { method: "other", ready: true, hint: null };
 }
 
 // Probe for the desktop Codex auth-readiness card: spawns a short-lived `codex app-server` child and

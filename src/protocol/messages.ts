@@ -196,7 +196,7 @@ export interface CodexModelInfo {
 // Codex backend auth-readiness — structurally identical to core/codex-auth-provider.ts's CodexAuthStatus,
 // re-declared here (not imported) for the same transport-agnostic reason as CodexModelInfo above.
 export interface CodexAuthStatus {
-  method: "api-key" | "chatgpt" | "bedrock" | "none";
+  method: "api-key" | "chatgpt" | "bedrock" | "other" | "none";
   ready: boolean;
   hint: string | null;
 }

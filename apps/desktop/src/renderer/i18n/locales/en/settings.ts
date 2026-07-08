@@ -102,6 +102,7 @@ export default {
   "settings.codexMethodChatgpt": "ChatGPT subscription",
   "settings.codexMethodApiKey": "API key",
   "settings.codexMethodBedrock": "Amazon Bedrock",
+  "settings.codexMethodOther": "Authenticated",
   "settings.codexMethodNone": "Not authenticated",
   "settings.codexAuthReady": "Authenticated — Codex masters and workers can run.",
   "settings.codexAuthNone": "No authentication detected. Run codex login in a terminal, or set an API key below.",

@@ -24,6 +24,15 @@ describe("mapCodexAuth (pure account/read → CodexAuthStatus mapping)", () => {
   it("maps an amazonBedrock account to method bedrock, ready", () => {
     expect(mapCodexAuth({ account: { type: "amazonBedrock" }, requiresOpenaiAuth: false }).method).toBe("bedrock");
   });
+  it("an authed account of an UNKNOWN future type → method other, still ready (never a false 'not authenticated')", () => {
+    // requiresOpenaiAuth:false + a present account is exactly what a real turn needs — openClient gates on
+    // requiresOpenaiAuth alone, never the type — so an unrecognized type must not degrade to not-ready.
+    expect(mapCodexAuth({ account: { type: "futureThing" }, requiresOpenaiAuth: false })).toEqual({ method: "other", ready: true, hint: null });
+  });
+  it("a chatgpt account with a null email carries no fabricated brand hint (just the plan, or null)", () => {
+    expect(mapCodexAuth({ account: { type: "chatgpt", email: null, planType: "pro" }, requiresOpenaiAuth: false }).hint).toBe("pro");
+    expect(mapCodexAuth({ account: { type: "chatgpt", email: null }, requiresOpenaiAuth: false }).hint).toBeNull();
+  });
   it("requiresOpenaiAuth:true (auth missing) → method none, not ready", () => {
     expect(mapCodexAuth({ account: null, requiresOpenaiAuth: true })).toEqual({ method: "none", ready: false, hint: null });
   });

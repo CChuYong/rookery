@@ -103,6 +103,7 @@ export default {
   "settings.codexMethodChatgpt": "ChatGPT 구독",
   "settings.codexMethodApiKey": "API 키",
   "settings.codexMethodBedrock": "Amazon Bedrock",
+  "settings.codexMethodOther": "인증됨",
   "settings.codexMethodNone": "인증 없음",
   "settings.codexAuthReady": "인증됨 — Codex 마스터/워커를 실행할 수 있어요.",
   "settings.codexAuthNone": "인증이 감지되지 않았어요. 터미널에서 codex login을 실행하거나 아래에 API 키를 설정하세요.",

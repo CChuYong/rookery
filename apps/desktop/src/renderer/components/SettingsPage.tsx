@@ -426,7 +426,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                           ? t("settings.codexMethodApiKey")
                           : method === "bedrock"
                             ? t("settings.codexMethodBedrock")
-                            : t("settings.codexMethodNone");
+                            : method === "other"
+                              ? t("settings.codexMethodOther")
+                              : t("settings.codexMethodNone");
                   const desc = unavailable ? t("settings.codexAuthUnavailableDesc") : ready ? t("settings.codexAuthReady") : t("settings.codexAuthNone");
                   return (
                     <div className="mt-3 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
