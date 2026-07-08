@@ -17,6 +17,10 @@ describe("mapCodexAuth (pure account/read → CodexAuthStatus mapping)", () => {
     expect(mapCodexAuth({ account: { type: "chatgpt", email: "a@b.co", planType: "pro" }, requiresOpenaiAuth: false }))
       .toEqual({ method: "chatgpt", ready: true, hint: "a@b.co · pro" });
   });
+  it("treats a present chatgpt account as ready even when requiresOpenaiAuth is true (codex-cli 0.142.5)", () => {
+    expect(mapCodexAuth({ account: { type: "chatgpt", email: "a@b.co", planType: "pro" }, requiresOpenaiAuth: true }))
+      .toEqual({ method: "chatgpt", ready: true, hint: "a@b.co · pro" });
+  });
   it("maps an apiKey account to method api-key, ready, no hint", () => {
     expect(mapCodexAuth({ account: { type: "apiKey" }, requiresOpenaiAuth: false }))
       .toEqual({ method: "api-key", ready: true, hint: null });

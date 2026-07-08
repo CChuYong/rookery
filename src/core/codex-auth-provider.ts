@@ -17,7 +17,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 // The `account/read` (GetAccount) response, camelCase (ts-rs), verified against codex-cli 0.142.5:
 // { account: { type: "apiKey" } | { type: "chatgpt", email, planType } | { type: "amazonBedrock" } | null,
-//   requiresOpenaiAuth: boolean }. requiresOpenaiAuth:true means auth is MISSING (a turn would need to log in).
+//   requiresOpenaiAuth: boolean }. In 0.142.5 a valid ChatGPT login can report requiresOpenaiAuth:true,
+// so account presence is the readiness signal; requiresOpenaiAuth is not a reliable negative by itself.
 type AccountRead = {
   account?: { type?: string; email?: string | null; planType?: string } | null;
   requiresOpenaiAuth?: boolean;
@@ -26,8 +27,7 @@ type AccountRead = {
 // Pure mapping — exported so the branch table is unit-testable without a child process.
 export function mapCodexAuth(res: AccountRead): CodexAuthStatus {
   const acct = res?.account;
-  const ready = res?.requiresOpenaiAuth === false && acct != null;
-  if (!ready || !acct) return { method: "none", ready: false, hint: null };
+  if (!acct) return { method: "none", ready: false, hint: null };
   if (acct.type === "chatgpt") {
     // No fabricated brand fallback for a null email — the "chatgpt" label already names the provider, so
     // an email-less account just carries the plan (or no hint), avoiding a hardcoded i18n-bypassing string.
@@ -36,9 +36,9 @@ export function mapCodexAuth(res: AccountRead): CodexAuthStatus {
   }
   if (acct.type === "apiKey") return { method: "api-key", ready: true, hint: null };
   if (acct.type === "amazonBedrock") return { method: "bedrock", ready: true, hint: null };
-  // Authenticated (requiresOpenaiAuth:false + an account) but an unrecognized type (a future codex account
-  // kind beyond the current 3) → still ready, since openClient only gates on requiresOpenaiAuth. Reporting
-  // "none" here would falsely show "Not authenticated" for an account a real turn authenticates fine.
+  // Authenticated (an account is present) but an unrecognized type (a future codex account kind beyond
+  // the current 3) -> still ready. Reporting "none" here would falsely show "Not authenticated" for
+  // an account a real turn authenticates fine.
   return { method: "other", ready: true, hint: null };
 }
 
