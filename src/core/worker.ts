@@ -34,6 +34,8 @@ interface WorkerOpts {
   label: string;
   deps: WorkerDeps;
   sdkSessionId?: string | null; // if present, resume the SDK conversation after restart
+  handoffSeed?: string; // cross-provider fork: source transcript, prepended to the FIRST turn's backend text (not recorded/echoed). See handoff.ts.
+  handoffFromProvider?: string; // cross-provider fork marker → cleared in the DB once this worker's sdk_session_id is assigned.
 }
 
 function safeJson(v: unknown): string {
@@ -60,6 +62,8 @@ export class Worker {
   private loop: Promise<void> = Promise.resolve();
   private stream?: AgentStream;
   private sdkSessionId: string | null;
+  // Cross-provider handoff seed (one-shot): prepended to the FIRST turn's backend text, then cleared so later turns are unaffected.
+  private handoffSeed: string | undefined;
   private currentModel: string; // current model (changeable live via setModel). The query option holds the value at start time.
   private currentPermissionMode: string; // changeable live via setPermissionMode (query.setPermissionMode). Held value at start time.
   // cumulative cost/turns — isomorphic to the master (cumCostUsd/cumTurns): accumulates over the worker's entire lifetime,
@@ -69,8 +73,18 @@ export class Worker {
 
   constructor(private readonly opts: WorkerOpts) {
     this.sdkSessionId = opts.sdkSessionId ?? null;
+    this.handoffSeed = opts.handoffSeed;
     this.currentModel = opts.deps.model;
     this.currentPermissionMode = opts.deps.permissionMode ?? "bypassPermissions";
+  }
+
+  // One-shot: prepend the cross-provider handoff seed to the FIRST turn's backend-bound text (NOT the recorded/
+  // echoed user text), then disarm so subsequent turns are unaffected. See docs/2026-07-08-cross-provider-fork-design.md.
+  private withHandoffSeed(text: string): string {
+    if (!this.handoffSeed) return text;
+    const seeded = `${this.handoffSeed}\n\n${text}`;
+    this.handoffSeed = undefined;
+    return seeded;
   }
 
   status(): WorkerStatus {
@@ -93,7 +107,7 @@ export class Worker {
       return;
     }
     this.opts.deps.onTurnStart?.(); // checkpoint before the first turn (handled by the orchestrator)
-    this.queue.push(task);
+    this.queue.push(this.withHandoffSeed(task)); // handoff: seed the backend text; the recorded transcript below stays clean
     this.record({ kind: "message", role: "user", content: task }); // record the first instruction in the transcript (UI/history display)
     this.loop = this.consume();
   }
@@ -146,7 +160,7 @@ export class Worker {
     if (this.state !== "running" && this.state !== "idle") throw new Error(`Worker ${this.opts.id} is not running`);
     if (this.state === "idle") {
       // no in-flight turn → enqueue + start a new turn immediately. echo/checkpoint right away.
-      this.queue.push(text);
+      this.queue.push(this.withHandoffSeed(text)); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
       this.opts.deps.onTurnStart?.();
       this.record({ kind: "message", role: "user", content: text }, clientMsgId);
       this.transition("running");
@@ -303,6 +317,8 @@ export class Worker {
           if (ev.sessionId !== this.sdkSessionId) {
             this.sdkSessionId = ev.sessionId;
             this.opts.deps.repos.setWorkerSdkSessionId(this.opts.id, ev.sessionId);
+            // Cross-provider handoff: the seed is now baked into this worker's native session; clear the marker.
+            if (this.opts.handoffFromProvider) this.opts.deps.repos.setWorkerHandoffFrom(this.opts.id, null);
           }
         } else if (ev.kind === "push") {
           if (ev.push.kind === "commands") {

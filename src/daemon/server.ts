@@ -178,7 +178,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     removeCodexHome(config.home, id);
   };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
-  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; costBudgetUsd?: number; provider?: string }): WorkerLike =>
+  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; costBudgetUsd?: number; provider?: string; handoffSeed?: string; handoffFromProvider?: string }): WorkerLike =>
     new Worker({
       id: o.id,
       sessionId: o.sessionId,
@@ -196,6 +196,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
       },
       sdkSessionId: o.sdkSessionId ?? null,
+      handoffSeed: o.handoffSeed, // cross-provider fork: seed the first turn's backend text
+      handoffFromProvider: o.handoffFromProvider,
     });
   // Auto-generate labels (Haiku): workers right after spawn, masters from the first message. best-effort.
   const summarizeLabel = makeLabeler(queryFn);

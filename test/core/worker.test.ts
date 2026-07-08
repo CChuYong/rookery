@@ -18,6 +18,43 @@ async function until(cond: () => boolean, ms = 1000): Promise<void> {
   }
 }
 
+describe("Worker cross-provider handoff seed", () => {
+  it("prepends the handoff seed to the first turn's backend text but records only the user text, then clears the marker", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", provider: "codex" });
+    repos.setWorkerHandoffFrom("a1", "claude");
+    let backendText = "";
+    const liveQuery = ((input: { prompt?: unknown }) => {
+      async function* gen(): AsyncGenerator<unknown> {
+        for await (const um of input.prompt as AsyncIterable<unknown>) {
+          backendText += JSON.stringify(um);
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as QueryFn;
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t", sdkSessionId: null,
+      handoffSeed: "<prior-conversation>ctx-from-claude</prior-conversation>", handoffFromProvider: "claude",
+      deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(liveQuery) },
+    });
+
+    agent.resume(); // handoff worker materializes idle (no native resume handle)
+    await until(() => agent.status() === "idle");
+    agent.send("do the task");
+    await until(() => backendText.includes("do the task"));
+
+    expect(backendText).toContain("ctx-from-claude"); // seed reached the backend
+    expect(backendText).toContain("do the task");
+    const userEvents = repos.listWorkerEvents("a1").filter((e) => { try { return JSON.parse(e.payload_json).role === "user"; } catch { return false; } });
+    expect(userEvents.some((e) => JSON.parse(e.payload_json).content === "do the task")).toBe(true);
+    expect(userEvents.some((e) => (JSON.parse(e.payload_json).content ?? "").includes("prior-conversation"))).toBe(false);
+    await until(() => repos.getWorker("a1")!.handoff_from_provider === null); // cleared once sdk id assigned
+    await agent.stop();
+  });
+});
+
 describe("Worker", () => {
   it("runs, persists events, emits to bus, and settles to done", async () => {
     const repos = new Repositories(openDb(":memory:"));
