@@ -14,6 +14,25 @@ describe("Repositories", () => {
     repos = makeRepos();
   });
 
+  it("sets and clears a session's handoff_from_provider marker (cross-provider fork)", () => {
+    repos.createSession({ id: "s1", cwd: "/x" });
+    expect(repos.getSession("s1")!.handoff_from_provider).toBeNull();
+    repos.setSessionHandoffFrom("s1", "claude");
+    expect(repos.getSession("s1")!.handoff_from_provider).toBe("claude");
+    repos.setSessionHandoffFrom("s1", null);
+    expect(repos.getSession("s1")!.handoff_from_provider).toBeNull();
+  });
+
+  it("sets and clears a worker's handoff_from_provider marker (cross-provider fork)", () => {
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/r", label: "w" });
+    expect(repos.getWorker("w1")!.handoff_from_provider).toBeNull();
+    repos.setWorkerHandoffFrom("w1", "codex");
+    expect(repos.getWorker("w1")!.handoff_from_provider).toBe("codex");
+    repos.setWorkerHandoffFrom("w1", null);
+    expect(repos.getWorker("w1")!.handoff_from_provider).toBeNull();
+  });
+
   it("setSessionPinned toggles pinned_at", () => {
     repos.createSession({ id: "sp", cwd: "/x" });
     expect(repos.getSession("sp")!.pinned_at).toBeNull();

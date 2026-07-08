@@ -176,6 +176,14 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     // the settings default (workerCostBudgetUsd) applies instead for worker actions.
     db.exec("ALTER TABLE automations ADD COLUMN cost_budget_usd REAL");
   },
+  (db) => {
+    // handoff_from_provider: cross-provider fork ("provider handoff") marker. Non-null on a session/worker
+    // created by a fork onto the OTHER agent backend = the source provider's name; the seed (source
+    // transcript) is baked into the target's first turn and this is cleared to NULL after that turn. NULL
+    // for every ordinary session/worker. See docs/2026-07-08-cross-provider-fork-design.md.
+    db.exec("ALTER TABLE sessions ADD COLUMN handoff_from_provider TEXT");
+    db.exec("ALTER TABLE workers ADD COLUMN handoff_from_provider TEXT");
+  },
 ];
 
 export function currentVersion(db: DB): number {

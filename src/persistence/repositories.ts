@@ -10,6 +10,7 @@ export interface SessionRow {
   origin_ref: string | null; // Identifier within the source: slack=thread key, automation=automation id, ui=null.
   pinned_at: string | null; // Pin timestamp (if set, shown in sidebar 'pinned' section). null=not pinned.
   provider: string; // which AgentBackend runs this master session ('claude' | 'codex'). Spawn-set, fixed for the session's lifetime.
+  handoff_from_provider: string | null; // cross-provider fork marker: source provider whose transcript seeds this session's first turn; cleared after. NULL normally.
   label: string | null;
   archived_at: string | null;
   created_at: string;
@@ -40,6 +41,7 @@ export interface WorkerRow {
   cost_budget_usd: number | null; // lifetime USD cost ceiling (the sibling runaway guard to max_turns). NULL = unlimited.
   effort: string | null; // spawn-time effort override. NULL = global default.
   provider: string; // which AgentBackend runs this worker ('claude' | 'codex'). Spawn-set, fixed for the worker's lifetime.
+  handoff_from_provider: string | null; // cross-provider fork marker: source provider whose transcript seeds this worker's first turn; cleared after. NULL normally.
   archived_at: string | null;
   notify_armed: number; // 0/1 — one-shot "notify the home master when I next settle"
   created_at: string;
@@ -210,6 +212,14 @@ export class Repositories {
       .run(sdkSessionId, this.now(), id);
   }
 
+  // Cross-provider fork marker (provider handoff). NULL = ordinary session; non-null = the source provider
+  // whose transcript seeds this session's first turn (cleared to NULL by the master after that turn).
+  setSessionHandoffFrom(id: string, provider: string | null): void {
+    this.db
+      .prepare("UPDATE sessions SET handoff_from_provider = ?, updated_at = ? WHERE id = ?")
+      .run(provider, this.now(), id);
+  }
+
   addMessage(input: { sessionId: string; role: string; content: string }): MessageRow {
     const info = this.db
       .prepare("INSERT INTO messages(session_id, role, content, created_at) VALUES (?, ?, ?, ?)")
@@ -345,6 +355,12 @@ export class Repositories {
 
   setWorkerSdkSessionId(id: string, sdkSessionId: string): void {
     this.db.prepare("UPDATE workers SET sdk_session_id = ?, updated_at = ? WHERE id = ?").run(sdkSessionId, this.now(), id);
+  }
+
+  // Cross-provider fork marker (provider handoff). NULL = ordinary worker; non-null = the source provider
+  // whose transcript seeds this worker's first turn (cleared to NULL by the worker after that turn).
+  setWorkerHandoffFrom(id: string, provider: string | null): void {
+    this.db.prepare("UPDATE workers SET handoff_from_provider = ?, updated_at = ? WHERE id = ?").run(provider, this.now(), id);
   }
 
   createRepo(input: { id: string; name: string; path: string; description: string; base?: string; remoteUrl?: string }): RepoRow {
