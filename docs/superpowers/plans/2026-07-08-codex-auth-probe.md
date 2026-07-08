@@ -1,5 +1,8 @@
 # Codex auth-status probe — Implementation Plan
 
+> **STATUS: COMPLETE** (branch `feat/codex-auth-probe`, 5 commits, TDD). All 4 units landed; root (typecheck + 918 tests) & desktop (typecheck + 914 tests) green. Refinement beyond the plan: the desktop store slot is **tri-state** (`CodexAuthStatus | "unavailable" | null`) — null=probing ("checking"), "unavailable"=probe ran but couldn't determine (codex missing/broken), object=real status — because codex's probe returns null when the app-server can't spawn (unlike Claude's always-resolving probe), which would otherwise strand the card on a "checking" spinner. Not yet merged to main.
+
+
 > Strategic bet #2 from the 2026-07-08 interop exploration. Codex has no auth-readiness probe (Claude does, `getAuthStatus`), so picking codex gives zero signal until a turn fails mid-run — worst for unattended workers/automations, and a prerequisite for a "Fork to Codex" affordance. TDD, commit per unit. Branch `feat/codex-auth-probe`.
 
 **Goal:** surface whether Codex is authenticated (and how) in the Settings Codex sub-tab, mirroring the Claude auth card.
