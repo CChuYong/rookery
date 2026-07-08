@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { RookeryTab } from "../src/renderer/workspace/RookeryTab.js";
-import { useWsStore } from "../src/renderer/store/workspace.js";
+import { useWsStore, emptyWsState, openFile, setDirty } from "../src/renderer/store/workspace.js";
 
 // Minimal fake of the dockview panel-header props RookeryTab actually reads
 // (api.title / api.onDidTitleChange / api.close + params) — the rest of the
@@ -89,5 +89,39 @@ describe("RookeryTab dirty-tab close confirm (audit #44)", () => {
     fireEvent.click(screen.getByRole("button", { name: "탭 닫기" }));
     fireEvent.click(screen.getByText("취소"));
     expect(close).not.toHaveBeenCalled();
+  });
+});
+
+describe("RookeryTab tab context menu", () => {
+  it("Close others keeps the clicked editor tab and closes the rest", () => {
+    let state = emptyWsState();
+    state = openFile(state, "p1", "/a.ts");
+    state = openFile(state, "p1", "/b.ts");
+    state = openFile(state, "p1", "/c.ts");
+    useWsStore.setState(state);
+    renderTab("file:/b.ts", "b.ts");
+
+    fireEvent.contextMenu(screen.getByText("b.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "다른 탭 닫기" }));
+
+    expect(useWsStore.getState().byPage.p1?.tabs.map((t) => t.id)).toEqual(["agent", "file:/b.ts"]);
+    expect(useWsStore.getState().byPage.p1?.activeTabId).toBe("file:/b.ts");
+  });
+
+  it("Close all confirms once when dirty editor tabs are included", () => {
+    let state = emptyWsState();
+    state = openFile(state, "p1", "/a.ts");
+    state = openFile(state, "p1", "/b.ts");
+    state = setDirty(state, "p1", "file:/a.ts", true);
+    useWsStore.setState(state);
+    renderTab("file:/b.ts", "b.ts");
+
+    fireEvent.contextMenu(screen.getByText("b.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "모든 탭 닫기" }));
+
+    expect(screen.getByText("저장 안 된 변경이 있어요")).toBeInTheDocument();
+    expect(screen.getByText("저장 안 된 변경이 있는 탭 1개를 닫으면 편집 내용이 사라져요.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("저장 안 함"));
+    expect(useWsStore.getState().byPage.p1?.tabs.map((t) => t.id)).toEqual(["agent"]);
   });
 });

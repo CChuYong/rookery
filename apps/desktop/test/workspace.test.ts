@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { emptyWsState, openFile, openDiff, openCommit, closeTab, setActive, setDirty, toggleRight, setSegment, setRightWidth, pruneWsPages, toggleDir, collapseAll, expandAncestors, type Tab } from "../src/renderer/store/workspace.js";
+import { emptyWsState, openFile, openDiff, openCommit, closeTab, closeTabs, setActive, setDirty, toggleRight, setSegment, setRightWidth, pruneWsPages, toggleDir, collapseAll, expandAncestors, type Tab } from "../src/renderer/store/workspace.js";
 
 describe("workspace reducer", () => {
   it("a fresh page has a pinned agent tab", () => {
@@ -41,6 +41,16 @@ describe("workspace reducer", () => {
     s = openFile(s, "p1", "/r/a.ts");
     s = closeTab(s, "p1", "agent");
     expect(s.byPage.p1.tabs.some((t) => t.id === "agent")).toBe(true);
+  });
+
+  it("closeTabs removes multiple editor tabs and keeps the pinned agent tab", () => {
+    let s = emptyWsState();
+    s = openFile(s, "p1", "/r/a.ts");
+    s = openFile(s, "p1", "/r/b.ts");
+    s = openFile(s, "p1", "/r/c.ts");
+    s = closeTabs(s, "p1", ["file:/r/a.ts", "file:/r/c.ts", "agent"]);
+    expect(s.byPage.p1.tabs.map((t) => t.id)).toEqual(["agent", "file:/r/b.ts"]);
+    expect(s.byPage.p1.activeTabId).toBe("file:/r/b.ts");
   });
 
   it("setDirty flags a file tab", () => {

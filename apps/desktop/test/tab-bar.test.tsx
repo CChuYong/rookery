@@ -58,3 +58,39 @@ describe("TabBar dirty-tab close confirm (audit #44)", () => {
     expect(useWsStore.getState().byPage.p1?.tabs.some((tb) => tb.id === FILE_ID)).toBe(true);
   });
 });
+
+describe("TabBar tab context menu", () => {
+  it("Close others keeps the clicked tab and closes the other editor tabs", () => {
+    let state = emptyWsState();
+    state = openFile(state, "p1", "/a.ts");
+    state = openFile(state, "p1", "/b.ts");
+    state = openFile(state, "p1", "/c.ts");
+    useWsStore.setState(state);
+    render(<TabBar pageKey="p1" agentLabel="Master" />);
+
+    fireEvent.contextMenu(screen.getByText("b.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "다른 탭 닫기" }));
+
+    const tabs = useWsStore.getState().byPage.p1?.tabs.map((t) => t.id);
+    expect(tabs).toEqual(["agent", "file:/b.ts"]);
+    expect(useWsStore.getState().byPage.p1?.activeTabId).toBe("file:/b.ts");
+  });
+
+  it("Close all asks once when dirty tabs are included, then closes all editor tabs", () => {
+    let state = emptyWsState();
+    state = openFile(state, "p1", "/a.ts");
+    state = openFile(state, "p1", "/b.ts");
+    state = setDirty(state, "p1", "file:/a.ts", true);
+    useWsStore.setState(state);
+    render(<TabBar pageKey="p1" agentLabel="Master" />);
+
+    fireEvent.contextMenu(screen.getByText("b.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "모든 탭 닫기" }));
+
+    expect(screen.getByText("저장 안 된 변경이 있어요")).toBeInTheDocument();
+    expect(screen.getByText("저장 안 된 변경이 있는 탭 1개를 닫으면 편집 내용이 사라져요.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("저장 안 함"));
+    expect(useWsStore.getState().byPage.p1?.tabs.map((t) => t.id)).toEqual(["agent"]);
+    expect(useWsStore.getState().byPage.p1?.activeTabId).toBe("agent");
+  });
+});

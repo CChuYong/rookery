@@ -66,6 +66,12 @@ export function closeTab(s: WsState, key: string, id: string): WsState {
   return put(s, key, { tabs, activeTabId });
 }
 
+export function closeTabs(s: WsState, key: string, ids: string[]): WsState {
+  let next = s;
+  for (const id of ids) next = closeTab(next, key, id);
+  return next;
+}
+
 export function setActive(s: WsState, key: string, id: string): WsState {
   return put(s, key, { ...page(s, key), activeTabId: id });
 }
@@ -108,6 +114,7 @@ interface WsStore extends WsState {
   openDiff_: (key: string, path: string) => void;
   openCommit_: (key: string, hash: string, subject: string) => void;
   closeTab_: (key: string, id: string) => void;
+  closeTabs_: (key: string, ids: string[]) => void;
   setActive_: (key: string, id: string) => void;
   setDirty_: (key: string, id: string, dirty: boolean) => void;
   toggleRight_: () => void;
@@ -125,6 +132,7 @@ export const useWsStore = create<WsStore>()(
       openDiff_: (key, path) => set((s) => openDiff(s, key, path)),
       openCommit_: (key, hash, subject) => set((s) => openCommit(s, key, hash, subject)),
       closeTab_: (key, id) => set((s) => closeTab(s, key, id)),
+      closeTabs_: (key, ids) => set((s) => closeTabs(s, key, ids)),
       setActive_: (key, id) => set((s) => setActive(s, key, id)),
       setDirty_: (key, id, dirty) => set((s) => setDirty(s, key, id, dirty)),
       toggleRight_: () => set((s) => toggleRight(s)),

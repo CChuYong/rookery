@@ -18,12 +18,13 @@ import { ConfirmDialog } from "../ui/confirm-dialog.js";
 // precedent for buffer loss in this app — the external-change banner in
 // MonacoEditor.tsx also offers only an explicit "Reload (discard edits)"
 // action, not a save option.
-export function TabCloseConfirm({ tabTitle, onDiscard, onCancel }: { tabTitle: string; onDiscard: () => void; onCancel: () => void }): JSX.Element {
+export function TabCloseConfirm({ tabTitle, dirtyCount, bulk, onDiscard, onCancel }: { tabTitle: string; dirtyCount?: number; bulk?: boolean; onDiscard: () => void; onCancel: () => void }): JSX.Element {
   const t = useT();
+  const body = bulk ? t("tabBar.unsavedManyBody", { count: dirtyCount ?? 1 }) : t("tabBar.unsavedBody", { name: tabTitle });
   return (
     <ConfirmDialog
       title={t("tabBar.unsavedTitle")}
-      body={t("tabBar.unsavedBody", { name: tabTitle })}
+      body={body}
       confirmLabel={t("tabBar.discardClose")}
       variant="danger"
       onConfirm={onDiscard}
