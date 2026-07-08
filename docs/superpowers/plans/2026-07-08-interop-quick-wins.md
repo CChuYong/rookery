@@ -30,6 +30,7 @@ Worker-settled notices don't name the backend.
 - **README:** a short "Choosing a backend" note centralizing the bypassPermissions-only / Claude-vs-Codex tradeoff. File: `README.md`.
 - **CLI `--help`:** usage text documenting `--provider claude|codex`. Files: `src/index.ts` / `src/entrypoints/cli.ts`.
 
-## Verification
-- Root + desktop typecheck + tests green. Optional final review.
-- Deferred (strategic bets, separate work): cross-provider fork, codex auth-status probe, codex effort defaults / tool_progress.
+## Verification — DONE (2026-07-08)
+- All 4 units shipped via TDD (5 commits on `feat/interop-quick-wins`). Root `npm test` = **903 passed**, desktop = **909 passed**, both typecheck clean.
+- QW1 (session provider badge), QW2/QW6 (fleet-tool provider + filter), QW3 (provider-attributed notifications), QW4/QW5/QW7 (onboarding + README + CLI --help).
+- Deferred (strategic bets, separate work): cross-provider fork, codex auth-status probe, codex effort defaults / tool_progress heartbeat.
