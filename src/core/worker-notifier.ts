@@ -13,23 +13,26 @@ export interface WorkerNotification {
   branch: string; // w.branch ?? workerId
   status: string; // idle | done | error | failed | stopped | orphaned
   tail: string;   // last assistant text (≤500 chars) — for the model prompt only, never shown in the chip
+  provider?: string; // which agent backend ran the worker (claude | codex) — so a mixed fleet's alerts are attributed; absent → claude
 }
 
-// The single model-prompt line for a settled worker (same wording the old buildLine produced).
+// The single model-prompt line for a settled worker. Names the backend so the master can reason about a mixed
+// claude/codex fleet ("the codex worker failed, the claude one is fine") without a separate status lookup.
 export function formatNotificationLine(n: WorkerNotification): string {
-  return `worker ${n.label} (${n.branch}) — ${n.status}\n  ${n.tail}`;
+  return `worker ${n.label} (${n.branch}) [${n.provider ?? "claude"}] — ${n.status}\n  ${n.tail}`;
 }
 
 // Parse a persisted pending-notification row back into structured form. Legacy rows (plain strings written by an
 // older build) fail JSON.parse or lack fields → wrapped as a done-bucket notice carrying the raw text as its tail.
+// A missing provider (legacy/older JSON) defaults to "claude".
 export function parseNotification(text: string): WorkerNotification {
   try {
     const o = JSON.parse(text) as Partial<WorkerNotification>;
     if (o && typeof o.label === "string" && typeof o.status === "string") {
-      return { label: o.label, branch: o.branch ?? "", status: o.status, tail: o.tail ?? "" };
+      return { label: o.label, branch: o.branch ?? "", status: o.status, tail: o.tail ?? "", provider: o.provider ?? "claude" };
     }
   } catch { /* legacy plain-string row → fall through */ }
-  return { label: "", branch: "", status: "done", tail: text };
+  return { label: "", branch: "", status: "done", tail: text, provider: "claude" };
 }
 
 export interface WorkerNotifierDeps {
@@ -78,6 +81,6 @@ export class WorkerNotifier {
         if (p.role === "assistant" && typeof p.content === "string") { tail = p.content.slice(0, 500); break; }
       } catch { /* skip malformed */ }
     }
-    return { label: w.label, branch: w.branch ?? workerId, status, tail };
+    return { label: w.label, branch: w.branch ?? workerId, status, tail, provider: w.provider ?? "claude" };
   }
 }

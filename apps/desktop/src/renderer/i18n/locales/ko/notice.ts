@@ -10,9 +10,9 @@ export default {
   "notice.interrupted": "⏹ 중단됨",
   "notice.turnCap": "턴 한도 도달 (maxTurns={max}, num_turns={turns}) — 세션 중단을 고려하세요.",
   "notice.costBudget": "비용 예산 도달 ({spent}/{budget} USD) — 세션 중단을 고려하세요.",
-  "notice.workerDone": "✅ 워커 {label} 완료",
-  "notice.workerFailed": "⚠️ 워커 {label} 실패",
-  "notice.workerStopped": "⏹ 워커 {label} 종료",
+  "notice.workerDone": "✅ 워커 {label} 완료{provider}",
+  "notice.workerFailed": "⚠️ 워커 {label} 실패{provider}",
+  "notice.workerStopped": "⏹ 워커 {label} 종료{provider}",
   "notice.codexError": "Codex 오류: {message}",
   "notice.codexTurnTimeout": "⏱ Codex 턴이 {seconds}초 동안 응답이 없어 중단됨",
 } satisfies Catalog;

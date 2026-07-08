@@ -30,6 +30,30 @@ it("armed worker reaching idle delivers one line to its home session, then disar
   expect(x.deliver).toHaveBeenCalledTimes(1);
 });
 
+it("delivers the settled worker's provider so alerts are backend-attributed (interop QW3)", () => {
+  const repos = new Repositories(openDb(":memory:"), () => "t");
+  repos.createSession({ id: "sA", cwd: "/x" });
+  repos.createWorker({ id: "cx", sessionId: "sA", repoPath: "/r", label: "cxw", worktreePath: "/wt/cx", branch: "b", provider: "codex" });
+  const bus = new EventBus();
+  const deliver = vi.fn();
+  new WorkerNotifier({ bus, repos, deliver }).start();
+  repos.setWorkerNotifyArmed("cx", true);
+  bus.emit({ type: "worker.status", sessionId: "sA", workerId: "cx", status: "idle" });
+  const [, n] = deliver.mock.calls[0]!;
+  expect(n.provider).toBe("codex");
+});
+
+it("formatNotificationLine names the provider (interop QW3)", () => {
+  const n: WorkerNotification = { label: "w", branch: "b", status: "done", tail: "t", provider: "codex" };
+  expect(formatNotificationLine(n)).toContain("codex");
+});
+
+it("parseNotification preserves provider and defaults legacy/missing rows to claude", () => {
+  expect(parseNotification(JSON.stringify({ label: "w", status: "done", provider: "codex" })).provider).toBe("codex");
+  expect(parseNotification(JSON.stringify({ label: "w", status: "done" })).provider).toBe("claude"); // missing → claude
+  expect(parseNotification("raw legacy text").provider).toBe("claude"); // non-JSON legacy row → claude
+});
+
 it("does not fire for unarmed workers, non-settled statuses, or failures-but-unarmed", () => {
   const x = h();
   x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "idle" }); // unarmed
@@ -109,10 +133,10 @@ describe("shutdown parking (arm survives to the next boot)", () => {
 });
 
 describe("worker-notification helpers", () => {
-  const n: WorkerNotification = { label: "app", branch: "rookery/w1", status: "idle", tail: "did the thing" };
+  const n: WorkerNotification = { label: "app", branch: "rookery/w1", status: "idle", tail: "did the thing", provider: "claude" };
 
   it("formatNotificationLine reproduces the model-prompt line", () => {
-    expect(formatNotificationLine(n)).toBe("worker app (rookery/w1) — idle\n  did the thing");
+    expect(formatNotificationLine(n)).toBe("worker app (rookery/w1) [claude] — idle\n  did the thing");
   });
 
   it("parseNotification round-trips a serialized notification", () => {
@@ -120,6 +144,6 @@ describe("worker-notification helpers", () => {
   });
 
   it("parseNotification falls back for a legacy plain-string row", () => {
-    expect(parseNotification("worker app (b) — idle")).toEqual({ label: "", branch: "", status: "done", tail: "worker app (b) — idle" });
+    expect(parseNotification("worker app (b) — idle")).toEqual({ label: "", branch: "", status: "done", tail: "worker app (b) — idle", provider: "claude" });
   });
 });

@@ -71,9 +71,12 @@ function workerNoticeCode(status: string): "notice.workerDone" | "notice.workerF
 }
 
 // The clean, localized display notice for a settled worker (no tail — the chip stays a one-line marker).
-function buildWorkerNotice(n: WorkerNotification): DisplayNotice {
+// `provider` is a pre-formatted suffix (codex → " · Codex", claude → "") so the chip is backend-attributed
+// for a codex worker but unchanged for the common claude case — consistent with the codex-only ProviderBadge.
+// Exported for a direct unit test.
+export function buildWorkerNotice(n: WorkerNotification): DisplayNotice {
   const code = workerNoticeCode(n.status);
-  const params = { label: n.label || n.branch || "worker" };
+  const params = { label: n.label || n.branch || "worker", provider: n.provider === "codex" ? " · Codex" : "" };
   return { code, params, text: t(DEFAULT_LOCALE, code, params) };
 }
 

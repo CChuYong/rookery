@@ -10,9 +10,9 @@ export default {
   "notice.interrupted": "⏹ Stopped",
   "notice.turnCap": "Turn cap reached (maxTurns={max}, num_turns={turns}) — consider stopping this session.",
   "notice.costBudget": "Cost budget reached ({spent}/{budget} USD) — consider stopping this session.",
-  "notice.workerDone": "✅ Worker {label} done",
-  "notice.workerFailed": "⚠️ Worker {label} failed",
-  "notice.workerStopped": "⏹ Worker {label} stopped",
+  "notice.workerDone": "✅ Worker {label} done{provider}",
+  "notice.workerFailed": "⚠️ Worker {label} failed{provider}",
+  "notice.workerStopped": "⏹ Worker {label} stopped{provider}",
   "notice.codexError": "Codex error: {message}",
   "notice.codexTurnTimeout": "⏱ Codex turn stopped after {seconds}s of no response",
 } satisfies Catalog;

@@ -6,7 +6,7 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
-import { MasterAgent } from "../../src/core/master-agent.js";
+import { MasterAgent, buildWorkerNotice } from "../../src/core/master-agent.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { InteractionRegistry } from "../../src/core/interaction-registry.js";
 import type { AgentStream, MasterTurnOptions } from "../../src/core/agent-backend.js";
@@ -44,6 +44,17 @@ function makeMaster(hooks?: { onPrompt?: (p: string) => void; onEvent?: (e: Core
   const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
   return { master, bus: d.bus, d };
 }
+
+describe("buildWorkerNotice provider attribution (interop QW3)", () => {
+  it("annotates a codex settlement (' · Codex' suffix) and leaves claude clean", () => {
+    const cx = buildWorkerNotice({ label: "w", branch: "b", status: "done", tail: "", provider: "codex" });
+    expect(cx.params?.provider).toBe(" · Codex");
+    expect(cx.text).toContain("Codex");
+    const cl = buildWorkerNotice({ label: "w", branch: "b", status: "done", tail: "", provider: "claude" });
+    expect(cl.params?.provider).toBe("");
+    expect(cl.text).not.toContain("Codex");
+  });
+});
 
 describe("MasterAgent", () => {
   it("auto-labels the session from the first user message (once, best-effort)", async () => {
@@ -640,8 +651,8 @@ describe("MasterAgent", () => {
 
     // Model still gets today's tagged prompt with both lines.
     expect(prompts[0]).toContain("<worker-notification>");
-    expect(prompts[0]).toContain("worker app (rookery/app) — idle");
-    expect(prompts[0]).toContain("worker web (rookery/web) — failed");
+    expect(prompts[0]).toContain("worker app (rookery/app) [claude] — idle");
+    expect(prompts[0]).toContain("worker web (rookery/web) [claude] — failed");
 
     // Display: one structured notice per worker, localized, WITHOUT the raw tag.
     const notices = events.filter((e) => e.type === "master.notice") as Array<{ code?: string; params?: { label?: string }; text?: string }>;
@@ -693,8 +704,8 @@ describe("MasterAgent", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[0]).toBe("go");
     expect(prompts[1]).toContain("<worker-notification>");
-    expect(prompts[1]).toContain("worker app (ra) — idle");
-    expect(prompts[1]).toContain("worker web (rw) — failed");
+    expect(prompts[1]).toContain("worker app (ra) [claude] — idle");
+    expect(prompts[1]).toContain("worker web (rw) [claude] — failed");
   });
 
   it("includes the untrusted-input fence instruction in the system prompt (every turn)", async () => {
