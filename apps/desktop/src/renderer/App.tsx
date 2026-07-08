@@ -20,6 +20,7 @@ import { useT } from "./i18n/provider.js";
 import { RepoTree } from "./views/RepoTree.js";
 import { RepoModal } from "./components/RepoModal.js";
 import { WorkerSpawnModal } from "./components/WorkerSpawnModal.js";
+import { ForkDialog } from "./components/ForkDialog.js";
 import { DataConsentModal } from "./components/DataConsentModal.js";
 import { OnboardingModal } from "./components/OnboardingModal.js";
 import { GettingStartedChecklist } from "./components/GettingStartedChecklist.js";
@@ -222,6 +223,8 @@ export function App(): JSX.Element {
   const [repoModal, setRepoModal] = useState(false);
   const [spawnRepo, setSpawnRepo] = useState<string | null>(null);
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
+  // Cross-provider fork dialog target (master session or worker) — the right-click "Fork" opens this instead of an instant fork.
+  const [forkTarget, setForkTarget] = useState<{ kind: "master" | "worker"; id: string; sourceProvider: string } | null>(null);
   const [editJob, setEditJob] = useState<Automation | "new" | null>(null);
   // Daemon-restart confirmation dialog state
   const [restartConfirm, setRestartConfirm] = useState(false);
@@ -517,7 +520,22 @@ export function App(): JSX.Element {
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   const archiveSession = useCallback((id: string, archived: boolean) => { void client?.request({ type: "session.archive", sessionId: id, archived }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
   const pinSession = useCallback((id: string, pinned: boolean) => { void client?.request({ type: "session.pin", sessionId: id, pinned }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
-  const forkSession = useCallback((id: string) => { void client?.request({ type: "session.fork", sessionId: id }).then((r) => { refetchSessions(); useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: r.sessionId }); void client?.request({ type: "session.history", sessionId: r.sessionId }).then((h) => useStore.getState().seedHistory(r.sessionId, h.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(r.sessionId, true)); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchSessions]);
+  // Right-click "Fork" → open the Fork dialog (target provider/model/effort pick + codex-auth gate), not an instant fork.
+  const forkSession = useCallback((id: string) => {
+    const provider = useStore.getState().sessions.find((x) => x.id === id)?.provider ?? "claude";
+    setForkTarget({ kind: "master", id, sourceProvider: provider });
+  }, []);
+  // Perform the master fork with the dialog's chosen target. session.fork carries ONLY provider (there is no
+  // session model column); the chosen model/effort are applied as the new session's per-session override after
+  // the fork. Then reuse the existing post-fork navigate + seedHistory path.
+  const runForkSession = useCallback((id: string, target: { provider: string; model?: string; effort?: string }) => {
+    void client?.request({ type: "session.fork", sessionId: id, provider: target.provider as "claude" | "codex" }).then((r) => {
+      refetchSessions();
+      if (target.model || target.effort) useStore.getState().setOverride(r.sessionId, { model: target.model, effort: target.effort });
+      useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: r.sessionId });
+      void client?.request({ type: "session.history", sessionId: r.sessionId }).then((h) => useStore.getState().seedHistory(r.sessionId, h.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(r.sessionId, true));
+    }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e)));
+  }, [refetchSessions]);
   // Use getState to remove the dependency on render state and stabilize with useCallback [] (as an event handler, getState() at call time = the existing closure value).
   const deleteSession = useCallback((id: string) => {
     // Optimistic removal — the row vanishes immediately (the refetch reconciles; restored on failure). Otherwise it lingers
@@ -630,7 +648,14 @@ export function App(): JSX.Element {
     useStore.getState().navigate({ overlay: null, showRepos: true, subId: id });
     void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
   }, []);
-  const forkSub = useCallback((id: string) => { void client?.request({ type: "worker.fork", id }).then((r) => { refetchFleet(); selectSub(r.id); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e))); }, [refetchFleet, selectSub]);
+  // Right-click "Fork" → open the Fork dialog. Workers persist model/effort as columns, so those ride along in worker.fork.
+  const forkSub = useCallback((id: string) => {
+    const provider = useStore.getState().fleet[id]?.provider ?? "claude";
+    setForkTarget({ kind: "worker", id, sourceProvider: provider });
+  }, []);
+  const runForkSub = useCallback((id: string, target: { provider: string; model?: string; effort?: string }) => {
+    void client?.request({ type: "worker.fork", id, provider: target.provider as "claude" | "codex", model: target.model, effort: target.effort }).then((r) => { refetchFleet(); selectSub(r.id); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e)));
+  }, [refetchFleet, selectSub]);
   const subSend = useCallback((id: string, text: string) => {
     const clientMsgId = crypto.randomUUID();
     // Show a queued bubble immediately → after the worker finishes its current turn (boundary echo) it switches to committed and settles into place.
@@ -1283,6 +1308,14 @@ export function App(): JSX.Element {
           searchSource={searchSource}
           onSpawn={spawnSub}
           onClose={() => setSpawnRepo(null)}
+        />
+      )}
+      {forkTarget && (
+        <ForkDialog
+          kind={forkTarget.kind}
+          sourceProvider={forkTarget.sourceProvider}
+          onFork={(target) => (forkTarget.kind === "master" ? runForkSession(forkTarget.id, target) : runForkSub(forkTarget.id, target))}
+          onClose={() => setForkTarget(null)}
         />
       )}
       {/* onAccept RETURNS the request promise (rather than swallowing it) so the modal itself can show busy/error
