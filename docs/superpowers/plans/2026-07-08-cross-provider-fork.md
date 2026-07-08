@@ -231,7 +231,8 @@ git commit -m "feat(fork): handoff seed builder — capped, fenced transcript (T
 
 **Interfaces:**
 - Consumes: `Repositories.setSessionHandoffFrom` (T1), `copySessionEvents`, `createSession`.
-- Produces: `SessionManager.fork(sessionId: string, target?: { provider?: string; model?: string; effort?: string }): Promise<Session>`. When `target.provider` is set and differs from the source → handoff (new session on `target.provider`, `handoff_from_provider` = source provider, no native `forkSession` call, no `sdk_session_id`). Otherwise unchanged.
+- Produces: `SessionManager.fork(sessionId: string, target?: { provider?: string }): Promise<Session>`. When `target.provider` is set and differs from the source → handoff (new session on `target.provider`, `handoff_from_provider` = source provider, no native `forkSession` call, no `sdk_session_id`). Otherwise unchanged.
+- **RESOLVED:** SessionRow has NO model/effort column (master model/effort is resolved from settings + the desktop's per-session `overrides`). So master fork carries ONLY `provider`; the chosen model/effort is applied client-side as a per-session override after the fork (T8). Do NOT invent a session model column.
 
 - [ ] **Step 1: Write the failing test** — add to `test/core/session-manager.test.ts` (mirror the existing fork test's harness; inspect it first for the `forkSession` fake + deps):
 
@@ -242,7 +243,7 @@ it("cross-provider fork creates a target-provider session with a handoff marker 
   repos.createSession({ id: "src", cwd: "/x", provider: "claude" });
   repos.setSdkSessionId("src", "claude-uuid");
   repos.addSessionEvent({ sessionId: "src", seq: 0, type: "master.message", payloadJson: JSON.stringify({ kind: "message", role: "user", content: "hi" }) });
-  const forked = await sm.fork("src", { provider: "codex", model: "gpt-5.5" });
+  const forked = await sm.fork("src", { provider: "codex" });
   const row = repos.getSession(forked.id)!;
   expect(row.provider).toBe("codex");
   expect(row.handoff_from_provider).toBe("claude");
@@ -268,7 +269,7 @@ Expected: FAIL (`fork` ignores the 2nd arg; native path always taken).
 - [ ] **Step 3: Implement** — replace the body of `fork` in `src/core/session-manager.ts` so it branches. Keep the existing native path verbatim for the else-branch:
 
 ```ts
-  async fork(sessionId: string, target?: { provider?: string; model?: string; effort?: string }): Promise<Session> {
+  async fork(sessionId: string, target?: { provider?: string }): Promise<Session> {
     const row = this.deps.repos.getSession(sessionId);
     if (!row) throw new Error(`unknown session: ${sessionId}`);
     const srcProvider = row.provider || "claude";
@@ -277,14 +278,14 @@ Expected: FAIL (`fork` ignores the 2nd arg; native path always taken).
 
     // Cross-provider handoff: no native resume handle crosses providers, so start a FRESH target session,
     // copy the transcript for UI history, and mark it so the first turn injects the source transcript.
+    // Model/effort are NOT persisted here (no session column) — the client applies them as a per-session
+    // override after the fork (see T8).
     if (target?.provider && target.provider !== srcProvider) {
       if (this.deps.repos.listSessionEvents(sessionId).length === 0) {
         throw new Error("nothing to hand off — this session has no conversation yet");
       }
       const forkLabel = `${label} (→ ${target.provider})`;
       this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider: target.provider });
-      if (target.model) this.deps.repos.setSessionModel?.(id, target.model); // setSessionModel if it exists; else omit
-      if (target.effort) this.deps.repos.setSessionEffort?.(id, target.effort);
       this.deps.repos.copySessionEvents(sessionId, id);
       this.deps.repos.setSessionHandoffFrom(id, srcProvider);
       this.deps.repos.setSessionLabel(id, forkLabel);
@@ -623,8 +624,9 @@ Expected: FAIL (params ignored).
 - [ ] **Step 3: Implement** — schemas in `messages.ts`:
 
 ```ts
-  z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), model: z.string().optional(), effort: z.string().optional() }),
+  z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
 ```
+(session.fork carries only `provider` — master model/effort is a client-side per-session override, applied by T8 after the fork, not a daemon session column.)
 ```ts
   z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string(), provider: z.enum(["claude", "codex"]).optional(), model: z.string().optional(), effort: z.string().optional() }),
 ```
@@ -634,7 +636,7 @@ Handlers in `connection.ts`:
 ```ts
       case "session.fork": {
         try {
-          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider, model: msg.model, effort: msg.effort });
+          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider });
           this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, reqId: msg.reqId });
         } catch (err) { this.reply({ type: "error", message: err instanceof Error ? err.message : String(err), reqId: msg.reqId }); }
         return;
@@ -709,7 +711,9 @@ describe("ForkDialog", () => {
 Run: `npx vitest run apps/desktop/test/fork-dialog.test.tsx` (from repo root: `npm -w apps/desktop exec vitest run test/fork-dialog.test.tsx`)
 Expected: FAIL (module not found).
 
-- [ ] **Step 3: Implement** the `ForkDialog` component (provider pill toggle default = other provider; model picker driven by `codexModels`/`models`; effort selector; codex-not-ready warning + disabled Fork reading `codexAuthStatus`; a "Fork" button calling `onFork({provider, model, effort})`). Mirror `WorkerSpawnModal`/`NewSessionPage` for the pickers and modal chrome. Add the `forkDialog.*` i18n keys (ko + en, identical key sets). Wire `App.tsx`: the existing `onFork`/fork menu action opens `ForkDialog`; its `onFork` sends `{ type: "session.fork", sessionId, provider, model, effort }` (or `worker.fork`), then navigates to the returned session/worker (reuse the current post-fork navigation).
+- [ ] **Step 3: Implement** the `ForkDialog` component (provider pill toggle default = other provider; model picker driven by `codexModels`/`models`; effort selector; codex-not-ready warning + disabled Fork reading `codexAuthStatus`; a "Fork" button calling `onFork({provider, model, effort})`). Mirror `WorkerSpawnModal`/`NewSessionPage` for the pickers and modal chrome. Add the `forkDialog.*` i18n keys (ko + en, identical key sets). Wire `App.tsx`:
+  - **Master fork:** send `{ type: "session.fork", sessionId, provider }` (provider only). After it returns, if a model/effort was chosen, apply them as the new session's per-session override (the existing `overrides` store slot + `setOverride`), so its turns use the chosen codex/claude model. Then navigate (reuse current post-fork navigation).
+  - **Worker fork:** send `{ type: "worker.fork", id, provider, model, effort }` (workers persist model/effort as columns). Navigate to the returned worker.
 
 - [ ] **Step 4: Run tests + typecheck**
 
