@@ -34,8 +34,8 @@ export function AutomationForm(p: {
   const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text-tolerant select fallback
   const init = p.job === "new" ? null : p.job;
   const [name, setName] = useState(init?.name ?? "");
-  // UI edits only cron/slack ('once' is for the agent's own wake-up, so it's excluded from the list → cron fallback)
-  const [triggerKind, setTriggerKind] = useState<"cron" | "slack">(init && init.trigger.kind === "slack" ? "slack" : "cron");
+  // UI edits cron/interval/slack ('once' is for the agent's own wake-up, so it's excluded from the list → cron fallback)
+  const [triggerKind, setTriggerKind] = useState<"cron" | "interval" | "slack">(init && (init.trigger.kind === "slack" || init.trigger.kind === "interval") ? init.trigger.kind : "cron");
   const [actionKind, setActionKind] = useState<"master" | "worker">(init?.action.kind ?? "master");
   const [enabled, setEnabled] = useState(init?.enabled ?? false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -44,6 +44,10 @@ export function AutomationForm(p: {
   const ct = init && init.trigger.kind === "cron" ? init.trigger : null;
   const [cron, setCron] = useState(ct?.cron ?? "0 3 * * *");
   const [tz, setTz] = useState(ct?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+  // interval trigger field (every N minutes)
+  const it = init && init.trigger.kind === "interval" ? init.trigger : null;
+  const [everyMinutes, setEveryMinutes] = useState(it?.everyMinutes != null ? String(it.everyMinutes) : "60");
 
   // slack trigger fields
   const st = init && init.trigger.kind === "slack" ? init.trigger : null;
@@ -109,6 +113,8 @@ export function AutomationForm(p: {
     const trigger: AutomationTrigger =
       triggerKind === "cron"
         ? { kind: "cron", cron: cron.trim(), timezone: tz.trim() }
+        : triggerKind === "interval"
+        ? { kind: "interval", everyMinutes: Math.max(1, Math.floor(Number(everyMinutes) || 1)) }
         : {
             kind: "slack",
             ...(ch ? { channels: ch } : {}),
@@ -155,7 +161,7 @@ export function AutomationForm(p: {
     if (d) setCwd(d);
   };
 
-  const triggerValid = triggerKind === "cron" ? cron.trim().split(/\s+/).length >= 5 : true;
+  const triggerValid = triggerKind === "cron" ? cron.trim().split(/\s+/).length >= 5 : triggerKind === "interval" ? Number(everyMinutes) >= 1 : true;
   const actionValid = actionKind === "master" ? prompt.trim() && cwd.trim() : repo && task.trim();
   const valid = name.trim() && triggerValid && actionValid;
 
@@ -225,14 +231,23 @@ export function AutomationForm(p: {
                 size="md"
                 className="w-full"
                 value={triggerKind}
-                onChange={(e) => setTriggerKind(e.target.value as "cron" | "slack")}
+                onChange={(e) => setTriggerKind(e.target.value as "cron" | "interval" | "slack")}
               >
                 <option value="cron">{t("automationModal.triggerCron")}</option>
+                <option value="interval">{t("automationModal.triggerInterval")}</option>
                 <option value="slack">{t("automationModal.triggerSlack")}</option>
               </Select>
             </label>
 
-            {triggerKind === "cron" ? (
+            {triggerKind === "interval" ? (
+              <div className="flex flex-col gap-1">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] text-fg-dim">{t("automationModal.everyMinutes")}</span>
+                  <Input type="number" min={1} value={everyMinutes} onChange={(e) => setEveryMinutes(e.target.value)} />
+                </label>
+                <span className="text-[11px] text-muted">{t("automationModal.everyMinutesHint")}</span>
+              </div>
+            ) : triggerKind === "cron" ? (
               <>
                 <div className="flex flex-col gap-1">
                   <label className="flex flex-col gap-1">

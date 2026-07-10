@@ -6,6 +6,7 @@ export default {
   "automationPage.typeMaster": "Master",
   "automationPage.typeWorker": "Worker",
   "automationPage.slackAll": "slack: all",
+  "automationPage.everyMinutes": "every {count} min",
   "automationPage.nextRun": "Next",
   "automationPage.run": "Run now",
   "automationPage.viewSessions": "Runs",

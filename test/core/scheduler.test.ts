@@ -149,6 +149,62 @@ it("reconcile ignores slack-trigger automations", () => {
   expect(h.repos.getAutomation("a1")!.nextRunAt).toBe(past);
 });
 
+// ── interval trigger (every N minutes) ──
+it("reconcile sets next_run_at to now + everyMinutes for an enabled interval trigger", () => {
+  const h = harness(past);
+  h.repos.createAutomation("a1", {
+    name: "n", enabled: true,
+    trigger: { kind: "interval", everyMinutes: 15 },
+    action: { kind: "master", prompt: "go", cwd: "/w", sessionMode: "reuse" },
+  });
+  h.sched.reconcile("a1");
+  const nxt = h.repos.getAutomation("a1")!.nextRunAt!;
+  expect(new Date(nxt).getTime()).toBe(new Date(past).getTime() + 15 * 60_000); // exactly now + 15min
+});
+
+it("reconcile sets next_run_at to null for a disabled interval trigger", () => {
+  const h = harness(past);
+  h.repos.createAutomation("a1", {
+    name: "n", enabled: false,
+    trigger: { kind: "interval", everyMinutes: 5 },
+    action: { kind: "master", prompt: "go", cwd: "/w", sessionMode: "reuse" },
+  });
+  h.repos.setAutomationNextRun("a1", past);
+  h.sched.reconcile("a1");
+  expect(h.repos.getAutomation("a1")!.nextRunAt).toBeNull();
+});
+
+it("start() backfills next_run_at for an enabled interval trigger with none set", () => {
+  const h = harness(past);
+  h.repos.createAutomation("a1", {
+    name: "n", enabled: true,
+    trigger: { kind: "interval", everyMinutes: 10 },
+    action: { kind: "master", prompt: "go", cwd: "/w", sessionMode: "reuse" },
+  });
+  expect(h.repos.getAutomation("a1")!.nextRunAt).toBeNull();
+  h.sched.start();
+  const nxt = h.repos.getAutomation("a1")!.nextRunAt!;
+  expect(new Date(nxt).getTime()).toBe(new Date(past).getTime() + 10 * 60_000);
+});
+
+it("fires a due interval automation, advances next_run by everyMinutes, and dispatches with {}", async () => {
+  const h = harness(past);
+  h.repos.createAutomation("a1", {
+    name: "n", enabled: true,
+    trigger: { kind: "interval", everyMinutes: 30 },
+    action: { kind: "master", prompt: "go", cwd: "/w", sessionMode: "reuse" },
+  });
+  h.repos.setAutomationNextRun("a1", past); // due now
+  h.sched.start();
+  h.fireTick();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(h.dispatchRun).toHaveBeenCalledOnce();
+  expect(h.dispatchRun.mock.calls[0]![1]).toEqual({});
+  // advanced to now + 30min (fire time), not left at the past due time → no pile-up
+  const nxt = h.repos.getAutomation("a1")!.nextRunAt!;
+  expect(new Date(nxt).getTime()).toBe(new Date(past).getTime() + 30 * 60_000);
+});
+
 // ── one-shot 'once' trigger (agent self-wakeup) ──
 it("fires a due 'once' automation and DELETES it (one-shot)", async () => {
   const h = harness(past);

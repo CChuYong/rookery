@@ -17,6 +17,12 @@ function defaultSchedule(fn: () => void, ms: number): () => void {
   return () => clearInterval(t);
 }
 
+// Recurring time triggers the scheduler owns the next-run for (cron + interval). `once` (self-wakeup) is
+// time-based too but its runAt is fixed, so it is handled separately (no next-run computation).
+function isRecurringTimeTrigger(kind: string): boolean {
+  return kind === "cron" || kind === "interval";
+}
+
 export class Scheduler {
   private cancelTick: (() => void) | null = null;
   constructor(private readonly d: SchedulerDeps) {}
@@ -30,7 +36,7 @@ export class Scheduler {
     // Cron: recurring → not backfilled (forward from now). Once: runAt persists, so a past-due
     // wakeup fires on the next tick (fire-overdue-on-boot); only (re)set if missing.
     for (const a of this.d.repos.listAutomations()) {
-      if ((a.trigger.kind === "cron" || a.trigger.kind === "once") && a.enabled && !a.nextRunAt) this.reconcile(a.id);
+      if ((isRecurringTimeTrigger(a.trigger.kind) || a.trigger.kind === "once") && a.enabled && !a.nextRunAt) this.reconcile(a.id);
     }
     this.cancelTick = (this.d.schedule ?? defaultSchedule)(() => this.tick(), this.d.tickMs ?? 30000);
   }
@@ -48,9 +54,20 @@ export class Scheduler {
       this.d.repos.setAutomationNextRun(id, a.enabled ? a.trigger.runAt : null);
       return;
     }
+    if (a.trigger.kind === "interval") {
+      const next = a.enabled ? this.intervalNext(a.trigger.everyMinutes) : null;
+      this.d.repos.setAutomationNextRun(id, next);
+      return;
+    }
     if (a.trigger.kind !== "cron") return;
     const next = a.enabled ? nextRun(a.trigger.cron, a.trigger.timezone, this.now()) : null;
     this.d.repos.setAutomationNextRun(id, next ? next.toISOString() : null);
+  }
+
+  // Next fire for an interval trigger: forward-from-now (now + everyMinutes). No wall-clock anchoring or
+  // catch-up — matches cron's forward-from-now philosophy, so a daemon that was down doesn't burst.
+  private intervalNext(everyMinutes: number): string {
+    return new Date(this.now().getTime() + everyMinutes * 60_000).toISOString();
   }
 
   async runNow(id: string, vars: ActionVars = {}): Promise<void> {
@@ -61,10 +78,19 @@ export class Scheduler {
   private tick(): void {
     const nowMs = this.now().getTime();
     for (const a of this.d.repos.listAutomations()) {
-      if ((a.trigger.kind !== "cron" && a.trigger.kind !== "once") || !a.enabled || !a.nextRunAt) continue;
+      if ((!isRecurringTimeTrigger(a.trigger.kind) && a.trigger.kind !== "once") || !a.enabled || !a.nextRunAt) continue;
       if (new Date(a.nextRunAt).getTime() > nowMs) continue;
-      void (a.trigger.kind === "once" ? this.fireOnce(a) : this.fireCron(a));
+      void (a.trigger.kind === "once" ? this.fireOnce(a) : a.trigger.kind === "interval" ? this.fireInterval(a) : this.fireCron(a));
     }
+  }
+
+  private async fireInterval(a: Automation): Promise<void> {
+    if (a.trigger.kind !== "interval") return;
+    // Advance next_run FIRST (mirrors fireCron) so the dispatcher's run-record preserves the advanced value
+    // and a long run can't cause pile-up (the dispatcher's overlap guard also skips a still-in-flight interval).
+    this.d.repos.setAutomationNextRun(a.id, this.intervalNext(a.trigger.everyMinutes));
+    const fresh = this.d.repos.getAutomation(a.id);
+    if (fresh) await this.d.dispatcher.run(fresh, {});
   }
 
   private async fireCron(a: Automation): Promise<void> {
