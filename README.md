@@ -73,6 +73,23 @@ Workers form a fleet that **codes in parallel, isolated per git worktree of a re
 - The orchestrator manages only worker lifecycle. **The worker commits, pushes, and opens PRs itself via bash (`git`/`gh`) in its own worktree**, when the master instructs it (`send_worker`). There is no automatic PR pipeline or `pr_open` status.
 - Global fleet: `list_workers`/`view_worker_diff`/`stop`/`discard` target the entire fleet from any session.
 
+## Expose rookery to other agents (External MCP)
+
+rookery can present its fleet control plane as an **MCP server**, so another agent (Claude Code, Cursor, Codex, …) can list, spawn, and steer rookery workers — while the code stays on your machine and your API keys and cost budgets still apply.
+
+It is **off by default**. Turn it on in the desktop app's **Settings → General → External MCP**, choosing a scope:
+
+- **Read-only** — observe only (`list_workers`, `get_worker_status`, `view_worker_transcript`, `view_worker_diff`, `list_repos`).
+- **Full control** — also `spawn_worker` / `send_worker` / `interrupt_worker` / `stop_worker` / `discard_worker`.
+
+The settings page shows the server URL (`http://127.0.0.1:8787/mcp-ext/<token>`) with a copy button and a token-regenerate action. Register it in your MCP client, e.g.:
+
+```bash
+claude mcp add rookery --transport http "http://127.0.0.1:8787/mcp-ext/<token>"
+```
+
+> ⚠️ Full control lets an external agent drive workers that run with `bypassPermissions`. Enable it only for clients you trust, and regenerate the token if a URL leaks.
+
 ## Desktop app (macOS)
 
 An Electron mission control for the agentic development environment. The app

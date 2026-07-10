@@ -5,7 +5,7 @@ import { useStore } from "../src/renderer/store/store.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 const base = {
-  settings: { masterName: "rookery", masterModel: "m", workerModel: "w", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "x", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex", codexTurnIdleTimeoutMs: "0", codexHandshakeTimeoutMs: "30000", slackProvider: "claude", workerCostBudgetUsd: "" },
+  settings: { masterName: "rookery", masterModel: "m", workerModel: "w", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "x", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex", codexTurnIdleTimeoutMs: "0", codexHandshakeTimeoutMs: "30000", slackProvider: "claude", workerCostBudgetUsd: "", mcpExposure: "off" },
   onSave: () => {},
   onClose: () => {},
   slack: "off" as const,
@@ -226,6 +226,39 @@ describe("SettingsPage workerCostBudgetUsd field", () => {
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ workerCostBudgetUsd: "10.5" }));
+  });
+});
+
+// ── External MCP server (rookery-as-MCP) section (General tab) ──
+describe("SettingsPage External MCP section", () => {
+  it("off (default): no URL, no regenerate button, no full-control warning", () => {
+    render(<SettingsPage {...base} mcpStatus={{ scope: "off", url: null }} />);
+    expect(screen.getByText("외부 MCP 서버")).toBeInTheDocument();
+    expect(screen.queryByText("토큰 재발급")).not.toBeInTheDocument();
+    expect(screen.queryByText(/전체 제어를 켜면/)).not.toBeInTheDocument();
+  });
+
+  it("changing the scope to full lands in onSave and shows the warning", () => {
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} mcpStatus={{ scope: "off", url: null }} />);
+    fireEvent.change(screen.getByLabelText(/노출 범위/), { target: { value: "full" } });
+    expect(screen.getByText(/전체 제어를 켜면/)).toBeInTheDocument(); // warning appears immediately (f-backed)
+    const saveButtons = screen.getAllByText("저장");
+    fireEvent.click(saveButtons[saveButtons.length - 1]!);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mcpExposure: "full" }));
+  });
+
+  it("when active with a URL, shows the URL and a regenerate button that fires the callback", () => {
+    const onRegenerateMcpToken = vi.fn();
+    render(<SettingsPage {...base} settings={{ ...base.settings, mcpExposure: "readonly" }} mcpStatus={{ scope: "readonly", url: "http://127.0.0.1:8787/mcp-ext/tok" }} onRegenerateMcpToken={onRegenerateMcpToken} />);
+    expect(screen.getByDisplayValue("http://127.0.0.1:8787/mcp-ext/tok")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("토큰 재발급"));
+    expect(onRegenerateMcpToken).toHaveBeenCalled();
+  });
+
+  it("active but no URL yet (scope changed, not saved) prompts to save", () => {
+    render(<SettingsPage {...base} settings={{ ...base.settings, mcpExposure: "full" }} mcpStatus={{ scope: "off", url: null }} />);
+    expect(screen.getByText("저장하면 서버 URL이 생성돼요.")).toBeInTheDocument();
   });
 });
 

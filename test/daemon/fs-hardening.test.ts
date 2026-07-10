@@ -5,13 +5,13 @@ import path from "node:path";
 import { secureFilePaths, secureDirPaths, secureHome } from "../../src/daemon/fs-hardening.js";
 
 function cfg(home: string) {
-  return { home, dbPath: path.join(home, "rookery.db"), pidPath: path.join(home, "daemon.pid"), tokenPath: path.join(home, "ws-token"), fleet: { worktreesDir: path.join(home, "worktrees") } };
+  return { home, dbPath: path.join(home, "rookery.db"), pidPath: path.join(home, "daemon.pid"), tokenPath: path.join(home, "ws-token"), mcpTokenPath: path.join(home, "mcp-token"), fleet: { worktreesDir: path.join(home, "worktrees") } };
 }
 
 describe("secure path lists", () => {
-  it("file list = db(+wal/shm), daemon.log, ws-token, daemon.pid; dir list = slack-files, worktrees", () => {
+  it("file list = db(+wal/shm), daemon.log, ws-token, mcp-token, daemon.pid; dir list = slack-files, worktrees", () => {
     const c = cfg("/h");
-    expect(secureFilePaths(c)).toEqual(["/h/rookery.db", "/h/rookery.db-wal", "/h/rookery.db-shm", "/h/daemon.log", "/h/ws-token", "/h/daemon.pid"]);
+    expect(secureFilePaths(c)).toEqual(["/h/rookery.db", "/h/rookery.db-wal", "/h/rookery.db-shm", "/h/daemon.log", "/h/ws-token", "/h/mcp-token", "/h/daemon.pid"]);
     expect(secureDirPaths(c)).toEqual(["/h/slack-files", "/h/worktrees"]);
   });
 });

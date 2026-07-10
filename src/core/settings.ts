@@ -52,7 +52,10 @@ export interface SettingsValues {
   workerSlackRelayEnabled: string; // mirror Slack-origin masters' worker activity to a channel ("1"/"0", default "0"). Echoed.
   workerSlackRelayChannel: string; // Slack channel ID for the worker relay ("" = off even if enabled). Echoed.
   workerCostBudgetUsd: string; // default lifetime USD cost ceiling applied to spawned workers when a spawn has no explicit override (settings-only). "" = unlimited (off). Echoed.
+  mcpExposure: string; // External MCP server exposure tier ("off"|"readonly"|"full", settings-only, fail-closed default "off"). Echoed.
 }
+
+export type McpScope = "off" | "readonly" | "full";
 
 // null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey/codexApiKey are outside SettingsValues (write-only secrets), so they're separate.
 export type SettingsPatch = { [K in keyof SettingsValues]?: string | null } & { linearApiKey?: string | null; anthropicApiKey?: string | null; codexApiKey?: string | null };
@@ -245,6 +248,14 @@ export class Settings {
     return this.repos.getSetting("usageRefreshMs") ?? String(DEFAULT_USAGE_REFRESH_MS);
   }
 
+  // External MCP server exposure tier. Fail-closed like slackAllowAll: any stored value other than
+  // exactly "readonly"/"full" (missing, cleared, or garbage) falls back to "off" — an unrecognized
+  // value must never silently expose the bypassPermissions fleet to external MCP clients.
+  mcpExposure(): McpScope {
+    const v = this.repos.getSetting("mcpExposure");
+    return v === "readonly" || v === "full" ? v : "off";
+  }
+
   all(): SettingsValues {
     const wcb = this.workerCostBudgetUsd(); // hoisted: avoid calling the getter twice for the same field below
     return {
@@ -272,6 +283,7 @@ export class Settings {
       workerSlackRelayEnabled: this.workerSlackRelayEnabled(),
       workerSlackRelayChannel: this.workerSlackRelayChannel(),
       workerCostBudgetUsd: wcb == null ? "" : String(wcb),
+      mcpExposure: this.mcpExposure(),
     };
   }
 

@@ -34,7 +34,20 @@ describe("Settings", () => {
       slackLocale: "ko",
       slackProvider: "claude",
       workerCostBudgetUsd: "",
+      mcpExposure: "off",
     });
+  });
+
+  it("mcpExposure: fail-closed default off; readonly/full pass through; garbage → off", () => {
+    const s = new Settings(new Repositories(openDb(":memory:")), config);
+    expect(s.mcpExposure()).toBe("off");
+    s.apply({ mcpExposure: "readonly" });
+    expect(s.mcpExposure()).toBe("readonly");
+    s.apply({ mcpExposure: "full" });
+    expect(s.mcpExposure()).toBe("full");
+    s.apply({ mcpExposure: "bogus" });
+    expect(s.mcpExposure()).toBe("off"); // unrecognized value must never expose the fleet
+    expect(s.all().mcpExposure).toBe("off");
   });
 
   it("codexWorkerModel/codexBin: settings-only defaults, overridable, clear to default", () => {

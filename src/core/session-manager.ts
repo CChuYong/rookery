@@ -11,6 +11,8 @@ import { parseNotification, type WorkerNotification } from "./worker-notifier.js
 export const UI_FLEET_SESSION_KEY = "ui:fleet";
 // Home (container) session for workers spawned by automation (automation: worker type) jobs. Not exposed in the Sessions list (same as UI_FLEET).
 export const AUTOMATION_FLEET_SESSION_KEY = "automation:fleet";
+// Home (container) session for workers spawned by external MCP clients (rookery-as-MCP). Not exposed in the Sessions list (same as UI/AUTOMATION_FLEET).
+export const EXTERNAL_FLEET_SESSION_KEY = "external:fleet";
 
 // external_key prefix → source (origin) + identifier within the source (originRef). Shared by the getOrCreateByKey creation path
 // and the fallback for old rows with an empty origin column / direct creation. slack=thread key, automation=automation id.
@@ -265,7 +267,7 @@ export class SessionManager {
   list(): Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider: string }> {
     return this.deps.repos
       .listSessionsWithActivity()
-      .filter((r) => r.external_key !== UI_FLEET_SESSION_KEY && r.external_key !== AUTOMATION_FLEET_SESSION_KEY) // hide UI/automation fleet container sessions
+      .filter((r) => r.external_key !== UI_FLEET_SESSION_KEY && r.external_key !== AUTOMATION_FLEET_SESSION_KEY && r.external_key !== EXTERNAL_FLEET_SESSION_KEY) // hide UI/automation/external fleet container sessions
       .map((r) => {
         // Prefer the stored origin; if empty (old row), derive from external_key.
         const src = r.origin ? { origin: r.origin, originRef: r.origin_ref } : deriveOrigin(r.external_key);

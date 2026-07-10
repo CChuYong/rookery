@@ -2,12 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Config } from "../config.js";
 
-type SecureConfig = Pick<Config, "home" | "dbPath" | "pidPath" | "tokenPath" | "fleet">;
+type SecureConfig = Pick<Config, "home" | "dbPath" | "pidPath" | "tokenPath" | "mcpTokenPath" | "fleet">;
 
 // Sensitive files to tighten to 0600. ⚠️ For the current-boot WAL/SHM the real protection is home 0700 (blocks traversal);
 // these -wal/-shm entries are for cleaning up leftovers from a previous boot (secureHome runs only once, before openDb).
 export function secureFilePaths(config: SecureConfig): string[] {
-  return [config.dbPath, `${config.dbPath}-wal`, `${config.dbPath}-shm`, path.join(config.home, "daemon.log"), config.tokenPath, config.pidPath];
+  return [config.dbPath, `${config.dbPath}-wal`, `${config.dbPath}-shm`, path.join(config.home, "daemon.log"), config.tokenPath, config.mcpTokenPath, config.pidPath];
 }
 export function secureDirPaths(config: SecureConfig): string[] {
   return [path.join(config.home, "slack-files"), config.fleet.worktreesDir];

@@ -36,6 +36,8 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { Connection } from "./connection.js";
 import { McpBridge } from "./mcp-bridge.js";
+import { ExternalMcpController } from "./external-mcp-controller.js";
+import { externalToolDefs } from "../tools/external-tools.js";
 import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource, gcOrphanCodexHomes } from "./codex-home.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
@@ -318,6 +320,19 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // child and reads its account state. NOT cached (auth changes at runtime) — see codex-auth-provider.ts.
   const codexAuthProvider = makeCodexAuthProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
 
+  // External MCP server (rookery-as-MCP): a SECOND McpBridge mounted at /mcp-ext, gating fleet control for
+  // external MCP clients (Claude Code/Cursor/Codex). Off by default (fail-closed) via the mcpExposure setting;
+  // reconcile() runs at boot and on every settings.set that touches mcpExposure (Connection). port reads the
+  // live boundPort so ephemeral (port 0) test/dev binds still advertise the real URL.
+  const extMcp = new ExternalMcpController({
+    tokenPath: config.mcpTokenPath,
+    host: config.host,
+    port: () => boundPort,
+    scope: () => settings.mcpExposure(),
+    defsFor: (scope) => externalToolDefs({ fleet, repos, sessions }, scope) as unknown as import("./mcp-bridge.js").BridgeToolDef[],
+  });
+  extMcp.reconcile();
+
   // Slack runtime config is resolved per call from settings (DB, tokens fall back to env). Tokens at connect time, the rest per message.
   const slackConfig = () => ({
     botToken: settings.slackBotToken(),
@@ -399,6 +414,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // MCP bridge FIRST: a codex master turn's per-turn child reaches its tools at /mcp/<token> on this same
     // server. handleHttp returns false for anything outside its base path, so this falls through cleanly.
     if (bridge.handleHttp(req, res)) return;
+    // External MCP server (rookery-as-MCP) at /mcp-ext/<token>. Off → its session isn't registered, so this 404s.
+    if (extMcp.handleHttp(req, res)) return;
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
       return;
@@ -445,7 +462,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });

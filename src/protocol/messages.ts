@@ -141,11 +141,16 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       workerSlackRelayEnabled: z.string().optional(), // mirror worker activity to a Slack channel ("1"/"0"). Echoed.
       workerSlackRelayChannel: z.string().nullable().optional(), // Slack channel ID for the worker relay. Echoed.
       workerCostBudgetUsd: z.string().nullable().optional(), // default lifetime USD cost ceiling for spawned workers ("" = unlimited). Echoed.
+      mcpExposure: z.string().nullable().optional(), // External MCP exposure tier "off"/"readonly"/"full" (fail-closed default off). Echoed.
       slackBotToken: z.string().nullable().optional(), // write-only secret. Not echoed.
       slackAppToken: z.string().nullable().optional(), // write-only secret. Not echoed.
     }),
   }),
   z.object({ type: z.literal("slack.set"), enabled: z.boolean(), reqId: z.string().optional() }),
+  // External MCP server (rookery-as-MCP): fetch current exposure/URL, or rotate the shared token.
+  // The exposure tier itself (mcpExposure) rides settings.get/settings.set; these carry the computed URL.
+  z.object({ type: z.literal("mcp.status"), reqId: z.string() }),
+  z.object({ type: z.literal("mcp.regenerate_token"), reqId: z.string() }),
   z.object({ type: z.literal("automation.list"), reqId: z.string() }),
   z.object({ type: z.literal("automation.create"), reqId: z.string(), automation: automationInputSchema }),
   z.object({ type: z.literal("automation.update"), reqId: z.string(), id: z.string(), patch: automationInputSchema }),
@@ -232,6 +237,7 @@ export type ServerMessage =
   | { type: "codex.authStatus.result"; reqId: string; status: CodexAuthStatus | null }
   | { type: "commands.result"; reqId: string; commands: SlashCommandInfo[] }
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
+  | { type: "mcp.status.result"; reqId: string; scope: "off" | "readonly" | "full"; url: string | null }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
   | { type: "automation.list.result"; reqId: string; automations: Automation[] }
   | { type: "automation.result"; reqId: string; automation: Automation }
@@ -286,6 +292,8 @@ export interface RequestResultMap {
   "commands.list": Extract<ServerMessage, { type: "commands.result" }>;
   "settings.get": Extract<ServerMessage, { type: "settings.result" }>;
   "settings.set": Extract<ServerMessage, { type: "settings.result" }>;
+  "mcp.status": Extract<ServerMessage, { type: "mcp.status.result" }>;
+  "mcp.regenerate_token": Extract<ServerMessage, { type: "mcp.status.result" }>;
   "slack.set": Extract<ServerMessage, { type: "slack.ack" }>;
   "automation.list": Extract<ServerMessage, { type: "automation.list.result" }>;
   "automation.create": Extract<ServerMessage, { type: "automation.result" }>;

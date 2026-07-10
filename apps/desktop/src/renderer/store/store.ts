@@ -61,6 +61,9 @@ interface Store extends AppState {
   // object = a real status. A not-authed codex still resolves to { method:"none" }, NOT "unavailable".
   codexAuthStatus: CodexAuthStatus | "unavailable" | null;
   setCodexAuthStatus: (codexAuthStatus: CodexAuthStatus | "unavailable" | null) => void;
+  // External MCP server (rookery-as-MCP) status: exposure scope + computed URL (null when off). Fetched via mcp.status.
+  mcpStatus: { scope: "off" | "readonly" | "full"; url: string | null } | null;
+  setMcpStatus: (mcpStatus: { scope: "off" | "readonly" | "full"; url: string | null } | null) => void;
   // Linear/GitHub integration connection status (on-demand pull). Used by the spawn dialog and the settings integrations section.
   integrations: IntegrationsStatus | null;
   setIntegrations: (i: IntegrationsStatus) => void;
@@ -169,6 +172,8 @@ export const useStore = create<Store>((set, get) => ({
   setCodexModels: (codexModels) => set({ codexModels }),
   codexAuthStatus: null,
   setCodexAuthStatus: (codexAuthStatus) => set({ codexAuthStatus }),
+  mcpStatus: null,
+  setMcpStatus: (mcpStatus) => set({ mcpStatus }),
   integrations: null,
   setIntegrations: (integrations) => set({ integrations }),
   authStatus: null,
