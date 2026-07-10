@@ -5,6 +5,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "status.provisioning": "준비 중",
   "status.running": "실행 중",
+  "status.background": "백그라운드 작업 중",
   "status.idle": "유휴",
   "status.stopped": "중지됨",
   "status.done": "완료",

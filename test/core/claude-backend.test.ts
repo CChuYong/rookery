@@ -299,3 +299,41 @@ describe("ClaudeStream controls", () => {
     await collect(stream);
   });
 });
+
+// ── Background-task lifecycle frames + terminal_reason (2026-07-11 state-graph redesign) ──
+describe("ClaudeBackend — background_task translation", () => {
+  it("maps task_started/task_notification to background_task events and drops progress/non-terminal updates", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "task_progress", id: "bg1" }, // heartbeat noise — must NOT become a system_text transcript row
+      { type: "task_updated", id: "bg1", status: "running" }, // non-terminal patch — ignored
+      { type: "task_updated", id: "bg1", status: "completed" }, // terminal patch — settled
+      { type: "task_notification", id: "bg1", status: "completed" }, // settle double-fire (consumer dedupes)
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    const bg = events.filter((e) => e.kind === "background_task");
+    expect(bg).toEqual([
+      { kind: "background_task", taskId: "bg1", taskType: "local_bash", status: "started" },
+      { kind: "background_task", taskId: "bg1", status: "settled" },
+      { kind: "background_task", taskId: "bg1", status: "settled" },
+    ]);
+    // no task frame leaked into system_text (previously task_* polluted transcripts as unclassified system rows)
+    expect(events.some((e) => e.kind === "system_text" && /task_/.test(e.text))).toBe(false);
+  });
+
+  it("carries result.terminal_reason on turn_end as an opaque diagnostic (absent when the SDK omits it)", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s", terminal_reason: "completed" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    const end = events.find((e) => e.kind === "turn_end")!;
+    expect(end).toMatchObject({ kind: "turn_end", terminalReason: "completed" });
+
+    const noReason = new ClaudeBackend(fakeQuery([
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events2 = await collect(noReason.startTurn("hi", baseOpts()));
+    expect("terminalReason" in (events2.find((e) => e.kind === "turn_end") as object)).toBe(false);
+  });
+});

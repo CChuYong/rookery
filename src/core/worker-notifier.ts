@@ -4,6 +4,10 @@ import type { Repositories } from "../persistence/repositories.js";
 
 // A worker has "finished a dispatch" once it leaves running/provisioning for any settled state — idle on success, or a
 // terminal failure (so an armed master is told even when the work failed, instead of waiting forever for an idle).
+// "background" is deliberately NOT settled (2026-07-11 state-graph redesign): the turn ended but background tasks
+// (run_in_background shells etc.) still run — notifying there would wake the master before the work is actually done.
+// The worker reaches idle after those tasks settle (and the SDK's auto-wake turn processes their results), so the arm
+// fires exactly once, at the truthful completion point. "done" stays only for legacy rows (retired from live writes).
 const SETTLED = new Set(["idle", "done", "error", "failed", "stopped", "orphaned"]);
 
 // A settled worker's notification payload. Structured (not a preformatted string) so the master can build BOTH the

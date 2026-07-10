@@ -65,6 +65,26 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     // Emit the session id EARLY (init) — an interrupt before the first result must not orphan resume.
     const sysSessionId = (msg as { session_id?: string }).session_id;
     if (sysSessionId) yield { kind: "session_id", sessionId: sysSessionId };
+    // Background-task lifecycle frames (task_started/task_updated/task_notification/task_progress) —
+    // live-verified against SDK 0.3.195 (probe-turn-lifecycle.mjs, 2026-07-11): started fires when a task
+    // is backgrounded (or a long foreground command is auto-promoted ~3s in); settle arrives as
+    // task_updated(patch.status ∈ completed|failed|killed) immediately followed by task_notification —
+    // the worker's task-id set dedupes the double settle. task_progress is heartbeat noise (dropped;
+    // previously it leaked into transcripts as an unclassified system_text row).
+    const sub = (msg as { subtype?: string }).subtype;
+    if (sub === "task_started" || sub === "task_updated" || sub === "task_notification" || sub === "task_progress") {
+      const tm = msg as { task_id?: string; task_type?: string; status?: string; patch?: { status?: string } };
+      if (!tm.task_id || sub === "task_progress") return;
+      if (sub === "task_started") {
+        yield { kind: "background_task", taskId: tm.task_id, taskType: tm.task_type, status: "started" };
+        return;
+      }
+      const st = sub === "task_notification" ? (tm.status ?? "completed") : tm.patch?.status;
+      if (sub === "task_notification" || st === "completed" || st === "failed" || st === "killed") {
+        yield { kind: "background_task", taskId: tm.task_id, status: "settled" };
+      }
+      return; // non-terminal task_updated patches (running/paused/description) are ignored
+    }
     const push = classifySystemPush(msg);
     if (push) {
       yield { kind: "push", push };
@@ -87,6 +107,7 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       num_turns?: number;
       session_id?: string;
       duration_ms?: number;
+      terminal_reason?: string;
       usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
       modelUsage?: Record<string, { contextWindow?: number }>;
     };
@@ -100,6 +121,7 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       durationMs: r.duration_ms ?? 0,
       contextTokens,
       contextWindow,
+      ...(r.terminal_reason ? { terminalReason: r.terminal_reason } : {}),
     };
   }
 }

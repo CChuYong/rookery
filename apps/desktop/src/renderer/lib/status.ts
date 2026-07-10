@@ -2,11 +2,11 @@
 // tag = colorblind-safe mono text (run/pr/fail are a red-green confusion trio, so a text channel is needed).
 // The dot (led-live) is split out for 'alive' (running) only, to strengthen the signature.
 const RAIL: Record<string, string> = {
-  provisioning: "bg-accent", running: "bg-run", idle: "bg-muted", failed: "bg-fail", error: "bg-fail",
+  provisioning: "bg-accent", running: "bg-run", background: "bg-run", idle: "bg-muted", failed: "bg-fail", error: "bg-fail",
   stopped: "bg-stop", orphaned: "bg-nochg", done: "bg-pr",
 };
 const TAG: Record<string, string> = {
-  provisioning: "PREP", running: "RUN", idle: "IDLE", failed: "ERR", error: "ERR",
+  provisioning: "PREP", running: "RUN", background: "BG", idle: "IDLE", failed: "ERR", error: "ERR",
   stopped: "STOP", orphaned: "ORPH", done: "DONE",
 };
 // i18n key for a status's full-word display label (status.running/idle/stopped/done/error/failed/orphaned/provisioning) —
@@ -14,12 +14,14 @@ const TAG: Record<string, string> = {
 // for the same worker (audit #50: tree showed 'ORPH' while the header showed 'orphaned'). TAG above stays as the
 // colorblind-safe short alt-channel; this is the accessible full word for text/title.
 const LABEL_KEY: Record<string, string> = {
-  provisioning: "status.provisioning", running: "status.running", idle: "status.idle", failed: "status.failed", error: "status.error",
+  provisioning: "status.provisioning", running: "status.running", background: "status.background", idle: "status.idle", failed: "status.failed", error: "status.error",
   stopped: "status.stopped", orphaned: "status.orphaned", done: "status.done",
 };
 // Full chip tone (border/bg/text) for the StatusBadge — kept here so status→color lives in one file (dot = railClass + led-live).
 const TONE: Record<string, string> = {
   running: "text-run bg-run/12 border-run/25",
+  // Turn ended but background tasks (bg shells etc.) still run — still "working", so it shares running's tone family.
+  background: "text-run bg-run/12 border-run/25",
   idle: "text-fg-dim bg-raised border-line",
   failed: "text-fail bg-fail/12 border-fail/25",
   error: "text-fail bg-fail/12 border-fail/25",

@@ -56,7 +56,7 @@ describe("Worker cross-provider handoff seed", () => {
 });
 
 describe("Worker", () => {
-  it("runs, persists events, emits to bus, and settles to done", async () => {
+  it("runs, persists events, emits to bus, and settles to stopped on natural stream end", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/repo/a", label: "task" });
@@ -83,13 +83,13 @@ describe("Worker", () => {
     agent.start("do the task");
     await agent.waitUntilSettled();
 
-    expect(agent.status()).toBe("done");
-    // Persisted events: first user instruction + assistant message + result
+    expect(agent.status()).toBe("stopped"); // natural fake-stream end lands stopped (done retired 2026-07-11)
+    // Persisted events: first user instruction + assistant message + result + the stream-end notice (done retired 2026-07-11)
     const persisted = repos.listWorkerEvents("a1");
-    expect(persisted.map((e) => e.type)).toEqual(["message", "message", "result"]);
-    // Emitted worker.event: user message + assistant message + result = 3
+    expect(persisted.map((e) => e.type)).toEqual(["message", "message", "result", "notice"]);
+    // Emitted worker.event: user message + assistant message + result + stream-end notice = 4
     const msgEvents = events.filter((e) => e.type === "worker.event");
-    expect(msgEvents.length).toBe(3);
+    expect(msgEvents.length).toBe(4);
     // status transition event
     expect(events.some((e) => e.type === "worker.status")).toBe(true);
     // The result's session_id is persisted → resume is possible after restart
@@ -472,7 +472,7 @@ describe("Worker", () => {
     const events = repos.listWorkerEvents("a1");
     expect(events.some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { role?: string; content?: string }).content === "do it")).toBe(true);
     await agent.waitUntilSettled();
-    expect(agent.status()).toBe("done");
+    expect(agent.status()).toBe("stopped"); // natural fake-stream end lands stopped (done retired 2026-07-11)
   });
 
   it("calls onTurnStart before each turn (start + send) for checkpointing", async () => {
@@ -775,7 +775,7 @@ describe("Worker", () => {
     });
     agent.start("task");
     await agent.waitUntilSettled();
-    expect(agent.status()).toBe("done"); // not stopped by cap
+    expect(agent.status()).toBe("stopped"); // natural fake-stream end (done retired 2026-07-11) — NOT the cap path (no cap notice)
   });
 
   it("stops at costBudgetUsd once cumCostUsd (lifetime) crosses it, across turns (mirror maxTurns)", async () => {
@@ -827,7 +827,7 @@ describe("Worker", () => {
     });
     agent.start("task");
     await agent.waitUntilSettled();
-    expect(agent.status()).toBe("done"); // not stopped by budget
+    expect(agent.status()).toBe("stopped"); // natural fake-stream end (done retired) — NOT the budget path (no budget notice)
   });
 
   it("maxTurns + costBudgetUsd both set, cost crosses while maxTurns does not that turn → stops via cost budget", async () => {
@@ -1132,5 +1132,104 @@ describe("extractToolUses / extractToolResults", () => {
   it("returns [] for messages without array content", () => {
     expect(extractToolUses({ type: "system", subtype: "init" })).toEqual([]);
     expect(extractToolResults({ message: { content: "plain" } })).toEqual([]);
+  });
+});
+
+// ── Background-aware state machine (2026-07-11 redesign): running / background / idle derived from
+//    turnActive + running bg-task set. Design: docs/superpowers/specs/2026-07-11-worker-state-graph-design.md ──
+describe("Worker background state machine", () => {
+  function mk(responder: Parameters<typeof fakeStreamingBackend>[0]) {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statusEvents: Array<{ status: string; bg?: { count: number; types: string[] } }> = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statusEvents.push({ status: e.status, ...(e.bg ? { bg: e.bg } : {}) }); });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: fakeStreamingBackend(responder) } });
+    return { repos, bus, statusEvents, agent };
+  }
+
+  it("turn_end with a running bg task → background (with bg payload); settle → idle (시킨 일 다 함)", async () => {
+    const x = mk(() => [
+      { type: "tool_use", id: "t1", name: "Bash", input: { command: "sleep 9", run_in_background: true } },
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "tool_result", id: "t1", content: "Command running in background with ID: bg1" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "bg1", status: "completed" },
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    const seq = x.statusEvents.map((s) => s.status);
+    expect(seq).toEqual(["background", "idle"]); // NOT idle at turn_end — bg still ran
+    // the background event carries why (count + task types) for UI labeling
+    expect(x.statusEvents[0]!.bg).toEqual({ count: 1, types: ["local_bash"] });
+    expect(x.repos.getWorker("a1")!.status).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("settle double-fire (task_updated completed + task_notification) is deduped — single background→idle", async () => {
+    const x = mk(() => [
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_updated", id: "bg1", status: "completed" },
+      { type: "task_notification", id: "bg1", status: "completed" }, // second settle for the same id — no-op
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "idle"]);
+    await x.agent.stop();
+  });
+
+  it("auto-wake: model activity after the settle flips idle → running with NO send() (live-verified SDK behavior)", async () => {
+    const x = mk(() => [
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "bg1", status: "completed" },
+      { type: "assistant", text: "bg finished — processed its output" }, // the SDK's spontaneous non-human wake turn
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    x.agent.start("go");
+    // The streaming fake yields all turn-0 steps then waits for the next input (queue stays open — the live
+    // lifecycle), so observe the status sequence rather than awaiting a natural end.
+    await until(() => x.statusEvents.length >= 4);
+    // background (bg running) → idle (settled) → running (wake turn, no send) → idle (wake turn ended)
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "idle", "running", "idle"]);
+    // the wake turn's output landed in the transcript
+    const persisted = x.repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { content?: string });
+    expect(persisted.some((p) => p.content === "bg finished — processed its output")).toBe(true);
+    await x.agent.stop();
+  });
+
+  it("stop() from background latches stopped; late frames cannot resurrect it", async () => {
+    const x = mk(() => [
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stop();
+    expect(x.agent.status()).toBe("stopped");
+    expect(() => x.agent.send("more")).toThrow(); // terminal — control contract unchanged
+  });
+
+  it("send() while background starts a turn immediately; turn end returns to background while the task still runs", async () => {
+    const x = mk((_text, turn) =>
+      turn === 0
+        ? [
+            { type: "task_started", id: "bg1", taskType: "local_bash" },
+            { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+          ]
+        : [
+            { type: "assistant", text: "follow-up handled" },
+            { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+          ],
+    );
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    x.agent.send("follow-up");
+    await until(() => x.statusEvents.filter((s) => s.status === "background").length >= 2, 2000);
+    // background → running (send) → background (bg1 never settled)
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "running", "background"]);
+    await x.agent.stop();
   });
 });

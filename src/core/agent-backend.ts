@@ -37,9 +37,17 @@ export type AgentEvent =
   // Classified provider push (commands_changed / compaction / retry / fallback …) — see system-push.ts.
   | { kind: "push"; push: SystemPush }
   | { kind: "system_text"; text: string } // unclassified system message (e.g. init)
+  // Harness-tracked background task lifecycle (Claude only: run_in_background shells, backgrounded
+  // subagents, monitors, workflows — docs/superpowers/specs/2026-07-11-worker-state-graph-design.md).
+  // "started" adds it to the worker's running set; "settled" removes it (completed/failed/killed/stopped
+  // are all just "settled" here — the state machine only needs the count). Codex never emits this
+  // (its items complete inside the turn; no background concept in app-server 0.142.5).
+  | { kind: "background_task"; taskId: string; taskType?: string; status: "started" | "settled" }
   // End of one turn. costUsd/numTurns/durationMs are THIS turn's raw values (numTurns is the provider's
   // per-send cumulative agentic turn count) — consumers accumulate their own session totals.
-  | { kind: "turn_end"; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number };
+  // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried
+  // for observability only, never branched on (live-verified 2026-07-11: bg detection rests on task frames).
+  | { kind: "turn_end"; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string };
 
 // One live agent stream: async-iterate the events; control the underlying session via the methods.
 // Controls are best-effort: adapters must resolve (not throw) when the underlying session lacks a control.

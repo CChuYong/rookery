@@ -284,8 +284,8 @@ export class SlackThreadReporter {
         return;
       }
       case "worker.status": {
-        // idle/running recur every turn → suppress to prevent spam. Notify only on terminal states (done is the success line, slack-idle-status-spam).
-        if (e.status === "running" || e.status === "idle") return;
+        // idle/running/background recur every turn → suppress to prevent spam. Notify only on terminal states (done is the success line, slack-idle-status-spam).
+        if (e.status === "running" || e.status === "idle" || e.status === "background") return;
         // worker.status: two writers (Worker.transition + FleetOrchestrator.setStatus) each emit the terminal state →
         // post the same terminal state for the same worker only once (prevents duplicate messages). Desktop/CLI overwrite the status field so they're idempotent (no effect).
         if (this.lastWorkerStatus.get(e.workerId) === e.status) return;

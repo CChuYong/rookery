@@ -15,6 +15,11 @@ export type FakeStep =
   | { type: "message_start"; usage: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }
   | { type: "tool_use"; id: string; name: string; input?: unknown; parentToolUseId?: string }
   | { type: "tool_result"; id: string; isError?: boolean; content?: string; parentToolUseId?: string }
+  // Background-task lifecycle frames (system subtype task_* — live-verified shapes, probe-turn-lifecycle.mjs 2026-07-11).
+  | { type: "task_started"; id: string; taskType?: string }
+  | { type: "task_updated"; id: string; status: string } // patch.status: completed/failed/killed settle; running/paused ignored
+  | { type: "task_notification"; id: string; status?: string }
+  | { type: "task_progress"; id: string }
   | {
       type: "result";
       subtype: string;
@@ -22,6 +27,7 @@ export type FakeStep =
       num_turns: number;
       session_id: string;
       duration_ms?: number;
+      terminal_reason?: string;
       usage?: Record<string, number>;
       modelUsage?: Record<string, { contextWindow: number }>;
     };
@@ -42,6 +48,14 @@ function stepToMessage(step: FakeStep): unknown {
     return { type: "assistant", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "assistant", content: [{ type: "tool_use", id: step.id, name: step.name, input: step.input ?? {} }] } };
   } else if (step.type === "tool_result") {
     return { type: "user", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.id, is_error: step.isError ?? false, ...(step.content !== undefined ? { content: step.content } : {}) }] } };
+  } else if (step.type === "task_started") {
+    return { type: "system", subtype: "task_started", task_id: step.id, ...(step.taskType ? { task_type: step.taskType } : {}) };
+  } else if (step.type === "task_updated") {
+    return { type: "system", subtype: "task_updated", task_id: step.id, patch: { status: step.status } };
+  } else if (step.type === "task_notification") {
+    return { type: "system", subtype: "task_notification", task_id: step.id, status: step.status ?? "completed" };
+  } else if (step.type === "task_progress") {
+    return { type: "system", subtype: "task_progress", task_id: step.id };
   }
   return {
     type: "result",
@@ -50,6 +64,7 @@ function stepToMessage(step: FakeStep): unknown {
     num_turns: step.num_turns,
     session_id: step.session_id,
     ...(step.duration_ms !== undefined ? { duration_ms: step.duration_ms } : {}),
+    ...(step.terminal_reason ? { terminal_reason: step.terminal_reason } : {}),
     ...(step.usage ? { usage: step.usage } : {}),
     ...(step.modelUsage ? { modelUsage: step.modelUsage } : {}),
   };
