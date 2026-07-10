@@ -21,6 +21,16 @@ export function loadOrCreateToken(tokenPath: string): string {
   return token;
 }
 
+// Force a fresh secret at `tokenPath` (0600), regardless of any existing value. Used to rotate the
+// External MCP token — the old URL immediately stops working once the caller re-registers with the new one.
+export function rotateToken(tokenPath: string): string {
+  const token = crypto.randomBytes(24).toString("base64url");
+  fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
+  return token;
+}
+
 interface UpgradeReq {
   url?: string;
   headers: { origin?: string };

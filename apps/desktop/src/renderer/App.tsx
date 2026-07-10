@@ -150,6 +150,7 @@ type AppSelected = Pick<
   | "setSessionFilter"
   | "authStatus"
   | "codexModels"
+  | "mcpStatus"
 >;
 
 export function App(): JSX.Element {
@@ -185,6 +186,7 @@ export function App(): JSX.Element {
         usageLoadFailed: st.usageLoadFailed,
         integrations: st.integrations,
         authStatus: st.authStatus,
+        mcpStatus: st.mcpStatus,
         automations: st.automations,
         automationsLoaded: st.automationsLoaded,
         automationsLoadFailed: st.automationsLoadFailed,
@@ -465,6 +467,7 @@ export function App(): JSX.Element {
       void c.request({ type: "models.list" }).then((r) => useStore.getState().setModels((r.models ?? []).map((m) => ({ id: m.id, label: m.displayName })))).catch(() => {});
       void c.request({ type: "codex.models.list" }).then((r) => useStore.getState().setCodexModels(r.models ?? null)).catch(() => {});
       void c.request({ type: "codex.authStatus" }).then((r) => useStore.getState().setCodexAuthStatus(r.status ?? "unavailable")).catch(() => useStore.getState().setCodexAuthStatus("unavailable"));
+      void c.request({ type: "mcp.status" }).then((r) => useStore.getState().setMcpStatus({ scope: r.scope, url: r.url })).catch(() => {});
       void c.request({ type: "integrations.status" }).then((r) => useStore.getState().setIntegrations({ github: r.github, linear: r.linear })).catch(() => {});
       void c.request({ type: "auth.status" }).then((r) => useStore.getState().setAuthStatus(r)).catch(() => {});
       void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true));
@@ -725,7 +728,11 @@ export function App(): JSX.Element {
       .catch((e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); throw e; });
   const saveSettings = useCallback((next: SettingsValues) => {
     const c = client; if (!c) return;
-    void c.request({ type: "settings.set", settings: next }).then((r) => { useStore.getState().setSettings(r.settings); }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+    void c.request({ type: "settings.set", settings: next }).then((r) => {
+      useStore.getState().setSettings(r.settings);
+      // A scope change (mcpExposure) reconciles the External MCP server daemon-side → refetch the URL/status.
+      void c.request({ type: "mcp.status" }).then((m) => useStore.getState().setMcpStatus({ scope: m.scope, url: m.url })).catch(() => {});
+    }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
   }, []);
   // Composer attach/drop — reads only the window bridge for stability (avoids a new ref every render → Conversation memo effect).
   const onAttachFile = useCallback(() => window.rookery.pickFile(), []);
@@ -1079,6 +1086,12 @@ export function App(): JSX.Element {
                 .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "codex.authStatus" }); })
                 .then((r) => { if (r) useStore.getState().setCodexAuthStatus(r.status ?? "unavailable"); })
                 .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+            }}
+            mcpStatus={s.mcpStatus}
+            onRegenerateMcpToken={() => {
+              void client?.request({ type: "mcp.regenerate_token" })
+                .then((r) => { useStore.getState().setMcpStatus({ scope: r.scope, url: r.url }); toast.success(tRef.current("toast.keySaved")); })
+                .catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e)));
             }}
           />
         ) : overlay === "newSession" ? (

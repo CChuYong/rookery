@@ -19,6 +19,7 @@ import type { SlashCommandInfo } from "../core/commands.js";
 import type { SourceItem, SourceProviderId } from "../core/source-intake.js";
 import type { IntegrationsStatus } from "../protocol/messages.js";
 import type { SlackController } from "../slack/controller.js";
+import type { ExternalMcpController } from "./external-mcp-controller.js";
 import type { ModelInfo } from "../core/models-provider.js";
 import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
@@ -108,6 +109,7 @@ export class Connection {
     private readonly resolveSlackRefs?: SlackRefResolverFn,
     private readonly codexModels?: CodexModelsProvider,
     private readonly codexAuth?: CodexAuthProvider,
+    private readonly externalMcp?: ExternalMcpController,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -499,7 +501,21 @@ export class Connection {
         const result = this.settings.apply(rest);
         // If a token changed, re-evaluate Slack to (re)connect/stop (applied immediately on save). Best-effort.
         if (slackTokenChanged) void this.slack?.reconcile();
+        // If the External MCP exposure tier changed, re-register/tear down the /mcp-ext session immediately.
+        if ("mcpExposure" in rest) this.externalMcp?.reconcile();
         this.reply({ type: "settings.result", reqId: msg.reqId, settings: result });
+        return;
+      }
+      case "mcp.status": {
+        if (!this.externalMcp) return this.reply({ type: "error", message: "external MCP unavailable", reqId: msg.reqId });
+        const s = this.externalMcp.status();
+        this.reply({ type: "mcp.status.result", reqId: msg.reqId, scope: s.scope, url: s.url });
+        return;
+      }
+      case "mcp.regenerate_token": {
+        if (!this.externalMcp) return this.reply({ type: "error", message: "external MCP unavailable", reqId: msg.reqId });
+        const s = this.externalMcp.regenerateToken();
+        this.reply({ type: "mcp.status.result", reqId: msg.reqId, scope: s.scope, url: s.url });
         return;
       }
       case "fleet.spawn": {

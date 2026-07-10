@@ -7,6 +7,7 @@ export interface Config {
   dbPath: string;
   pidPath: string;
   tokenPath: string;
+  mcpTokenPath: string; // 0600 shared secret for the External MCP server URL (/mcp-ext/<token>). Separate from ws-token so it can be rotated independently.
   host: string;
   port: number;
   masterModel: string;
@@ -54,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath: path.join(home, "rookery.db"),
     pidPath: path.join(home, "daemon.pid"),
     tokenPath: path.join(home, "ws-token"),
+    mcpTokenPath: path.join(home, "mcp-token"),
     host: env.ROOKERY_HOST?.trim() || "127.0.0.1",
     // Only allow the valid range [0,65535] (negative/out-of-range values crash listen with a RangeError). 0 is a valid value meaning an OS-assigned (ephemeral) port.
     port: Number.isInteger(port) && port >= 0 && port <= 65535 ? port : 8787,

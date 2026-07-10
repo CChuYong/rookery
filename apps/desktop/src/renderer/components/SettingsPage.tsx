@@ -32,7 +32,7 @@ type Tab = "general" | "slack" | "models" | "integration";
 type ModelsProvider = "claude" | "codex";
 
 // Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Claude | Codex | Integration tabs.
-export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void }): JSX.Element {
+export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void }): JSX.Element {
   const t = useT();
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
@@ -76,6 +76,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   // close affordance (the header X) behind a confirm when dirty; not dirty closes exactly as before. Out of scope:
   // intercepting sidebar navigation away from the page — only this in-page close action.
   const [confirmClose, setConfirmClose] = useState(false);
+  const [mcpCopied, setMcpCopied] = useState(false);
+  const copyMcpUrl = (url: string): void => {
+    void navigator.clipboard.writeText(url).then(() => { setMcpCopied(true); window.setTimeout(() => setMcpCopied(false), 1500); }).catch(() => {});
+  };
   const requestClose = (): void => {
     if (dirty) setConfirmClose(true);
     else p.onClose();
@@ -156,6 +160,44 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       <Input type="number" value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
                     </Field>
                   </div>
+                </section>
+
+                {/* External MCP server (rookery-as-MCP): expose fleet control to external MCP clients (Claude Code /
+                    Cursor / Codex). Off by default (fail-closed). The scope is f-backed (saved via the footer button);
+                    the URL/token are live actions reflecting the SAVED state (mcpStatus). */}
+                <section className="mt-8">
+                  <h2 className="text-[13px] font-semibold">{t("settings.mcpTitle")}</h2>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.mcpDesc")}</p>
+                  <div className="mt-3 max-w-[280px]">
+                    <Field label={t("settings.mcpExposureLabel")} hint={t("settings.mcpExposureHint")}>
+                      <Select value={f.mcpExposure ?? "off"} onChange={(e) => setF({ ...f, mcpExposure: e.target.value })}>
+                        <option value="off">{t("settings.mcpScopeOff")}</option>
+                        <option value="readonly">{t("settings.mcpScopeReadonly")}</option>
+                        <option value="full">{t("settings.mcpScopeFull")}</option>
+                      </Select>
+                    </Field>
+                  </div>
+                  {f.mcpExposure === "full" && (
+                    <p className="mt-2 max-w-[440px] text-[11px] leading-relaxed text-fail">{t("settings.mcpFullWarning")}</p>
+                  )}
+                  {f.mcpExposure !== "off" && (
+                    <div className="mt-3 max-w-[440px]">
+                      {p.mcpStatus?.url ? (
+                        <>
+                          <div className="flex gap-2">
+                            <Input readOnly value={p.mcpStatus.url} className="flex-1 font-mono text-[11px]" onFocus={(e) => e.currentTarget.select()} />
+                            <Button variant="outline" size="sm" onClick={() => copyMcpUrl(p.mcpStatus!.url!)}>{mcpCopied ? t("settings.mcpCopied") : t("settings.mcpCopy")}</Button>
+                          </div>
+                          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{t("settings.mcpAddHint")}</p>
+                          <div className="mt-2 flex justify-end">
+                            <Button variant="outline" size="sm" onClick={() => p.onRegenerateMcpToken?.()}>{t("settings.mcpRegenerate")}</Button>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-[11px] leading-relaxed text-muted">{t("settings.mcpSaveToActivate")}</p>
+                      )}
+                    </div>
+                  )}
                 </section>
 
                 <section className="mt-8">

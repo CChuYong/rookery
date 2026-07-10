@@ -57,6 +57,7 @@ export class McpBridge {
   ensureSession(
     sessionKey: string,
     defsProvider: () => BridgeToolDef[],
+    opts?: { fixedToken?: string },
   ): { url: (host: string, port: number) => string; token: string } {
     const existing = this.sessions.get(sessionKey);
     if (existing) {
@@ -76,7 +77,10 @@ export class McpBridge {
       existing.defsProvider = defsProvider;
       return { url: (host, port) => this.buildUrl(host, port, existing.token), token: existing.token };
     }
-    const token = randomUUID();
+    // fixedToken lets a caller pin a session's URL to a persisted secret (the External MCP server reads
+    // ~/.rookery/mcp-token) so the URL survives daemon restarts. Only honored on NEW-session creation —
+    // an existing entry keeps its stable token above; rotation is done via release()+ensureSession().
+    const token = opts?.fixedToken ?? randomUUID();
     this.sessions.set(sessionKey, { token, defsProvider, transports: new Map() });
     this.tokenIndex.set(token, sessionKey);
     return { url: (host, port) => this.buildUrl(host, port, token), token };

@@ -650,6 +650,45 @@ describe("Connection settings", () => {
     expect(settings.codexBin()).toBe("/opt/codex/bin/codex");
   });
 
+  it("external MCP: mcp.status/regenerate reply, and settings.set{mcpExposure} triggers reconcile", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "mm", fleet });
+    const settings = new Settings(repos, loadConfig({}));
+    let reconciles = 0;
+    let regens = 0;
+    const externalMcp = {
+      reconcile: () => { reconciles++; },
+      status: () => ({ scope: settings.mcpExposure(), url: settings.mcpExposure() === "off" ? null : "http://127.0.0.1:8787/mcp-ext/tok" }),
+      regenerateToken: () => { regens++; return { scope: settings.mcpExposure(), url: "http://127.0.0.1:8787/mcp-ext/new" }; },
+      handleHttp: () => false,
+    } as unknown as import("../../src/daemon/external-mcp-controller.js").ExternalMcpController;
+    const sent: any[] = [];
+    // externalMcp is the 17th constructor arg (after codexAuth).
+    const conn = new Connection({ send: (d) => sent.push(JSON.parse(d)) }, sm, bus, fleet, repos, undefined, settings,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, externalMcp);
+
+    await conn.handleRaw(JSON.stringify({ type: "mcp.status", reqId: "m1" }));
+    expect(sent.at(-1)).toMatchObject({ type: "mcp.status.result", reqId: "m1", scope: "off", url: null });
+
+    await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "m2", settings: { mcpExposure: "full" } }));
+    expect(reconciles).toBe(1); // mcpExposure in the patch → reconcile()
+    expect(settings.mcpExposure()).toBe("full");
+
+    await conn.handleRaw(JSON.stringify({ type: "mcp.status", reqId: "m3" }));
+    expect(sent.at(-1)).toMatchObject({ type: "mcp.status.result", reqId: "m3", scope: "full", url: "http://127.0.0.1:8787/mcp-ext/tok" });
+
+    await conn.handleRaw(JSON.stringify({ type: "mcp.regenerate_token", reqId: "m4" }));
+    expect(regens).toBe(1);
+    expect(sent.at(-1)).toMatchObject({ type: "mcp.status.result", reqId: "m4", url: "http://127.0.0.1:8787/mcp-ext/new" });
+
+    // a settings.set that does NOT touch mcpExposure must not reconcile
+    await conn.handleRaw(JSON.stringify({ type: "settings.set", reqId: "m5", settings: { masterModel: "x" } }));
+    expect(reconciles).toBe(1);
+  });
+
   it("commands.list uses the live sub when workerId given, else the cwd catalog", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();

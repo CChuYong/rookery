@@ -100,6 +100,21 @@ describe("McpBridge", () => {
     expect(resultA.content).toEqual([{ type: "text", text: "a:x" }]);
   });
 
+  it("honors a fixedToken on new-session creation (stable URL for the External MCP server)", async () => {
+    const bridge = new McpBridge({ basePath: "/mcp-ext" });
+    const { port, close } = await startHttpServer(bridge);
+    cleanup.push(close);
+
+    const pinned = "pinned-secret-123";
+    const { token, url } = bridge.ensureSession("external", () => [echoDef("ext")], { fixedToken: pinned });
+    expect(token).toBe(pinned);
+    expect(url("127.0.0.1", port)).toBe(`http://127.0.0.1:${port}/mcp-ext/${pinned}`);
+
+    const client = await connectClient(url("127.0.0.1", port));
+    cleanup.push(() => client.close());
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["echo"]);
+  });
+
   it("returns 404 for an unknown token (no oracle)", async () => {
     const bridge = new McpBridge({});
     const { port, close } = await startHttpServer(bridge);
