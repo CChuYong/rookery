@@ -135,3 +135,15 @@ it("run() still GUARDS overlap for cron (time) triggers — avoids scheduled pil
   expect(runTurn).toHaveBeenCalledOnce();
   release(); await p1;
 });
+
+it("run() GUARDS overlap for interval (time) triggers too — a slow run doesn't pile up", async () => {
+  const x = h();
+  const { disp, runTurn, release } = deferredDisp(x);
+  const a = x.repos.createAutomation("a1", { name: "n", trigger: { kind: "interval", everyMinutes: 5 }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" }, enabled: true });
+  const p1 = disp.run(a, {});
+  await Promise.resolve();
+  await disp.run(a, {}); // second while first in-flight → skipped
+  expect(x.repos.getAutomation("a1")!.lastStatus).toBe("skipped");
+  expect(runTurn).toHaveBeenCalledOnce();
+  release(); await p1;
+});

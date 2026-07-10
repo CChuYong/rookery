@@ -330,6 +330,18 @@ describe("automations", () => {
     expect(a.action).toEqual({ kind: "worker", repo: "app-api", task: "investigate {{message}}", base: "main" });
   });
 
+  it("round-trips an interval trigger (everyMinutes preserved through create/update)", () => {
+    const r = mk();
+    const a = r.createAutomation("a3", {
+      name: "poll", enabled: true,
+      trigger: { kind: "interval" as const, everyMinutes: 15 },
+      action: { kind: "master" as const, prompt: "check", cwd: "/w", sessionMode: "reuse" as const },
+    });
+    expect(a.trigger).toEqual({ kind: "interval", everyMinutes: 15 });
+    const upd = r.updateAutomation("a3", { trigger: { kind: "interval", everyMinutes: 30 } });
+    expect(upd!.trigger).toEqual({ kind: "interval", everyMinutes: 30 });
+  });
+
   it("updates, toggles enabled, records run + next-run, deletes", () => {
     const r = mk();
     r.createAutomation("a1", cronMaster);

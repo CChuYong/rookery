@@ -20,9 +20,9 @@ export class AutomationDispatcher {
 
   async run(a: Automation, vars: ActionVars): Promise<void> {
     const nowIso = this.now().toISOString();
-    // Only time triggers (cron) skip on overlap — prevents schedule pile-up (runaway) when a run takes longer than the period.
-    // Event triggers (slack) must process every message, so concurrent runs are allowed (no drop).
-    const guard = a.trigger.kind === "cron";
+    // Only recurring time triggers (cron/interval) skip on overlap — prevents schedule pile-up (runaway) when a run
+    // takes longer than the period. Event triggers (slack) must process every message, so concurrent runs are allowed (no drop).
+    const guard = a.trigger.kind === "cron" || a.trigger.kind === "interval";
     if (guard && this.inflight.has(a.id)) {
       this.d.repos.setAutomationRun(a.id, { lastRunAt: nowIso, lastStatus: "skipped", lastError: null });
       this.emit(); return;

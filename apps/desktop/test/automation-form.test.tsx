@@ -25,6 +25,25 @@ describe("AutomationForm", () => {
     );
   });
 
+  it("submits an interval trigger with the entered minutes", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "poller" } });
+    fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "interval" } });
+    fireEvent.change(screen.getByLabelText("실행 주기 (분)"), { target: { value: "20" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "poll now";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/some/path" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "poller",
+        trigger: { kind: "interval", everyMinutes: 20 },
+      }),
+    );
+  });
+
   it("submits a slack trigger with master action", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);

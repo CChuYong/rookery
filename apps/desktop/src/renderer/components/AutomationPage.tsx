@@ -24,6 +24,7 @@ const EMPTY_SLACK_NAMES: SlackRefNames = { channels: {}, users: {} };
 // channel/user ids are rendered as their resolved name when known (names), otherwise the raw id (unchanged from before #51).
 function triggerBadge(trigger: AutomationTrigger, t: TFunc, names: SlackRefNames = EMPTY_SLACK_NAMES): string {
   if (trigger.kind === "cron") return `${trigger.cron} · ${trigger.timezone}`;
+  if (trigger.kind === "interval") return t("automationPage.everyMinutes", { count: trigger.everyMinutes });
   // 'once' (agent self-wakeup) is not sent to the UI list by the backend, but handle it for union safety.
   if (trigger.kind === "once") return `once · ${trigger.runAt}`;
   const parts: string[] = [];
@@ -138,7 +139,7 @@ export function AutomationPage(p: {
                     </div>
                     <div className="mt-0.5 truncate font-mono text-[11px] text-muted">
                       {triggerBadge(a.trigger, t, slackNames)}
-                      {a.trigger.kind === "cron" && <> · {t("automationPage.nextRun")}: {a.nextRunAt ?? t("automationPage.never")}</>}
+                      {(a.trigger.kind === "cron" || a.trigger.kind === "interval") && <> · {t("automationPage.nextRun")}: {a.nextRunAt ?? t("automationPage.never")}</>}
                     </div>
                   </div>
                   <label className="flex shrink-0 items-center gap-1 text-[11px] text-muted">

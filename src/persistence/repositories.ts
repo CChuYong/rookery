@@ -74,6 +74,7 @@ export interface MemoryRow {
 
 export type AutomationTrigger =
   | { kind: "cron"; cron: string; timezone: string }
+  | { kind: "interval"; everyMinutes: number } // Recurring, forward-from-now. Fires every everyMinutes minutes (min 1).
   | { kind: "once"; runAt: string } // One-shot (agent self-wakeup). Fires once at runAt (ISO) then auto-deletes.
   | { kind: "slack"; channels?: string[]; keyword?: string; fromUsers?: string[] };
 export type AutomationAction =

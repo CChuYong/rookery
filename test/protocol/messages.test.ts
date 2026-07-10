@@ -68,6 +68,21 @@ describe("automation protocol messages", () => {
     expect(() => parseClientMessage(JSON.stringify(invalid))).toThrow();
   });
 
+  it("automation.create: interval trigger parses; everyMinutes must be a positive integer", () => {
+    const mk = (everyMinutes: unknown) => ({
+      type: "automation.create", reqId: "q",
+      automation: {
+        name: "poll",
+        trigger: { kind: "interval", everyMinutes },
+        action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" },
+      },
+    });
+    expect(() => parseClientMessage(JSON.stringify(mk(15)))).not.toThrow();
+    expect(() => parseClientMessage(JSON.stringify(mk(0)))).toThrow(); // zero rejected
+    expect(() => parseClientMessage(JSON.stringify(mk(-5)))).toThrow(); // negative rejected
+    expect(() => parseClientMessage(JSON.stringify(mk(1.5)))).toThrow(); // non-integer rejected
+  });
+
   it("automation.create: slack/worker create parses", () => {
     const ok = {
       type: "automation.create", reqId: "q",

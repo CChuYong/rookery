@@ -6,6 +6,7 @@ export default {
   "automationPage.typeMaster": "마스터",
   "automationPage.typeWorker": "워커",
   "automationPage.slackAll": "slack: 전체",
+  "automationPage.everyMinutes": "{count}분마다",
   "automationPage.nextRun": "다음",
   "automationPage.run": "지금 실행",
   "automationPage.viewSessions": "실행 세션",

@@ -14,6 +14,7 @@ const effortField = z.string().refine((v) => EFFORT_LEVELS.includes(v), { messag
 
 const triggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cron"), cron: z.string(), timezone: z.string() }),
+  z.object({ kind: z.literal("interval"), everyMinutes: z.number().int().positive() }), // "every N minutes" (min 1; the scheduler tick is 30s)
   z.object({ kind: z.literal("slack"), channels: z.array(z.string()).optional(), keyword: z.string().optional(), fromUsers: z.array(z.string()).optional() }),
 ]);
 
