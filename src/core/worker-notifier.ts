@@ -39,6 +39,20 @@ export function parseNotification(text: string): WorkerNotification {
   return { label: "", branch: "", status: "done", tail: text, provider: "claude" };
 }
 
+// Last assistant message (≤ maxChars) from a worker's persisted transcript — the "what it said last"
+// summary shared by the notifier (model prompt line) and the worker-settled trigger's {{tail}} var.
+export function extractWorkerTail(repos: Pick<Repositories, "listWorkerEvents">, workerId: string, maxChars = 500): string {
+  const events = repos.listWorkerEvents(workerId);
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]!.type !== "message") continue;
+    try {
+      const p = JSON.parse(events[i]!.payload_json) as { role?: string; content?: string };
+      if (p.role === "assistant" && typeof p.content === "string") return p.content.slice(0, maxChars);
+    } catch { /* skip malformed */ }
+  }
+  return "(no output)";
+}
+
 export interface WorkerNotifierDeps {
   bus: EventBus;
   repos: Repositories;
@@ -76,15 +90,6 @@ export class WorkerNotifier {
   private buildNotification(workerId: string, status: string): WorkerNotification | null {
     const w = this.d.repos.getWorker(workerId);
     if (!w) return null;
-    let tail = "(no output)";
-    const events = this.d.repos.listWorkerEvents(workerId);
-    for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i]!.type !== "message") continue;
-      try {
-        const p = JSON.parse(events[i]!.payload_json) as { role?: string; content?: string };
-        if (p.role === "assistant" && typeof p.content === "string") { tail = p.content.slice(0, 500); break; }
-      } catch { /* skip malformed */ }
-    }
-    return { label: w.label, branch: w.branch ?? workerId, status, tail, provider: w.provider ?? "claude" };
+    return { label: w.label, branch: w.branch ?? workerId, status, tail: extractWorkerTail(this.d.repos, workerId), provider: w.provider ?? "claude" };
   }
 }

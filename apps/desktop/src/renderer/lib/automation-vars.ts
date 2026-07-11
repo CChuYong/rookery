@@ -1,6 +1,6 @@
 // For the manual-run dialog: pick out only the template vars referenced by the action text.
 // ⚠️ Must match the token set of the core applyVars (src/core/automation-action.ts) — when adding a var there, update here too.
-export const KNOWN_AUTOMATION_VARS = ["message", "channel", "user", "ts", "threadTs", "team"] as const;
+export const KNOWN_AUTOMATION_VARS = ["message", "channel", "user", "ts", "threadTs", "team", "workerId", "repo", "branch", "status", "label", "tail"] as const;
 const KNOWN = new Set<string>(KNOWN_AUTOMATION_VARS);
 
 export function referencedVars(text: string): string[] {

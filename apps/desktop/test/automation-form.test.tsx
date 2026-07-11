@@ -552,3 +552,46 @@ describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex", model: "gpt-5.4", effort: "medium" }));
   });
 });
+
+describe("AutomationForm worker-settled trigger", () => {
+  it("defaults to 종료+실패 checked, idle unchecked; submits kind/on/repo/label", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "handoff" } });
+    fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "worker" } });
+    // defaults: 종료+실패 on, idle off
+    expect((screen.getByLabelText(/종료됨/) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText(/실패/) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText(/작업 완료/) as HTMLInputElement).checked).toBe(false);
+    // opt into idle + pick repo + label filter
+    fireEvent.click(screen.getByLabelText(/작업 완료/));
+    fireEvent.change(screen.getByLabelText("레포 필터"), { target: { value: "app-api" } });
+    fireEvent.change(screen.getByLabelText("라벨 필터 (부분일치)"), { target: { value: "impl" } });
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "review {{branch}}: {{tail}}";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/some/path" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "handoff",
+        trigger: { kind: "worker", on: ["idle", "stopped", "failure"], repo: "app-api", label: "impl" },
+      }),
+    );
+  });
+
+  it("unchecking all buckets blocks save (at least one required)", () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "worker" } });
+    fireEvent.click(screen.getByLabelText(/종료됨/));
+    fireEvent.click(screen.getByLabelText(/실패/));
+    const promptEditor = screen.getByLabelText("프롬프트");
+    promptEditor.textContent = "p";
+    fireEvent.input(promptEditor);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/w" } });
+    fireEvent.click(screen.getByText("저장"));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

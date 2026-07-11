@@ -58,6 +58,7 @@ import { Scheduler } from "../core/scheduler.js";
 import { WorkerNotifier } from "../core/worker-notifier.js";
 import { AutomationDispatcher } from "../core/automation-dispatcher.js";
 import { makeSlackTriggerHandler } from "../slack/trigger-source.js";
+import { startWorkerTriggerSource } from "../core/worker-trigger-source.js";
 import type { AutomationProvider } from "./connection.js";
 import type { AutomationInput } from "../persistence/repositories.js";
 
@@ -384,6 +385,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   };
   scheduler.start();
   const slackTrigger = makeSlackTriggerHandler({ repos, dispatcher });
+  // Trigger source ③ worker-settled: fires `worker`-kind automations when a fleet worker settles
+  // (idle/stopped/failure buckets; automation-spawned workers excluded — see worker-trigger-source.ts).
+  const stopWorkerTrigger = startWorkerTriggerSource({ repos, dispatcher, bus });
 
   const slack = new SlackController({
     configured: () => settings.slackConfigured(), // resolver, since tokens can change at runtime
@@ -490,6 +494,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // loses the notification forever). fleet.close's stop() also synchronously emits worker.status 'stopped' for every
     // live worker. Parked, the arms stay notify_armed=1 in the DB and the next boot's sweepSettled() delivers them.
     stopNotifier();
+    stopWorkerTrigger(); // same rationale: fleet.close's synchronous 'stopped' emits must not fire automations mid-shutdown
     usageCollector.stop();
     scheduler.stop();
     clearInterval(heartbeat);
