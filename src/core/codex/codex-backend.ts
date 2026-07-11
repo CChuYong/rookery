@@ -74,6 +74,44 @@ export function serializeMcpResult(result: unknown, fallback: string): string {
   return fallback;
 }
 
+// Duck-typed shape of a `item/started`/`item/completed` notification's `item` field — shared by
+// the inline cast in handleNotification and the module-private mapping helpers below.
+type CodexItemShape = { type?: string; id?: string; text?: string; command?: string; cwd?: string; status?: string; aggregatedOutput?: string | null; server?: string; tool?: string; arguments?: unknown; query?: string; changes?: unknown; result?: unknown; kind?: string; agentThreadId?: string; agentPath?: string; prompt?: string | null; model?: string | null; receiverThreadIds?: string[] };
+
+// Shared thread-item → port-event mapping, used by the own-thread path (parent: null) and the
+// child-thread nested path (parent: child threadId). Returns null for non-tool items.
+function toolUseOf(item: CodexItemShape, parent: string | null): AgentEvent | null {
+  if (!item.id) return null;
+  if (item.type === "commandExecution") return { kind: "tool_use", id: item.id, name: "shell", input: { command: item.command, cwd: item.cwd }, parentToolUseId: parent };
+  if (item.type === "fileChange") return { kind: "tool_use", id: item.id, name: "apply_patch", input: { changes: item.changes }, parentToolUseId: parent };
+  if (item.type === "mcpToolCall") return { kind: "tool_use", id: item.id, name: `${item.server ?? "mcp"}.${item.tool ?? "tool"}`, input: item.arguments, parentToolUseId: parent };
+  if (item.type === "webSearch") return { kind: "tool_use", id: item.id, name: "web_search", input: { query: item.query }, parentToolUseId: parent };
+  if (item.type === "collabAgentToolCall") return { kind: "tool_use", id: item.id, name: `collab.${item.tool ?? "call"}`, input: { prompt: item.prompt, model: item.model, receiverThreadIds: item.receiverThreadIds }, parentToolUseId: parent };
+  return null;
+}
+
+function toolResultOf(item: CodexItemShape, parent: string | null): AgentEvent | null {
+  if (!item.id) return null;
+  if (item.type === "commandExecution") return { kind: "tool_result", toolUseId: item.id, isError: item.status !== "completed", content: item.aggregatedOutput ?? "", parentToolUseId: parent };
+  if (item.type === "fileChange") return { kind: "tool_result", toolUseId: item.id, isError: item.status !== "completed", content: item.status ?? "", parentToolUseId: parent };
+  if (item.type === "mcpToolCall" || item.type === "webSearch") return { kind: "tool_result", toolUseId: item.id, isError: item.status != null && item.status !== "completed", content: serializeMcpResult(item.result, item.status ?? "done"), parentToolUseId: parent };
+  if (item.type === "collabAgentToolCall") return { kind: "tool_result", toolUseId: item.id, isError: item.status != null && item.status !== "completed", content: item.status ?? "done", parentToolUseId: parent };
+  return null;
+}
+
+// The spawn marker: a parent-side item/completed carrying the new child's identity. Mapped to a
+// synthetic tool_use + immediate tool_result pair whose id IS the child threadId — the desktop's
+// nestedLabel() finds the main-transcript card whose toolId equals the panel key, so labeling
+// works with zero reducer changes. kind !== "started" (interacted/interrupted) is observability
+// noise — no card.
+function spawnCardsOf(item: CodexItemShape, parent: string | null): AgentEvent[] {
+  if (item.type !== "subAgentActivity" || item.kind !== "started" || !item.agentThreadId) return [];
+  return [
+    { kind: "tool_use", id: item.agentThreadId, name: "spawn_agent", input: { agentPath: item.agentPath }, parentToolUseId: parent },
+    { kind: "tool_result", toolUseId: item.agentThreadId, isError: false, content: item.agentPath ?? "", parentToolUseId: parent },
+  ];
+}
+
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
 
 type PermissionPair = ReturnType<typeof mapPermissionMode>;
@@ -501,12 +539,18 @@ abstract class CodexSessionBase implements AgentStream {
       turnId?: string;
       itemId?: string;
       delta?: string;
-      item?: { type?: string; id?: string; text?: string; command?: string; cwd?: string; status?: string; aggregatedOutput?: string | null; server?: string; tool?: string; arguments?: unknown; query?: string; changes?: unknown; result?: unknown };
+      item?: CodexItemShape;
       tokenUsage?: CodexThreadTokenUsage;
       error?: { message?: string };
     };
-    // filter to our thread: child threads (codex-native subagents) are dropped in P1.
-    if (this.threadId && p?.threadId && p.threadId !== this.threadId) return;
+    // Child-thread traffic (codex-native collab subagents, multi_agent stable since 0.144.x):
+    // route to the nested mapper instead of dropping. Any non-own thread — children AND
+    // grandchildren — gets its own flat panel keyed by its threadId
+    // (docs/superpowers/specs/2026-07-11-codex-nested-agents-design.md).
+    if (this.threadId && p?.threadId && p.threadId !== this.threadId) {
+      this.handleChildNotification(p.threadId, method, p.item);
+      return;
+    }
     if (method === "thread/started") {
       const id = p?.thread?.id;
       if (id && !this.threadId) { this.threadId = id; this.channel.push({ kind: "session_id", sessionId: id }); }
@@ -535,11 +579,9 @@ abstract class CodexSessionBase implements AgentStream {
     if (method === "item/started") {
       const item = p?.item;
       if (!item?.id) return;
-      if (item.type === "commandExecution") this.channel.push({ kind: "tool_use", id: item.id, name: "shell", input: { command: item.command, cwd: item.cwd }, parentToolUseId: null });
-      else if (item.type === "fileChange") this.channel.push({ kind: "tool_use", id: item.id, name: "apply_patch", input: { changes: item.changes }, parentToolUseId: null });
-      else if (item.type === "mcpToolCall") this.channel.push({ kind: "tool_use", id: item.id, name: `${item.server ?? "mcp"}.${item.tool ?? "tool"}`, input: item.arguments, parentToolUseId: null });
-      else if (item.type === "webSearch") this.channel.push({ kind: "tool_use", id: item.id, name: "web_search", input: { query: item.query }, parentToolUseId: null });
-      else return; // non-tool item (agentMessage/reasoning/…): no progress tracking
+      const ev = toolUseOf(item, null);
+      if (!ev) return; // non-tool item (agentMessage/reasoning/…): no progress tracking
+      this.channel.push(ev);
       this.toolStartMs.set(item.id, Date.now()); // begin the elapsed-time clock for this tool's progress heartbeat
       return;
     }
@@ -549,13 +591,11 @@ abstract class CodexSessionBase implements AgentStream {
       this.clearToolProgress(item.id); // tool finished → stop its progress heartbeat
       if (item.type === "agentMessage") {
         if (item.text) this.channel.push({ kind: "message", role: "assistant", text: item.text, parentToolUseId: null });
-      } else if (item.type === "commandExecution") {
-        this.channel.push({ kind: "tool_result", toolUseId: item.id, isError: item.status !== "completed", content: item.aggregatedOutput ?? "", parentToolUseId: null });
-      } else if (item.type === "fileChange") {
-        this.channel.push({ kind: "tool_result", toolUseId: item.id, isError: item.status !== "completed", content: item.status ?? "", parentToolUseId: null });
-      } else if (item.type === "mcpToolCall" || item.type === "webSearch") {
-        this.channel.push({ kind: "tool_result", toolUseId: item.id, isError: item.status != null && item.status !== "completed", content: serializeMcpResult(item.result, item.status ?? "done"), parentToolUseId: null });
+        return;
       }
+      for (const ev of spawnCardsOf(item, null)) this.channel.push(ev);
+      const res = toolResultOf(item, null);
+      if (res) this.channel.push(res);
       return; // reasoning/userMessage/plan/etc.: dropped (deltas already flowed; user echo is Worker-side)
     }
     if (method === "thread/tokenUsage/updated") {
@@ -624,6 +664,32 @@ abstract class CodexSessionBase implements AgentStream {
       return;
     }
     // unknown notifications: ignored (0.x tolerance)
+  }
+
+  // Codex-native nested subagent (collab child thread) traffic → port events tagged with
+  // parentToolUseId = child threadId (the NestedAgents panel group key — worker.ts routes these
+  // to worker.nested, live-only). Completed messages and tool pairs only: child deltas /
+  // outputDelta / progress are suppressed (nested shows completed steps — Claude parity), and
+  // child turn/* + thread/tokenUsage/updated are dropped so they can never emit a phantom
+  // turn_end, clear activeTurnId, or bill into this turn's turnAccum.
+  private handleChildNotification(childThreadId: string, method: string, item: CodexItemShape | undefined): void {
+    if (method === "item/started") {
+      if (!item) return;
+      const ev = toolUseOf(item, childThreadId);
+      if (ev) this.channel.push(ev); // no toolStartMs: the progress heartbeat is main-transcript-only
+      return;
+    }
+    if (method === "item/completed") {
+      if (!item) return;
+      if (item.type === "agentMessage") {
+        if (item.text) this.channel.push({ kind: "message", role: "assistant", text: item.text, parentToolUseId: childThreadId });
+        return;
+      }
+      for (const ev of spawnCardsOf(item, childThreadId)) this.channel.push(ev); // grandchild spawns show in the child's panel
+      const res = toolResultOf(item, childThreadId);
+      if (res) this.channel.push(res);
+    }
+    // everything else from child threads: dropped
   }
 
   // With approvalPolicy "never" these should not fire; if one does, decline it (with a transcript

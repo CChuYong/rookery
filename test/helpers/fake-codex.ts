@@ -12,7 +12,8 @@ export type CodexStep =
   | { kind: "errorNote"; message: string }
   | { kind: "requestApproval"; id: string } // emits a server→client commandExecution approval request
   | { kind: "turnEnd"; status?: "completed" | "interrupted" | "failed"; durationMs?: number; errorMessage?: string }
-  | { kind: "staleTurnEnd" }; // emits turn/completed for a DIFFERENT (stale) turn id — pins the activeTurnId correlation guard
+  | { kind: "staleTurnEnd" } // emits turn/completed for a DIFFERENT (stale) turn id — pins the activeTurnId correlation guard
+  | { kind: "raw"; method: string; params: Record<string, unknown> }; // verbatim notification (child-thread / collab-item frames)
 
 export interface FakeCodexServerOpts {
   threadId?: string;
@@ -149,6 +150,8 @@ export function fakeCodexSpawn(
               send({ id: 9000 + turnCount, method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: step.id } });
             } else if (step.kind === "staleTurnEnd") {
               send({ method: "turn/completed", params: { threadId, turn: { id: "turn-STALE", status: "completed" } } });
+            } else if (step.kind === "raw") {
+              send({ method: step.method, params: step.params });
             } else if (step.kind === "turnEnd") {
               ended = true;
               send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: step.status ?? "completed", durationMs: step.durationMs ?? 0, ...(step.errorMessage ? { error: { message: step.errorMessage } } : {}) } } });
