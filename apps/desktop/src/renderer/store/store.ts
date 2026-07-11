@@ -84,6 +84,8 @@ interface Store extends AppState {
   seedRunningFromSessions: (sessions: { id: string; status: string }[]) => void;
   // Sessions whose turn ended (idle) while not being looked at = unread. The session-side counterpart of worker attention (a separate map — so it isn't swept by the setFleet prune).
   sessionAttention: Record<string, boolean>;
+  clearAttention: (workerId: string) => void; // attention-queue tier-2 dismiss (worker review)
+  clearSessionAttention: (sessionId: string) => void; // attention-queue tier-2 dismiss (session review)
   // requestIds of interaction cards the daemon has announced since the last (re)connect (see the store creator).
   liveInteractionIds: Set<string>;
   resetLiveInteractions: () => void;
@@ -187,6 +189,10 @@ export const useStore = create<Store>((set, get) => ({
   // Authoritative seed: since session.list is the truth, explicitly set each session's running flag (even bringing a stale true down to false). Restores missed idle on reconnect.
   seedRunningFromSessions: (sessions) => set((s) => { const running = { ...s.running }; for (const x of sessions) running[x.id] = x.status === "running"; return { running }; }),
   sessionAttention: {},
+  // Attention-queue dismissal ("본 걸로 침") for tier-2 review items — flips the live unread map instead of a
+  // persisted ack, so the same worker/session going unread AGAIN re-surfaces naturally (attention-queue design).
+  clearAttention: (workerId) => set((s) => ({ attention: { ...s.attention, [workerId]: false } })),
+  clearSessionAttention: (sessionId) => set((s) => ({ sessionAttention: { ...s.sessionAttention, [sessionId]: false } })),
   // requestIds of interaction cards the daemon has announced since the last (re)connect. Reset in App's ws
   // onOpen BEFORE events.subscribe; the daemon's synchronous pending-card replay then repopulates it, so at
   // seed time "not in this set" means the daemon no longer holds that request (expired).

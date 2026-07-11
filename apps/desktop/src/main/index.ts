@@ -237,7 +237,7 @@ ipcMain.handle("dialog:pickFile", async () => {
 
 // OS notification for worker state transitions. Suppressed when a window is focused (i.e. already being watched) — this is for walk-away use.
 // On click, surface the window and send a signal (notify:click) to the renderer to navigate to that worker.
-ipcMain.handle("notify:show", (_e, p: { title: string; body: string; workerId: string }) => {
+ipcMain.handle("notify:show", (_e, p: { title: string; body: string; workerId?: string; sessionId?: string }) => {
   const focused = BrowserWindow.getAllWindows().some((w) => w.isFocused());
   if (focused || !Notification.isSupported()) return;
   const n = new Notification({ title: p.title, body: p.body });
@@ -247,7 +247,8 @@ ipcMain.handle("notify:show", (_e, p: { title: string; body: string; workerId: s
     if (w.isMinimized()) w.restore();
     w.show();
     w.focus();
-    w.webContents.send("notify:click", p.workerId);
+    // Target object (was a bare workerId string): worker → Repos view, session → Sessions view (attention-queue).
+    w.webContents.send("notify:click", { workerId: p.workerId, sessionId: p.sessionId });
   });
   n.show();
 });

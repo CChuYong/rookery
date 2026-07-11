@@ -46,9 +46,9 @@ contextBridge.exposeInMainWorld("rookery", {
     browse: (opts: { dir: string; subId?: string; cwd?: string }) =>
       ipcRenderer.invoke("fs:browse", opts) as Promise<{ dir: string; entries: Array<{ name: string; isDir: boolean; size?: number }>; error?: string }>,
   },
-  notify: (p: { title: string; body: string; workerId: string }) => ipcRenderer.invoke("notify:show", p) as Promise<void>,
-  onNotifyClick: (cb: (workerId: string) => void) => {
-    const h = (_e: unknown, id: string): void => cb(id);
+  notify: (p: { title: string; body: string; workerId?: string; sessionId?: string }) => ipcRenderer.invoke("notify:show", p) as Promise<void>,
+  onNotifyClick: (cb: (target: { workerId?: string; sessionId?: string }) => void) => {
+    const h = (_e: unknown, target: { workerId?: string; sessionId?: string }): void => cb(target);
     ipcRenderer.on("notify:click", h);
     return () => { ipcRenderer.removeListener("notify:click", h); };
   },
