@@ -76,7 +76,12 @@ export type AutomationTrigger =
   | { kind: "cron"; cron: string; timezone: string }
   | { kind: "interval"; everyMinutes: number } // Recurring, forward-from-now. Fires every everyMinutes minutes (min 1).
   | { kind: "once"; runAt: string } // One-shot (agent self-wakeup). Fires once at runAt (ISO) then auto-deletes.
-  | { kind: "slack"; channels?: string[]; keyword?: string; fromUsers?: string[] };
+  | { kind: "slack"; channels?: string[]; keyword?: string; fromUsers?: string[] }
+  // Fires when a fleet worker settles. on: settle buckets (idle = dispatch complete · stopped = intentional end,
+  // legacy done folds in · failure = error/failed/orphaned); absent/empty → ["stopped","failure"] (idle is opt-in).
+  // repo = registered repo name filter; label = case-insensitive substring on the worker label. Workers homed in
+  // automation:fleet never match (self-loop guard) — see src/core/worker-trigger-source.ts.
+  | { kind: "worker"; repo?: string; on?: Array<"idle" | "stopped" | "failure">; label?: string };
 export type AutomationAction =
   // When targetSessionId is set, resume that session (agent self-wakeup: "continue this conversation"). Otherwise reuse(automation:<id>)/fresh.
   | { kind: "master"; prompt: string; cwd: string; sessionMode: "reuse" | "fresh"; targetSessionId?: string }

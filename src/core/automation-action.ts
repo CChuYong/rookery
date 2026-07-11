@@ -3,7 +3,12 @@ import type { Automation } from "../persistence/repositories.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { AUTOMATION_FLEET_SESSION_KEY } from "./session-manager.js";
 
-export interface ActionVars { message?: string; channel?: string; user?: string; ts?: string; threadTs?: string; team?: string }
+export interface ActionVars {
+  // slack trigger vars
+  message?: string; channel?: string; user?: string; ts?: string; threadTs?: string; team?: string;
+  // worker-settled trigger vars (label/tail are model-generated → genuinely untrusted; all are fenced uniformly)
+  workerId?: string; repo?: string; branch?: string; status?: string; label?: string; tail?: string;
+}
 type ActionSession = { id: string; master: { runTurn(t: string, o?: { model?: string; effort?: string; permissionMode?: string; maxTurns?: number; costBudgetUsd?: number }): Promise<void> } };
 export interface AutomationActionSessions {
   create(cwd: string, opts?: { origin?: string; originRef?: string | null; provider?: string }): ActionSession;
@@ -37,7 +42,13 @@ export function applyVars(s: string, vars: ActionVars): string {
     .replace(/\{\{user\}\}/g,     () => fence(vars.user,     "slack-user",      nonce))
     .replace(/\{\{ts\}\}/g,       () => fence(vars.ts,       "slack-ts",        nonce))
     .replace(/\{\{threadTs\}\}/g, () => fence(vars.threadTs, "slack-thread-ts", nonce))
-    .replace(/\{\{team\}\}/g,     () => fence(vars.team,     "slack-team",      nonce));
+    .replace(/\{\{team\}\}/g,     () => fence(vars.team,     "slack-team",      nonce))
+    .replace(/\{\{workerId\}\}/g, () => fence(vars.workerId, "worker-id",       nonce))
+    .replace(/\{\{repo\}\}/g,     () => fence(vars.repo,     "worker-repo",     nonce))
+    .replace(/\{\{branch\}\}/g,   () => fence(vars.branch,   "worker-branch",   nonce))
+    .replace(/\{\{status\}\}/g,   () => fence(vars.status,   "worker-status",   nonce))
+    .replace(/\{\{label\}\}/g,    () => fence(vars.label,    "worker-label",    nonce))
+    .replace(/\{\{tail\}\}/g,     () => fence(vars.tail,     "worker-tail",     nonce));
 }
 
 export async function runAutomationAction(a: Automation, vars: ActionVars, deps: AutomationActionDeps): Promise<void> {

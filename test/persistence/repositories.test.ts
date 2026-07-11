@@ -330,6 +330,16 @@ describe("automations", () => {
     expect(a.action).toEqual({ kind: "worker", repo: "app-api", task: "investigate {{message}}", base: "main" });
   });
 
+  it("round-trips a worker-settled trigger (on/repo/label preserved)", () => {
+    const r = mk();
+    const a = r.createAutomation("a4", {
+      name: "handoff", enabled: true,
+      trigger: { kind: "worker" as const, repo: "app", on: ["stopped" as const, "failure" as const], label: "impl" },
+      action: { kind: "worker" as const, repo: "app", task: "review {{branch}}" },
+    });
+    expect(a.trigger).toEqual({ kind: "worker", repo: "app", on: ["stopped", "failure"], label: "impl" });
+  });
+
   it("round-trips an interval trigger (everyMinutes preserved through create/update)", () => {
     const r = mk();
     const a = r.createAutomation("a3", {

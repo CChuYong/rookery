@@ -34,8 +34,8 @@ export function AutomationForm(p: {
   const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text-tolerant select fallback
   const init = p.job === "new" ? null : p.job;
   const [name, setName] = useState(init?.name ?? "");
-  // UI edits cron/interval/slack ('once' is for the agent's own wake-up, so it's excluded from the list → cron fallback)
-  const [triggerKind, setTriggerKind] = useState<"cron" | "interval" | "slack">(init && (init.trigger.kind === "slack" || init.trigger.kind === "interval") ? init.trigger.kind : "cron");
+  // UI edits cron/interval/slack/worker ('once' is for the agent's own wake-up, so it's excluded from the list → cron fallback)
+  const [triggerKind, setTriggerKind] = useState<"cron" | "interval" | "slack" | "worker">(init && (init.trigger.kind === "slack" || init.trigger.kind === "interval" || init.trigger.kind === "worker") ? init.trigger.kind : "cron");
   const [actionKind, setActionKind] = useState<"master" | "worker">(init?.action.kind ?? "master");
   const [enabled, setEnabled] = useState(init?.enabled ?? false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -54,6 +54,16 @@ export function AutomationForm(p: {
   const [channels, setChannels] = useState(joinIds(st?.channels));
   const [keyword, setKeyword] = useState(st?.keyword ?? "");
   const [fromUsers, setFromUsers] = useState(joinIds(st?.fromUsers));
+
+  // worker-settled trigger fields. Default buckets: 종료+실패 checked, 작업 완료(idle) opt-in (the
+  // re-fire-prone bucket must not be caught by surprise — mirrors the daemon-side DEFAULT_WORKER_TRIGGER_ON).
+  const wt = init && init.trigger.kind === "worker" ? init.trigger : null;
+  const initialOn = wt?.on && wt.on.length > 0 ? wt.on : ["stopped", "failure"];
+  const [workerRepo, setWorkerRepo] = useState(wt?.repo ?? "");
+  const [workerLabel, setWorkerLabel] = useState(wt?.label ?? "");
+  const [onIdle, setOnIdle] = useState(initialOn.includes("idle"));
+  const [onStopped, setOnStopped] = useState(initialOn.includes("stopped"));
+  const [onFailure, setOnFailure] = useState(initialOn.includes("failure"));
 
   // master action fields
   const mc = init && init.action.kind === "master" ? init.action : null;
@@ -110,11 +120,19 @@ export function AutomationForm(p: {
     setSubmitError(null);
     const ch = parseIds(channels);
     const fu = parseIds(fromUsers);
+    const workerOn = [...(onIdle ? ["idle" as const] : []), ...(onStopped ? ["stopped" as const] : []), ...(onFailure ? ["failure" as const] : [])];
     const trigger: AutomationTrigger =
       triggerKind === "cron"
         ? { kind: "cron", cron: cron.trim(), timezone: tz.trim() }
         : triggerKind === "interval"
         ? { kind: "interval", everyMinutes: Math.max(1, Math.floor(Number(everyMinutes) || 1)) }
+        : triggerKind === "worker"
+        ? {
+            kind: "worker",
+            on: workerOn,
+            ...(workerRepo ? { repo: workerRepo } : {}),
+            ...(workerLabel.trim() ? { label: workerLabel.trim() } : {}),
+          }
         : {
             kind: "slack",
             ...(ch ? { channels: ch } : {}),
@@ -161,7 +179,7 @@ export function AutomationForm(p: {
     if (d) setCwd(d);
   };
 
-  const triggerValid = triggerKind === "cron" ? cron.trim().split(/\s+/).length >= 5 : triggerKind === "interval" ? Number(everyMinutes) >= 1 : true;
+  const triggerValid = triggerKind === "cron" ? cron.trim().split(/\s+/).length >= 5 : triggerKind === "interval" ? Number(everyMinutes) >= 1 : triggerKind === "worker" ? onIdle || onStopped || onFailure : true;
   const actionValid = actionKind === "master" ? prompt.trim() && cwd.trim() : repo && task.trim();
   const valid = name.trim() && triggerValid && actionValid;
 
@@ -231,15 +249,50 @@ export function AutomationForm(p: {
                 size="md"
                 className="w-full"
                 value={triggerKind}
-                onChange={(e) => setTriggerKind(e.target.value as "cron" | "interval" | "slack")}
+                onChange={(e) => setTriggerKind(e.target.value as "cron" | "interval" | "slack" | "worker")}
               >
                 <option value="cron">{t("automationModal.triggerCron")}</option>
                 <option value="interval">{t("automationModal.triggerInterval")}</option>
                 <option value="slack">{t("automationModal.triggerSlack")}</option>
+                <option value="worker">{t("automationModal.triggerWorker")}</option>
               </Select>
             </label>
 
-            {triggerKind === "interval" ? (
+            {triggerKind === "worker" ? (
+              <>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[12px] text-fg-dim">{t("automationModal.workerOn")}</span>
+                  <div className="flex flex-wrap gap-4 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
+                    <label className="flex items-center gap-2 text-[12.5px] text-fg-dim">
+                      <input type="checkbox" checked={onStopped} onChange={(e) => setOnStopped(e.target.checked)} /> {t("automationModal.workerOnStopped")}
+                    </label>
+                    <label className="flex items-center gap-2 text-[12.5px] text-fg-dim">
+                      <input type="checkbox" checked={onFailure} onChange={(e) => setOnFailure(e.target.checked)} /> {t("automationModal.workerOnFailure")}
+                    </label>
+                    <label className="flex items-center gap-2 text-[12.5px] text-fg-dim">
+                      <input type="checkbox" checked={onIdle} onChange={(e) => setOnIdle(e.target.checked)} /> {t("automationModal.workerOnIdle")}
+                    </label>
+                  </div>
+                  <span className="text-[11px] text-muted">{t("automationModal.workerOnHint")}</span>
+                </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[12px] text-fg-dim">{t("automationModal.workerRepo")}</span>
+                  <Select size="md" className="w-full" value={workerRepo} onChange={(e) => setWorkerRepo(e.target.value)}>
+                    <option value="">{t("automationModal.workerRepoAll")}</option>
+                    {p.repos.map((r) => (
+                      <option key={r.name} value={r.name}>{r.name}</option>
+                    ))}
+                  </Select>
+                </label>
+                <div className="flex flex-col gap-1">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[12px] text-fg-dim">{t("automationModal.workerLabel")}</span>
+                    <Input value={workerLabel} onChange={(e) => setWorkerLabel(e.target.value)} />
+                  </label>
+                  <span className="text-[11px] text-muted">{t("automationModal.workerLabelHint")}</span>
+                </div>
+              </>
+            ) : triggerKind === "interval" ? (
               <div className="flex flex-col gap-1">
                 <label className="flex flex-col gap-1">
                   <span className="text-[12px] text-fg-dim">{t("automationModal.everyMinutes")}</span>

@@ -27,6 +27,12 @@ function triggerBadge(trigger: AutomationTrigger, t: TFunc, names: SlackRefNames
   if (trigger.kind === "interval") return t("automationPage.everyMinutes", { count: trigger.everyMinutes });
   // 'once' (agent self-wakeup) is not sent to the UI list by the backend, but handle it for union safety.
   if (trigger.kind === "once") return `once · ${trigger.runAt}`;
+  if (trigger.kind === "worker") {
+    const on = trigger.on && trigger.on.length > 0 ? trigger.on : ["stopped", "failure"];
+    const wparts = [trigger.repo ?? t("automationPage.workerAllRepos"), on.map((b) => t(`automationPage.workerOn_${b}`)).join("/")];
+    if (trigger.label) wparts.push(`"${trigger.label}"`);
+    return `worker: ${wparts.join(" · ")}`;
+  }
   const parts: string[] = [];
   if (trigger.channels?.length) parts.push(trigger.channels.map((id) => `#${names.channels[id] ?? id}`).join(","));
   if (trigger.keyword) parts.push(`"${trigger.keyword}"`);

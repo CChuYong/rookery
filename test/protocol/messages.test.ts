@@ -83,6 +83,17 @@ describe("automation protocol messages", () => {
     expect(() => parseClientMessage(JSON.stringify(mk(1.5)))).toThrow(); // non-integer rejected
   });
 
+  it("automation.create: worker-settled trigger parses; bad bucket rejected; run vars accept worker keys", () => {
+    const wmk = (trigger: unknown) => ({
+      type: "automation.create", reqId: "q",
+      automation: { name: "n", trigger, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "reuse" } },
+    });
+    expect(() => parseClientMessage(JSON.stringify(wmk({ kind: "worker" })))).not.toThrow(); // all fields optional
+    expect(() => parseClientMessage(JSON.stringify(wmk({ kind: "worker", repo: "app", on: ["stopped", "failure"], label: "impl" })))).not.toThrow();
+    expect(() => parseClientMessage(JSON.stringify(wmk({ kind: "worker", on: ["running"] })))).toThrow(); // not a settle bucket
+    expect(clientMessageSchema.safeParse({ type: "automation.run", reqId: "r", id: "a1", vars: { workerId: "w1", branch: "b", tail: "t" } }).success).toBe(true);
+  });
+
   it("automation.create: slack/worker create parses", () => {
     const ok = {
       type: "automation.create", reqId: "q",

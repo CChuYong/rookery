@@ -16,6 +16,8 @@ const triggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cron"), cron: z.string(), timezone: z.string() }),
   z.object({ kind: z.literal("interval"), everyMinutes: z.number().int().positive() }), // "every N minutes" (min 1; the scheduler tick is 30s)
   z.object({ kind: z.literal("slack"), channels: z.array(z.string()).optional(), keyword: z.string().optional(), fromUsers: z.array(z.string()).optional() }),
+  // Worker-settled trigger: on = settle buckets (absent/empty → ["stopped","failure"]; idle is opt-in).
+  z.object({ kind: z.literal("worker"), repo: z.string().optional(), on: z.array(z.enum(["idle", "stopped", "failure"])).optional(), label: z.string().optional() }),
 ]);
 
 const actionSchema = z.discriminatedUnion("kind", [
@@ -158,7 +160,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("automation.delete"), reqId: z.string(), id: z.string() }),
   z.object({
     type: z.literal("automation.run"), reqId: z.string(), id: z.string(),
-    vars: z.object({ message: z.string(), channel: z.string(), user: z.string(), ts: z.string(), threadTs: z.string(), team: z.string() }).partial().optional(),
+    vars: z.object({ message: z.string(), channel: z.string(), user: z.string(), ts: z.string(), threadTs: z.string(), team: z.string(), workerId: z.string(), repo: z.string(), branch: z.string(), status: z.string(), label: z.string(), tail: z.string() }).partial().optional(),
   }),
   z.object({ type: z.literal("automation.set_enabled"), reqId: z.string(), id: z.string(), enabled: z.boolean() }),
   // Best-effort Slack channel/user id → display name resolution for automation rule cards (audit #51). Never blocks
