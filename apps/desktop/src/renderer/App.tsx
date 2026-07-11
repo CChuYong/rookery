@@ -38,6 +38,8 @@ import { RestartDaemonDialog } from "./components/RestartDaemonDialog.js";
 import { UsagePanel } from "./components/UsagePanel.js";
 import { ResourceMonitor } from "./components/ResourceMonitor.js";
 import { SettingsPage } from "./components/SettingsPage.js";
+import { AttentionBell } from "./components/AttentionBell.js";
+import type { AttentionNav } from "./lib/attention-queue.js";
 import { Button } from "./ui/button.js";
 import { Toaster } from "./components/Toaster.js";
 import { toast } from "./store/toasts.js";
@@ -64,7 +66,7 @@ import { useWorkRoot } from "./lib/useWorkRoot.js";
 
 declare global {
   interface Window {
-    rookery: { daemon: { ensure(): Promise<string>; status(): Promise<string>; restart(): Promise<string> }; wsUrl(): Promise<string>; pickDirectory(): Promise<string | null>; pickFile(): Promise<string | null>; openExternal(url: string): Promise<void>; getPathForFile(file: File): string; system: { getLocale(): Promise<string>; setLocale(locale: string): void }; term: RookeryTerm; ws: RookeryWs; fs: RookeryFs; resources: RookeryResources; apps: RookeryApps; notify(p: { title: string; body: string; workerId: string }): Promise<void>; onNotifyClick(cb: (workerId: string) => void): () => void; platform: string; win: RookeryWin; getVersion(): Promise<string>; update: RookeryUpdate };
+    rookery: { daemon: { ensure(): Promise<string>; status(): Promise<string>; restart(): Promise<string> }; wsUrl(): Promise<string>; pickDirectory(): Promise<string | null>; pickFile(): Promise<string | null>; openExternal(url: string): Promise<void>; getPathForFile(file: File): string; system: { getLocale(): Promise<string>; setLocale(locale: string): void }; term: RookeryTerm; ws: RookeryWs; fs: RookeryFs; resources: RookeryResources; apps: RookeryApps; notify(p: { title: string; body: string; workerId?: string; sessionId?: string }): Promise<void>; onNotifyClick(cb: (target: { workerId?: string; sessionId?: string }) => void): () => void; platform: string; win: RookeryWin; getVersion(): Promise<string>; update: RookeryUpdate };
   }
 }
 
@@ -199,6 +201,12 @@ export function App(): JSX.Element {
   // Location is a single store model — overlay/showRepos/activeSessionId/activeWorkerId together form one Location.
   // Transitions go through navigate; back/forward through goBack/goForward (browser-style history). A new page = add an Overlay member to the store.
   const { overlay, showRepos, navigate, goBack, goForward } = s;
+  // Attention-queue row click → navigate to the target surface (session / worker / automation page).
+  const onAttentionNav = useCallback((nav: AttentionNav) => {
+    if (nav.overlay === "automation") useStore.getState().navigate({ overlay: "automation" });
+    else if (nav.workerId) useStore.getState().navigate({ overlay: null, showRepos: true, subId: nav.workerId });
+    else if (nav.sessionId) useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: nav.sessionId });
+  }, []);
   const gsDismissed = usePrefsStore((st) => st.gettingStartedDismissed);
   const setGsDismissed = usePrefsStore((st) => st.setGettingStartedDismissed);
   // i18n: closures like connect read the latest locale via tRef (same idiom as notifyRef).
@@ -237,8 +245,11 @@ export function App(): JSX.Element {
   const notifyRef = useRef(notifyOn);
   notifyRef.current = notifyOn;
   const toggleNotify = () => setNotifyOn((v) => { localStorage.setItem("rookery.notify", v ? "0" : "1"); return !v; });
-  // Notification click → jump to that worker (Repos view).
-  useEffect(() => window.rookery.onNotifyClick((id) => { useStore.getState().navigate({ overlay: null, showRepos: true, subId: id }); }), []);
+  // Notification click → jump to the target: worker (Repos view) or session (Sessions view — attention-queue tier-0 notify).
+  useEffect(() => window.rookery.onNotifyClick((target) => {
+    if (target.sessionId) useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: target.sessionId });
+    else if (target.workerId) useStore.getState().navigate({ overlay: null, showRepos: true, subId: target.workerId });
+  }), []);
   // Reset edit state when leaving the automation overlay — so re-entering shows the list instead of a stale form.
   useEffect(() => { if (overlay !== "automation") setEditJob(null); }, [overlay]);
   // When the spawn modal opens, load the base-branch candidates for that repo.
@@ -435,6 +446,16 @@ export function App(): JSX.Element {
           const row = useStore.getState().fleet[e.workerId];
           const n = notifyFor(row?.status, e.status, row?.label ?? e.workerId, tRef.current);
           if (n) void window.rookery.notify({ ...n, workerId: e.workerId });
+        }
+        // Attention-queue tier 0: a master turn is BLOCKED on a human answer — the one transition worth an OS
+        // notification even more than worker settles (main suppresses it while the window is focused).
+        if (e.type === "interaction.request" && notifyRef.current) {
+          const sess = useStore.getState().sessions.find((x) => x.id === e.sessionId);
+          void window.rookery.notify({
+            title: tRef.current("attentionBell.notifyTitle"),
+            body: tRef.current("attentionBell.notifyBody", { label: sess?.label ?? e.sessionId.slice(0, 8) }),
+            sessionId: e.sessionId,
+          });
         }
         useStore.getState().applyEvent(e);
         if (e.type === "automation.changed") { void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => {}); }
@@ -960,6 +981,7 @@ export function App(): JSX.Element {
             </Tooltip>
             {/* Automation is a top-level feature (audit #22) — the collapsed rail needs the same reachable-from-anywhere
                 entry as the expanded footer, not just restart/Settings. */}
+            <AttentionBell onNavigate={onAttentionNav} />
             <Tooltip label={t("app.automation")} side="right">
               <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                 <Clock size={16} />
@@ -977,6 +999,7 @@ export function App(): JSX.Element {
               {navBtn(t("app.navSessions"), !showRepos && !overlay, () => { navigate({ overlay: null, showRepos: false }); }, Object.values(s.sessionAttention).some(Boolean))}
               {navBtn(t("app.navRepos"), showRepos && !overlay, () => { navigate({ overlay: null, showRepos: true }); }, Object.values(s.attention).some(Boolean))}
               <div className="no-drag ml-auto flex items-center gap-0.5">
+                <AttentionBell onNavigate={onAttentionNav} />
                 <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
                   <ChevronLeft size={16} />
                 </button>
