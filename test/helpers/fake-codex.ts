@@ -36,6 +36,8 @@ export interface FakeCodexServerOpts {
   // request→response idle-watchdog coverage window (cleanup wave B1): proves the watchdog fires even
   // when it never got a turnRes.turn.id (activeTurnId stays null on a first turn).
   modelList?: unknown[]; // scripted `model/list` data[] rows (codex-models-provider.ts tests) — absent → responds with an empty data[]
+  rateLimits?: unknown; // account/rateLimits/read result (absent → generic empty {} via the fallback)
+  accountUsage?: unknown; // account/usage/read result (absent → generic empty {})
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -177,6 +179,8 @@ export function fakeCodexSpawn(
           return;
         }
         if (msg.method === "account/login/start") { provisioned = true; send({ id: msg.id, result: {} }); return; }
+        if (msg.method === "account/rateLimits/read") { send({ id: msg.id, result: opts.rateLimits ?? {} }); return; }
+        if (msg.method === "account/usage/read") { send({ id: msg.id, result: opts.accountUsage ?? {} }); return; }
         // any other request: generic empty result
         send({ id: msg.id, result: {} });
       },
