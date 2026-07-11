@@ -4,6 +4,27 @@
 
 A long-lived daemon hosts **master agent** sessions that register your repos, remember project context, and spawn **workers** that code in parallel — each in its own git worktree and branch, on the AI backend you choose (**Claude or Codex**). The desktop app, CLI, and Slack are thin clients: close them anytime, the daemon keeps working.
 
+<p align="center">
+  <img src="docs/assets/readme/hero-conversation.png" alt="A master session fanning work out to parallel workers — tool calls, worker branches, and per-turn cost in one conversation" width="920">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/fleet-worker.png" alt="The fleet: workers per repo with status, backend, and cost — and each worker's own transcript and terminal"></td>
+    <td width="50%"><img src="docs/assets/readme/automation.png" alt="Automation rules: cron, interval, Slack, and worker-settled triggers driving master turns or worker spawns"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>The fleet</b> — per-repo workers with status, backend & cost; every worker has its own transcript, diff, and terminal.</sub></td>
+    <td align="center"><sub><b>Automation</b> — cron / interval / Slack / worker-settled triggers, with per-rule model, backend, and budget.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/assets/readme/attention-bell.png" alt="The attention bell ranking what needs you now: blocked questions, failures, and unreviewed results"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><sub><b>The attention bell</b> — one ranked queue for what actually needs you: blocked questions first, failures second, unreviewed results third.</sub></td>
+  </tr>
+</table>
+
 ## Why rookery
 
 - **Always-on, not tab-bound.** The daemon owns sessions, workers, memory, and automations. Clients attach and detach; overnight runs survive; conversations restore on reconnect — including tool calls and reasoning.

@@ -39,6 +39,10 @@ function probeNodeAbi(nodePath: string): Promise<number | null> {
 
 app.setName("Rookery"); // display name in the menu bar/Dock (including dev)
 
+// Opt-in CDP endpoint for UI automation (README screenshots, visual QA scripts). Dev-only affordance:
+// never enabled unless the env var is explicitly set, so packaged/user runs are unaffected.
+if (process.env.ROOKERY_DEBUG_PORT) app.commandLine.appendSwitch("remote-debugging-port", process.env.ROOKERY_DEBUG_PORT);
+
 const HOST = process.env.ROOKERY_HOST ?? "127.0.0.1";
 const PORT = Number.parseInt(process.env.ROOKERY_PORT ?? "8787", 10) || 8787;
 // The daemon is spawned with an external Node (>=22) — because better-sqlite3's native ABI differs from Electron's bundled Node.
