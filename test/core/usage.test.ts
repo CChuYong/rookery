@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parseUsage, UsageCollector } from "../../src/core/usage.js";
+import { parseUsage, UsageCollector, emptyUsage } from "../../src/core/usage.js";
 import { fetchOAuthUsage } from "../../src/core/oauth-usage.js";
 import type { OAuthUsage } from "../../src/core/oauth-usage.js";
+import type { CodexUsage } from "../../src/core/codex-usage-provider.js";
 
 const blocksJson = JSON.stringify({
   blocks: [{ isActive: true, costUSD: 12.5, totalTokens: 1000, startTime: "2026-06-19T06:00:00.000Z", endTime: "2026-06-19T11:00:00.000Z" }],
@@ -102,5 +103,32 @@ describe("UsageCollector", () => {
     await c.collect();
     expect(c.snapshot().pct).toEqual(fakePct); // keep the previous value even if the second call fails
     expect(c.snapshot().today).toEqual({ totalTokens: 500, costUSD: 5 });
+  });
+});
+
+describe("UsageCollector — codex", () => {
+  const cx: CodexUsage = { fiveHour: { usedPercent: 37, resetsAt: 1783762463 }, sevenDay: { usedPercent: 12, resetsAt: null }, planType: "pro", todayTokens: 1000, weeklyTokens: 1200 };
+  const failingExec = { run: async () => { throw new Error("no ccusage"); } };
+
+  it("emptyUsage carries codex: null", () => {
+    expect(emptyUsage().codex).toBeNull();
+  });
+
+  it("collect stores a successful codex fetch in the snapshot", async () => {
+    const c = new UsageCollector({ exec: failingExec, refreshMs: 999999, codexUsage: async () => cx });
+    await c.collect();
+    expect(c.snapshot().codex).toEqual(cx);
+  });
+
+  it("a null/throwing codex fetch keeps the previous codex value (transient failure must not blank the panel)", async () => {
+    let fail = false;
+    const c = new UsageCollector({ exec: failingExec, refreshMs: 999999, codexUsage: async () => { if (fail) throw new Error("down"); return cx; } });
+    await c.collect();
+    fail = true;
+    await c.collect();
+    expect(c.snapshot().codex).toEqual(cx); // kept
+    const c2 = new UsageCollector({ exec: failingExec, refreshMs: 999999, codexUsage: async () => null });
+    await c2.collect();
+    expect(c2.snapshot().codex).toBeNull(); // never had data — stays null
   });
 });
