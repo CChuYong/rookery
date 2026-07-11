@@ -82,18 +82,17 @@ claude mcp add rookery --transport http "http://127.0.0.1:8787/mcp-ext/<token>"
 
 ## Quick start
 
-Requirements: **Node.js ≥ 22** and Anthropic credentials (an API key, or a `claude login` session as fallback). Codex is optional — authenticate the `codex` CLI or set an in-app key to unlock the second backend.
+**Desktop app — no prerequisites.** Download it above, launch, done: the app bundles its own Node runtime and starts and manages the daemon for you. A first-run checklist walks you through the rest — connect Claude (paste an API key in Settings, or an existing `claude login` is picked up automatically), pick a work folder, start a session, and spawn your first worker. Codex is optional — authenticate the `codex` CLI or set an in-app key to unlock the second backend.
+
+**Headless / CLI** — requires **Node.js ≥ 22**:
 
 ```bash
-# Desktop app: just launch it — it starts and manages the daemon for you.
-
-# Or headless:
 export ANTHROPIC_API_KEY=sk-ant-...
 node dist/index.js daemon      # run the daemon in the foreground
 node dist/index.js             # or use the CLI (auto-starts a daemon if none is running)
 ```
 
-Build from source:
+Build from source (Node.js ≥ 22):
 
 ```bash
 npm install && npm run build   # daemon/CLI → dist/
