@@ -235,6 +235,9 @@ export function App(): JSX.Element {
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
   // Cross-provider fork dialog target (master session or worker) — the right-click "Fork" opens this instead of an instant fork.
   const [forkTarget, setForkTarget] = useState<{ kind: "master" | "worker"; id: string; sourceProvider: string } | null>(null);
+  // Bump to remount the master ConversationPane — the composer reads its draft only on mount, so a
+  // programmatically-seeded draft (Getting Started "first worker" example) needs this when already viewing the session.
+  const [composerEpoch, setComposerEpoch] = useState(0);
   const [editJob, setEditJob] = useState<Automation | "new" | null>(null);
   // Daemon-restart confirmation dialog state
   const [restartConfirm, setRestartConfirm] = useState(false);
@@ -538,6 +541,23 @@ export function App(): JSX.Element {
     else void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
   }, []);
   const create = () => navigate({ overlay: "newSession" }); // open the new-session full page (mutually exclusive with settings/automation)
+  // Getting Started "first worker": land the user in a composer pre-filled with an example natural-language ask
+  // (register the repo → spawn a worker → report back). With no usable session yet, seed the New Session page's
+  // draft instead. Existing drafts are never clobbered; the epoch bump makes an already-mounted pane pick the seed up.
+  const suggestFirstWorker = () => {
+    const drafts = useDraftStore.getState();
+    const latest = useStore.getState().sessions
+      .filter((x) => !x.archived && x.origin !== "slack") // slack sessions are read-only in the UI
+      .sort((a, b) => (a.lastActivity < b.lastActivity ? 1 : a.lastActivity > b.lastActivity ? -1 : 0))[0];
+    if (!latest) {
+      if (!drafts.byPage[NEW_SESSION_DRAFT_KEY]) drafts.setDraft_(NEW_SESSION_DRAFT_KEY, t("gettingStarted.workerPrompt"));
+      create();
+      return;
+    }
+    if (!drafts.byPage[latest.id]) drafts.setDraft_(latest.id, t("gettingStarted.workerPrompt"));
+    setComposerEpoch((e) => e + 1);
+    useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: latest.id });
+  };
   const refetchSessions = useCallback(() => { void client?.request({ type: "session.list" }).then((r) => useStore.getState().setSessions(r.sessions ?? [])).catch(() => {}); }, []);
   // Rename session — refetch not needed since it updates live via the session.label event.
   // Inject reqId via request() (schema requires reqId) — the daemon replies with fleet.ack (the label reflects live via session.label; the ack is ignored).
@@ -864,7 +884,7 @@ export function App(): JSX.Element {
     ? {
         conversation: () => (
           <ConversationPane
-            key={s.activeSessionId ?? "none"}
+            key={`${s.activeSessionId ?? "none"}:${composerEpoch}`}
             kind="master"
             id={s.activeSessionId!}
             onRetryHistory={retryHistory}
@@ -1380,15 +1400,18 @@ export function App(): JSX.Element {
         const authDone = !!s.authStatus && s.authStatus.method !== "none";
         const folderDone = !!s.settings.defaultSessionCwd;
         const sessionDone = s.sessions.length > 0;
-        if (authDone && folderDone && sessionDone) return null; // all set → no nag
+        const workerDone = Object.keys(s.fleet).length > 0; // any worker ever spawned (fleet.list includes terminated rows)
+        if (authDone && folderDone && sessionDone && workerDone) return null; // all set → no nag
         return (
           <GettingStartedChecklist
             authDone={authDone}
             folderDone={folderDone}
             sessionDone={sessionDone}
+            workerDone={workerDone}
             onAuth={() => navigate({ overlay: "settings" })}
             onFolder={() => { void window.rookery.pickDirectory().then((dir) => { if (dir) void client?.request({ type: "settings.set", settings: { defaultSessionCwd: dir } }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => {}); }); }}
             onSession={() => create()}
+            onWorker={suggestFirstWorker}
             onDismiss={() => setGsDismissed(true)}
           />
         );

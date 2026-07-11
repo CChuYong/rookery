@@ -4,16 +4,17 @@ import { useT } from "../i18n/provider.js";
 interface Item { key: string; title: string; desc: string; done: boolean; action: () => void; actionLabel: string; }
 
 // Non-blocking "Getting Started" card (floating bottom-right) shown after onboarding until dismissed or all done.
-// Each item auto-completes from live state (auth / default folder / first session) — the parent passes the booleans.
-export function GettingStartedChecklist({ authDone, folderDone, sessionDone, onAuth, onFolder, onSession, onDismiss }: {
-  authDone: boolean; folderDone: boolean; sessionDone: boolean;
-  onAuth: () => void; onFolder: () => void; onSession: () => void; onDismiss: () => void;
+// Each item auto-completes from live state (auth / default folder / first session / first worker) — the parent passes the booleans.
+export function GettingStartedChecklist({ authDone, folderDone, sessionDone, workerDone, onAuth, onFolder, onSession, onWorker, onDismiss }: {
+  authDone: boolean; folderDone: boolean; sessionDone: boolean; workerDone: boolean;
+  onAuth: () => void; onFolder: () => void; onSession: () => void; onWorker: () => void; onDismiss: () => void;
 }): JSX.Element {
   const t = useT();
   const items: Item[] = [
     { key: "auth", title: t("gettingStarted.auth"), desc: t("gettingStarted.authDesc"), done: authDone, action: onAuth, actionLabel: t("gettingStarted.authAction") },
     { key: "folder", title: t("gettingStarted.folder"), desc: t("gettingStarted.folderDesc"), done: folderDone, action: onFolder, actionLabel: t("gettingStarted.folderAction") },
     { key: "session", title: t("gettingStarted.session"), desc: t("gettingStarted.sessionDesc"), done: sessionDone, action: onSession, actionLabel: t("gettingStarted.sessionAction") },
+    { key: "worker", title: t("gettingStarted.worker"), desc: t("gettingStarted.workerDesc"), done: workerDone, action: onWorker, actionLabel: t("gettingStarted.workerAction") },
   ];
   const doneCount = items.filter((i) => i.done).length;
 
