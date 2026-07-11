@@ -40,8 +40,10 @@ export type AgentEvent =
   // Harness-tracked background task lifecycle (Claude only: run_in_background shells, backgrounded
   // subagents, monitors, workflows — docs/superpowers/specs/2026-07-11-worker-state-graph-design.md).
   // "started" adds it to the worker's running set; "settled" removes it (completed/failed/killed/stopped
-  // are all just "settled" here — the state machine only needs the count). Codex never emits this
-  // (its items complete inside the turn; no background concept in app-server 0.142.5).
+  // are all just "settled" here — the state machine only needs the count). Codex does not emit
+  // this YET: unawaited collab child threads DO outlive the turn (live-verified 2026-07-11,
+  // probe-collab-nowait.mjs) but are only surfaced as nested-panel traffic, not background_task
+  // (scope-A decision, docs/superpowers/specs/2026-07-11-codex-nested-agents-design.md).
   | { kind: "background_task"; taskId: string; taskType?: string; status: "started" | "settled" }
   // End of one turn. costUsd/numTurns/durationMs are THIS turn's raw values (numTurns is the provider's
   // per-send cumulative agentic turn count) — consumers accumulate their own session totals.

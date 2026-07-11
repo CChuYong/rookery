@@ -352,8 +352,14 @@ export class Worker {
         // activity (thinking delta) can lag ~4s (worker 74022a19) — init resolves the grace near-instantly.
         // Outside the grace, init is deliberately NOT a wake signal (an eager init at session boot, e.g. a
         // resumed worker before any send, must not flip a quiescent worker to running with no turn coming).
+        // Nested-subagent traffic is NOT the worker's own turn: codex collab children keep
+        // streaming after the parent turn ends (live-verified 2026-07-11), and counting them
+        // here would flip a settled worker back to running with no turn_end ever coming.
+        // (On Claude nested frames only flow mid-turn, so this exclusion is a no-op there.)
+        const nested = (ev.kind === "message" || ev.kind === "tool_use" || ev.kind === "tool_result") && ev.parentToolUseId != null;
         if (
           !this.turnActive &&
+          !nested &&
           (ev.kind === "text_delta" || ev.kind === "thinking_delta" || ev.kind === "message" || ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "tool_progress" ||
             (this.idleGraceTimer !== undefined && ev.kind === "system_text" && ev.text === "init"))
         ) {

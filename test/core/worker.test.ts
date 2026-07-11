@@ -1233,6 +1233,25 @@ describe("Worker background state machine", () => {
     expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "running", "background"]);
     await x.agent.stop();
   });
+
+  it("nested-tagged traffic after the turn ends does NOT wake the worker (codex collab child keeps streaming post-turn)", async () => {
+    const x = mk(() => [
+      { type: "assistant", text: "spawned a child" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      // codex-native child thread still streaming AFTER the parent turn ended (live-verified 2026-07-11)
+      { type: "assistant", text: "child says 42", parentToolUseId: "th-child" },
+    ]);
+    const nestedEvents: Array<{ parentToolUseId: string }> = [];
+    x.bus.subscribe("s1", (e) => { if (e.type === "worker.nested") nestedEvents.push({ parentToolUseId: e.parentToolUseId }); });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    await new Promise((r) => setTimeout(r, 40)); // let the trailing nested frame flow
+    expect(x.agent.status()).toBe("idle"); // did NOT flip back to running
+    expect(x.statusEvents.map((s) => s.status)).not.toContain("running");
+    // the nested frame still reached the panel path
+    expect(nestedEvents).toEqual([{ parentToolUseId: "th-child" }]);
+    await x.agent.stop();
+  });
 });
 
 // ── Settle-grace (fix/worker-idle-grace): no transient idle between the last bg settle and the auto-wake ──
