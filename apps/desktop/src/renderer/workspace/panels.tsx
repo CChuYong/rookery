@@ -3,21 +3,10 @@ import type { IDockviewPanelProps } from "dockview-react";
 import { useStore } from "../store/store.js";
 import { NestedAgents } from "../views/NestedAgents.js";
 import type { LogItem } from "../store/reduce.js";
+import { nestedLabel } from "../lib/nested-label.js";
 import type { PanelParams } from "./panel-ids.js";
 import { useWorkspaceRender } from "./WorkspaceRender.js";
 import { useT } from "../i18n/provider.js";
-
-// Nested-agent label: extract subagent_type/description from the Task tool call
-// input in the main transcript. (Copied from RightSidebar for the PoC; dedupe in
-// Phase 3 when RightSidebar is removed.) The input JSON may be truncated, so
-// match with a regex rather than JSON.parse.
-function nestedLabel(mainLog: LogItem[], parentId: string): string {
-  const tool = mainLog.find((i) => i.kind === "tool" && i.toolId === parentId);
-  const input = tool && tool.kind === "tool" ? tool.input ?? "" : "";
-  const sub = input.match(/"subagent_type"\s*:\s*"([^"]+)"/)?.[1];
-  const desc = input.match(/"description"\s*:\s*"([^"]+)"/)?.[1];
-  return [sub, desc].filter(Boolean).join(": ") || `worker ${parentId.slice(0, 6)}`;
-}
 
 const EMPTY_NESTED: Record<string, LogItem[]> = {};
 const EMPTY_LOG: LogItem[] = [];
