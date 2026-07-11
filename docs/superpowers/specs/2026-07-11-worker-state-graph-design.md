@@ -86,6 +86,14 @@ The spontaneous `idle→running` edge is new and load-bearing: verified fact 2 s
 - `{ kind: "background_task"; taskId: string; taskType?: string; status: "started" | "settled"; description?: string }` — codex adapter simply never emits it.
 - `turn_end.terminalReason?: string` — opaque diagnostic passthrough (claude only).
 
+### Settle-grace (added post-merge, fix/worker-idle-grace)
+
+Live use (worker 74022a19) exposed a **transient idle** between the last bg settle and the auto-wake turn's first model activity (~4s: settle → wake `init` <100ms later → first thinking delta ~4s later). Event-driven consumers (WorkerNotifier, the planned worker-settled trigger) fire on any idle emit regardless of duration — one beat early, and a once-latch would latch at the wrong moment. Fix, in `worker.ts`:
+
+- On the **last** settle while quiescent, hold `background` for a grace window (`WorkerDeps.settleGraceMs`, default 3000ms) instead of reconciling to idle; `reconcile()` refuses to derive idle while the grace is armed (the emit is suppressed, not shortened).
+- The wake turn's **`init` system frame counts as the wake while the grace is armed** (it lands <100ms after the settle, vs ~4s for the first model activity) → `background → running` with no idle ever emitted. Outside the grace, init is deliberately NOT a wake signal — an eager boot-time init (e.g. a resumed worker before any send) must not flip a quiescent worker to running with no turn coming.
+- Grace expiry = no wake came → truthful idle. send() supersedes the grace; terminal transitions clear it (no late expiry reconcile).
+
 ### Edge cases
 
 - **In-turn tracked foreground tasks** (auto-promoted after ~3s — fact 3): their settle frames arrive before `result`, so the task set is empty again by turn end. The turn-end snapshot rule needs no special-casing.

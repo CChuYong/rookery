@@ -1138,14 +1138,15 @@ describe("extractToolUses / extractToolResults", () => {
 // ── Background-aware state machine (2026-07-11 redesign): running / background / idle derived from
 //    turnActive + running bg-task set. Design: docs/superpowers/specs/2026-07-11-worker-state-graph-design.md ──
 describe("Worker background state machine", () => {
-  function mk(responder: Parameters<typeof fakeStreamingBackend>[0]) {
+  function mk(responder: Parameters<typeof fakeStreamingBackend>[0], opts?: { settleGraceMs?: number }) {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
     const bus = new EventBus();
     const statusEvents: Array<{ status: string; bg?: { count: number; types: string[] } }> = [];
     bus.subscribe("s1", (e) => { if (e.type === "worker.status") statusEvents.push({ status: e.status, ...(e.bg ? { bg: e.bg } : {}) }); });
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: fakeStreamingBackend(responder) } });
+    // settleGraceMs: short by default so no-wake tests resolve fast; wake tests arrive synchronously anyway.
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: fakeStreamingBackend(responder), settleGraceMs: opts?.settleGraceMs ?? 15 } });
     return { repos, bus, statusEvents, agent };
   }
 
@@ -1180,7 +1181,7 @@ describe("Worker background state machine", () => {
     await x.agent.stop();
   });
 
-  it("auto-wake: model activity after the settle flips idle → running with NO send() (live-verified SDK behavior)", async () => {
+  it("auto-wake: model activity after the settle goes background → running with NO send() and NO transient idle (settle-grace)", async () => {
     const x = mk(() => [
       { type: "task_started", id: "bg1", taskType: "local_bash" },
       { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
@@ -1191,9 +1192,9 @@ describe("Worker background state machine", () => {
     x.agent.start("go");
     // The streaming fake yields all turn-0 steps then waits for the next input (queue stays open — the live
     // lifecycle), so observe the status sequence rather than awaiting a natural end.
-    await until(() => x.statusEvents.length >= 4);
-    // background (bg running) → idle (settled) → running (wake turn, no send) → idle (wake turn ended)
-    expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "idle", "running", "idle"]);
+    await until(() => x.statusEvents.length >= 3);
+    // background (bg running) → running (wake turn — the settle-grace held "background", NO transient idle) → idle
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "running", "idle"]);
     // the wake turn's output landed in the transcript
     const persisted = x.repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { content?: string });
     expect(persisted.some((p) => p.content === "bg finished — processed its output")).toBe(true);
@@ -1230,6 +1231,101 @@ describe("Worker background state machine", () => {
     await until(() => x.statusEvents.filter((s) => s.status === "background").length >= 2, 2000);
     // background → running (send) → background (bg1 never settled)
     expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "running", "background"]);
+    await x.agent.stop();
+  });
+});
+
+// ── Settle-grace (fix/worker-idle-grace): no transient idle between the last bg settle and the auto-wake ──
+describe("Worker settle-grace", () => {
+  function mk2(responder: Parameters<typeof fakeStreamingBackend>[0], settleGraceMs: number) {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: fakeStreamingBackend(responder), settleGraceMs } });
+    return { statuses, agent };
+  }
+
+  it("the wake turn's init resolves the grace near-instantly (live: init lands <100ms after the settle)", async () => {
+    const x = mk2(() => [
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "bg1", status: "completed" }, // settle → grace armed, background held
+      { type: "system", text: "init" }, // the auto-wake turn's init — counts as the wake DURING the grace
+      { type: "assistant", text: "processed bg output" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], 60_000); // deliberately huge: the test must resolve via init, never via expiry
+    x.agent.start("go");
+    await until(() => x.statuses.length >= 3);
+    expect(x.statuses).toEqual(["background", "running", "idle"]); // no transient idle
+    await x.agent.stop();
+  });
+
+  it("no wake within the grace → expiry derives the truthful idle (and only then)", async () => {
+    const x = mk2(() => [
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "bg1", status: "completed" }, // settle → grace armed; nothing follows
+    ], 30);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    expect(x.statuses).toEqual(["background"]); // held — no idle yet
+    await until(() => x.agent.status() === "idle", 2000); // grace expired → idle
+    expect(x.statuses).toEqual(["background", "idle"]);
+    await x.agent.stop();
+  });
+
+  it("init OUTSIDE the grace is NOT a wake signal (a boot-time init must not flip a quiescent worker to running)", async () => {
+    const x = mk2((_text, turn) =>
+      turn === 0
+        ? [
+            { type: "system", text: "init" }, // session-boot init during the first turn — no grace armed later
+            { type: "assistant", text: "hi" },
+            { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+          ]
+        : [],
+      30);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(x.statuses).toEqual(["idle"]); // turn ended → idle; the init never re-flipped it to running
+    await x.agent.stop();
+  });
+
+  it("stop() during the grace latches stopped; the expiry cannot resurrect it", async () => {
+    const x = mk2(() => [
+      { type: "task_started", id: "bg1", taskType: "local_bash" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "bg1", status: "completed" },
+    ], 25);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stop();
+    expect(x.agent.status()).toBe("stopped");
+    await new Promise((r) => setTimeout(r, 60)); // let the (cleared) grace window pass
+    expect(x.agent.status()).toBe("stopped"); // no late idle
+    expect(x.statuses.filter((s) => s === "idle")).toEqual([]);
+  });
+
+  it("send() during the grace supersedes the wake-wait (background → running, no idle)", async () => {
+    const x = mk2((_text, turn) =>
+      turn === 0
+        ? [
+            { type: "task_started", id: "bg1", taskType: "local_bash" },
+            { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+            { type: "task_notification", id: "bg1", status: "completed" },
+          ]
+        : [
+            { type: "assistant", text: "follow-up done" },
+            { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+          ],
+      60_000); // huge grace: only send() can move it forward
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    x.agent.send("follow-up");
+    await until(() => x.agent.status() === "idle", 2000);
+    expect(x.statuses).toEqual(["background", "running", "idle"]);
     await x.agent.stop();
   });
 });
