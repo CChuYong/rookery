@@ -15,6 +15,17 @@ function h() {
   return { repos, bus, deliver };
 }
 
+it("background is NOT settled — an armed worker's arm survives it and fires only at the truthful idle", () => {
+  const x = h();
+  x.repos.setWorkerNotifyArmed("w1", true);
+  // Turn ended but a run_in_background shell still runs → the master must NOT be woken yet.
+  x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "background", bg: { count: 1, types: ["local_bash"] } });
+  expect(x.deliver).not.toHaveBeenCalled();
+  // The bg task settles (and the SDK's auto-wake turn ends) → idle = 시킨 일 다 함 → deliver exactly once.
+  x.bus.emit({ type: "worker.status", sessionId: "sA", workerId: "w1", status: "idle" });
+  expect(x.deliver).toHaveBeenCalledTimes(1);
+});
+
 it("armed worker reaching idle delivers one line to its home session, then disarms (one-shot)", () => {
   const x = h();
   x.repos.setWorkerNotifyArmed("w1", true);

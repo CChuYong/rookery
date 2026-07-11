@@ -154,7 +154,9 @@ export class FleetOrchestrator {
       // stop keeps the worktree, so if sdk_session+worktree are both alive, lazy-resuming (→idle) after restart is correct.
       // 'provisioning' is a worker the daemon died mid-spawn on (never got an sdk_session) → it falls to the orphaned branch
       // below, so it shows as a dead worker (diff/discard) instead of a stuck spinner.
-      if (status === "running" || status === "idle" || status === "stopped" || status === "provisioning") {
+      // 'background' rows resume like idle: their background tasks were children of the dead SDK subprocess,
+      // so nothing is running anymore — the resumed worker starts with an empty task set (Worker.resume()).
+      if (status === "running" || status === "idle" || status === "background" || status === "stopped" || status === "provisioning") {
         // resume condition: a saved SDK session (OR a pending cross-provider handoff, which has no sdk_session_id
         // until its first turn) + the worktree actually exists. If neither handle is present it's a zombie →
         // orphaned (diff/discard only). Resuming when the worktree is gone would advertise a dead worker as healthy.
@@ -586,7 +588,7 @@ export class FleetOrchestrator {
       // the status the orchestrator recorded (orphaned, provisioning-'failed', etc.) is canonical.
       if (e.agent) {
         const live = e.agent.status();
-        if (live === "running" || live === "idle") return live;
+        if (live === "running" || live === "idle" || live === "background") return live;
       }
       return e.status;
     }
@@ -669,7 +671,7 @@ export class FleetOrchestrator {
     for (const e of this.entries.values()) {
       const live = e.agent?.status();
       // void: just trigger stop so each flow settles; the actual completion wait is handled by the drain below.
-      if (e.agent && (live === "running" || live === "idle")) void e.agent.stop().catch(() => {});
+      if (e.agent && (live === "running" || live === "idle" || live === "background")) void e.agent.stop().catch(() => {});
     }
     // only after draining all worker flows + in-flight checkpoint writes does the caller call db.close().
     // (checkpoints aren't in flows so wait for them separately — otherwise addCheckpoint throws on a closed DB.)

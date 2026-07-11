@@ -894,6 +894,22 @@ describe("FleetOrchestrator rehydrate (restart recovery)", () => {
     expect(s.repos.getWorker("old1")?.status).toBe("orphaned");
   });
 
+  it("rehydrates a 'background' row like idle — its bg tasks died with the process (2026-07-11 redesign)", () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    repos.createWorker({ id: "bg1", sessionId: "sA", repoPath: "/code/app", label: "app", worktreePath: "/wt/bg1", branch: "rookery/bg1", base: "main" });
+    repos.setWorkerSdkSessionId("bg1", "sdk-bg1");
+    repos.setWorkerStatus("bg1", "background");
+    const fleet = new FleetOrchestrator({
+      repos, bus: new EventBus(), git: new FakeGitOps(),
+      factory: () => ({ start: () => {}, resume: () => {}, send: () => {}, stop: async () => {}, status: () => "idle" as const, waitUntilSettled: async () => {} }),
+      worktreesDir: "/wt", exists: () => true,
+    });
+    fleet.rehydrate();
+    expect(fleet.status("bg1")).toBe("idle"); // resumable, quiescent — NOT orphaned, NOT still background
+    expect(repos.getWorker("bg1")?.status).toBe("idle");
+  });
+
   it("resumes a running agent that has a persisted sdk_session_id (→ live idle)", () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "sA", cwd: "/x" });

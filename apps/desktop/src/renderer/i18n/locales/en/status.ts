@@ -5,6 +5,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "status.provisioning": "Preparing",
   "status.running": "Running",
+  "status.background": "Background tasks",
   "status.idle": "Idle",
   "status.stopped": "Stopped",
   "status.done": "Done",
