@@ -60,6 +60,8 @@ Add curated inbound shapes for the two new item types (documenting fields we rea
 - No master-side nested panels: `MasterAgent` keeps dropping `parentToolUseId` traffic (Claude parity). Caveat to document: a codex **master** runs on a per-turn ephemeral child process, so unawaited children die when the turn's process exits — nothing rookery can surface.
 - No persistence: nested stays live-only (Claude parity; reload clears panels).
 - No spawn/enable knobs: `multi_agent` is upstream-default-on; rookery neither enables nor blocks it.
+- **No cost accounting for collab children** (final-review finding, accepted): child `thread/tokenUsage/updated` is deliberately dropped from `turnAccum`, so whatever a collab child burns never reaches `cumCostUsd` — the `costBudgetUsd` runaway guard cannot see or stop a runaway child. Not a regression (the old drop-all filter had the same hole), but now that children are a surfaced feature this is a recorded limitation. Follow-up: bill child usage at some boundary, likely together with the `background_task` mapping.
+- Grandchild panels always label as the `worker <id6>` fallback: a grandchild's `spawn_agent` card lands in its parent-child's panel, but `nestedLabel` only searches the worker's main transcript. Inherent to the flat-panel design; cosmetic.
 
 ### 6. Testing
 

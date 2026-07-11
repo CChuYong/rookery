@@ -355,7 +355,8 @@ export class Worker {
         // Nested-subagent traffic is NOT the worker's own turn: codex collab children keep
         // streaming after the parent turn ends (live-verified 2026-07-11), and counting them
         // here would flip a settled worker back to running with no turn_end ever coming.
-        // (On Claude nested frames only flow mid-turn, so this exclusion is a no-op there.)
+        // (On Claude nested frames are expected only mid-turn, so this is normally a no-op there —
+        // but if a backgrounded Task subagent ever streams post-turn, the same exclusion applies.)
         const nested = (ev.kind === "message" || ev.kind === "tool_use" || ev.kind === "tool_result") && ev.parentToolUseId != null;
         if (
           !this.turnActive &&
