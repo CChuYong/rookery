@@ -1048,3 +1048,82 @@ describe("CodexBackend — in-app apiKey provisioning", () => {
     expect(fake.requests.some((r) => r.method === "account/read")).toBe(false);
   });
 });
+
+describe("CodexBackend — codex-native nested subagents (collab child threads)", () => {
+  const child = "th-child";
+
+  it("child items map to nested-tagged events; child deltas/turn/tokenUsage/progress are dropped", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "raw", method: "item/agentMessage/delta", params: { threadId: child, itemId: "cm1", delta: "par" } },
+      { kind: "raw", method: "item/reasoning/summaryTextDelta", params: { threadId: child, itemId: "cr1", delta: "think" } },
+      { kind: "raw", method: "item/started", params: { threadId: child, item: { type: "commandExecution", id: "cc1", command: "echo hi", status: "inProgress" } } },
+      { kind: "raw", method: "item/commandExecution/outputDelta", params: { threadId: child, itemId: "cc1", delta: "hi" } },
+      { kind: "raw", method: "item/completed", params: { threadId: child, item: { type: "commandExecution", id: "cc1", command: "echo hi", status: "completed", aggregatedOutput: "hi" } } },
+      { kind: "raw", method: "item/completed", params: { threadId: child, item: { type: "agentMessage", id: "cm1", text: "done 42" } } },
+      { kind: "raw", method: "thread/tokenUsage/updated", params: { threadId: child, tokenUsage: { last: { inputTokens: 500 }, total: { inputTokens: 500, outputTokens: 100 }, modelContextWindow: null } } },
+      { kind: "raw", method: "turn/completed", params: { threadId: child, turn: { id: "child-turn", status: "completed" } } },
+      { kind: "turnEnd", durationMs: 7 },
+    ]);
+    const q = new MessageQueue();
+    q.push("go");
+    q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    // child tool pair + completed message, tagged with the child threadId as the panel group key
+    expect(events).toContainEqual({ kind: "tool_use", id: "cc1", name: "shell", input: { command: "echo hi", cwd: undefined }, parentToolUseId: child });
+    expect(events).toContainEqual({ kind: "tool_result", toolUseId: "cc1", isError: false, content: "hi", parentToolUseId: child });
+    expect(events).toContainEqual({ kind: "message", role: "assistant", text: "done 42", parentToolUseId: child });
+    // child deltas suppressed (nested shows completed steps only — Claude parity)
+    expect(events.filter((e) => e.kind === "text_delta")).toEqual([]);
+    expect(events.filter((e) => e.kind === "thinking_delta")).toEqual([]);
+    expect(events.filter((e) => e.kind === "tool_progress")).toEqual([]);
+    // exactly ONE turn_end (the parent's) — the child's turn/completed emitted no phantom end,
+    // and the child's tokenUsage did not bill into the parent's turn cost
+    const ends = events.filter((e) => e.kind === "turn_end");
+    expect(ends).toHaveLength(1);
+    expect((ends[0] as { costUsd: number }).costUsd).toBe(0);
+  });
+
+  it("parent subAgentActivity(kind=started) → spawn_agent tool card pair keyed by the CHILD threadId", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "raw", method: "item/completed", params: { threadId: "th-1", item: { type: "subAgentActivity", id: "call_1", kind: "started", agentThreadId: child, agentPath: "/root/compute" } } },
+      { kind: "raw", method: "item/completed", params: { threadId: "th-1", item: { type: "subAgentActivity", id: "call_2", kind: "interacted", agentThreadId: child, agentPath: "/root/compute" } } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue();
+    q.push("go");
+    q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    // id is the child threadId ON PURPOSE: the desktop's nestedLabel() finds the main-transcript
+    // card whose toolId equals the panel key (= child threadId)
+    expect(events).toContainEqual({ kind: "tool_use", id: child, name: "spawn_agent", input: { agentPath: "/root/compute" }, parentToolUseId: null });
+    expect(events).toContainEqual({ kind: "tool_result", toolUseId: child, isError: false, content: "/root/compute", parentToolUseId: null });
+    // kind !== "started" (interacted/interrupted) emits nothing
+    expect(events.filter((e) => e.kind === "tool_use")).toHaveLength(1);
+  });
+
+  it("parent collabAgentToolCall started/completed → collab.<tool> card pair", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "raw", method: "item/started", params: { threadId: "th-1", item: { type: "collabAgentToolCall", id: "call_w", tool: "wait", status: "inProgress", senderThreadId: "th-1", receiverThreadIds: [], prompt: null } } },
+      { kind: "raw", method: "item/completed", params: { threadId: "th-1", item: { type: "collabAgentToolCall", id: "call_w", tool: "wait", status: "completed" } } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue();
+    q.push("go");
+    q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    expect(events).toContainEqual({ kind: "tool_use", id: "call_w", name: "collab.wait", input: { prompt: null, model: undefined, receiverThreadIds: [] }, parentToolUseId: null });
+    expect(events).toContainEqual({ kind: "tool_result", toolUseId: "call_w", isError: false, content: "completed", parentToolUseId: null });
+  });
+
+  it("a collabAgentToolCall on a CHILD thread lands in that child's panel (grandchild spawn visibility)", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "raw", method: "item/started", params: { threadId: child, item: { type: "collabAgentToolCall", id: "call_g", tool: "spawnAgent", status: "inProgress", prompt: "do sub-work" } } },
+      { kind: "turnEnd" },
+    ]);
+    const q = new MessageQueue();
+    q.push("go");
+    q.close();
+    const events = await collect(b.openSession(q, baseOpts()));
+    expect(events).toContainEqual({ kind: "tool_use", id: "call_g", name: "collab.spawnAgent", input: { prompt: "do sub-work", model: undefined, receiverThreadIds: undefined }, parentToolUseId: child });
+  });
+});

@@ -30,6 +30,13 @@ export interface WorkerDeps {
   onTurnStart?: () => void; // called right before each turn starts (start/send) — the orchestrator takes a checkpoint.
   maxTurns?: number; // per-result num_turns cap. When r.num_turns >= cap, the worker is stopped (notice emitted). null/undefined → unlimited.
   costBudgetUsd?: number; // lifetime USD cost ceiling. When cumCostUsd >= budget, the worker is stopped (notice emitted). null/undefined → unlimited.
+  // Settle-grace window (ms, default 3000): after the LAST background task settles while quiescent, hold
+  // "background" this long instead of dropping to idle — the SDK's auto-wake turn follows almost immediately
+  // (live-measured: its init arrives <100ms after the settle; worker 74022a19 showed a ~4s transient idle
+  // without this, which fired event-driven consumers — WorkerNotifier / the worker-settled trigger — one
+  // beat early). The wake cancels the grace (→ running, no idle ever emitted); expiry means no wake came
+  // (→ idle, truthful). Injectable for deterministic tests.
+  settleGraceMs?: number;
 }
 
 interface WorkerOpts {
@@ -67,6 +74,7 @@ export class Worker {
   // Derived-state inputs (2026-07-11 state-graph redesign): liveStatus = f(turnActive, bgTasks.size).
   private turnActive = true; // a task-spawned worker starts mid-turn; start()/resume() reconcile for the task-less paths
   private readonly bgTasks = new Map<string, string>(); // running background tasks: taskId → taskType (claude only; codex never emits them)
+  private idleGraceTimer?: ReturnType<typeof setTimeout>; // settle-grace hold (see WorkerDeps.settleGraceMs)
   private loop: Promise<void> = Promise.resolve();
   private stream?: AgentStream;
   private sdkSessionId: string | null;
@@ -108,8 +116,30 @@ export class Worker {
   // settle arriving after stop() must never resurrect a terminated worker.
   private reconcile(): void {
     if (this.isTerminalState()) return;
+    // Settle-grace: while armed, hold "background" instead of deriving idle — the auto-wake turn is imminent.
+    // Even a 1ms idle emit would fire event-driven consumers (notifier / worker-settled), so the emit itself
+    // must be suppressed, not merely shortened.
+    if (!this.turnActive && this.bgTasks.size === 0 && this.idleGraceTimer) return;
     const live: WorkerStatus = this.turnActive ? "running" : this.bgTasks.size > 0 ? "background" : "idle";
     if (live !== this.state) this.transition(live);
+  }
+
+  private clearIdleGrace(): void {
+    if (this.idleGraceTimer) {
+      clearTimeout(this.idleGraceTimer);
+      this.idleGraceTimer = undefined;
+    }
+  }
+
+  // Arm (or re-arm, on the settle double-fire) the settle-grace hold. Expiry = no wake came → derive idle.
+  private armIdleGrace(): void {
+    this.clearIdleGrace();
+    const t = setTimeout(() => {
+      this.idleGraceTimer = undefined;
+      this.reconcile();
+    }, this.opts.deps.settleGraceMs ?? 3000);
+    t.unref?.();
+    this.idleGraceTimer = t;
   }
 
   // Surface an out-of-band informational notice in this worker's transcript (a degraded condition the orchestrator caught —
@@ -189,6 +219,7 @@ export class Worker {
       this.queue.push(this.withHandoffSeed(text)); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
       this.opts.deps.onTurnStart?.();
       this.record({ kind: "message", role: "user", content: text }, clientMsgId);
+      this.clearIdleGrace(); // a user turn supersedes the wake-wait
       this.turnActive = true;
       this.reconcile();
     } else {
@@ -248,6 +279,7 @@ export class Worker {
   }
 
   private transition(status: WorkerStatus): void {
+    if (status === "stopped" || status === "done" || status === "error") this.clearIdleGrace(); // terminal: no late grace-expiry reconcile
     this.state = status;
     this.opts.deps.repos.setWorkerStatus(this.opts.id, status);
     this.opts.deps.bus.emit({
@@ -315,11 +347,24 @@ export class Worker {
         // Spontaneous wake (live-verified 2026-07-11, probe-turn-lifecycle.mjs): after a background task
         // settles, the SDK starts a non-human turn with NO send() — including after an interrupt. Any model
         // activity while no turn is tracked means a turn began; without this the wake turn would stream
-        // while the status still claims background/idle.
+        // while the status still claims background/idle. WHILE THE SETTLE-GRACE IS ARMED, the wake turn's
+        // `init` system frame also counts: it arrives <100ms after the settle whereas the first model
+        // activity (thinking delta) can lag ~4s (worker 74022a19) — init resolves the grace near-instantly.
+        // Outside the grace, init is deliberately NOT a wake signal (an eager init at session boot, e.g. a
+        // resumed worker before any send, must not flip a quiescent worker to running with no turn coming).
+        // Nested-subagent traffic is NOT the worker's own turn: codex collab children keep
+        // streaming after the parent turn ends (live-verified 2026-07-11), and counting them
+        // here would flip a settled worker back to running with no turn_end ever coming.
+        // (On Claude nested frames are expected only mid-turn, so this is normally a no-op there —
+        // but if a backgrounded Task subagent ever streams post-turn, the same exclusion applies.)
+        const nested = (ev.kind === "message" || ev.kind === "tool_use" || ev.kind === "tool_result") && ev.parentToolUseId != null;
         if (
           !this.turnActive &&
-          (ev.kind === "text_delta" || ev.kind === "thinking_delta" || ev.kind === "message" || ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "tool_progress")
+          !nested &&
+          (ev.kind === "text_delta" || ev.kind === "thinking_delta" || ev.kind === "message" || ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "tool_progress" ||
+            (this.idleGraceTimer !== undefined && ev.kind === "system_text" && ev.text === "init"))
         ) {
+          this.clearIdleGrace();
           this.turnActive = true;
           this.reconcile();
         }
@@ -374,9 +419,17 @@ export class Worker {
           // Harness-tracked background task lifecycle (claude only). No transcript record: the SDK's own
           // "Command running in background with ID: …" tool_result already documents it there. The Map
           // dedupes the settle double-fire (task_updated(completed) immediately followed by task_notification).
-          if (ev.status === "started") this.bgTasks.set(ev.taskId, ev.taskType ?? "task");
-          else this.bgTasks.delete(ev.taskId);
-          this.reconcile();
+          if (ev.status === "started") {
+            this.bgTasks.set(ev.taskId, ev.taskType ?? "task");
+            this.reconcile();
+          } else {
+            this.bgTasks.delete(ev.taskId);
+            // Last task settled while quiescent → hold "background" for the settle-grace instead of blipping
+            // idle (the auto-wake turn is imminent; see WorkerDeps.settleGraceMs). The double-fire re-arms
+            // harmlessly. Settles DURING a turn (auto-promoted foreground tasks) take the plain reconcile.
+            if (!this.turnActive && this.bgTasks.size === 0) this.armIdleGrace();
+            else this.reconcile();
+          }
         } else if (ev.kind === "turn_end") {
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
           // ev.costUsd/ev.numTurns are PER-SEND (this query()'s own cost + agentic-loop count), NOT

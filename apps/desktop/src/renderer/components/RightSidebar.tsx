@@ -7,6 +7,7 @@ import { useResizableWidth } from "../lib/useResizableWidth.js";
 import { ResizeHandle } from "./ResizeHandle.js";
 import { cn } from "../lib/cn.js";
 import type { LogItem } from "../store/reduce.js";
+import { nestedLabel } from "../lib/nested-label.js";
 import { FileTree } from "./FileTree.js";
 import { GitChanges } from "./GitChanges.js";
 import { SkeletonRows } from "./Skeleton.js";
@@ -18,16 +19,6 @@ import { useT } from "../i18n/provider.js";
 type SegmentKey = "files" | "git" | "worker";
 
 type Nested = { id: string; label: string; items: LogItem[] };
-
-// Nested agent panel label: extracts subagent_type/description from the Task tool call input in the main transcript.
-// (The input JSON may be truncated at 4000 chars, so extract robustly with a regex instead of JSON.parse.)
-function nestedLabel(mainLog: LogItem[], parentId: string): string {
-  const t = mainLog.find((i) => i.kind === "tool" && i.toolId === parentId);
-  const input = t && t.kind === "tool" ? t.input ?? "" : "";
-  const sub = input.match(/"subagent_type"\s*:\s*"([^"]+)"/)?.[1];
-  const desc = input.match(/"description"\s*:\s*"([^"]+)"/)?.[1];
-  return [sub, desc].filter(Boolean).join(": ") || `worker ${parentId.slice(0, 6)}`;
-}
 
 // Stable refs for the nested/workerLogs selectors (creating a fresh empty ref each time would cause infinite re-renders).
 const EMPTY_NESTED: Record<string, LogItem[]> = {};
