@@ -29,6 +29,7 @@ import { UsageCollector } from "../core/usage.js";
 import { makeOAuthUsageProvider } from "../core/oauth-usage.js";
 import { makeModelsProvider } from "../core/models-provider.js";
 import { makeCodexModelsProvider } from "../core/codex-models-provider.js";
+import { makeCodexUsageProvider } from "../core/codex-usage-provider.js";
 import { makeCodexAuthProvider } from "../core/codex-auth-provider.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
@@ -297,6 +298,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // The refresh interval comes from settings (DB). Applied once at boot (changes take effect on daemon restart). Invalid values fall back to the default.
   const parsedRefresh = Number.parseInt(settings.usageRefreshMs(), 10);
   const usageRefreshMs = Number.isInteger(parsedRefresh) && parsedRefresh > 0 ? parsedRefresh : DEFAULT_USAGE_REFRESH_MS;
+  // Codex usage for the desktop Usage panel's Codex tab — same spawn/env/apiKey closures as the
+  // codex models/auth providers so it authenticates under the account the turns run under.
+  const codexUsageProvider = makeCodexUsageProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
   const usageCollector = new UsageCollector({
     refreshMs: usageRefreshMs,
     exec: {
@@ -307,6 +311,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       },
     },
     oauthUsage: makeOAuthUsageProvider(), // server-side % (queries /api/oauth/usage with the local OAuth token)
+    codexUsage: () => codexUsageProvider.fetch(),
   });
   usageCollector.start();
   const usageProvider = { snapshot: () => usageCollector.snapshot() };

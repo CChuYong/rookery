@@ -1,4 +1,5 @@
 import type { OAuthUsage } from "./oauth-usage.js";
+import type { CodexUsage } from "./codex-usage-provider.js";
 
 // Usage snapshot: tokens/$ come from ccusage (JSONL parsing), % comes from the OAuth endpoint (pct).
 export interface UsageSnapshot {
@@ -6,6 +7,7 @@ export interface UsageSnapshot {
   weekly: { totalTokens: number; costUSD: number } | null;
   today: { totalTokens: number; costUSD: number } | null;
   pct: OAuthUsage | null;
+  codex: CodexUsage | null; // codex account usage (rate-limit gauges + token buckets); null = codex absent/unfetched
   updatedAt: string | null;
   error: string | null;
 }
@@ -16,7 +18,7 @@ export interface UsageExec {
 }
 
 export function emptyUsage(): UsageSnapshot {
-  return { session: null, weekly: null, today: null, pct: null, updatedAt: null, error: null };
+  return { session: null, weekly: null, today: null, pct: null, codex: null, updatedAt: null, error: null };
 }
 
 function ymd(d: Date): string {
@@ -61,6 +63,7 @@ export class UsageCollector {
       refreshMs: number;
       now?: () => Date;
       oauthUsage?: () => Promise<OAuthUsage | null>; // server-side % (if absent, pct is not collected)
+      codexUsage?: () => Promise<CodexUsage | null>; // codex gauges/tokens (if absent, codex is not collected)
     },
   ) {}
 
@@ -99,6 +102,16 @@ export class UsageCollector {
         if (pct) this.snap = { ...this.snap, pct, updatedAt: stamp() };
       } catch {
         /* keep the previous pct */
+      }
+    }
+    // codex gauges/tokens — short-lived app-server child (fast). Failure keeps the previous value:
+    // a transient spawn/auth blip must not blank the panel.
+    if (this.opts.codexUsage) {
+      try {
+        const cx = await this.opts.codexUsage();
+        if (cx) this.snap = { ...this.snap, codex: cx, updatedAt: stamp() };
+      } catch {
+        /* keep the previous codex */
       }
     }
     // tokens/$ — ccusage (slow because it parses thousands of JSONL entries)
