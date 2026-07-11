@@ -56,4 +56,11 @@ describe("UsagePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Claude" }));
     expect(screen.getByText("1.0k · $1.23")).toBeInTheDocument();
   });
+
+  it("Codex tab shows weekly tokens as a Stat when the weekly gauge is absent (partial data)", () => {
+    render(<UsagePanel usage={{ ...base, codex: { ...cx, fiveHour: null, sevenDay: null, weeklyTokens: 1200000 } }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.getByText("주간")).toBeInTheDocument();
+    expect(screen.getByText("1.2M")).toBeInTheDocument(); // weeklyTokens 1200000 → fmtTok
+  });
 });

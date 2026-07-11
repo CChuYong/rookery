@@ -57,9 +57,9 @@ describe("mapCodexUsage", () => {
     expect(mapCodexUsage({ rateLimits: { primary: { usedPercent: "bad" } } }, { dailyUsageBuckets: "nope" }, NOW)).toBeNull();
   });
 
-  it("a day with no bucket → todayTokens 0 (buckets exist), not null", () => {
+  it("a day with no bucket → todayTokens null (server buckets lag; a false 0 would mislead)", () => {
     const u = mapCodexUsage(null, { dailyUsageBuckets: [{ startDate: "2026-07-08", tokens: 200 }] }, NOW)!;
-    expect(u.todayTokens).toBe(0);
+    expect(u.todayTokens).toBeNull();
     expect(u.weeklyTokens).toBe(200);
   });
 });
@@ -93,5 +93,11 @@ describe("makeCodexUsageProvider", () => {
     const u = await provider.fetch();
     expect(u).not.toBeNull();
     expect(fake.requests.map((r) => r.method)).toEqual(["initialize", "initialized", "account/read", "account/login/start", "account/rateLimits/read", "account/usage/read"]);
+  });
+
+  it("wedged child (initialize never answered) → timeout → null", async () => {
+    const fake = fakeCodexSpawn(() => [], { silentInitialize: true });
+    const provider = makeCodexUsageProvider({ spawn: fake.spawn, timeoutMs: 50 });
+    await expect(provider.fetch()).resolves.toBeNull();
   });
 });

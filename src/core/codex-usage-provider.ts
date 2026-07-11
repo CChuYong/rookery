@@ -58,7 +58,9 @@ export function mapCodexUsage(rateLimitsRes: unknown, usageRes: unknown, now: Da
     }
     if (sawAny) {
       weeklyTokens = weekSum;
-      todayTokens = todayTokens ?? 0; // buckets exist but none for today = genuinely 0, not unknown
+      // NOTE: todayTokens stays null when no bucket carries today's date — live-observed (2026-07-11)
+      // that the server materializes daily buckets with a lag, so "no bucket yet" usually means
+      // "not aggregated yet", not "zero usage". Null hides the Stat instead of showing a false 0.
     }
   }
 

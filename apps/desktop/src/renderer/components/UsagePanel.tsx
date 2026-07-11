@@ -111,6 +111,7 @@ function UsagePanelImpl({ usage, loadFailed }: { usage: UsageSnapshot | null; lo
             {/* codex plan billing has no USD — tokens only, never $ */}
             {cdx.fiveHour && <Meter label={t("usagePanel.session5h")} pct={cdx.fiveHour.usedPercent} sub={cdx.fiveHour.resetsAt != null ? t("usagePanel.resets", { time: fmtReset(cdx.fiveHour.resetsAt) }) : undefined} />}
             {cdx.sevenDay && <Meter label={t("usagePanel.weekly")} pct={cdx.sevenDay.usedPercent} sub={cdx.weeklyTokens != null ? fmtTok(cdx.weeklyTokens) : undefined} />}
+            {!cdx.sevenDay && cdx.weeklyTokens != null && <Stat label={t("usagePanel.weekly")} value={fmtTok(cdx.weeklyTokens)} />}
             {cdx.todayTokens != null && <Stat label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}
           </>
         ) : (

@@ -37,6 +37,7 @@ export function makeCodexUsageProvider(opts: { spawn: CodexSpawn; timeoutMs?: nu
 - Tolerant duck-typed decode. Primary/secondary map to fiveHour/sevenDay positionally (the observed shape); a missing/malformed window → that field `null`. If `account/usage/read` fails but rateLimits succeeded, still return the gauges with `todayTokens`/`weeklyTokens` null (partial data beats none) — and vice versa.
 - `env`/`apiKey` are the SAME resolvers the codex turn children use (account-mismatch prevention — parity with findings [25]/[26] on the models provider).
 - Pure mapping helpers exported for tests (`mapCodexUsage(rateLimitsRes, usageRes, now)`).
+- Live-observed (2026-07-11): the server materializes `dailyUsageBuckets` with a lag (no bucket for the current day mid-day despite heavy usage), so `todayTokens` is null — and the Stat hidden — until today's bucket exists; a false 0 would mislead.
 
 ### 2. Snapshot + collector — `src/core/usage.ts`
 
@@ -57,7 +58,8 @@ export function makeCodexUsageProvider(opts: { spawn: CodexSpawn; timeoutMs?: nu
   - `todayTokens` → `Stat` (label `usagePanel.today`, value `fmtTok` — **no `$`**: plan billing has no USD notion).
   - `usage.codex == null` → a muted `usagePanel.codexUnavailable` line ("코덱스 사용량 없음 — codex 로그인/설치 확인" / EN equivalent). The tab is always visible (discoverability) even when codex is absent.
   - Skeleton/loadFailed pre-load states stay shared (they gate on `usage` itself, not per-tab).
-- i18n: new keys in `usagePanel` ko/en catalogs (`usagePanel.tabClaude`, `usagePanel.tabCodex`, `usagePanel.codexUnavailable`, plus a reset-time label if needed). ko/en parity + used-keys tests enforce them.
+- The header title is **per-tab** (`usagePanel.title` stays the existing Claude wording on the Claude tab; a new `usagePanel.titleCodex` / `usagePanel.titleHintCodex` pair serves the Codex tab) — existing Claude-tab tests keep passing unchanged.
+- i18n: new keys in `usagePanel` ko/en catalogs (`usagePanel.tabClaude`, `usagePanel.tabCodex`, `usagePanel.titleCodex`, `usagePanel.titleHintCodex`, `usagePanel.codexUnavailable`, `usagePanel.resets` with a `{time}` param). ko/en parity + used-keys tests enforce them.
 
 ### 5. Non-goals
 
