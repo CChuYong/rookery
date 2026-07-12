@@ -124,6 +124,15 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events[0]).toEqual({ kind: "tool_progress", toolUseId: "t9", elapsedSec: 4 });
   });
+
+  it("drops background_tasks_changed frames (0.3.203 level signal) without leaking system_text", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "b1", task_type: "local_bash", description: "sleep" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events.some((e) => e.kind === "system_text")).toBe(false);
+  });
 });
 
 describe("ClaudeBackend — option assembly", () => {
