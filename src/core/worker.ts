@@ -458,8 +458,10 @@ export class Worker {
           // Same settle-grace rule as the edge path: dropping to zero while quiescent must not blip idle.
           if (hadTasks && this.bgTasks.size === 0 && !this.turnActive) this.armIdleGrace();
           else {
-            // A repopulated set supersedes any pending idle grace.
-            this.clearIdleGrace();
+            // A repopulated set supersedes any pending idle grace. Guarded so a duplicate empty
+            // snapshot (excluded by the SDK contract, but cheap to defend) cannot kill an armed
+            // grace and blip idle mid-hold.
+            if (this.bgTasks.size > 0) this.clearIdleGrace();
             this.reconcile();
           }
         } else if (ev.kind === "turn_end") {
