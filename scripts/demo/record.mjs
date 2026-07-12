@@ -8,17 +8,19 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { connectPage, sleep } from "./cdp.mjs";
 
-export function startRecording(cdp, outDir, { maxWidth = 1440, maxHeight = 1024 } = {}) {
+export function startRecording(cdp, outDir, { maxWidth = 1440, maxHeight = 1024, format = "png", quality = 92 } = {}) {
   fs.mkdirSync(outDir, { recursive: true });
+  const ext = format === "jpeg" ? "jpg" : "png";
   const frames = []; // { file, ts }
   let n = 0;
   const off = cdp.on("Page.screencastFrame", (p) => {
-    const file = path.join(outDir, `frame-${String(n++).padStart(6, "0")}.png`);
+    const file = path.join(outDir, `frame-${String(n++).padStart(6, "0")}.${ext}`);
     fs.writeFileSync(file, Buffer.from(p.data, "base64"));
     frames.push({ file, ts: p.metadata.timestamp });
     void cdp.send("Page.screencastFrameAck", { sessionId: p.sessionId }).catch(() => {});
   });
-  void cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth, maxHeight });
+  // jpeg at high quality is ~5-8x smaller than png — use it for native-resolution takes.
+  void cdp.send("Page.startScreencast", { format, ...(format === "jpeg" ? { quality } : {}), everyNthFrame: 1, maxWidth, maxHeight });
 
   return {
     frames,

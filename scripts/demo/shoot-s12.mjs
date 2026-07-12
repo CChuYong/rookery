@@ -21,10 +21,12 @@ d.send({ type: "events.subscribe" });
 const cdp = await connectPage(Number(arg("cdp", "9223")));
 await installCursor(cdp);
 console.log("[take1] rolling");
-const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 1440 });
+const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2560, maxHeight: 1800, format: "jpeg" });
 await sleep(1500);
 
 // S1 — type the ask into the New Session composer (clear any leftover draft first).
+await clickText(cdp, "Sessions").catch(() => {}); // the "New session" button only exists on the Sessions tab
+await sleep(600);
 await clickText(cdp, "New session").catch(() => {}); // no-op if the page is already open
 await sleep(800);
 await clickSelector(cdp, '[contenteditable="true"]');

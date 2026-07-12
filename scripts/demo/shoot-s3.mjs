@@ -14,12 +14,12 @@ const out = arg("out", "/tmp/demo-take2");
 const cdp = await connectPage(Number(arg("cdp", "9223")));
 await installCursor(cdp);
 console.log("[take2] rolling (restore)");
-const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 1440 });
+const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2560, maxHeight: 1800, format: "jpeg" });
 await sleep(2500); // the freshly-reopened window, sessions restoring
 
 await clickText(cdp, "Sessions").catch(() => {});
 await sleep(800);
-await clickText(cdp, "orbitkit"); // the session created on camera in take 1
+await clickText(cdp, arg("session", "orbitkit")); // the session created on camera in take 1 (auto-labeled)
 await sleep(3500); // transcript (tools/thinking included) restores on screen
 
 await clickText(cdp, "Repos");
