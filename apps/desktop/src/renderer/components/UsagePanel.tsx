@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Info } from "lucide-react";
+import { ChevronRight, Info } from "lucide-react";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
@@ -49,23 +49,36 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   );
 }
 
-function UsagePanelImpl({ usage, loadFailed }: { usage: UsageSnapshot | null; loadFailed?: boolean }): JSX.Element {
+function UsagePanelImpl({ usage, loadFailed, compact = false }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean }): JSX.Element {
   const t = useT();
   // Provider tab: Claude is the default (user direction); not persisted (YAGNI).
   const [tab, setTab] = useState<"claude" | "codex">("claude");
+  const [expanded, setExpanded] = useState(false);
   const p = usage?.pct;
   const wk = usage?.weekly;
   const hasAny = !!(p || usage?.session || wk || usage?.today);
   const cdx = usage?.codex;
+  const showBody = !compact || expanded;
   return (
     <div className="border-t border-line pt-1">
       {/* Always-rendered header (audit #55/#56): per-tab title + provider tab toggle. */}
       <div className="flex items-center gap-1 px-2 pt-1 text-[10.5px] text-muted">
-        <span>{t(tab === "claude" ? "usagePanel.title" : "usagePanel.titleCodex")}</span>
+        <span className="min-w-0 flex-1 truncate">{t(tab === "claude" ? "usagePanel.title" : "usagePanel.titleCodex")}</span>
         <Tooltip label={t(tab === "claude" ? "usagePanel.titleHint" : "usagePanel.titleHintCodex")} side="top">
           <Info size={11} tabIndex={0} aria-label={t(tab === "claude" ? "usagePanel.titleHint" : "usagePanel.titleHintCodex")} className="shrink-0 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-accent/50" />
         </Tooltip>
-        <div className="ml-auto flex items-center gap-0.5">
+        {compact && (
+          <button
+            type="button"
+            aria-label={t(expanded ? "usagePanel.collapse" : "usagePanel.expand")}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+            className="shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+          >
+            <ChevronRight size={12} className={cn("transition-transform", expanded && "rotate-90")} />
+          </button>
+        )}
+        {showBody && <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {(["claude", "codex"] as const).map((k) => (
             <button
               key={k}
@@ -77,47 +90,49 @@ function UsagePanelImpl({ usage, loadFailed }: { usage: UsageSnapshot | null; lo
               {t(k === "claude" ? "usagePanel.tabClaude" : "usagePanel.tabCodex")}
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
-      {/* Shared pre-load states (gate on the snapshot itself, not per-tab). */}
-      {!usage && !loadFailed && <SkeletonRows rows={2} className="px-2 py-1.5" />}
-      {!usage && loadFailed && <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.loadFailed")}</div>}
+      {showBody && <>
+        {/* Shared pre-load states (gate on the snapshot itself, not per-tab). */}
+        {!usage && !loadFailed && <SkeletonRows rows={2} className="px-2 py-1.5" />}
+        {!usage && loadFailed && <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.loadFailed")}</div>}
 
-      {usage && tab === "claude" && (
-        <>
-          {!hasAny && <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.loading")}</div>}
-          {hasAny && (
-            <>
-              {/* Server-side % (official, same source as /usage) */}
-              {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} pct={p.fiveHour} sub={usage.session ? `${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}` : undefined} />}
-              {p?.sevenDay != null && <Meter label={t("usagePanel.weekly")} pct={p.sevenDay} sub={wk ? `${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}` : undefined} />}
-              {p?.sevenDayOpus != null && <Meter label={t("usagePanel.weeklyOpus")} pct={p.sevenDayOpus} />}
-              {p?.sevenDaySonnet != null && <Meter label={t("usagePanel.weeklySonnet")} pct={p.sevenDaySonnet} />}
-
-              {/* ccusage tokens/$ (no gauge needed) */}
-              {!p && usage.session && <Stat label={t("usagePanel.session5h")} value={`${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}`} />}
-              {!p && wk && <Stat label={t("usagePanel.weekly")} value={`${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}`} />}
-              {usage.today && <Stat label={t("usagePanel.today")} value={`${fmtTok(usage.today.totalTokens)} · ${usd(usage.today.costUSD)}`} />}
-              {p?.extra && <Stat label={t("usagePanel.extraCredits")} value={`${usd(p.extra.usedCredits)} / ${usd(p.extra.monthlyLimit)}`} />}
-            </>
-          )}
-        </>
-      )}
-
-      {usage && tab === "codex" && (
-        cdx ? (
+        {usage && tab === "claude" && (
           <>
-            {/* codex plan billing has no USD — tokens only, never $ */}
-            {cdx.fiveHour && <Meter label={t("usagePanel.session5h")} pct={cdx.fiveHour.usedPercent} sub={cdx.fiveHour.resetsAt != null ? t("usagePanel.resets", { time: fmtReset(cdx.fiveHour.resetsAt) }) : undefined} />}
-            {cdx.sevenDay && <Meter label={t("usagePanel.weekly")} pct={cdx.sevenDay.usedPercent} sub={cdx.weeklyTokens != null ? fmtTok(cdx.weeklyTokens) : undefined} />}
-            {!cdx.sevenDay && cdx.weeklyTokens != null && <Stat label={t("usagePanel.weekly")} value={fmtTok(cdx.weeklyTokens)} />}
-            {cdx.todayTokens != null && <Stat label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}
+            {!hasAny && <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.loading")}</div>}
+            {hasAny && (
+              <>
+                {/* Server-side % (official, same source as /usage) */}
+                {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} pct={p.fiveHour} sub={usage.session ? `${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}` : undefined} />}
+                {p?.sevenDay != null && <Meter label={t("usagePanel.weekly")} pct={p.sevenDay} sub={wk ? `${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}` : undefined} />}
+                {p?.sevenDayOpus != null && <Meter label={t("usagePanel.weeklyOpus")} pct={p.sevenDayOpus} />}
+                {p?.sevenDaySonnet != null && <Meter label={t("usagePanel.weeklySonnet")} pct={p.sevenDaySonnet} />}
+
+                {/* ccusage tokens/$ (no gauge needed) */}
+                {!p && usage.session && <Stat label={t("usagePanel.session5h")} value={`${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}`} />}
+                {!p && wk && <Stat label={t("usagePanel.weekly")} value={`${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}`} />}
+                {usage.today && <Stat label={t("usagePanel.today")} value={`${fmtTok(usage.today.totalTokens)} · ${usd(usage.today.costUSD)}`} />}
+                {p?.extra && <Stat label={t("usagePanel.extraCredits")} value={`${usd(p.extra.usedCredits)} / ${usd(p.extra.monthlyLimit)}`} />}
+              </>
+            )}
           </>
-        ) : (
-          <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.codexUnavailable")}</div>
-        )
-      )}
+        )}
+
+        {usage && tab === "codex" && (
+          cdx ? (
+            <>
+              {/* codex plan billing has no USD — tokens only, never $ */}
+              {cdx.fiveHour && <Meter label={t("usagePanel.session5h")} pct={cdx.fiveHour.usedPercent} sub={cdx.fiveHour.resetsAt != null ? t("usagePanel.resets", { time: fmtReset(cdx.fiveHour.resetsAt) }) : undefined} />}
+              {cdx.sevenDay && <Meter label={t("usagePanel.weekly")} pct={cdx.sevenDay.usedPercent} sub={cdx.weeklyTokens != null ? fmtTok(cdx.weeklyTokens) : undefined} />}
+              {!cdx.sevenDay && cdx.weeklyTokens != null && <Stat label={t("usagePanel.weekly")} value={fmtTok(cdx.weeklyTokens)} />}
+              {cdx.todayTokens != null && <Stat label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}
+            </>
+          ) : (
+            <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.codexUnavailable")}</div>
+          )
+        )}
+      </>}
     </div>
   );
 }

@@ -40,23 +40,27 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
         role="dialog"
         aria-modal="true"
         aria-label={t("runAutomationDialog.title")}
-        className={cn("flex w-full max-w-md flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-surface", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
       >
-        <div className="text-[14px] font-semibold">{t("runAutomationDialog.title")} · {automation.name}</div>
-        <p className="text-[12px] text-muted">{t("runAutomationDialog.desc")}</p>
-        <div className="flex flex-col gap-2.5">
-          {names.map((n) => (
-            <label key={n} className="flex flex-col gap-1">
-              <span className="font-mono text-[11px] text-muted">{`{{${n}}}`}</span>
-              {n === "message" ? (
-                <Textarea autoFocus rows={3} className="resize-y" value={vals[n] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [n]: e.target.value }))} />
-              ) : (
-                <Input value={vals[n] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [n]: e.target.value }))} />
-              )}
-            </label>
-          ))}
+        <div className="shrink-0 px-5 pb-3 pt-5">
+          <div className="text-[14px] font-semibold">{t("runAutomationDialog.title")} · {automation.name}</div>
+          <p className="mt-3 text-[12px] text-muted">{t("runAutomationDialog.desc")}</p>
         </div>
-        <div className="mt-1 flex justify-end gap-2">
+        <div data-dialog-scroll-body className="min-h-0 overflow-y-auto px-5 pb-4">
+          <div className="flex flex-col gap-2.5">
+            {names.map((n) => (
+              <label key={n} className="flex flex-col gap-1">
+                <span className="font-mono text-[11px] text-muted">{`{{${n}}}`}</span>
+                {n === "message" ? (
+                  <Textarea autoFocus rows={3} className="resize-y" value={vals[n] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [n]: e.target.value }))} />
+                ) : (
+                  <Input value={vals[n] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [n]: e.target.value }))} />
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div data-dialog-footer className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-4">
           <Button variant="outline" size="sm" onClick={dismiss}>{t("common.cancel")}</Button>
           <Button variant="primary" size="sm" onClick={submit}>{t("runAutomationDialog.run")}</Button>
         </div>

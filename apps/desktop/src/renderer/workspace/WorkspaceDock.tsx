@@ -5,7 +5,7 @@ import { useT } from "../i18n/provider.js";
 import { useWsStore, type Tab } from "../store/workspace.js";
 import { useTermStore } from "../store/terminals.js";
 import { useLayoutStore } from "../store/layout.js";
-import { useDockPanelsStore, hideableKindsFor, type HideableKind } from "../store/dock-panels.js";
+import { useDockPanelsStore, hideableKindsFor, rightGroupKindsFor, type HideableKind } from "../store/dock-panels.js";
 import { defaultPanels, terminalSeedHeight, isTerminalGroupCollapsed, TERMINAL_EXPANDED_HEIGHT } from "./default-template.js";
 import { fixedPanelId, editorPanelId, panelIdForTab, tabIdForPanel, conversationAgentKindPatch, type FixedKind } from "./panel-ids.js";
 import { fixedPanelTitle } from "./panel-titles.js";
@@ -23,13 +23,16 @@ type Disposable = { dispose(): void }; // dockview event subscriptions return on
 // switch). Seeds from the default template or restores the saved layout,
 // persists per-page on change, and keeps editor panels in sync with the page's
 // workspace tabs. Panel content comes from the WorkspaceRender context (App).
-export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKind: "master" | "worker" }): JSX.Element {
+export function WorkspaceDock({ pageKey, agentKind, compact = false }: { pageKey: string; agentKind: "master" | "worker"; compact?: boolean }): JSX.Element {
   const t = useT();
   const apiRef = useRef<DockviewApi | null>(null);
   const reconcilingRef = useRef(false); // suppress closeTab_ while WE add/remove editor panels
   const disposedRef = useRef(false); // ignore dockview events fired during teardown
   const disposablesRef = useRef<Disposable[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const responsiveHiddenRef = useRef<HideableKind[]>([]);
+  const compactRef = useRef(compact);
+  compactRef.current = compact;
 
   // addPanel-time translation (see panel-titles.ts) — this is what gets persisted
   // into the saved layout JSON. RookeryTab re-derives the SAME thing live on every
@@ -74,6 +77,38 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     const spec = defaultPanels(agentKind).find((sp) => sp.kind === kind);
     const anchor = spec?.anchor && api.getPanel(fixedPanelId(spec.anchor)) ? spec.anchor : undefined;
     addFixed(api, kind, anchor, spec?.direction as Direction | undefined);
+  };
+
+  // Narrow-window compaction is temporary UI state, not a user-authored layout
+  // change. Remember only the panels we removed automatically, suppress layout
+  // persistence while they are absent, and restore exactly those panels when
+  // space returns. Panels the user had already hidden stay hidden.
+  const applyResponsiveCompact = (api: DockviewApi, nextCompact: boolean): void => {
+    if (nextCompact) {
+      const removed = rightGroupKindsFor(agentKind).filter((kind) => api.getPanel(fixedPanelId(kind)));
+      if (removed.length === 0) return;
+      responsiveHiddenRef.current = [...new Set([...responsiveHiddenRef.current, ...removed])];
+      reconcilingRef.current = true;
+      try {
+        for (const kind of removed) {
+          const panel = api.getPanel(fixedPanelId(kind));
+          if (panel) api.removePanel(panel);
+        }
+      } finally {
+        reconcilingRef.current = false;
+      }
+    } else if (responsiveHiddenRef.current.length > 0) {
+      const restore = responsiveHiddenRef.current;
+      responsiveHiddenRef.current = [];
+      reconcilingRef.current = true;
+      try {
+        for (const kind of restore) if (!api.getPanel(fixedPanelId(kind))) reopen(api, kind);
+      } finally {
+        reconcilingRef.current = false;
+      }
+      persist(api);
+    }
+    useDockPanelsStore.getState().setHidden_(pageKey, hideableKindsFor(agentKind).filter((kind) => !api.getPanel(fixedPanelId(kind))));
   };
 
   // Reconcile editor panels against the page's non-agent workspace tabs: add
@@ -138,6 +173,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       const patch = conversationAgentKindPatch(conv.params as { agentKind?: "master" | "worker" } | undefined, agentKind);
       if (patch) conv.api.updateParameters(patch);
     }
+    applyResponsiveCompact(api, compactRef.current);
     // Mirror actual panel presence into dockPanelsStore right after seed/restore
     // (audit #48) — the restored dockview JSON is the real source of truth for
     // "does this panel exist" (a panel closed in a previous session is simply
@@ -168,7 +204,9 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       if (!tabId) return;
       if ((useWsStore.getState().byPage[pageKey]?.activeTabId ?? "agent") !== tabId) useWsStore.getState().setActive_(pageKey, tabId);
     }));
-    disposables.push(api.onDidLayoutChange(() => persist(api)));
+    disposables.push(api.onDidLayoutChange(() => {
+      if (responsiveHiddenRef.current.length === 0) persist(api);
+    }));
     disposablesRef.current = disposables;
   };
 
@@ -226,6 +264,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       if (prevState.byPage[pageKey] === undefined || state.byPage[pageKey] !== undefined) return;
       reconcilingRef.current = true;
       try { api.clear(); seed(api); } finally { reconcilingRef.current = false; }
+      applyResponsiveCompact(api, compactRef.current);
       useDockPanelsStore.getState().setHidden_(pageKey, hideableKindsFor(agentKind).filter((k) => !api.getPanel(fixedPanelId(k))));
       syncEditors(api);
       syncActive(api);
@@ -243,11 +282,19 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
         saveTimer.current = null;
         // Flush instead of dropping (audit #33): a layout change within the 400ms debounce of a page switch was silently lost. (Window reload/app quit still skip React cleanups — that residual sliver is accepted.)
         const api = apiRef.current;
-        if (api) { try { useLayoutStore.getState().save_(pageKey, api.toJSON()); } catch { /* dockview mid-teardown — keep the last saved layout */ } }
+        if (api && responsiveHiddenRef.current.length === 0) { try { useLayoutStore.getState().save_(pageKey, api.toJSON()); } catch { /* dockview mid-teardown — keep the last saved layout */ } }
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageKey]);
+
+  useEffect(() => {
+    const api = apiRef.current;
+    if (api && !disposedRef.current) applyResponsiveCompact(api, compact);
+    // applyResponsiveCompact intentionally closes over this page's stable
+    // pageKey/agentKind and is only driven by the viewport-derived compact flag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact]);
 
   return (
     <div className="dockview-theme-dark dockview-theme-rookery min-h-0 w-full flex-1">

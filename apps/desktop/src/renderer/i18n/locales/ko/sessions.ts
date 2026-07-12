@@ -18,6 +18,7 @@ export default {
   "sessions.sourceUi": "UI",
   "sessions.sourceSlack": "Slack",
   "sessions.sourceAutomation": "자동화",
+  "sessions.sourceFilter": "세션 출처",
   "sessions.deletedAutomation": "(삭제된 자동화)",
   "sessions.runs": "{count} 실행",
   "sessions.allAutomations": "← 전체 자동화",

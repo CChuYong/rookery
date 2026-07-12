@@ -16,4 +16,6 @@ export default {
   "usagePanel.titleHintCodex": "codex app-server의 계정 레이트리밋·일별 토큰 집계 — 이 앱 사용분만이 아니라 계정 전체 사용량입니다.",
   "usagePanel.codexUnavailable": "Codex 사용량 없음 — codex 설치/로그인을 확인하세요",
   "usagePanel.resets": "{time} 리셋",
+  "usagePanel.expand": "사용량 펼치기",
+  "usagePanel.collapse": "사용량 접기",
 } satisfies Catalog;

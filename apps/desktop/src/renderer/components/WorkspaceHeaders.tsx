@@ -75,25 +75,25 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
 }): JSX.Element {
   const t = useT();
   return (
-    <div className="drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
+    <div className="workspace-header drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
       <StatusBadge status={worker.status} />
-      <ProviderBadge provider={worker.provider} />
-      <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.workerEyebrow")}</span>
-      <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" title={worker.label}>{worker.label}</span>
-      <span className="shrink-0 font-mono text-[11px] text-muted/80">{worker.branch ?? `rookery/${worker.id.slice(0, 8)}`}</span>
+      <span className="workspace-header-provider shrink-0"><ProviderBadge provider={worker.provider} /></span>
+      <span className="workspace-header-eyebrow eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.workerEyebrow")}</span>
+      <span className="workspace-header-title min-w-0 truncate font-semibold tracking-[-0.01em]" title={worker.label}>{worker.label}</span>
+      <span className="workspace-header-branch min-w-0 truncate font-mono text-[11px] text-muted/80">{worker.branch ?? `rookery/${worker.id.slice(0, 8)}`}</span>
       {worker.ticketKey && worker.ticketUrl && (
         <button
           title={t("workspaceHeaders.openTicket")}
           onClick={() => window.rookery.openExternal(worker.ticketUrl!)}
-          className="no-drag inline-flex shrink-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+          className="workspace-header-ticket no-drag inline-flex shrink-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-muted transition-colors hover:bg-raised hover:text-fg-dim"
         >
           <Ticket size={10} /> {worker.ticketKey}
         </button>
       )}
       {/* One group at the far right, order: metrics → restore → terminal → sidebar. View-diff/stop/discard moved to the RepoTree right-click menu. */}
-      <div className="no-drag ml-auto flex shrink-0 items-center gap-1">
-        <WorkerMetrics workerId={worker.id} />
-        <CheckpointMenu fetchCheckpoints={onFetchCheckpoints} onRestore={onRestore} />
+      <div className="workspace-header-controls no-drag ml-auto flex shrink-0 items-center gap-1">
+        <div className="workspace-header-metrics"><WorkerMetrics workerId={worker.id} /></div>
+        <div className="workspace-header-checkpoint"><CheckpointMenu fetchCheckpoints={onFetchCheckpoints} onRestore={onRestore} /></div>
         <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} dock={dock} agentKind="worker" />
       </div>
     </div>
@@ -107,21 +107,21 @@ export function SessionHeader({ name, sessionId, cwd, provider, readOnly, runnin
 }): JSX.Element {
   const t = useT();
   return (
-    <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
-      <span className="eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.sessionEyebrow")}</span>
-      <span className="min-w-0 truncate font-semibold tracking-[-0.01em]" title={name}>{name}</span>
+    <div className="workspace-header drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
+      <span className="workspace-header-eyebrow eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.sessionEyebrow")}</span>
+      <span className="workspace-header-title min-w-0 truncate font-semibold tracking-[-0.01em]" title={name}>{name}</span>
       {readOnly && <span className="shrink-0 rounded border border-nochg/30 bg-nochg/12 px-1.5 py-0.5 font-mono text-[10px] uppercase text-nochg">{t("workspaceHeaders.slackReadOnly")}</span>}
-      {sessionId && <span className="shrink-0 font-mono text-[11px] text-muted/80">#{sessionId.slice(-6)}</span>}
-      <ProviderBadge provider={provider} />
+      {sessionId && <span className="workspace-header-session-id shrink-0 font-mono text-[11px] text-muted/80">#{sessionId.slice(-6)}</span>}
+      <span className="workspace-header-provider shrink-0"><ProviderBadge provider={provider} /></span>
       {/* Master turn in progress = a "working" pulse chip (same signature as the worker StatusBadge running state) */}
       {running && (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-run/25 bg-run/12 px-2 py-0.5 text-[10px] font-medium text-run">
           <span className="h-1.5 w-1.5 rounded-full bg-run led-live" /> {t("workspaceHeaders.working")}
         </span>
       )}
-      <div className="ml-auto flex shrink-0 items-center gap-2.5">
+      <div className="workspace-header-controls ml-auto flex shrink-0 items-center gap-2.5">
         <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} agentKind="master" />
-        {sessionId && <SessionMetrics sessionId={sessionId} />}
+        {sessionId && <div className="workspace-header-metrics"><SessionMetrics sessionId={sessionId} /></div>}
       </div>
     </div>
   );

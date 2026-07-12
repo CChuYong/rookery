@@ -172,3 +172,36 @@ body {
   .rise-in, .fade-in, .dot-settle, .status-flash, .dot-pop, .badge-pop, .pop-in, .menu-pop, .mention-chip { animation: none; }
   .collapse-anim, .usage-fill { transition: none; }
 }
+
+/* Workspace chrome responds to the actual center-pane width, which can shrink
+   independently of the window when the resizable sidebar is open. Keep the
+   title and primary panel controls reachable; progressively drop metadata. */
+.workspace-header {
+  container-type: inline-size;
+  overflow: hidden;
+}
+.workspace-header-title {
+  flex: 0 1 auto;
+}
+.workspace-header-branch {
+  flex: 1 1 160px;
+  max-width: 38%;
+}
+@container (max-width: 720px) {
+  .workspace-header-eyebrow,
+  .workspace-header-metrics,
+  .workspace-header-checkpoint,
+  .workspace-header-ticket {
+    display: none;
+  }
+  .workspace-header-title {
+    flex: 1 1 auto;
+  }
+}
+@container (max-width: 520px) {
+  .workspace-header-provider,
+  .workspace-header-branch,
+  .workspace-header-session-id {
+    display: none;
+  }
+}

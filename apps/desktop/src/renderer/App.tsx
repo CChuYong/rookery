@@ -13,6 +13,8 @@ import { Sessions } from "./views/Sessions.js";
 import { ConversationPane } from "./components/ConversationPane.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { useResizableWidth } from "./lib/useResizableWidth.js";
+import { useViewportSize } from "./lib/useViewportSize.js";
+import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, shouldCompactDock, sidebarMaxForViewport } from "./lib/layout-budget.js";
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
@@ -294,7 +296,17 @@ export function App(): JSX.Element {
   });
   const wsRoot = wsRootRaw ?? "";
   const treeVersion = useTreeVersion(wsRootRaw); // fs-watch bump for the dockable files/git panels (parity with RightSidebar)
+  const viewport = useViewportSize();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("rookery.sidebar") === "1");
+  const leftPanel = useResizableWidth("rookery.leftWidth", 252, {
+    min: SIDEBAR_MIN_WIDTH,
+    max: sidebarMaxForViewport(viewport.width),
+    side: "left",
+  });
+  const mainViewportWidth = viewport.width - (collapsed ? 56 : leftPanel.width + 6);
+  const compactDock = shouldCompactDock(mainViewportWidth);
+  const compactSidebar = isCompactSidebar(leftPanel.width);
+  const shortViewport = isShortViewport(viewport.height);
   const toggleSidebar = () =>
     setCollapsed((v) => {
       localStorage.setItem("rookery.sidebar", v ? "0" : "1");
@@ -319,7 +331,6 @@ export function App(): JSX.Element {
     document.addEventListener("visibilitychange", onVis);
     return () => { live = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [resOpen, pollResourcesOnce]);
-  const leftPanel = useResizableWidth("rookery.leftWidth", 252, { min: 180, max: 440, side: "left" });
   const mounted = useRef(true);
   const restoredView = useRef(false);
   const restoredTermPages = useRef<Set<string>>(new Set());
@@ -1048,12 +1059,16 @@ export function App(): JSX.Element {
               {navBtn(t("app.navRepos"), showRepos && !overlay, () => { navigate({ overlay: null, showRepos: true }); }, Object.values(s.attention).some(Boolean))}
               <div className="no-drag ml-auto flex items-center gap-0.5">
                 <AttentionBell onNavigate={onAttentionNav} />
-                <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                  <ChevronLeft size={16} />
-                </button>
-                <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                  <ChevronRight size={16} />
-                </button>
+                {!compactSidebar && (
+                  <>
+                    <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+                      <ChevronRight size={16} />
+                    </button>
+                  </>
+                )}
                 <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} title={t("app.collapseSidebar")} className="rounded-md p-1 text-muted hover:bg-raised hover:text-fg-dim">
                   <PanelLeftClose size={15} />
                 </button>
@@ -1074,36 +1089,41 @@ export function App(): JSX.Element {
             {showRepos ? (
               <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
             ) : (
-              <Sessions sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
+              <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
-            <UsagePanel usage={s.usage} loadFailed={s.usageLoadFailed} />
-            {/* daemon·Slack status + settings gear. Normally just dot+name (clean), appending · status only when not up. Exact status in the tooltip. */}
-            <div className="flex flex-wrap items-center gap-3 px-1 py-0.5 font-mono text-[11px] text-muted">
-              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`daemon · ${daemonStatusText}`}>
-                <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.daemon === "up" ? "bg-pr led-live" : s.daemon === "starting" ? "bg-run led-live" : "bg-fail", daemonJustUp && "status-flash")} />
-                <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {daemonStatusText}</span>}</span>
-              </span>
-              <span className="inline-flex items-center gap-1 whitespace-nowrap" title={`slack · ${slackStatusText}`}>
-                <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.slack === "up" ? "bg-pr led-live" : s.slack === "connecting" ? "bg-run led-live" : s.slack === "error" ? "bg-fail" : "bg-stop", slackJustUp && "status-flash")} />
-                <span>slack{s.slack !== "up" && <span className="text-fg-dim"> · {slackStatusText}</span>}</span>
-              </span>
-              {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
-                  shouldn't require switching to the Sessions tab first. */}
-              <Tooltip label={t("app.automation")} side="top">
-                <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                  <Clock size={14} />
-                </button>
-              </Tooltip>
-              <Tooltip label={t("app.restartDaemon")} side="top">
-                <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
-                  <RotateCcw size={13} className={cn(restarting && "animate-spin")} />
-                </button>
-              </Tooltip>
-              <Tooltip label={t("app.settings")} side="top">
-                <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "settings" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                  <Settings size={14} />
-                </button>
-              </Tooltip>
+            <UsagePanel usage={s.usage} loadFailed={s.usageLoadFailed} compact={shortViewport} />
+            {/* Status and actions use separate rows. Mixing them in one wrapping row made the first action tooltip
+                cross the viewport edge and let long Slack status text push controls onto unpredictable lines. */}
+            <div className="flex flex-col gap-1 px-1 py-0.5 font-mono text-[11px] text-muted">
+              <div className="flex min-w-0 items-center gap-3 overflow-hidden">
+                <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap" title={`daemon · ${daemonStatusText}`}>
+                  <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.daemon === "up" ? "bg-pr led-live" : s.daemon === "starting" ? "bg-run led-live" : "bg-fail", daemonJustUp && "status-flash")} />
+                  <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {daemonStatusText}</span>}</span>
+                </span>
+                <span className="inline-flex min-w-0 items-center gap-1 whitespace-nowrap" title={`slack · ${slackStatusText}`}>
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", s.slack === "up" ? "bg-pr led-live" : s.slack === "connecting" ? "bg-run led-live" : s.slack === "error" ? "bg-fail" : "bg-stop", slackJustUp && "status-flash")} />
+                  <span className="truncate">slack{s.slack !== "up" && <span className="text-fg-dim"> · {slackStatusText}</span>}</span>
+                </span>
+              </div>
+              <div className="flex items-center justify-end gap-1">
+                {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
+                    shouldn't require switching to the Sessions tab first. */}
+                <Tooltip label={t("app.automation")} side="top">
+                  <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                    <Clock size={14} />
+                  </button>
+                </Tooltip>
+                <Tooltip label={t("app.restartDaemon")} side="top">
+                  <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
+                    <RotateCcw size={13} className={cn(restarting && "animate-spin")} />
+                  </button>
+                </Tooltip>
+                <Tooltip label={t("app.settings")} side="top">
+                  <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "settings" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                    <Settings size={14} />
+                  </button>
+                </Tooltip>
+              </div>
             </div>
           </>
         )}
@@ -1236,7 +1256,7 @@ export function App(): JSX.Element {
                   dock
                 />
                 <WorkspaceRenderProvider value={workerRender}>
-                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
+                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" compact={compactDock} />
                 </WorkspaceRenderProvider>
               </div>
             ) : (
@@ -1326,7 +1346,7 @@ export function App(): JSX.Element {
               dock
             />
             <WorkspaceRenderProvider value={masterRender}>
-              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
+              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" compact={compactDock} />
             </WorkspaceRenderProvider>
           </div>
         ) : (

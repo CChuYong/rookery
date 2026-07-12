@@ -6,6 +6,14 @@ import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
 describe("WorkerSpawnModal", () => {
+  it("bounds the dialog to the viewport and keeps its body scrollable", () => {
+    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveClass("max-h-[calc(100vh-2rem)]", "overflow-hidden");
+    expect(dialog.querySelector("[data-dialog-scroll-body]")).toHaveClass("overflow-y-auto");
+    expect(dialog.querySelector("[data-dialog-footer]")).toBeInTheDocument();
+  });
+
   it("defaults to direct-write mode (no search box) and passes base through onSpawn", () => {
     const onSpawn = vi.fn();
     render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" branches={["main", "dev"]} onSpawn={onSpawn} onClose={() => {}} />);
