@@ -121,6 +121,50 @@ snapshots.
 - Known risk to watch live: 0.3.204 reclassifies previously-`completed` dead turns —
   confirm worker settle paths and the worker-settled trigger buckets behave as before.
 
+## Addendum (2026-07-12) — Phase 2-D live probe finding
+
+**Phase 2-D investigated, not adopted.** `parent_agent_id` is disk-metadata-only
+(`SessionMessage`, returned by `getSessionMessages`); the live stream carries no
+depth linkage beyond `parent_tool_use_id`.
+
+- **Static check** (`grep -n "parent_agent_id" sdk.d.ts`): the field appears exactly
+  once, on `SessionMessage` (the type returned when reading a persisted transcript
+  off disk). It does not appear on any member of the live `SDKMessage` union
+  (`SDKAssistantMessage | SDKUserMessage | … 30 variants`).
+- **Live probe**: `query()` run in a temp cwd (`bypassPermissions`,
+  `forwardSubagentText: true`, `includePartialMessages: false`, default model),
+  prompted to spawn a Task-tool subagent that itself spawns a nested Task-tool
+  subagent (forcing real depth-2). 23 raw messages captured
+  (`system: 12, assistant: 6, user: 3, rate_limit_event: 1, result: 1`).
+  `grep -c parent_agent_id` over the full dump → **0 matches**.
+- **Depth *is* achieved but only depth-1 is separately observable live**: the
+  depth-1 subagent's own assistant/user turns stream as top-level messages with
+  `parent_tool_use_id` set to the outer `Task`/`Agent` tool_use id
+  (`toolu_01STuAszGNjWAM5gdzMHbdjZ`) — this confirms `forwardSubagentText`
+  flattens depth-1 into the main stream, keyed correctly. The depth-2 subagent's
+  own turns are **not** forwarded as separate live messages at all: only the
+  final `tool_result` of the inner `Task` call (id `toolu_01Mx6VxxmEVyg1mZtAZQS3XB`)
+  appears, nested inside a depth-1 `user` message whose `parent_tool_use_id` is
+  still the *depth-1* Task id, not the depth-2 one. That result's text payload
+  does carry a human-readable `agentId: <id>` line (two distinct ids observed,
+  one per depth — `aa827a16f26147150` depth-1, `a21166ce9e9c1988a` depth-2) plus
+  a `<usage>` block, but these are free-text inside the tool result content, not
+  structured message fields, and there is no live signal correlating the two ids
+  into a parent/child edge.
+- **Conclusion**: depth-2+ trees are only reconstructable after the fact by
+  reading disk-persisted session files (`getSessionMessages`) and following each
+  `SessionMessage.parent_agent_id`. The live stream today only supports
+  depth-1 flattening via `parent_tool_use_id` (which is what
+  `worker.nested`/desktop `NestedAgents` already implements — see the "Native
+  nested subagent" glossary entry in AGENTS.md). Adopting depth-2+ trees would
+  require a disk-polling or post-hoc-reconciliation design (new desktop tree UI,
+  a way to detect "subagent finished, go re-read its session file"), which is
+  out of scope for this bump-and-adopt plan. Phase 2-D is closed as
+  investigated-not-adopted; no code changes.
+- Probe script: `<scratchpad>/probe-parent-agent-id.mjs` (not committed, per
+  dispatch instructions). Cost: 1 of the allotted 2 probe runs used
+  (`total_cost_usd: ~$1.02` for the single run).
+
 ## Out of scope
 
 - `command_lifecycle` consumption (0.3.206) — concept overlaps the worker's deferred
