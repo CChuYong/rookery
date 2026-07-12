@@ -457,7 +457,11 @@ export class Worker {
           for (const bt of ev.tasks) this.bgTasks.set(bt.taskId, bt.taskType);
           // Same settle-grace rule as the edge path: dropping to zero while quiescent must not blip idle.
           if (hadTasks && this.bgTasks.size === 0 && !this.turnActive) this.armIdleGrace();
-          else this.reconcile();
+          else {
+            // A repopulated set supersedes any pending idle grace.
+            this.clearIdleGrace();
+            this.reconcile();
+          }
         } else if (ev.kind === "turn_end") {
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
           // ev.costUsd/ev.numTurns are PER-SEND (this query()'s own cost + agentic-loop count), NOT

@@ -64,7 +64,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `tool_use` | `id`, `name`, `input` | `record` (persisted + live) | `input` truncated to 4000 |
 | `tool_result` | `id`, `isError`, `content` | `record` (persisted + live) | `content` truncated to 4000 |
 | `tool_progress` | `id`, `elapsedSec` | `emit` (live only) | elapsed seconds of an in-progress tool |
-| `result` | `subtype`, `costUsd`, `numTurns`, `durationMs?`, `contextTokens?`, `contextWindow?` | `record` (persisted + live) | cost/turns cumulative; drives maxTurns cap + idle/deferred transition |
+| `result` | `subtype`, `costUsd`, `numTurns`, `durationMs?`, `contextTokens?`, `contextWindow?`, `terminalReason?` | `record` (persisted + live) | cost/turns cumulative; drives maxTurns cap + idle/deferred transition; `terminalReason` is the provider's `terminal_reason` (worker only) |
 | `notice` | `text` | `record` (persisted + live) | compaction/retry/fallback push, or turn-cap message |
 | `error` | `message` | `record` (persisted + live) | not recorded if the abort came from stop/discard |
 

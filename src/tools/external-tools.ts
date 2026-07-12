@@ -168,8 +168,9 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
     async (args) => {
       audit("interrupt_worker");
       try {
-        await fleet.interrupt(args.id);
-        return text(`Interrupted ${args.id}. Its current turn was aborted; the session is idle — send_worker to give it a new instruction.`);
+        const receipt = await fleet.interrupt(args.id);
+        const extra = receipt && receipt.stillQueued.length > 0 ? ` Note: ${receipt.stillQueued.length} queued message(s) may still run (SDK-internal queue).` : "";
+        return text(`Interrupted ${args.id}. Its current turn was aborted; the session is idle — send_worker to give it a new instruction.${extra}`);
       } catch (err) {
         return errorText(`interrupt failed: ${String(err)}`);
       }

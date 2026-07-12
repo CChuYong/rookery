@@ -1435,6 +1435,22 @@ describe("Worker settle-grace", () => {
     await x.agent.stop();
   });
 
+  it("a bg_tasks snapshot repopulating while the idle-grace timer is armed clears it (no belated idle after the original deadline)", async () => {
+    const x = mk2(() => [
+      { type: "bg_tasks", ids: [{ id: "bg1", taskType: "local_bash" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "bg_tasks", ids: [] }, // empty snapshot while quiescent → grace armed, background held
+      { type: "bg_tasks", ids: [{ id: "bg2", taskType: "agent" }] }, // repopulates BEFORE expiry → clears the stale grace
+    ], 30);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    expect(x.statuses).toEqual(["background"]); // repopulation never blipped idle
+    await new Promise((r) => setTimeout(r, 80)); // past the original grace deadline
+    expect(x.agent.status()).toBe("background"); // the cleared timer never fired a belated idle
+    expect(x.statuses).toEqual(["background"]);
+    await x.agent.stop();
+  });
+
   it("init OUTSIDE the grace is NOT a wake signal (a boot-time init must not flip a quiescent worker to running)", async () => {
     const x = mk2((_text, turn) =>
       turn === 0

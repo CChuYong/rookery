@@ -75,4 +75,39 @@ describe("external tools (rookery-as-MCP)", () => {
     expect(out.isError).toBe(true);
     expect(out.content[0]!.text).toContain("unknown repo");
   });
+
+  it("interrupt_worker appends a still-queued note when the fleet's interrupt resolves a non-empty receipt", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: EXTERNAL_FLEET_SESSION_KEY, cwd: "/x" });
+    const factory = (): WorkerLike => ({
+      start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {},
+      interruptTurn: async () => ({ stillQueued: ["u1", "u2"] }),
+    });
+    const fo = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    // fleet.spawn() registers a LIVE entry (fleet.interrupt requires one) — a bare repos.createWorker row would be detached/lazy.
+    const { id } = await fo.spawn({ homeSessionId: EXTERNAL_FLEET_SESSION_KEY, repoPath: "/code/app", label: "app", task: "do it" });
+    const sessions = { getOrCreateByKey: () => repos.getSession(EXTERNAL_FLEET_SESSION_KEY)! } as unknown as SessionManager;
+    const defs = externalToolDefs({ fleet: fo, repos, sessions }, "full");
+    const interrupt = defs.find((d) => d.name === "interrupt_worker")!;
+    const out = ((await interrupt.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out).toContain("2 queued message(s) may still run");
+  });
+
+  it("interrupt_worker leaves the base text unchanged when the fleet's interrupt resolves no receipt", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: EXTERNAL_FLEET_SESSION_KEY, cwd: "/x" });
+    const factory = (): WorkerLike => ({
+      start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {},
+      interruptTurn: async () => undefined,
+    });
+    const fo = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const { id } = await fo.spawn({ homeSessionId: EXTERNAL_FLEET_SESSION_KEY, repoPath: "/code/app", label: "app", task: "do it" });
+    const sessions = { getOrCreateByKey: () => repos.getSession(EXTERNAL_FLEET_SESSION_KEY)! } as unknown as SessionManager;
+    const defs = externalToolDefs({ fleet: fo, repos, sessions }, "full");
+    const interrupt = defs.find((d) => d.name === "interrupt_worker")!;
+    const out = ((await interrupt.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out).toBe(`Interrupted ${id}. Its current turn was aborted; the session is idle — send_worker to give it a new instruction.`);
+  });
 });
