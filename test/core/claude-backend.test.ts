@@ -25,6 +25,19 @@ function baseOpts(over: Record<string, unknown> = {}) {
 }
 
 describe("ClaudeBackend.startTurn — event translation", () => {
+  it("enforces the Side read-only boundary with plan mode and only read/search tools exposed", async () => {
+    let captured: Record<string, unknown> | undefined;
+    const q = fakeQuery([]);
+    const backend = new ClaudeBackend(((input: Parameters<QueryFn>[0]) => {
+      captured = input.options as unknown as Record<string, unknown>;
+      return q(input);
+    }) as QueryFn);
+    await collect(backend.startTurn("why", baseOpts({ permissionMode: "plan", readOnly: true })));
+    expect(captured?.permissionMode).toBe("plan");
+    expect(captured?.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    expect(captured?.disallowedTools).toEqual(expect.arrayContaining(["Bash", "Edit", "Write", "Task"]));
+  });
+
   it("translates text, tools, session id, and result telemetry", async () => {
     const backend = new ClaudeBackend(fakeQuery([
       { type: "system", text: "init" },

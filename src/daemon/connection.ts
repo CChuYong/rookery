@@ -24,6 +24,7 @@ import type { ModelInfo } from "../core/models-provider.js";
 import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
 import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
+import type { SideSourceKind } from "../core/side-conversation.js";
 
 export interface UsageProvider {
   snapshot(): UsageSnapshot;
@@ -89,8 +90,16 @@ export interface ClientSocket {
   send(data: string): void;
 }
 
+export interface SideConversationController {
+  create(input: { sourceKind: SideSourceKind; sourceId: string; model?: string; effort?: string | null }): Promise<{ id: string }>;
+  send(id: string, text: string): void;
+  stop(id: string): Promise<void>;
+  close(id: string): Promise<void>;
+}
+
 export class Connection {
   private readonly unsubs = new Map<string, () => void>();
+  private readonly ownedSideIds = new Set<string>();
 
   constructor(
     private readonly socket: ClientSocket,
@@ -110,6 +119,7 @@ export class Connection {
     private readonly codexModels?: CodexModelsProvider,
     private readonly codexAuth?: CodexAuthProvider,
     private readonly externalMcp?: ExternalMcpController,
+    private readonly sides?: SideConversationController,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -207,6 +217,34 @@ export class Connection {
         // Interrupt the in-progress master turn. No-op if no turn is in progress. (ack even on failure)
         await this.sessions.stop(msg.sessionId);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "stop", id: msg.sessionId });
+        return;
+      }
+      case "side.start": {
+        if (!this.sides) return this.reply({ type: "error", message: "Side conversations unavailable", reqId: msg.reqId });
+        const { id } = await this.sides.create({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort });
+        this.ownedSideIds.add(id);
+        // Ordering is load-bearing: tell the client the id before send() can emit the first side.event.
+        this.reply({ type: "side.started", sideId: id, reqId: msg.reqId });
+        this.sides.send(id, msg.text);
+        return;
+      }
+      case "side.send": {
+        if (!this.sides || !this.ownedSideIds.has(msg.sideId)) throw new Error(`unknown Side conversation: ${msg.sideId}`);
+        this.sides.send(msg.sideId, msg.text);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sideId });
+        return;
+      }
+      case "side.stop": {
+        if (!this.sides || !this.ownedSideIds.has(msg.sideId)) throw new Error(`unknown Side conversation: ${msg.sideId}`);
+        await this.sides.stop(msg.sideId);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "stop", id: msg.sideId });
+        return;
+      }
+      case "side.close": {
+        if (!this.sides || !this.ownedSideIds.has(msg.sideId)) throw new Error(`unknown Side conversation: ${msg.sideId}`);
+        await this.sides.close(msg.sideId);
+        this.ownedSideIds.delete(msg.sideId);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "close", id: msg.sideId });
         return;
       }
       case "interaction.respond": {
@@ -603,5 +641,7 @@ export class Connection {
   dispose(): void {
     for (const off of this.unsubs.values()) off();
     this.unsubs.clear();
+    for (const id of this.ownedSideIds) void this.sides?.close(id);
+    this.ownedSideIds.clear();
   }
 }

@@ -56,6 +56,12 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
   z.object({ type: z.literal("session.send"), sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.stop"), sessionId: z.string(), reqId: z.string().optional() }),
+  // Ephemeral read-only conversation forked from a master/worker provider session. It reuses the
+  // source cwd (including a worker's live worktree) but never creates a session/worker/worktree row.
+  z.object({ type: z.literal("side.start"), sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim().min(1), model: z.string().optional(), effort: effortField, reqId: z.string() }),
+  z.object({ type: z.literal("side.send"), sideId: z.string(), text: z.string().trim().min(1), reqId: z.string().optional() }),
+  z.object({ type: z.literal("side.stop"), sideId: z.string(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("side.close"), sideId: z.string(), reqId: z.string().optional() }),
   // Master canUseTool (approval/AskUserQuestion) response — resolves the pending interaction by requestId (=toolUseID).
   z.object({
     type: z.literal("interaction.respond"),
@@ -216,6 +222,7 @@ export interface CodexAuthStatus {
 
 export type ServerMessage =
   | { type: "session.created"; sessionId: string; cwd: string; reqId?: string }
+  | { type: "side.started"; sideId: string; reqId: string }
   | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string }>; reqId?: string }
   | { type: "worker.list.result"; sessionId: string; reqId?: string; workers: WorkerRow[] }
   | { type: "event"; event: CoreEvent }
@@ -256,6 +263,10 @@ export interface RequestResultMap {
   "session.fork": Extract<ServerMessage, { type: "session.created" }>;
   "session.send": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "side.start": Extract<ServerMessage, { type: "side.started" }>;
+  "side.send": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "side.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "side.close": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.rename": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.archive": Extract<ServerMessage, { type: "fleet.ack" }>;
   "session.pin": Extract<ServerMessage, { type: "fleet.ack" }>;

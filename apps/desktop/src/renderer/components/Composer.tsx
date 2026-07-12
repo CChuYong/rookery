@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
-import { Send, Paperclip, Square, Loader2 } from "lucide-react";
+import { Send, Paperclip, Square, Loader2, MessageCircleQuestion } from "lucide-react";
 import { baseName as basename } from "../lib/path.js";
 import { makeChip } from "../lib/mention-editor.js";
 import type { BrowseResult } from "../types/rookery.js";
@@ -46,6 +46,7 @@ export type { SlashCommand };
 // wrapped by the caller — this only renders the inner input box.
 export interface ComposerProps {
   onSend: (text: string) => void;
+  onSideSend?: (text: string) => void; // redirect the current draft into an independent read-only Side conversation
   disabled?: boolean;
   placeholder?: string;
   controls?: ComposerControls;
@@ -67,6 +68,7 @@ export interface ComposerProps {
 
 export function Composer({
   onSend,
+  onSideSend,
   disabled = false,
   placeholder,
   controls,
@@ -125,6 +127,14 @@ export function Composer({
     const msg = (promptRef.current?.getText() ?? "").trim();
     if (!msg && !allowEmpty) return;
     onSend(msg);
+    promptRef.current?.clear();
+  };
+
+  const submitSide = () => {
+    if (disabled || !onSideSend) return;
+    const msg = (promptRef.current?.getText() ?? "").trim();
+    if (!msg) return;
+    onSideSend(msg);
     promptRef.current?.clear();
   };
 
@@ -260,6 +270,11 @@ export function Composer({
             </span>
           ))}
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {onSideSend && !disabled && (
+            <Button variant="ghost" size="icon" aria-label={t("composer.sideQuestion")} disabled={!text.trim()} onClick={submitSide}>
+              <MessageCircleQuestion size={16} />
+            </Button>
+          )}
           {onAttachFile && (
             <Button variant="ghost" size="icon" aria-label={t("composer.attachFile")} disabled={disabled} onClick={() => void attach()}>
               <Paperclip size={15} />

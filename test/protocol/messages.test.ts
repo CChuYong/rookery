@@ -192,6 +192,20 @@ describe("automation protocol messages", () => {
 });
 
 describe("protocol", () => {
+  it("parses Side conversation lifecycle requests for master and worker sources", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "side.start", sourceKind: "master", sourceId: "s1", text: "why?", model: "claude-opus-4-8", effort: "high", reqId: "q1" }))).toEqual({
+      type: "side.start", sourceKind: "master", sourceId: "s1", text: "why?", model: "claude-opus-4-8", effort: "high", reqId: "q1",
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "side.start", sourceKind: "worker", sourceId: "w1", text: "what changed?", reqId: "q-worker" }))).toMatchObject({
+      type: "side.start", sourceKind: "worker", sourceId: "w1",
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "side.send", sideId: "btw1", text: "follow up", reqId: "q2" }))).toMatchObject({ type: "side.send", sideId: "btw1" });
+    expect(parseClientMessage(JSON.stringify({ type: "side.stop", sideId: "btw1" }))).toEqual({ type: "side.stop", sideId: "btw1" });
+    expect(parseClientMessage(JSON.stringify({ type: "side.close", sideId: "btw1", reqId: "q3" }))).toMatchObject({ type: "side.close", sideId: "btw1" });
+    expect(() => parseClientMessage(JSON.stringify({ type: "side.start", sourceKind: "master", sourceId: "s1" }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "side.start", sourceKind: "other", sourceId: "s1", text: "x" }))).toThrow();
+  });
+
   it("parses a valid session.send", () => {
     const msg = parseClientMessage(JSON.stringify({ type: "session.send", sessionId: "s1", text: "hi" }));
     expect(msg).toEqual({ type: "session.send", sessionId: "s1", text: "hi" });

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import { useStore } from "../store/store.js";
 import type { LogItem } from "../store/reduce.js";
@@ -6,6 +6,7 @@ import { useDraftStore } from "../store/drafts.js";
 import { Conversation } from "../views/Conversation.js";
 import type { ConversationProps } from "../views/Conversation.js";
 import { useT } from "../i18n/provider.js";
+import { SideConversationDrawer } from "./SideConversationDrawer.js";
 
 // Shared conversation panel for master sessions / workers. Subscribes to transcript, pending, and progress state itself, per kind
 // (passing them down as props from App would re-render the whole App on every token delta, so high-frequency subscriptions live here).
@@ -19,8 +20,20 @@ export function ConversationPane({
   kind,
   id,
   onRetryHistory,
+  onSideStart,
+  onSideSend,
+  onSideStop,
+  onSideClose,
   ...rest
-}: { kind: "master" | "worker"; id: string; onRetryHistory?: (kind: "master" | "worker", id: string) => void } & Omit<ConversationProps, "items" | "busy" | "kind" | "loaded" | "loadFailed" | "onRetryHistory">): JSX.Element {
+}: {
+  kind: "master" | "worker";
+  id: string;
+  onRetryHistory?: (kind: "master" | "worker", id: string) => void;
+  onSideStart?: (text: string) => Promise<string>;
+  onSideSend?: (sideId: string, text: string) => void;
+  onSideStop?: (sideId: string) => void;
+  onSideClose?: (sideId: string) => void;
+} & Omit<ConversationProps, "items" | "busy" | "kind" | "loaded" | "loadFailed" | "onRetryHistory" | "onSideSend">): JSX.Element {
   const t = useT();
   const items = useStore((st) => (kind === "master" ? st.logsBySession[id] : st.workerLogs[id]) ?? EMPTY);
   // "Pending" messages sent mid-turn — they convert to committed and disappear when the echo (clientMsgId) arrives.
@@ -36,19 +49,49 @@ export function ConversationPane({
   // draft is read non-reactively, only when id changes (we write to the store on every keystroke but don't subscribe). App uses key={id}, so it remounts on switch.
   const initialText = useMemo(() => useDraftStore.getState().byPage[id] ?? "", [id]);
   const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(id, text), [id]);
+  const [side, setSide] = useState<{ id: string | null; question: string } | null>(null);
+  const sideGeneration = useRef(0);
+  const askSide = useCallback((text: string) => {
+    if (!onSideStart) return;
+    // One Side thread per visible target. A question submitted while it is open becomes a follow-up.
+    if (side?.id) { onSideSend?.(side.id, text); return; }
+    const generation = ++sideGeneration.current;
+    setSide({ id: null, question: text });
+    void onSideStart(text).then((sideId) => {
+      if (sideGeneration.current === generation) setSide({ id: sideId, question: text });
+      else onSideClose?.(sideId); // closed while the provider fork was opening
+    }).catch(() => { if (sideGeneration.current === generation) setSide(null); });
+  }, [onSideStart, onSideSend, onSideClose, side]);
+  const closeSide = useCallback(() => {
+    sideGeneration.current++;
+    if (side?.id) onSideClose?.(side.id);
+    setSide(null);
+  }, [side, onSideClose]);
   return (
-    <>
-      <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} busy={busy} initialText={initialText} onDraftChange={onDraftChange} />
-      {pending.length > 0 && (
-        <div className="flex flex-col gap-1 px-4 pb-2">
-          {pending.map((p) => (
-            <div key={p.clientMsgId} className="ml-auto max-w-[80%] rounded-xl border border-dashed border-line bg-ink/30 px-3 py-2 text-[13px] text-fg-dim opacity-70">
-              <span className="mr-2 inline-flex items-center gap-1 rounded bg-line/40 px-1.5 py-0.5 text-[10px] text-muted"><Clock size={10} /> {t("conversation.pendingBadge")}</span>
-              {p.text}
-            </div>
-          ))}
-        </div>
+    <div className="relative flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} />
+        {pending.length > 0 && (
+          <div className="flex flex-col gap-1 px-4 pb-2">
+            {pending.map((p) => (
+              <div key={p.clientMsgId} className="ml-auto max-w-[80%] rounded-xl border border-dashed border-line bg-ink/30 px-3 py-2 text-[13px] text-fg-dim opacity-70">
+                <span className="mr-2 inline-flex items-center gap-1 rounded bg-line/40 px-1.5 py-0.5 text-[10px] text-muted"><Clock size={10} /> {t("conversation.pendingBadge")}</span>
+                {p.text}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {side && (
+        <SideConversationDrawer
+          sourceKind={kind}
+          sideId={side.id}
+          openingQuestion={side.question}
+          onSend={(sideId, text) => onSideSend?.(sideId, text)}
+          onStop={(sideId) => onSideStop?.(sideId)}
+          onClose={closeSide}
+        />
       )}
-    </>
+    </div>
   );
 }

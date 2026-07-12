@@ -14,4 +14,5 @@ export default {
   "composer.permAcceptEdits": "Accept Edits",
   "composer.attachFile": "Attach file",
   "composer.stop": "Stop",
+  "composer.sideQuestion": "Ask separately",
 } satisfies Catalog;
