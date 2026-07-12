@@ -15,14 +15,18 @@ export function useResizableWidth(
 ): { width: number; startDrag: (e: ReactPointerEvent) => void; resizing: boolean } {
   const [width, setWidth] = useState(() => {
     const saved = Number.parseInt(localStorage.getItem(key) ?? "", 10);
-    return Number.isFinite(saved) ? clamp(saved, opts.min, opts.max) : initial;
+    // Keep the user's preferred width even when the current viewport forces a
+    // smaller effective max. This lets a roomy layout return when the window is
+    // widened again instead of permanently collapsing the preference.
+    return Number.isFinite(saved) ? Math.max(saved, opts.min) : initial;
   });
   const [resizing, setResizing] = useState(false);
+  const effectiveWidth = clamp(width, opts.min, opts.max);
 
   const startDrag = (e: ReactPointerEvent): void => {
     e.preventDefault();
     const startX = e.clientX;
-    const startW = width;
+    const startW = effectiveWidth;
     let latest = startW;
     setResizing(true);
     const onMove = (ev: PointerEvent): void => {
@@ -44,5 +48,5 @@ export function useResizableWidth(
     document.body.style.cursor = "col-resize";
   };
 
-  return { width, startDrag, resizing };
+  return { width: effectiveWidth, startDrag, resizing };
 }

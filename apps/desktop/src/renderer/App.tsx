@@ -13,6 +13,8 @@ import { Sessions } from "./views/Sessions.js";
 import { ConversationPane } from "./components/ConversationPane.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { useResizableWidth } from "./lib/useResizableWidth.js";
+import { useViewportSize } from "./lib/useViewportSize.js";
+import { SIDEBAR_MIN_WIDTH, shouldCompactDock, sidebarMaxForViewport } from "./lib/layout-budget.js";
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
@@ -294,7 +296,15 @@ export function App(): JSX.Element {
   });
   const wsRoot = wsRootRaw ?? "";
   const treeVersion = useTreeVersion(wsRootRaw); // fs-watch bump for the dockable files/git panels (parity with RightSidebar)
+  const viewport = useViewportSize();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("rookery.sidebar") === "1");
+  const leftPanel = useResizableWidth("rookery.leftWidth", 252, {
+    min: SIDEBAR_MIN_WIDTH,
+    max: sidebarMaxForViewport(viewport.width),
+    side: "left",
+  });
+  const mainViewportWidth = viewport.width - (collapsed ? 56 : leftPanel.width + 6);
+  const compactDock = shouldCompactDock(mainViewportWidth);
   const toggleSidebar = () =>
     setCollapsed((v) => {
       localStorage.setItem("rookery.sidebar", v ? "0" : "1");
@@ -319,7 +329,6 @@ export function App(): JSX.Element {
     document.addEventListener("visibilitychange", onVis);
     return () => { live = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [resOpen, pollResourcesOnce]);
-  const leftPanel = useResizableWidth("rookery.leftWidth", 252, { min: 180, max: 440, side: "left" });
   const mounted = useRef(true);
   const restoredView = useRef(false);
   const restoredTermPages = useRef<Set<string>>(new Set());
@@ -1236,7 +1245,7 @@ export function App(): JSX.Element {
                   dock
                 />
                 <WorkspaceRenderProvider value={workerRender}>
-                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
+                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" compact={compactDock} />
                 </WorkspaceRenderProvider>
               </div>
             ) : (
@@ -1326,7 +1335,7 @@ export function App(): JSX.Element {
               dock
             />
             <WorkspaceRenderProvider value={masterRender}>
-              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
+              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" compact={compactDock} />
             </WorkspaceRenderProvider>
           </div>
         ) : (
