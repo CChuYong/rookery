@@ -8,4 +8,6 @@ export default {
   "sideConversation.workerLive": "The worker keeps changing the same worktree, so read results may change.",
   "sideConversation.waitingPlaceholder": "You can follow up when this answer finishes",
   "sideConversation.followupPlaceholder": "Follow-up question…",
+  "sideConversation.commandDescription": "Ask separately without stopping the current task.",
+  "sideConversation.commandArgumentHint": "<question>",
 } satisfies Catalog;

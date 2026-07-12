@@ -41,6 +41,12 @@ export function permLabel(mode: string, t: (k: string) => string): string {
 
 export type { SlashCommand };
 
+export function parseSideCommand(text: string): { command: "btw" | "side"; question: string } | null {
+  const match = /^\/(btw|side)(?:\s+([\s\S]*))?$/.exec(text.trim());
+  if (!match) return null;
+  return { command: match[1] as "btw" | "side", question: (match[2] ?? "").trim() };
+}
+
 // Chat input composer (shared by master/worker conversations + new session). Bundles markdown shortcuts, @file-mention and /skill popups,
 // file attachment / drag-drop, and model/effort controls into one box. The outer chrome (bottom bar vs card) is
 // wrapped by the caller — this only renders the inner input box.
@@ -126,6 +132,13 @@ export function Composer({
     if (disabled) return;
     const msg = (promptRef.current?.getText() ?? "").trim();
     if (!msg && !allowEmpty) return;
+    const sideCommand = onSideSend ? parseSideCommand(msg) : null;
+    if (sideCommand) {
+      if (!sideCommand.question) return;
+      onSideSend?.(sideCommand.question);
+      promptRef.current?.clear();
+      return;
+    }
     onSend(msg);
     promptRef.current?.clear();
   };
