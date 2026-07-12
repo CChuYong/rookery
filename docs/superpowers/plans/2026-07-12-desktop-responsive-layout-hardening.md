@@ -37,7 +37,7 @@
 - Produces: `useViewportSize(): { width: number; height: number }`.
 - Extends: `WorkspaceDock` with `compact?: boolean`; compact mode temporarily removes Files/Git/Nested and restores them when space returns without persisting the temporary layout.
 
-- [ ] **Step 1: Write failing layout-budget tests**
+- [x] **Step 1: Write failing layout-budget tests**
 
 ```ts
 expect(sidebarMaxForViewport(840)).toBe(220);
@@ -48,12 +48,12 @@ expect(shouldCompactDock(619)).toBe(true);
 expect(shouldCompactDock(720)).toBe(false);
 ```
 
-- [ ] **Step 2: Run the focused tests and confirm missing exports fail**
+- [x] **Step 2: Run the focused tests and confirm missing exports fail**
 
 Run: `npx vitest run test/lib/layout-budget.test.ts test/workspace/default-template.test.ts`
 Expected: FAIL because the layout-budget module and compact-dock predicate do not exist.
 
-- [ ] **Step 3: Implement the pure layout budget and viewport hook**
+- [x] **Step 3: Implement the pure layout budget and viewport hook**
 
 ```ts
 export const SIDEBAR_MIN_WIDTH = 220;
@@ -71,19 +71,19 @@ export const shouldCompactDock = (mainWidth: number): boolean => mainWidth < DOC
 
 `useViewportSize` reads `window.innerWidth/innerHeight`, subscribes to `resize`, and removes the listener on unmount.
 
-- [ ] **Step 4: Make sidebar resizing honor the live maximum**
+- [x] **Step 4: Make sidebar resizing honor the live maximum**
 
 Return `width: clamp(width, opts.min, opts.max)` from `useResizableWidth`; use that clamped width as `startW`. In `App`, pass `min: SIDEBAR_MIN_WIDTH`, `max: sidebarMaxForViewport(viewport.width)`, derive compact/short flags, and pass them to Sessions, UsagePanel, and WorkspaceDock.
 
-- [ ] **Step 5: Compact Dockview without destroying the saved roomy layout**
+- [x] **Step 5: Compact Dockview without destroying the saved roomy layout**
 
 Track auto-removed right-group panel kinds in a ref. When `compact` becomes true, remove visible Files/Git/Nested with reconciliation enabled and suppress layout persistence. When it becomes false, reopen only those auto-removed kinds, clear the suppression flag, and persist the restored layout.
 
-- [ ] **Step 6: Make workspace headers container-responsive**
+- [x] **Step 6: Make workspace headers container-responsive**
 
 Add semantic classes for eyebrow, provider, branch/session id, metrics, and controls. Add container queries that hide metrics/eyebrow below 720px and secondary identity fields below 520px while keeping status, title, and controls reachable.
 
-- [ ] **Step 7: Run tests, typecheck, and commit**
+- [x] **Step 7: Run tests, typecheck, and commit**
 
 Run: `npx vitest run test/lib/layout-budget.test.ts test/workspace/default-template.test.ts test/workspace-headers.test.tsx`
 Run: `npm -w apps/desktop run typecheck`
@@ -107,7 +107,7 @@ Commit: `fix(desktop): protect workspace layout at narrow widths`
 - Produces: `attentionPanelPosition(rect, viewport): { top?: number; bottom?: number; left: number }`.
 - Keeps all modal callbacks and automation/worker payloads unchanged.
 
-- [ ] **Step 1: Add failing containment tests**
+- [x] **Step 1: Add failing containment tests**
 
 ```ts
 expect(attentionPanelPosition({ left: 14, top: 480, bottom: 508 }, { width: 840, height: 547 }))
@@ -117,24 +117,24 @@ expect(screen.getByRole("dialog")).toHaveClass("max-h-[calc(100vh-2rem)]", "over
 
 The run-automation test renders an automation referencing all supported variables and asserts the dialog has a scrollable body plus fixed footer.
 
-- [ ] **Step 2: Run tests and confirm they fail on current positioning/classes**
+- [x] **Step 2: Run tests and confirm they fail on current positioning/classes**
 
 Run: `npx vitest run test/attention-bell.test.tsx test/spawn-modal.test.tsx test/run-automation-dialog.test.tsx`
 Expected: FAIL for missing position helper and containment classes.
 
-- [ ] **Step 3: Split WorkerSpawnModal into fixed header, scrollable body, and fixed footer**
+- [x] **Step 3: Split WorkerSpawnModal into fixed header, scrollable body, and fixed footer**
 
 Use an overlay with `p-4`, a `w-full max-w-[520px] max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col` panel, a `min-h-0 overflow-y-auto px-5` body, and a border-top footer. Keep the source result list nested inside the body scroll region.
 
-- [ ] **Step 4: Apply the same bounded structure to RunAutomationDialog**
+- [x] **Step 4: Apply the same bounded structure to RunAutomationDialog**
 
 Keep title/description and action buttons visible; place only the generated variable fields in `min-h-0 overflow-y-auto`.
 
-- [ ] **Step 5: Flip and clamp AttentionBell vertically**
+- [x] **Step 5: Flip and clamp AttentionBell vertically**
 
 Use the panel's maximum expected height to open downward only when it fits. Otherwise set `bottom` from the trigger's top edge. Clamp the list height to the remaining viewport and retain the existing horizontal clamp.
 
-- [ ] **Step 6: Run tests, typecheck, and commit**
+- [x] **Step 6: Run tests, typecheck, and commit**
 
 Run: `npx vitest run test/attention-bell.test.tsx test/spawn-modal.test.tsx test/run-automation-dialog.test.tsx`
 Run: `npm -w apps/desktop run typecheck`
@@ -161,32 +161,32 @@ Commit: `fix(desktop): keep dialogs and attention popover in viewport`
 - Extends: `Sessions` with `compact?: boolean` to replace the wide source tab row with a full-width source select.
 - Extends: `UsagePanel` with `compact?: boolean`; compact mode starts collapsed but remains user-expandable.
 
-- [ ] **Step 1: Add failing compact-mode component tests**
+- [x] **Step 1: Add failing compact-mode component tests**
 
 Assert compact Sessions renders one source select instead of the wide Segment, and compact UsagePanel initially hides meters but exposes an expand button that reveals them.
 
-- [ ] **Step 2: Run focused tests and confirm compact props are unsupported**
+- [x] **Step 2: Run focused tests and confirm compact props are unsupported**
 
 Run: `npx vitest run test/sessions-responsive.test.tsx test/usage-panel.test.tsx`
 Expected: FAIL.
 
-- [ ] **Step 3: Isolate horizontal overflow**
+- [x] **Step 3: Isolate horizontal overflow**
 
 Set Sessions and RepoTree scroll containers to `overflow-y-auto overflow-x-hidden`. In compact Sessions render a full-width source `<Select>` with localized labels/counts; retain the existing Segment at normal width.
 
-- [ ] **Step 4: Make usage collapsible in short viewports**
+- [x] **Step 4: Make usage collapsible in short viewports**
 
 Keep the provider header visible, add a chevron disclosure button, and render meter/stat rows only when `!compact || expanded`. Reset to collapsed when entering compact mode without changing provider selection.
 
-- [ ] **Step 5: Separate footer status and action rows**
+- [x] **Step 5: Separate footer status and action rows**
 
 Replace the mixed wrapping row with a clipped status row and a right-aligned action row so daemon/Slack text cannot push action icons or top-tooltips outside the sidebar.
 
-- [ ] **Step 6: Polish narrow composer/new-session flow**
+- [x] **Step 6: Polish narrow composer/new-session flow**
 
 Give composer selects bounded flex bases, keep attach/send grouped at the line end, and use compact heading/padding classes when the shell reports narrow space. The send action must stay visible on every wrapped line.
 
-- [ ] **Step 7: Run tests, typecheck, and commit**
+- [x] **Step 7: Run tests, typecheck, and commit**
 
 Run: `npx vitest run test/sessions-responsive.test.tsx test/usage-panel.test.tsx test/new-session-page-provider.test.tsx`
 Run: `npm -w apps/desktop run typecheck`
@@ -204,17 +204,17 @@ Commit: `fix(desktop): compact sidebar and new-session controls`
 **Interfaces:**
 - No new interfaces; this task proves the complete behavior.
 
-- [ ] **Step 1: Build the root daemon with Node 22**
+- [x] **Step 1: Build the root daemon with Node 22**
 
 Run: `npm run build`
 Expected: TypeScript build succeeds and `dist/index.js` is executable.
 
-- [ ] **Step 2: Launch Electron with a CDP port**
+- [x] **Step 2: Launch Electron with a CDP port**
 
 Run: `ROOKERY_DEBUG_PORT=9225 npm -w apps/desktop run dev`
 Expected: Electron starts and exposes the renderer page.
 
-- [ ] **Step 3: Verify the failure matrix with screenshots and bounding boxes**
+- [x] **Step 3: Verify the failure matrix with screenshots and bounding boxes**
 
 Check:
 - 920×600 with sidebar preferred widths 220, 252, and 440.
@@ -225,7 +225,7 @@ Check:
 - Attention queue from the collapsed bottom rail; panel must open upward and remain inside the viewport.
 - 1280×800; roomy saved sidebar/Dockview layout must return instead of remaining compacted.
 
-- [ ] **Step 4: Run complete validation**
+- [x] **Step 4: Run complete validation**
 
 Run: `npm -w apps/desktop test`
 Run: `npm -w apps/desktop run typecheck`
@@ -233,7 +233,7 @@ Run: `npm run typecheck`
 Run: `npm run build`
 Expected: all commands PASS.
 
-- [ ] **Step 5: Inspect the final diff and commit any QA corrections**
+- [x] **Step 5: Inspect the final diff and commit any QA corrections**
 
 Run: `git diff --check`
 Run: `git status --short`
