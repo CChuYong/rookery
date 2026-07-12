@@ -47,6 +47,30 @@ describe("ConversationPane Side drawer", () => {
     fireEvent.keyDown(sideEditor, { key: "Enter" });
     expect(onSideSend).toHaveBeenCalledWith("side-w", "which file?");
   });
+
+  it("prepends /btw and /side to slash autocomplete alongside existing commands", () => {
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[{ name: "review", description: "review code" }]} />);
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "/";
+    fireEvent.input(editor);
+    expect(screen.getByText((_text, el) => el?.textContent === "/btw<질문>")).toBeInTheDocument();
+    expect(screen.getByText((_text, el) => el?.textContent === "/side<질문>")).toBeInTheDocument();
+    expect(screen.getByText("/review")).toBeInTheDocument();
+  });
+
+  it("removes local Side commands from autocomplete while its drawer is already open", async () => {
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[{ name: "review", description: "review code" }]} />);
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "open side";
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    await screen.findByLabelText("Side 질문");
+    editor.textContent = "/";
+    fireEvent.input(editor);
+    expect(screen.getByText("/review")).toBeInTheDocument();
+    expect(screen.queryByText((_text, el) => el?.textContent === "/btw<질문>")).toBeNull();
+    expect(screen.queryByText((_text, el) => el?.textContent === "/side<질문>")).toBeNull();
+  });
 });
 
 describe("ConversationPane busy derivation (master/worker unified)", () => {
