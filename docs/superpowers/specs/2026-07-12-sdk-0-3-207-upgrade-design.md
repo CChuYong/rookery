@@ -78,6 +78,13 @@ Today `turn_end.terminalReason` is decoded (`claude-backend.ts:124`) and discard
 - Live probe first (reuse `probe-turn-lifecycle.mjs` approach) to confirm the actual
   frame shape/timing; add snapshot frames to fake-query test scripts.
 
+**Refinement (implementation):** per SDK guidance ("do not correlate the level with
+the edge stream"), the worker latches to level-only mode on the first snapshot
+instead of merging both signals — a `bgLevel` flag flips true on the first
+`background_tasks` event, and the edge branch (`background_task`) is skipped
+entirely once latched, rather than continuing to process edge frames alongside
+snapshots.
+
 ## Phase 2-C — interrupt receipt (1 commit)
 
 - `AgentStream.interrupt()` return widens to `Promise<InterruptReceipt | undefined>`

@@ -81,6 +81,7 @@ export class Worker {
   // Derived-state inputs (2026-07-11 state-graph redesign): liveStatus = f(turnActive, bgTasks.size).
   private turnActive = true; // a task-spawned worker starts mid-turn; start()/resume() reconcile for the task-less paths
   private readonly bgTasks = new Map<string, string>(); // running background tasks: taskId → taskType (claude only; codex never emits them)
+  private bgLevel = false; // latched on the first background_tasks level frame — edge frames are ignored from then on
   private idleGraceTimer?: ReturnType<typeof setTimeout>; // settle-grace hold (see WorkerDeps.settleGraceMs)
   private loop: Promise<void> = Promise.resolve();
   private stream?: AgentStream;
@@ -426,17 +427,31 @@ export class Worker {
           // Harness-tracked background task lifecycle (claude only). No transcript record: the SDK's own
           // "Command running in background with ID: …" tool_result already documents it there. The Map
           // dedupes the settle double-fire (task_updated(completed) immediately followed by task_notification).
-          if (ev.status === "started") {
-            this.bgTasks.set(ev.taskId, ev.taskType ?? "task");
-            this.reconcile();
-          } else {
-            this.bgTasks.delete(ev.taskId);
-            // Last task settled while quiescent → hold "background" for the settle-grace instead of blipping
-            // idle (the auto-wake turn is imminent; see WorkerDeps.settleGraceMs). The double-fire re-arms
-            // harmlessly. Settles DURING a turn (auto-promoted foreground tasks) take the plain reconcile.
-            if (!this.turnActive && this.bgTasks.size === 0) this.armIdleGrace();
-            else this.reconcile();
+          // Once a background_tasks level frame has been seen, these edge frames are latched out (SDK
+          // guidance: do not correlate the two streams — the level snapshot is authoritative from then on).
+          if (!this.bgLevel) {
+            if (ev.status === "started") {
+              this.bgTasks.set(ev.taskId, ev.taskType ?? "task");
+              this.reconcile();
+            } else {
+              this.bgTasks.delete(ev.taskId);
+              // Last task settled while quiescent → hold "background" for the settle-grace instead of blipping
+              // idle (the auto-wake turn is imminent; see WorkerDeps.settleGraceMs). The double-fire re-arms
+              // harmlessly. Settles DURING a turn (auto-promoted foreground tasks) take the plain reconcile.
+              if (!this.turnActive && this.bgTasks.size === 0) this.armIdleGrace();
+              else this.reconcile();
+            }
           }
+        } else if (ev.kind === "background_tasks") {
+          // Level snapshot (SDK ≥0.3.203 background_tasks_changed): the full live-task set, REPLACE
+          // semantics. Latches out the edge branch above from here on (see the comment there).
+          this.bgLevel = true;
+          const hadTasks = this.bgTasks.size > 0;
+          this.bgTasks.clear();
+          for (const bt of ev.tasks) this.bgTasks.set(bt.taskId, bt.taskType);
+          // Same settle-grace rule as the edge path: dropping to zero while quiescent must not blip idle.
+          if (hadTasks && this.bgTasks.size === 0 && !this.turnActive) this.armIdleGrace();
+          else this.reconcile();
         } else if (ev.kind === "turn_end") {
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
           // ev.costUsd/ev.numTurns are PER-SEND (this query()'s own cost + agentic-loop count), NOT

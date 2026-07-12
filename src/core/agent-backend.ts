@@ -45,6 +45,10 @@ export type AgentEvent =
   // probe-collab-nowait.mjs) but are only surfaced as nested-panel traffic, not background_task
   // (scope-A decision, docs/superpowers/specs/2026-07-11-codex-nested-agents-design.md).
   | { kind: "background_task"; taskId: string; taskType?: string; status: "started" | "settled" }
+  // Level form of the same signal (SDK ≥0.3.203 background_tasks_changed): the FULL live-task set after a
+  // membership change — REPLACE semantics. SDK guidance: do not correlate with the edge frames above; once
+  // a consumer sees a level frame it should trust levels only (Worker latches edges out on first sight).
+  | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string }> }
   // End of one turn. costUsd/numTurns/durationMs are THIS turn's raw values (numTurns is the provider's
   // per-send cumulative agentic turn count) — consumers accumulate their own session totals.
   // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried

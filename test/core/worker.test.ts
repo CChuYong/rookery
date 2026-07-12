@@ -1312,6 +1312,35 @@ describe("Worker background state machine", () => {
     expect(nestedEvents).toEqual([{ parentToolUseId: "th-child" }]);
     await x.agent.stop();
   });
+
+  it("bg_tasks snapshot while quiescent → background (count from snapshot); snapshot to [] holds background via settle-grace, then idle", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "bg1", taskType: "local_bash" }, { id: "bg2", taskType: "agent" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "bg_tasks", ids: [] }, // membership change → empty snapshot while quiescent
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background", "idle"]); // no transient idle blip
+    expect(x.statusEvents[0]!.bg).toEqual({ count: 2, types: expect.arrayContaining(["local_bash", "agent"]) });
+    await x.agent.stop();
+  });
+
+  it("latch: once a bg_tasks snapshot is seen, later task_started/task_notification edge frames for other ids are ignored", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "bg1", taskType: "local_bash" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_started", id: "bg2", taskType: "agent" }, // edge frame — must be ignored once latched
+      { type: "task_notification", id: "bg1", status: "completed" }, // edge settle for the snapshot's own id — also ignored
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    // give the ignored edge frames a beat to (not) take effect
+    await new Promise((r) => setTimeout(r, 40));
+    expect(x.agent.status()).toBe("background"); // still background — bg1 was never removed by the ignored edge settle
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // no extra transitions from the edge frames
+    await x.agent.stop();
+  });
 });
 
 // ── Settle-grace (fix/worker-idle-grace): no transient idle between the last bg settle and the auto-wake ──

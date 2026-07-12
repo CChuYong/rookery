@@ -66,16 +66,23 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     const sysSessionId = (msg as { session_id?: string }).session_id;
     if (sysSessionId) yield { kind: "session_id", sessionId: sysSessionId };
     // Background-task lifecycle frames (task_started/task_updated/task_notification/task_progress) —
-    // live-verified against SDK 0.3.195 (probe-turn-lifecycle.mjs, 2026-07-11): started fires when a task
-    // is backgrounded (or a long foreground command is auto-promoted ~3s in); settle arrives as
-    // task_updated(patch.status ∈ completed|failed|killed) immediately followed by task_notification —
-    // the worker's task-id set dedupes the double settle. task_progress is heartbeat noise (dropped;
-    // previously it leaked into transcripts as an unclassified system_text row).
+    // live-verified against SDK 0.3.195 (probe-turn-lifecycle.mjs, 2026-07-11), still current at 0.3.207:
+    // started fires when a task is backgrounded (or a long foreground command is auto-promoted ~3s in);
+    // settle arrives as task_updated(patch.status ∈ completed|failed|killed) immediately followed by
+    // task_notification — the worker's task-id set dedupes the double settle. task_progress is heartbeat
+    // noise (dropped; previously it leaked into transcripts as an unclassified system_text row).
+    // background_tasks_changed (SDK ≥0.3.203) is the level form of the same signal — the full live-task
+    // set after a membership change, REPLACE semantics — consumed below as its own AgentEvent kind
+    // ("background_tasks"), not merged into the edge stream above (Phase 2-B of the 2026-07-12 upgrade
+    // design; the worker latches to level-only once it sees the first snapshot).
     const sub = (msg as { subtype?: string }).subtype;
-    // background_tasks_changed (SDK ≥0.3.203): full live-task set, REPLACE semantics. Dropped for now
-    // so it can't leak into transcripts as system_text (same leak class as the old task_progress);
-    // consumed as a level signal in Phase 2-B of the 2026-07-12 upgrade design.
-    if (sub === "background_tasks_changed") return;
+    if (sub === "background_tasks_changed") {
+      // NOTE: this frame may also carry a top-level `session_id` — already re-emitted above (harmless/idempotent).
+      const bt = msg as { tasks?: Array<{ task_id?: string; task_type?: string }> };
+      const tasks = (bt.tasks ?? []).flatMap((t) => (t.task_id ? [{ taskId: t.task_id, taskType: t.task_type ?? "task" }] : []));
+      yield { kind: "background_tasks", tasks };
+      return;
+    }
     if (sub === "task_started" || sub === "task_updated" || sub === "task_notification" || sub === "task_progress") {
       const tm = msg as { task_id?: string; task_type?: string; status?: string; patch?: { status?: string } };
       if (!tm.task_id || sub === "task_progress") return;

@@ -20,6 +20,8 @@ export type FakeStep =
   | { type: "task_updated"; id: string; status: string } // patch.status: completed/failed/killed settle; running/paused ignored
   | { type: "task_notification"; id: string; status?: string }
   | { type: "task_progress"; id: string }
+  // background_tasks_changed level frame (SDK ≥0.3.203): the full live set, REPLACE semantics.
+  | { type: "bg_tasks"; ids: Array<{ id: string; taskType?: string }> }
   | {
       type: "result";
       subtype: string;
@@ -56,6 +58,8 @@ function stepToMessage(step: FakeStep): unknown {
     return { type: "system", subtype: "task_notification", task_id: step.id, status: step.status ?? "completed" };
   } else if (step.type === "task_progress") {
     return { type: "system", subtype: "task_progress", task_id: step.id };
+  } else if (step.type === "bg_tasks") {
+    return { type: "system", subtype: "background_tasks_changed", tasks: step.ids.map((t) => ({ task_id: t.id, task_type: t.taskType ?? "task", description: "" })) };
   }
   return {
     type: "result",
