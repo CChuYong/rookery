@@ -8,12 +8,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-export const WIN_W = 2560, WIN_H = 1720;
-export const CANVAS_W = 3200, CANVAS_H = 2000;
-export const WIN_X = (CANVAS_W - WIN_W) / 2, WIN_Y = (CANVAS_H - WIN_H) / 2;
+export let WIN_W = 2560, WIN_H = 1720;
+export let CANVAS_W = 3200, CANVAS_H = 2000;
+export let WIN_X = (CANVAS_W - WIN_W) / 2, WIN_Y = (CANVAS_H - WIN_H) / 2;
 export const OUT_W = 1440, OUT_H = 900, FPS = 30;
 const BG = "0xE7E3D8"; // warm paper backdrop
 const RADIUS = 28;
+
+// Call once per capture size (device pixels of the take). The canvas keeps the output's 16:10
+// aspect with comfortable margins so wide shots always show the backdrop.
+export function setWindow(w, h) {
+  WIN_W = w; WIN_H = h;
+  CANVAS_W = w + 560;
+  CANVAS_H = Math.round((CANVAS_W * (OUT_H / OUT_W)) / 2) * 2;
+  if (CANVAS_H < h + 150) { CANVAS_H = h + 150 + ((h + 150) % 2); CANVAS_W = Math.round((CANVAS_H * (OUT_W / OUT_H)) / 2) * 2; }
+  WIN_X = Math.round((CANVAS_W - WIN_W) / 2);
+  WIN_Y = Math.round((CANVAS_H - WIN_H) / 2);
+}
 
 // One-time rounded-rect alpha mask (white on black) via geq.
 export function ensureMask(dir) {
@@ -67,10 +78,15 @@ export function renderSegment({ input, start, end, out, shots, maskDir, speed = 
   const mask = ensureMask(maskDir);
   const dur = (end - start) / speed;
   const setpts = speed !== 1 ? `,setpts=PTS/${speed}` : "";
+  // The usage gauge is bottom-anchored in the sidebar — same logical offsets at any window height.
+  const blurY = WIN_H - 375;
+  // Mild grade: the dark UI reads flat on the paper backdrop — lift gamma, add contrast/saturation
+  // and a light text-sharpening pass so it pops without blowing out.
+  const grade = `eq=contrast=1.07:saturation=1.22:gamma=1.05:brightness=0.012,unsharp=5:5:0.35`;
   const filter = [
     // usage gauge blur (window-native coords), then normalize to CFR for frame-indexed camera math
     `[0:v]trim=${start}:${end},setpts=PTS-STARTPTS${setpts},fps=${FPS},` +
-      `split[w0][wb];[wb]crop=690:310:0:1345,boxblur=14[bl];[w0][bl]overlay=0:1345[win]`,
+      `split[w0][wb];[wb]crop=690:310:0:${blurY},boxblur=14[bl];[w0][bl]overlay=0:${blurY},${grade}[win]`,
     `[1:v]format=gray,loop=-1:1:0[am]`,
     `[win][am]alphamerge[winA]`,
     // soft shadow = the same mask, blackened + blurred, under the window

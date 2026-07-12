@@ -115,6 +115,10 @@ for (const [rel, content] of Object.entries(files)) {
 
 const git = (...args) => execFileSync("git", args, { cwd: target, stdio: "pipe", env: { ...process.env, GIT_AUTHOR_NAME: "orbitkit", GIT_AUTHOR_EMAIL: "dev@orbitkit.example", GIT_COMMITTER_NAME: "orbitkit", GIT_COMMITTER_EMAIL: "dev@orbitkit.example" } });
 git("init", "-b", "main");
+// Repo-local identity — worktrees share .git/config, so on-camera WORKER commits carry this
+// instead of the machine owner's global git identity.
+git("config", "user.name", "orbitkit");
+git("config", "user.email", "dev@orbitkit.example");
 git("add", "-A");
 git("commit", "-m", "feat: changelog + feed generation (v0.2.1)");
 // A little history so the repo doesn't look single-commit sterile.

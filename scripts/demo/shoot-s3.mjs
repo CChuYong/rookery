@@ -14,7 +14,7 @@ const out = arg("out", "/tmp/demo-take2");
 const cdp = await connectPage(Number(arg("cdp", "9223")));
 await installCursor(cdp);
 console.log("[take2] rolling (restore)");
-const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2560, maxHeight: 1800, format: "jpeg" });
+const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2880, maxHeight: 1800, format: "jpeg" });
 await sleep(2500); // the freshly-reopened window, sessions restoring
 
 await clickText(cdp, "Sessions").catch(() => {});

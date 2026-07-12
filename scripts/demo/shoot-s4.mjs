@@ -19,7 +19,7 @@ d.send({ type: "events.subscribe" });
 const cdp = await connectPage(Number(arg("cdp", "9223")));
 await installCursor(cdp);
 console.log("[take3] rolling (fleet view)");
-const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2560, maxHeight: 1800, format: "jpeg" });
+const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2880, maxHeight: 1800, format: "jpeg" });
 await sleep(1000);
 await clickText(cdp, "Repos").catch(() => {});
 await sleep(2000);

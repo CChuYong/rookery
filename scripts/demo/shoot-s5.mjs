@@ -13,7 +13,7 @@ const out = arg("out", "/tmp/demo-take4");
 const cdp = await connectPage(Number(arg("cdp", "9223")));
 await installCursor(cdp);
 console.log("[take4] rolling (attention bell)");
-const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2560, maxHeight: 1800, format: "jpeg" });
+const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2880, maxHeight: 1800, format: "jpeg" });
 await sleep(1500);
 
 try {

@@ -21,7 +21,7 @@ d.send({ type: "events.subscribe" });
 const cdp = await connectPage(Number(arg("cdp", "9223")));
 await installCursor(cdp);
 console.log("[take1] rolling");
-const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2560, maxHeight: 1800, format: "jpeg" });
+const rec = startRecording(cdp, path.join(out, "frames"), { maxWidth: 2880, maxHeight: 1800, format: "jpeg" });
 await sleep(1500);
 
 // S1 — type the ask into the New Session composer (clear any leftover draft first).
@@ -34,17 +34,20 @@ await cdp.eval(`document.execCommand("selectAll")`);
 await sleep(300);
 await typeText(cdp, ASK, { cps: 24 });
 await sleep(900);
-await pressEnter(cdp);
-
-// Confirm the turn actually started (else surface loudly — don't waste a take).
-await d.waitForEvent((e) => e.type === "master.status" && e.status === "running", { timeoutMs: 20000, label: "master turn start" });
-console.log("[take1] master running — waiting for it to spawn the worker");
-
-// S1 climax: the master's spawn_worker materializes as a running worker.
-const w1 = await d.waitForEvent(
+// ARM WAITERS BEFORE SENDING — master.status fires within ms of the Enter; arming after misses it.
+const turnStarted = d.waitForEvent((e) => e.type === "master.status" && e.status === "running", { timeoutMs: 20000, label: "master turn start" });
+const workerSpawn = d.waitForEvent(
   (e) => e.type === "worker.status" && ["provisioning", "running"].includes(e.status),
   { timeoutMs: 300000, label: "worker 1 spawn" },
 );
+await pressEnter(cdp);
+
+// Confirm the turn actually started (else surface loudly — don't waste a take).
+await turnStarted;
+console.log("[take1] master running — waiting for it to spawn the worker");
+
+// S1 climax: the master's spawn_worker materializes as a running worker.
+const w1 = await workerSpawn;
 console.log(`[take1] worker1: ${w1.workerId}`);
 await sleep(8000); // let the tool card complete + worker chip render on camera
 
