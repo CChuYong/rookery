@@ -130,29 +130,32 @@ export function WorkerSpawnModal(p: {
 
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("workerSpawnModal.title")}
-        className={cn("w-[520px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
       >
-        <div className="mb-1 text-[14px] font-semibold">{t("workerSpawnModal.title")}</div>
-        <div className="mb-3 font-mono text-[11px] text-muted">repo · {p.repo}</div>
+        <div className="shrink-0 px-5 pb-3 pt-5">
+          <div className="mb-1 text-[14px] font-semibold">{t("workerSpawnModal.title")}</div>
+          <div className="mb-3 font-mono text-[11px] text-muted">repo · {p.repo}</div>
 
-        {/* Source mode — write directly / GitHub issues·PRs / Linear tickets */}
-        <Segment
-          items={MODES}
-          value={mode}
-          onChange={switchMode}
-          variant="pill"
-          className="mb-3 gap-1 rounded-[var(--radius)] border border-line bg-ink/40 p-1"
-          itemClassName="flex-1 justify-center py-1.5 text-[12px] font-medium"
-        />
+          {/* Source mode — write directly / GitHub issues·PRs / Linear tickets */}
+          <Segment
+            items={MODES}
+            value={mode}
+            onChange={switchMode}
+            variant="pill"
+            className="gap-1 rounded-[var(--radius)] border border-line bg-ink/40 p-1"
+            itemClassName="flex-1 justify-center py-1.5 text-[12px] font-medium"
+          />
+        </div>
 
-        <div className="flex flex-col gap-2">
+        <div data-dialog-scroll-body className="min-h-0 overflow-y-auto px-5 pb-4">
+          <div className="flex flex-col gap-2">
           {/* Agent backend for this worker — copies the permissionMode hardcoded-<option> idiom below. */}
           <Select size="sm" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
             <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
@@ -300,9 +303,10 @@ export function WorkerSpawnModal(p: {
             value={task}
             onChange={(e) => setTask(e.target.value)}
           />
+          </div>
+          <p className="mt-2 text-[11.5px] text-muted">{t("workerSpawnModal.footerNote")}</p>
         </div>
-        <p className="mt-2 text-[11.5px] text-muted">{t("workerSpawnModal.footerNote")}</p>
-        <div className="mt-4 flex justify-end gap-2">
+        <div data-dialog-footer className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-4">
           <Button variant="outline" onClick={dismiss}>{t("common.cancel")}</Button>
           <Button variant="primary" onClick={spawn}>{t("workerSpawnModal.spawn")}</Button>
         </div>

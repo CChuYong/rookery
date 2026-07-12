@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { AttentionBell } from "../src/renderer/components/AttentionBell.js";
+import { AttentionBell, attentionPanelPosition } from "../src/renderer/components/AttentionBell.js";
 import { useStore } from "../src/renderer/store/store.js";
 import { useAcksStore } from "../src/renderer/store/acks.js";
 import type { FleetRow } from "../src/renderer/store/reduce.js";
@@ -18,6 +18,20 @@ beforeEach(() => {
 });
 
 describe("AttentionBell", () => {
+  it("opens upward when a bottom-rail trigger has no room below", () => {
+    expect(attentionPanelPosition(
+      { left: 14, top: 480, bottom: 508 },
+      { width: 840, height: 547 },
+    )).toEqual({ left: 14, bottom: 73 });
+  });
+
+  it("opens downward and clamps horizontally when room is available", () => {
+    expect(attentionPanelPosition(
+      { left: 820, top: 20, bottom: 48 },
+      { width: 840, height: 547 },
+    )).toEqual({ left: 504, top: 54 });
+  });
+
   it("renders no badge when quiet; opens to the empty state", () => {
     render(<AttentionBell onNavigate={vi.fn()} />);
     const btn = screen.getByRole("button");

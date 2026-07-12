@@ -7,6 +7,35 @@ import { buildAttentionItems, type AttentionItem, type AttentionNav } from "../l
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 
+interface TriggerRect {
+  left: number;
+  top: number;
+  bottom: number;
+}
+
+interface ViewportRect {
+  width: number;
+  height: number;
+}
+
+export type AttentionPanelPosition = { left: number; top?: number; bottom?: number };
+
+const PANEL_WIDTH_WITH_GUTTER = 336;
+const PANEL_MAX_HEIGHT = 452;
+const VIEWPORT_GUTTER = 8;
+const TRIGGER_GAP = 6;
+
+export function attentionPanelPosition(rect: TriggerRect, viewport: ViewportRect): AttentionPanelPosition {
+  const left = Math.max(
+    VIEWPORT_GUTTER,
+    Math.min(rect.left, Math.max(VIEWPORT_GUTTER, viewport.width - PANEL_WIDTH_WITH_GUTTER)),
+  );
+  const usablePanelHeight = Math.min(PANEL_MAX_HEIGHT, viewport.height - VIEWPORT_GUTTER * 2);
+  const top = rect.bottom + TRIGGER_GAP;
+  if (top + usablePanelHeight <= viewport.height - VIEWPORT_GUTTER) return { left, top };
+  return { left, bottom: Math.max(VIEWPORT_GUTTER, viewport.height - rect.top + TRIGGER_GAP) };
+}
+
 // Header bell: the single ranked "지금 나를 기다리는 것" surface (attention-queue design).
 // Tier 0 (blocked on a human answer) drives the urgent badge tone; clicking a row navigates to it.
 // Dismissal routes by kind: failures → persisted ack (acks store), review items → flip the live unread map.
@@ -60,12 +89,13 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [pos, setPos] = useState<AttentionPanelPosition>({ top: 0, left: 0 });
   const toggle = (): void => {
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
-      // Fixed positioning (the sidebar clips absolutely-positioned children); clamp to the viewport.
-      setPos({ top: r.bottom + 6, left: Math.min(r.left, Math.max(8, window.innerWidth - 336)) });
+      // Fixed positioning (the sidebar clips absolutely-positioned children):
+      // clamp horizontally and flip above bottom-rail triggers when needed.
+      setPos(attentionPanelPosition(r, { width: window.innerWidth, height: window.innerHeight }));
     }
     setOpen((v) => !v);
   };
@@ -128,13 +158,13 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
           role="dialog"
           aria-label={t("attentionBell.title")}
           style={{ top: pos.top, left: pos.left }}
-          className="fixed z-[90] w-[328px] rounded-xl border border-line bg-surface p-1.5 shadow-xl"
+          className="fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden rounded-xl border border-line bg-surface p-1.5 shadow-xl"
         >
           <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{t("attentionBell.title")}</div>
           {items.length === 0 ? (
             <div className="px-2.5 pb-3 pt-1 text-[12.5px] text-muted">{t("attentionBell.empty")}</div>
           ) : (
-            <div className="max-h-[420px] overflow-y-auto">
+            <div className="min-h-0 max-h-[420px] overflow-y-auto">
               {tiers.map(({ tier, title, rows }) =>
                 rows.length === 0 ? null : (
                   <div key={tier}>
