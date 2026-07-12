@@ -78,6 +78,9 @@ export interface AgentSessionOptions {
 
 // Master-turn extras: provider-specific tool wiring, passed through opaquely (P2 will neutralize these).
 export interface MasterTurnOptions extends AgentSessionOptions {
+  // Ephemeral Side conversations run a master-style resumed turn without daemon MCP tools. Adapters
+  // enforce a provider-native read-only boundary (Claude plan/read tools; Codex read-only sandbox).
+  readOnly?: boolean;
   // Base in-process tool servers as RAW definitions (server name → defs). Claude adapter wraps them
   // with createSdkMcpServer; Codex adapter registers them on the daemon MCP bridge for the session.
   toolDefs?: Record<string, ProviderToolDef[]>;

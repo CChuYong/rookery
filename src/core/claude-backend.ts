@@ -184,14 +184,16 @@ export class ClaudeBackend implements AgentBackend {
   }
 
   startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
+    const readOnlyAllowed = ["Read", "Glob", "Grep"];
+    const readOnlyDenied = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
     const q = this.queryFn({
       prompt,
       options: {
         ...this.baseOptions(opts),
         ...(opts.canUseTool ? { canUseTool: opts.canUseTool as QueryOptions["canUseTool"] } : {}),
         ...this.buildMcpServersOption(opts),
-        ...(opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
-        ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
+        ...(opts.readOnly ? { allowedTools: readOnlyAllowed } : opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
+        ...(opts.readOnly ? { disallowedTools: readOnlyDenied } : opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
       },
     });
     return new ClaudeStream(q);

@@ -35,6 +35,10 @@ export type CoreEvent =
   | { type: "master.result"; sessionId: string; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number }
   // Master turn progress state (running↔idle) — corresponds to the worker's worker.status. Live pulse in the UI session list.
   | { type: "master.status"; sessionId: string; status: "running" | "idle" }
+  // Ephemeral read-only fork used by the desktop's Side drawer. sessionId is the owning master
+  // session (for a worker source, its home session) so existing EventBus routing remains intact.
+  | { type: "side.event"; sessionId: string; sideId: string; sourceKind: "master" | "worker"; sourceId: string; data: WorkerEventData }
+  | { type: "side.status"; sessionId: string; sideId: string; sourceKind: "master" | "worker"; sourceId: string; status: "opening" | "running" | "idle" | "closed" }
   // When the master session label is filled in by auto-generation (Haiku) — live refresh of the UI session list.
   | { type: "session.label"; sessionId: string; label: string }
   // status: the worker's initial state — "provisioning" while its worktree is still being created (emitted up-front so the UI

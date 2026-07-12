@@ -614,6 +614,30 @@ describe("worker result telemetry → metrics LogItem", () => {
   });
 });
 
+describe("Side conversation reducer", () => {
+  it("keeps Side transcript/status independent from its parent master or worker", () => {
+    let st = emptyState();
+    st = reduceEvent(st, { type: "side.event", sessionId: "home", sideId: "side-1", sourceKind: "worker", sourceId: "w1", data: { kind: "message", role: "user", content: "why?" } });
+    st = reduceEvent(st, { type: "side.event", sessionId: "home", sideId: "side-1", sourceKind: "worker", sourceId: "w1", data: { kind: "message_delta", text: "because" } });
+    st = reduceEvent(st, { type: "side.status", sessionId: "home", sideId: "side-1", sourceKind: "worker", sourceId: "w1", status: "idle" });
+
+    expect(st.sideConversations["side-1"]).toMatchObject({ sourceKind: "worker", sourceId: "w1", status: "idle" });
+    expect(st.sideConversations["side-1"]!.items).toEqual([
+      { kind: "message", role: "user", content: "why?" },
+      { kind: "message", role: "assistant", content: "because", streaming: false },
+    ]);
+    expect(st.workerLogs.w1).toBeUndefined();
+    expect(st.logsBySession.home).toBeUndefined();
+  });
+
+  it("creates a status-only Side entry and removes volatile state when closed", () => {
+    let st = reduceEvent(emptyState(), { type: "side.status", sessionId: "s1", sideId: "side-2", sourceKind: "master", sourceId: "s1", status: "running" });
+    st = reduceEvent(st, { type: "side.event", sessionId: "s1", sideId: "side-2", sourceKind: "master", sourceId: "s1", data: { kind: "tool_use", id: "t1", name: "Read", input: "{}" } });
+    st = reduceEvent(st, { type: "side.status", sessionId: "s1", sideId: "side-2", sourceKind: "master", sourceId: "s1", status: "closed" });
+    expect(st.sideConversations["side-2"]).toBeUndefined();
+  });
+});
+
 describe("format", () => {
   it("formats", () => {
     expect(fmtTokens(84200)).toBe("84.2k");

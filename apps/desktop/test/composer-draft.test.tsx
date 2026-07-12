@@ -35,4 +35,17 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     expect(onSend).toHaveBeenCalledWith("send me");
     expect(onDraftChange).toHaveBeenLastCalledWith("");
   });
+
+  it("redirects the current draft to a Side question and clears it", () => {
+    const onSend = vi.fn();
+    const onSideSend = vi.fn();
+    render(<Composer onSend={onSend} onSideSend={onSideSend} />);
+    const ed = screen.getByRole("textbox");
+    ed.textContent = "why this approach?";
+    fireEvent.input(ed);
+    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    expect(onSideSend).toHaveBeenCalledWith("why this approach?");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(ed.textContent).toBe("");
+  });
 });

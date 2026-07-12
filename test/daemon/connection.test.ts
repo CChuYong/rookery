@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import type { Automation, AutomationInput } from "../../src/persistence/repositories.js";
@@ -109,6 +109,41 @@ function parsed(sent: string[]): Array<Record<string, unknown>> {
 }
 
 describe("Connection", () => {
+  it("starts Side only after replying with its id, routes lifecycle commands, and cleans owned Side threads on dispose", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const sessions = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "m", fleet });
+    const order: string[] = [];
+    const socket: ClientSocket = { send: (data) => order.push(`reply:${(JSON.parse(data) as { type: string }).type}`) };
+    let n = 0;
+    const sides = {
+      create: vi.fn(async () => ({ id: `side-${++n}` })),
+      send: vi.fn((id: string, text: string) => { order.push(`send:${id}:${text}`); }),
+      stop: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+    const conn = new Connection(socket, sessions, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, sides);
+
+    await conn.handleRaw(JSON.stringify({ type: "side.start", sourceKind: "worker", sourceId: "w1", text: "why", model: "m2", effort: "high", reqId: "q1" }));
+    expect(sides.create).toHaveBeenCalledWith({ sourceKind: "worker", sourceId: "w1", model: "m2", effort: "high" });
+    expect(order.slice(0, 2)).toEqual(["reply:side.started", "send:side-1:why"]);
+
+    await conn.handleRaw(JSON.stringify({ type: "side.send", sideId: "side-1", text: "more", reqId: "q2" }));
+    await conn.handleRaw(JSON.stringify({ type: "side.stop", sideId: "side-1", reqId: "q3" }));
+    await conn.handleRaw(JSON.stringify({ type: "side.close", sideId: "side-1", reqId: "q4" }));
+    expect(sides.send).toHaveBeenLastCalledWith("side-1", "more");
+    expect(sides.stop).toHaveBeenCalledWith("side-1");
+    expect(sides.close).toHaveBeenCalledWith("side-1");
+
+    await conn.handleRaw(JSON.stringify({ type: "side.start", sourceKind: "master", sourceId: "s1", text: "x", reqId: "q5" }));
+    conn.dispose();
+    await Promise.resolve();
+    expect(sides.close).toHaveBeenCalledWith("side-2");
+  });
+
   it("replays a pending interaction card on events.subscribe (survives a full client reload → turn not left hung)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();

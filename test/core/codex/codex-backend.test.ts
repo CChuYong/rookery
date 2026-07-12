@@ -284,6 +284,21 @@ describe("CodexBackend.startTurn", () => {
     expect(fake.spawns).toHaveLength(0);
   });
 
+  it("allows a tool-less read-only Side turn and maps it to the Codex read-only sandbox", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    await collect(b.startTurn("why", baseOpts({ permissionMode: "plan", readOnly: true }) as never));
+    expect(fake.requests.find((r) => r.method === "thread/start")?.params).toMatchObject({ sandbox: "read-only", approvalPolicy: "never" });
+    expect(fake.requests.find((r) => r.method === "turn/start")?.params).toMatchObject({ sandboxPolicy: { type: "readOnly", networkAccess: false } });
+  });
+
+  it("rejects MCP exposure on a read-only Side before spawning", () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    expect(() => b.startTurn("why", baseOpts({ permissionMode: "plan", readOnly: true, toolDefs: { x: [fakeToolDef("write")] } }) as never)).toThrow(/cannot expose MCP tools/);
+    expect(fake.spawns).toHaveLength(0);
+  });
+
   it("no bridge deps → no CODEX_HOME override / no args; a tool-less master turn still completes", async () => {
     const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" }); // no bridge, no toolDefs/sessionKey

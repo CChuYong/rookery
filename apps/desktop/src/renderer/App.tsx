@@ -733,6 +733,26 @@ export function App(): JSX.Element {
   }, []);
   // Interrupt the worker's current turn (keep the session) — composer stop button. The worker equivalent of the master's stopMaster.
   const subInterrupt = useCallback((id: string) => { void client?.request({ type: "worker.interrupt", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
+  const startSide = useCallback(async (sourceKind: "master" | "worker", sourceId: string, text: string, model?: string, effort?: string): Promise<string> => {
+    const c = client;
+    if (!c) throw new Error("not connected");
+    try {
+      const result = await c.request({ type: "side.start", sourceKind, sourceId, text, model, effort });
+      return result.sideId;
+    } catch (error) {
+      toast.error(tRef.current("toast.sendFailed"), String(error));
+      throw error;
+    }
+  }, []);
+  const sendSide = useCallback((sideId: string, text: string) => {
+    void client?.request({ type: "side.send", sideId, text }).catch((error) => toast.error(tRef.current("toast.sendFailed"), String(error)));
+  }, []);
+  const stopSide = useCallback((sideId: string) => {
+    void client?.request({ type: "side.stop", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
+  }, []);
+  const closeSide = useCallback((sideId: string) => {
+    void client?.request({ type: "side.close", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
+  }, []);
   const spawnSub = (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => {
     const c = client;
     if (!c || !spawnRepo) return;
@@ -845,6 +865,10 @@ export function App(): JSX.Element {
             onRetryHistory={retryHistory}
             onSend={(text) => subSend(activeSub.id, text)}
             onStop={() => subInterrupt(activeSub.id)}
+            onSideStart={(text) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined)}
+            onSideSend={sendSide}
+            onSideStop={stopSide}
+            onSideClose={closeSide}
             onOpenFile={openFileInPage}
             onAttachFile={onAttachFile}
             onDropFiles={onDropFiles}
@@ -894,6 +918,10 @@ export function App(): JSX.Element {
             onRespond={respondInteraction}
             disabled={sessionReadOnly}
             onStop={stopMaster}
+            onSideStart={(text) => startSide("master", s.activeSessionId!, text, masterControls?.model, masterControls?.effort)}
+            onSideSend={sendSide}
+            onSideStop={stopSide}
+            onSideClose={closeSide}
             placeholder={sessionReadOnly ? t("app.slackReadOnly") : t("app.composerPlaceholder")}
             onAttachFile={onAttachFile}
             onDropFiles={onDropFiles}
@@ -1234,6 +1262,10 @@ export function App(): JSX.Element {
                       onRetryHistory={retryHistory}
                       onSend={(t) => subSend(activeSub.id, t)}
                       onStop={() => subInterrupt(activeSub.id)}
+                      onSideStart={(text) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined)}
+                      onSideSend={sendSide}
+                      onSideStop={stopSide}
+                      onSideClose={closeSide}
                       onOpenFile={openFileInPage}
                       onAttachFile={onAttachFile}
                       onDropFiles={onDropFiles}
@@ -1325,6 +1357,10 @@ export function App(): JSX.Element {
                 onRespond={respondInteraction}
                 disabled={sessionReadOnly}
                 onStop={stopMaster}
+                onSideStart={(text) => startSide("master", s.activeSessionId!, text, masterControls?.model, masterControls?.effort)}
+                onSideSend={sendSide}
+                onSideStop={stopSide}
+                onSideClose={closeSide}
                 placeholder={sessionReadOnly ? t("app.slackReadOnly") : t("app.composerPlaceholder")}
                 onAttachFile={onAttachFile}
                 onDropFiles={onDropFiles}

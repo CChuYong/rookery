@@ -823,8 +823,11 @@ export class CodexBackend implements AgentBackend {
   // (spike finding #2), so this is the only place that footgun can be caught cleanly.
   startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
     const mode = mapPermissionMode(opts.permissionMode);
-    if (mode.sandbox !== "danger-full-access") {
+    if (mode.sandbox !== "danger-full-access" && !opts.readOnly) {
       throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");
+    }
+    if (opts.readOnly && (Object.values(opts.toolDefs ?? {}).some((defs) => defs.length > 0) || Object.keys(opts.mcpServers ?? {}).length > 0)) {
+      throw new Error("read-only codex Side conversations cannot expose MCP tools");
     }
     // Fail loudly instead of silently no-oping (finding [20]): CodexBackend reaches tools ONLY via the
     // toolDefs→bridge channel; the SDK-wrapped opts.mcpServers channel (Claude-only) is dropped here. No

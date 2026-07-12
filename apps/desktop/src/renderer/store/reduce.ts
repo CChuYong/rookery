@@ -22,6 +22,8 @@ export interface AppState {
   fleet: Record<string, FleetRow>;
   // Native nested subagent activity (live-only, not persisted): workerId → parentToolUseId (= Task call id) → logs.
   nested: Record<string, Record<string, LogItem[]>>;
+  // Ephemeral read-only Side conversations. Volatile by design: no history request or persistence.
+  sideConversations: Record<string, { sourceKind: "master" | "worker"; sourceId: string; status: "opening" | "running" | "idle" | "closed"; items: LogItem[] }>;
   // User messages not yet acknowledged (echoed) by the daemon — removed when reconciled via master.message by clientMsgId.
   // Always empty (dormant) until the App send path in Task 2 calls pushPending.
   pendingBySession: Record<string, { clientMsgId: string; text: string; epoch?: number }[]>;
@@ -30,7 +32,16 @@ export interface AppState {
 }
 
 export function emptyState(): AppState {
-  return { logsBySession: {}, workerLogs: {}, fleet: {}, nested: {}, pendingBySession: {}, pendingByWorker: {} };
+  return { logsBySession: {}, workerLogs: {}, fleet: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {} };
+}
+
+function finalizeSideItems(items: LogItem[]): LogItem[] {
+  return items.map((item) => {
+    if (item.kind === "message" && item.streaming) return { ...item, streaming: false };
+    if (item.kind === "thinking" && item.streaming) return { ...item, streaming: false };
+    if (item.kind === "tool" && item.status === "in_progress") return { ...item, status: "complete" as const };
+    return item;
+  });
 }
 
 function appendLog(state: AppState, sid: string, item: LogItem): LogItem[] {
@@ -167,6 +178,21 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
 // Optional — if omitted, no ts timestamp (pure reduce tests / existing call sites unaffected).
 export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppState {
   switch (e.type) {
+    case "side.event": {
+      const prev = state.sideConversations[e.sideId] ?? { sourceKind: e.sourceKind, sourceId: e.sourceId, status: "running" as const, items: [] };
+      const next = { ...prev, sourceKind: e.sourceKind, sourceId: e.sourceId, items: applySubEvent(prev.items, e.data, now) };
+      return { ...state, sideConversations: { ...state.sideConversations, [e.sideId]: next } };
+    }
+    case "side.status": {
+      if (e.status === "closed") {
+        const sideConversations = { ...state.sideConversations };
+        delete sideConversations[e.sideId];
+        return { ...state, sideConversations };
+      }
+      const prev = state.sideConversations[e.sideId] ?? { sourceKind: e.sourceKind, sourceId: e.sourceId, status: e.status, items: [] };
+      const items = e.status === "idle" ? finalizeSideItems(prev.items) : prev.items;
+      return { ...state, sideConversations: { ...state.sideConversations, [e.sideId]: { ...prev, sourceKind: e.sourceKind, sourceId: e.sourceId, status: e.status, items } } };
+    }
     case "master.thinking.delta": {
       const log = state.logsBySession[e.sessionId] ?? [];
       const last = log[log.length - 1];

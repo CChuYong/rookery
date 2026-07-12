@@ -1,13 +1,53 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { useStore } from "../src/renderer/store/store.js";
 import { ConversationPane } from "../src/renderer/components/ConversationPane.js";
 
 // Shared master/worker composer busy rule: running (authoritative) ‖ pending (optimistic) → stop button.
 // Since both go through the same component, only one side can't break in isolation — lock it with both cases.
 function reset(): void {
-  useStore.setState({ logsBySession: {}, workerLogs: {}, fleet: {}, running: {}, pendingBySession: {}, pendingByWorker: {}, historyLoaded: {}, historyLoadFailed: {} } as never);
+  useStore.setState({ logsBySession: {}, workerLogs: {}, fleet: {}, running: {}, pendingBySession: {}, pendingByWorker: {}, sideConversations: {}, historyLoaded: {}, historyLoadFailed: {} } as never);
 }
+
+describe("ConversationPane Side drawer", () => {
+  beforeEach(reset);
+
+  it("opens a read-only master Side drawer from the current composer draft and closes only that Side", async () => {
+    const onSideStart = vi.fn(async () => "side-1");
+    const onSideClose = vi.fn();
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "why this approach?";
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    expect(onSideStart).toHaveBeenCalledWith("why this approach?");
+    expect(await screen.findByText("메인 세션의 문맥 · 읽기 전용")).toBeInTheDocument();
+    expect(screen.getByText("why this approach?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
+    expect(screen.queryByLabelText("Side 질문")).toBeNull();
+  });
+
+  it("shows live-worktree copy and routes worker Side follow-ups independently", async () => {
+    const onSideStart = vi.fn(async () => "side-w");
+    const onSideSend = vi.fn();
+    render(<ConversationPane kind="worker" id="w1" onSend={() => {}} onSideStart={onSideStart} onSideSend={onSideSend} />);
+    const mainEditor = screen.getByRole("textbox");
+    mainEditor.textContent = "what changed?";
+    fireEvent.input(mainEditor);
+    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    expect(await screen.findByText("이 워커의 문맥 · live worktree · 읽기 전용")).toBeInTheDocument();
+    await act(async () => {
+      useStore.setState({ sideConversations: { "side-w": { sourceKind: "worker", sourceId: "w1", status: "idle", items: [{ kind: "message", role: "user", content: "what changed?" }] } } } as never);
+    });
+    const editors = screen.getAllByRole("textbox");
+    const sideEditor = editors.at(-1)!;
+    sideEditor.textContent = "which file?";
+    fireEvent.input(sideEditor);
+    fireEvent.keyDown(sideEditor, { key: "Enter" });
+    expect(onSideSend).toHaveBeenCalledWith("side-w", "which file?");
+  });
+});
 
 describe("ConversationPane busy derivation (master/worker unified)", () => {
   beforeEach(reset);

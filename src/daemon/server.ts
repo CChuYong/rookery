@@ -62,6 +62,7 @@ import { makeSlackTriggerHandler } from "../slack/trigger-source.js";
 import { startWorkerTriggerSource } from "../core/worker-trigger-source.js";
 import type { AutomationProvider } from "./connection.js";
 import type { AutomationInput } from "../persistence/repositories.js";
+import { SideConversationManager, type SideSource } from "../core/side-conversation.js";
 
 export interface DaemonHandle {
   port: number;
@@ -270,6 +271,40 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         };
       };
     } });
+  const sides = new SideConversationManager({
+    bus,
+    backends: { claude: backend, codex: codexBackend },
+    resolveSource: (sourceKind, sourceId): SideSource | undefined => {
+      if (sourceKind === "master") {
+        const row = repos.getSession(sourceId);
+        if (!row) return undefined;
+        const provider = row.provider || "claude";
+        return {
+          sourceKind, sourceId, sessionId: row.id, provider, cwd: row.cwd, sdkSessionId: row.sdk_session_id,
+          model: provider === "codex" ? settings.codexMasterModel() : settings.masterModel(),
+          effort: settings.masterEffort(),
+        };
+      }
+      const row = repos.getWorker(sourceId);
+      if (!row?.worktree_path) return undefined;
+      const provider = row.provider || "claude";
+      return {
+        sourceKind, sourceId, sessionId: row.session_id, provider, cwd: row.worktree_path, sdkSessionId: row.sdk_session_id,
+        model: row.model || (provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
+        effort: row.effort || settings.workerEffort(),
+      };
+    },
+    forkSession: (source, sideId) => {
+      if (source.provider !== "codex") return sdkForkSession(source.sdkSessionId!, { title: "Side question" });
+      if (source.sourceKind === "master") {
+        return forkCodexMaster(source.sdkSessionId!, { sourceSessionId: source.sourceId, newSessionId: sideId });
+      }
+      return codexBackend.forkSession(source.sdkSessionId!);
+    },
+    // Only a Codex master Side owns a per-side bridge registration/CODEX_HOME. Claude and Codex
+    // worker Side conversations have no side-specific daemon resources to release.
+    cleanup: (sideId, source) => { if (source.provider === "codex" && source.sourceKind === "master") onSessionDelete(sideId); },
+  });
   // Worker completion → wake the home master (notify mode). deliver routes to the live master or persists for a cold one.
   const notifier = new WorkerNotifier({ bus, repos, deliver: (sessionId, n) => sessions.deliverWorkerNotification(sessionId, n) });
   const stopNotifier = notifier.start();
@@ -471,7 +506,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });
@@ -512,6 +547,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // reachable. (In noServer mode wss is attached via httpServer's 'upgrade' event and does not own it.)
     for (const ws of wss.clients) ws.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
+    await sides.closeAll();
     // Now finish in-flight writes before db.close() (G-SHUTDOWN-RACE): stop live workers + drain master
     // turns. This runs while httpServer is STILL listening (finding [15]): a codex master turn reaches its
     // in-process tools over the MCP bridge on that http server, so the bridge must stay reachable for the
