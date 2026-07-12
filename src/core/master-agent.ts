@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentBackend, ProviderMcpServer, ProviderPermissionCallback, ProviderToolDef } from "./agent-backend.js";
+import type { AgentBackend, InterruptReceipt, ProviderMcpServer, ProviderPermissionCallback, ProviderToolDef } from "./agent-backend.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
 import type { EventBus, CoreEvent } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
@@ -149,7 +149,7 @@ export class MasterAgent {
   private cumTurns = 0;
   // Abort handle for the in-progress turn (null if none). Same abort + interrupt pattern as the worker.
   private currentAbort: AbortController | null = null;
-  private currentQuery: { interrupt(): Promise<void>; pauseIdleWatchdog?(): void; resumeIdleWatchdog?(): void } | null = null;
+  private currentQuery: { interrupt(): Promise<InterruptReceipt | undefined>; pauseIdleWatchdog?(): void; resumeIdleWatchdog?(): void } | null = null;
   // Session teardown in progress (SessionManager.delete). Queued turns must not start (their DB writes would
   // race the row cascade → FK violations) and new worker notifications must not chain ghost SDK turns.
   private closing = false;

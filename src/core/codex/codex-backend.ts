@@ -1,4 +1,4 @@
-import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
+import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
 import type { CodexSpawn } from "./codex-transport.js";
@@ -708,14 +708,15 @@ abstract class CodexSessionBase implements AgentStream {
   // Between sending turn/start and receiving its response (or turn/started), activeTurnId is
   // still null and interrupt() no-ops — a tiny dead window Claude's SDK interrupt doesn't have;
   // acceptable best-effort (the turn then runs to completion).
-  async interrupt(): Promise<void> {
+  async interrupt(): Promise<InterruptReceipt | undefined> {
     this.disarmIdleWatchdog(); // an explicit interrupt (ours from the watchdog, or an external caller's) always disarms
-    if (!this.client || !this.threadId || !this.activeTurnId) return;
+    if (!this.client || !this.threadId || !this.activeTurnId) return undefined;
     try {
       await this.client.request("turn/interrupt", { threadId: this.threadId, turnId: this.activeTurnId });
     } catch {
       /* best-effort: turn may have just ended */
     }
+    return undefined; // codex has no receipt concept
   }
 
   async setModel(model: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { query as sdkQuery, createSdkMcpServer, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, MasterTurnOptions, SlashCommandInfo } from "./agent-backend.js";
+import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, SlashCommandInfo } from "./agent-backend.js";
 import { extractText, extractToolUses, extractToolResults } from "./sdk-extract.js";
 import { classifySystemPush } from "./system-push.js";
 import { turnContext } from "./result-telemetry.js";
@@ -145,8 +145,11 @@ class ClaudeStream implements AgentStream {
     for await (const msg of this.q) yield* translate(msg, state);
   }
 
-  async interrupt(): Promise<void> {
-    await this.q.interrupt();
+  async interrupt(): Promise<InterruptReceipt | undefined> {
+    // 0.3.205+: the control response is the interrupt receipt; older CLIs/fakes resolve void.
+    const r = (await this.q.interrupt()) as { still_queued?: string[] } | undefined | void;
+    const sq = r && typeof r === "object" ? r.still_queued : undefined;
+    return Array.isArray(sq) ? { stillQueued: sq } : undefined;
   }
 
   // Optional live controls: fakes (and other providers) may lack them — mirror the old `this.query?.x` guards.

@@ -333,6 +333,23 @@ describe("ClaudeStream controls", () => {
     await expect(stream.supportedCommands()).resolves.toEqual([]);
     await collect(stream);
   });
+
+  it("maps the SDK's typed interrupt receipt (still_queued) to InterruptReceipt.stillQueued", async () => {
+    const backend = new ClaudeBackend(fakeQuery(
+      [{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }],
+      { stillQueued: ["u1", "u2"] },
+    ));
+    const stream = backend.startTurn("hi", baseOpts());
+    await expect(stream.interrupt()).resolves.toEqual({ stillQueued: ["u1", "u2"] });
+    await collect(stream);
+  });
+
+  it("resolves undefined when the underlying query.interrupt() resolves void (older CLI)", async () => {
+    const backend = new ClaudeBackend(rawQuery([]));
+    const stream = backend.startTurn("hi", baseOpts());
+    await expect(stream.interrupt()).resolves.toBeUndefined();
+    await collect(stream);
+  });
 });
 
 // ── Background-task lifecycle frames + terminal_reason (2026-07-11 state-graph redesign) ──

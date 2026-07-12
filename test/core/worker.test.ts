@@ -1006,6 +1006,56 @@ describe("Worker", () => {
     await agent.stop();
   });
 
+  it("interruptTurn() returns the SDK's interrupt receipt and records a notice with the still-queued count", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
+      deps: { repos, bus: new EventBus(), model: "m", backend: fakeStreamingBackend((_t) => [
+        { type: "assistant", text: "ok" },
+        { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      ], { stillQueued: ["u1", "u2"] }) },
+    });
+    agent.start("go");
+    await until(() => agent.status() === "idle");
+
+    const receipt = await agent.interruptTurn();
+    expect(receipt).toEqual({ stillQueued: ["u1", "u2"] });
+
+    const notices = repos.listWorkerEvents("a1").filter(
+      (e) => e.type === "notice" && (JSON.parse(e.payload_json) as { text?: string }).text === "Interrupt receipt: 2 queued message(s) may still run.",
+    );
+    expect(notices.length).toBe(1);
+
+    await agent.stop();
+  });
+
+  it("interruptTurn() records NO 'Interrupt receipt' notice when stillQueued is empty/undefined", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({
+      id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
+      deps: { repos, bus: new EventBus(), model: "m", backend: fakeStreamingBackend((_t) => [
+        { type: "assistant", text: "ok" },
+        { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      ]) }, // no stillQueued opt → interrupt() resolves undefined
+    });
+    agent.start("go");
+    await until(() => agent.status() === "idle");
+
+    const receipt = await agent.interruptTurn();
+    expect(receipt).toBeUndefined();
+
+    const notices = repos.listWorkerEvents("a1").filter(
+      (e) => e.type === "notice" && (JSON.parse(e.payload_json) as { text?: string }).text?.startsWith("Interrupt receipt:"),
+    );
+    expect(notices.length).toBe(0);
+
+    await agent.stop();
+  });
+
   it("stop() clears deferred queue — emits 2 dropped notices after loop drains (no seq-interleave with consume loop)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });

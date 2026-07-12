@@ -55,10 +55,18 @@ export type AgentEvent =
   // for observability only, never branched on (live-verified 2026-07-11: bg detection rests on task frames).
   | { kind: "turn_end"; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string };
 
+// The SDK's typed interrupt receipt (0.3.205+ Query.interrupt() resolution), neutralized.
+// still_queued: uuids of async user messages that survive the interrupt. [] does NOT mean
+// "nothing will run" (unstamped messages are never listed) and may include internally-enqueued
+// uuids — consumers surface a COUNT only, never the ids.
+export interface InterruptReceipt {
+  stillQueued: string[];
+}
+
 // One live agent stream: async-iterate the events; control the underlying session via the methods.
 // Controls are best-effort: adapters must resolve (not throw) when the underlying session lacks a control.
 export interface AgentStream extends AsyncIterable<AgentEvent> {
-  interrupt(): Promise<void>;
+  interrupt(): Promise<InterruptReceipt | undefined>;
   setModel(model: string): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   supportedCommands(): Promise<SlashCommandInfo[]>;

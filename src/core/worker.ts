@@ -1,4 +1,4 @@
-import type { AgentBackend, AgentStream } from "./agent-backend.js";
+import type { AgentBackend, AgentStream, InterruptReceipt } from "./agent-backend.js";
 import { MessageQueue } from "./message-queue.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
 import type { EventBus, WorkerEventData } from "./events.js";
@@ -268,18 +268,24 @@ export class Worker {
   }
 
   // interrupt only the current turn (keep the session) — parity with the master stop()'s turn-abort. Does not close the queue, so additional instructions are possible.
-  async interruptTurn(): Promise<void> {
+  async interruptTurn(): Promise<InterruptReceipt | undefined> {
     // ORDER IS LOAD-BEARING: splice MUST run synchronously BEFORE the await — else the SDK could emit `result`
     // during the await and the consume loop would shift() a deferred item as a ghost turn before we clear.
     const dropped = this.deferred.splice(0);
+    let receipt: InterruptReceipt | undefined;
     try {
-      await this.stream?.interrupt();
+      receipt = await this.stream?.interrupt();
     } catch {
       /* best-effort */
     }
     for (const d of dropped) {
       this.record({ kind: "notice", text: `Dropped deferred instruction (interrupted): ${d.text.slice(0, 120)}` }, d.clientMsgId);
     }
+    if (receipt && receipt.stillQueued.length > 0) {
+      // SDK-internal queue — distinct from our deferred FIFO (dropped above); count only, ids are opaque.
+      this.record({ kind: "notice", text: `Interrupt receipt: ${receipt.stillQueued.length} queued message(s) may still run.` });
+    }
+    return receipt;
   }
 
   async waitUntilSettled(): Promise<void> {

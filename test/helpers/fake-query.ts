@@ -81,6 +81,7 @@ export function fakeQuery(
     commands?: Array<{ name: string; description: string; argumentHint?: string; aliases?: string[] }>;
     onSetModel?: (model: string) => void;
     onSetPermissionMode?: (mode: string) => void;
+    stillQueued?: string[]; // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
   },
 ): QueryFn {
   const fn = ((_input: unknown) => {
@@ -89,7 +90,7 @@ export function fakeQuery(
     }
     const iterator = gen();
     return Object.assign(iterator, {
-      interrupt: async () => {},
+      interrupt: async () => (opts?.stillQueued ? { still_queued: opts.stillQueued } : undefined),
       close: () => {},
       supportedCommands: async () => opts?.commands ?? [],
       setModel: async (model: string) => opts?.onSetModel?.(model),
@@ -102,7 +103,10 @@ export function fakeQuery(
 // Faithful reproduction of the streaming-input SDK: for each input (MessageQueue) message, yield the steps the responder gives,
 // and the generator stays alive until the input is closed (= the worker's stop). It exposes verbatim the "stay idle after a turn"
 // lifecycle that the finite fakeQuery hides (for worker tests; for the master's string prompt it terminates empty immediately).
-export function fakeStreamingQuery(responder: (userText: string, turn: number) => FakeStep[]): QueryFn {
+export function fakeStreamingQuery(
+  responder: (userText: string, turn: number) => FakeStep[],
+  opts?: { stillQueued?: string[] }, // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
+): QueryFn {
   const fn = ((input: { prompt?: unknown; options?: { abortController?: AbortController } }) => {
     const prompt = input?.prompt as AsyncIterable<{ message?: { content?: unknown } }> | undefined;
     const signal = input?.options?.abortController?.signal;
@@ -120,7 +124,7 @@ export function fakeStreamingQuery(responder: (userText: string, turn: number) =
     }
     const iterator = gen();
     return Object.assign(iterator, {
-      interrupt: async () => {},
+      interrupt: async () => (opts?.stillQueued ? { still_queued: opts.stillQueued } : undefined),
       close: () => {},
       supportedCommands: async () => [],
     });
@@ -133,6 +137,6 @@ export function fakeStreamingQuery(responder: (userText: string, turn: number) =
 export function fakeBackend(script: FakeStep[], opts?: Parameters<typeof fakeQuery>[1]): AgentBackend {
   return new ClaudeBackend(fakeQuery(script, opts));
 }
-export function fakeStreamingBackend(responder: (userText: string, turn: number) => FakeStep[]): AgentBackend {
-  return new ClaudeBackend(fakeStreamingQuery(responder));
+export function fakeStreamingBackend(responder: (userText: string, turn: number) => FakeStep[], opts?: { stillQueued?: string[] }): AgentBackend {
+  return new ClaudeBackend(fakeStreamingQuery(responder, opts));
 }

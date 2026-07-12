@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Repositories } from "../persistence/repositories.js";
 import type { EventBus } from "./events.js";
 import type { GitOps } from "./git-ops.js";
-import type { SlashCommandInfo } from "./agent-backend.js";
+import type { InterruptReceipt, SlashCommandInfo } from "./agent-backend.js";
 import { truncateBytes } from "./truncate.js";
 import { buildHandoffSeed } from "./handoff.js";
 
@@ -20,7 +20,7 @@ export interface WorkerLike {
   listCommands?(): Promise<SlashCommandInfo[]>; // slash commands/skills of a live session (absent = unsupported)
   setModel?(model: string): Promise<void>; // hot-swap the model while running (query.setModel)
   setPermissionMode?(mode: string): Promise<void>; // hot-swap the permission mode while running (query.setPermissionMode)
-  interruptTurn?(): Promise<void>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
+  interruptTurn?(): Promise<InterruptReceipt | undefined>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
   notice?(text: string): void; // surface an out-of-band informational notice in the worker transcript (degraded condition the orchestrator caught)
 }
 
@@ -491,8 +491,8 @@ export class FleetOrchestrator {
   }
 
   // abort only the current turn (keep the session) — parity with master turn-abort. Requires a live agent.
-  async interrupt(id: string): Promise<void> {
-    await this.requireLive(id).agent.interruptTurn?.();
+  async interrupt(id: string): Promise<InterruptReceipt | undefined> {
+    return await this.requireLive(id).agent.interruptTurn?.();
   }
 
   // called right before a turn starts (onTurnStart) — snapshot the whole worktree to a hidden ref and persist by seq. best-effort,

@@ -87,6 +87,23 @@ describe("fleet tools", () => {
     const workers = repos.listAllWorkers();
     expect(workers[0]!.cost_budget_usd).toBeNull();
   });
+
+  it("interrupt_worker appends a still-queued note when the fleet's interrupt resolves a non-empty receipt", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    const factory = (): WorkerLike => ({
+      start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {},
+      interruptTurn: async () => ({ stillQueued: ["u1", "u2"] }),
+    });
+    const fo = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    // fleet.spawn() registers a LIVE entry (fleet.interrupt requires one) — a bare repos.createWorker row would be detached/lazy.
+    const { id } = await fo.spawn({ homeSessionId: "s1", repoPath: "/code/app", label: "app", task: "do it" });
+    const defs = fleetToolDefs(fo, repos, "s1");
+    const interrupt = defs.find((d) => d.name === "interrupt_worker")!;
+    const out = ((await interrupt.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out).toContain("2 queued message(s) may still run");
+  });
 });
 
 describe("formatTranscript", () => {
