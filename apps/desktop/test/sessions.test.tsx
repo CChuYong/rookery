@@ -102,6 +102,18 @@ describe("Sessions overflow '⋯' button (audit #45)", () => {
 });
 
 describe("Sessions source segmentation + automation grouping", () => {
+  it("uses a compact source select instead of the wide segment in a narrow sidebar", () => {
+    const onFilter = vi.fn();
+    render(<Sessions compact activeId={null} onSelect={() => {}} filter={{ source: "all" }} onFilter={onFilter} sessions={[
+      mk({ id: "u", label: "uirow", origin: "ui" }),
+      mk({ id: "a", label: "autorow", origin: "automation", originRef: "auto1" }),
+    ] as never} />);
+    const source = screen.getByRole("combobox", { name: "세션 출처" });
+    expect(screen.queryByRole("tablist")).toBeNull();
+    fireEvent.change(source, { target: { value: "automation" } });
+    expect(onFilter).toHaveBeenCalledWith({ source: "automation" });
+  });
+
   it("shows a 3-way origin badge (ui / slack / auto)", () => {
     render(<Sessions activeId={null} onSelect={() => {}} sessions={[
       mk({ id: "u", label: "uirow", origin: "ui" }),

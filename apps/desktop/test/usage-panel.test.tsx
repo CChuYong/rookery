@@ -7,6 +7,16 @@ import { UsagePanel } from "../src/renderer/components/UsagePanel.js";
 // so assertions below use the Korean catalog strings.
 
 describe("UsagePanel", () => {
+  it("collapses usage rows in compact-height mode and lets the user expand them", () => {
+    const usage: UsageSnapshot = { session: null, weekly: null, today: { totalTokens: 1000, costUSD: 1.23 }, pct: null, codex: null, updatedAt: null, error: null };
+    render(<UsagePanel usage={usage} compact />);
+    expect(screen.queryByText("1.0k · $1.23")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "사용량 펼치기" }));
+    expect(screen.getByText("1.0k · $1.23")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "사용량 접기" }));
+    expect(screen.queryByText("1.0k · $1.23")).toBeNull();
+  });
+
   it("renders a skeleton (not nothing) while usage hasn't loaded yet — no pop-in later (audit #55)", () => {
     const { container } = render(<UsagePanel usage={null} />);
     // The title is present from the very first paint so the panel's height doesn't jump once data arrives (audit #56 too).

@@ -18,6 +18,7 @@ export default {
   "sessions.sourceUi": "UI",
   "sessions.sourceSlack": "Slack",
   "sessions.sourceAutomation": "Automation",
+  "sessions.sourceFilter": "Session source",
   "sessions.deletedAutomation": "(deleted automation)",
   "sessions.runs": "{count} runs",
   "sessions.allAutomations": "← All automations",

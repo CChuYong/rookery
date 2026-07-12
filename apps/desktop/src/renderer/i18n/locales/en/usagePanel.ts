@@ -16,4 +16,6 @@ export default {
   "usagePanel.titleHintCodex": "Account rate limits and daily tokens from the codex app-server — account-wide, not just this app's usage.",
   "usagePanel.codexUnavailable": "No Codex usage — check codex install/login",
   "usagePanel.resets": "resets {time}",
+  "usagePanel.expand": "Expand usage",
+  "usagePanel.collapse": "Collapse usage",
 } satisfies Catalog;

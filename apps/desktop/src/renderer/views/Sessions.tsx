@@ -7,6 +7,7 @@ import { Collapse } from "../components/Collapse.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { baseName } from "../lib/path.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
+import { Select } from "../ui/input.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -140,6 +141,7 @@ function SessionsImpl(p: {
   automations?: AutomationLite[]; // for resolving automation group header names
   filter?: SourceFilter; // source segment state (external = held by store → set by AutomationPage cross-link)
   onFilter?: (f: SourceFilter) => void;
+  compact?: boolean;
 }): JSX.Element {
   const t = useT();
   const locale = useLocale();
@@ -268,11 +270,26 @@ function SessionsImpl(p: {
   const menuSession = menu ? p.sessions.find((x) => x.id === menu.id) : undefined;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
+    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
       {/* sticky header — the tab area is opaque (nothing shows through), and the thin frosted fade below it appears naturally only 'when not at the top'. */}
       {showSegment && (
         <div className="sticky top-0 z-10 bg-surface">
-          <SourceSegment sources={presentSources} counts={counts} current={effectiveSource} onPick={(k) => p.onFilter?.({ source: k })} t={t} />
+          {p.compact ? (
+            <Select
+              size="xs"
+              aria-label={t("sessions.sourceFilter")}
+              className="mx-1 my-1 w-[calc(100%-0.5rem)] text-fg-dim"
+              value={effectiveSource}
+              onChange={(e) => p.onFilter?.({ source: e.target.value as SourceKind })}
+            >
+              {presentSources.map((kind) => (
+                <option key={kind} value={kind}>{t(SOURCE_LABEL_KEY[kind])} · {counts[kind]}</option>
+              ))}
+              <option value="all">{t("sessions.sourceAll")} · {counts.all}</option>
+            </Select>
+          ) : (
+            <SourceSegment sources={presentSources} counts={counts} current={effectiveSource} onPick={(k) => p.onFilter?.({ source: k })} t={t} />
+          )}
           <div className={cn("pointer-events-none absolute inset-x-0 top-full h-2.5 bg-gradient-to-b from-surface to-transparent backdrop-blur-sm transition-opacity duration-200", scrolled ? "opacity-100" : "opacity-0")} />
         </div>
       )}
