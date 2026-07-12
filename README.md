@@ -5,20 +5,24 @@
 A long-lived daemon hosts **master agent** sessions that register your repos, remember project context, and spawn **workers** that code in parallel — each in its own git worktree and branch, on the AI backend you choose (**Claude or Codex**). The desktop app, CLI, and Slack are thin clients: close them anytime, the daemon keeps working.
 
 <p align="center">
-  <img src="docs/assets/readme/hero-conversation.png" alt="A master session fanning work out to parallel workers — tool calls, worker branches, and per-turn cost in one conversation" width="920">
+  <img src="https://github.com/user-attachments/assets/a4eb2001-deaf-4738-92c1-435d1b216ce6" alt="Ask in plain language → the master spawns workers in isolated worktrees → a reviewer auto-spawns when they settle → the attention bell tells you what needs you" width="920">
 </p>
+
+Watch the full 90-second demo — a real run: real workers, real commits, real automation.
+
+https://github.com/user-attachments/assets/38face67-d553-4c51-9741-b0942ca337cd
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/readme/fleet-worker.png" alt="The fleet: workers per repo with status, backend, and cost — and each worker's own transcript and terminal"></td>
-    <td width="50%"><img src="docs/assets/readme/automation.png" alt="Automation rules: cron, interval, Slack, and worker-settled triggers driving master turns or worker spawns"></td>
+    <td width="50%"><img src="https://github.com/user-attachments/assets/3b339393-c0ec-4bdb-8e81-8817dae8d845" alt="The fleet: workers per repo with status, backend, and cost — and each worker's own transcript and terminal"></td>
+    <td width="50%"><img src="https://github.com/user-attachments/assets/f9cb81ec-31d8-4e40-a790-e50cccc673aa" alt="Automation rules: cron, interval, Slack, and worker-settled triggers driving master turns or worker spawns"></td>
   </tr>
   <tr>
     <td align="center"><sub><b>The fleet</b> — per-repo workers with status, backend & cost; every worker has its own transcript, diff, and terminal.</sub></td>
     <td align="center"><sub><b>Automation</b> — cron / interval / Slack / worker-settled triggers, with per-rule model, backend, and budget.</sub></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/assets/readme/attention-bell.png" alt="The attention bell ranking what needs you now: blocked questions, failures, and unreviewed results"></td>
+    <td colspan="2"><img src="https://github.com/user-attachments/assets/b958b17d-2bc6-4776-a65e-84e4d9267829" alt="The attention bell ranking what needs you now: blocked questions, failures, and unreviewed results"></td>
   </tr>
   <tr>
     <td colspan="2" align="center"><sub><b>The attention bell</b> — one ranked queue for what actually needs you: blocked questions first, failures second, unreviewed results third.</sub></td>
