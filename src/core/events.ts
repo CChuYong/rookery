@@ -7,7 +7,7 @@ export type WorkerEventData =
   | { kind: "tool_use"; id: string; name: string; input: string }
   | { kind: "tool_result"; id: string; isError: boolean; content: string }
   | { kind: "tool_progress"; id: string; elapsedSec: number } // elapsed seconds of an in-progress tool (live only)
-  | { kind: "result"; subtype: string; costUsd: number; numTurns: number; durationMs?: number; contextTokens?: number; contextWindow?: number }
+  | { kind: "result"; subtype: string; costUsd: number; numTurns: number; durationMs?: number; contextTokens?: number; contextWindow?: number; terminalReason?: string }
   | { kind: "notice"; text: string } // informational system push (compaction/retry/fallback) — shown as a single-line chip in the conversation
   | { kind: "error"; message: string };
 
