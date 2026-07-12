@@ -413,6 +413,18 @@ describe("MetricsView", () => {
     const { container } = render(<MetricsView items={[{ kind: "message", role: "user", content: "x" }]} />);
     expect(container.querySelector("span")).toBeNull();
   });
+  it("renders the terminalReason with a fail tone when present", () => {
+    const items: LogItem[] = [{ kind: "metrics", contextPct: 25, tokens: 50000, turns: 3, durationMs: 12300, cost: 1.25, terminalReason: "api_error" }];
+    render(<MetricsView items={items} />);
+    const reason = screen.getByText("⚠ api_error");
+    expect(reason).toBeInTheDocument();
+    expect(reason).toHaveClass("text-fail");
+  });
+  it("omits the terminalReason segment when absent", () => {
+    const items: LogItem[] = [{ kind: "metrics", contextPct: 25, tokens: 50000, turns: 3, durationMs: 12300, cost: 1.25 }];
+    render(<MetricsView items={items} />);
+    expect(screen.queryByText(/⚠/)).toBeNull();
+  });
 });
 
 describe("ConversationPane pending bubbles", () => {

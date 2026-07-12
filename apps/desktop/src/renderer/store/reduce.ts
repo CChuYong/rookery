@@ -10,7 +10,7 @@ export type LogItem =
   | { kind: "notice"; text: string; code?: string; params?: Record<string, string | number> } // informational system push (compaction/retry/fallback)
   // Master canUseTool (approve/AskUserQuestion) inline card. When resolved, shows a one-line summary instead of buttons.
   | { kind: "interaction"; requestId: string; mode: "approve" | "ask"; toolName?: string; inputText?: string; questions?: InteractionQuestion[]; resolved?: boolean; summary?: string; expired?: boolean }
-  | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number };
+  | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; terminalReason?: string };
 
 // The worker row's single source of truth is the protocol WorkerRow. archived always arrives on fleet.list but is omitted when building worker.* events, so it's optional.
 // permissionMode is required here (the worker composer's selector reads it) — defaulted to "bypassPermissions" wherever the source (event/list) doesn't carry it.
@@ -164,7 +164,7 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
       // Update only the elapsed seconds on the in-progress tool card (don't touch completed ones).
       return log.map((i) => (i.kind === "tool" && i.toolId === d.id && i.status === "in_progress" ? { ...i, elapsedSec: d.elapsedSec } : i));
     case "result":
-      return [...log, { kind: "metrics", contextPct: contextPct(d.contextTokens ?? 0, d.contextWindow ?? 0), tokens: d.contextTokens ?? 0, turns: d.numTurns ?? 0, durationMs: d.durationMs ?? 0, cost: d.costUsd ?? 0 }];
+      return [...log, { kind: "metrics", contextPct: contextPct(d.contextTokens ?? 0, d.contextWindow ?? 0), tokens: d.contextTokens ?? 0, turns: d.numTurns ?? 0, durationMs: d.durationMs ?? 0, cost: d.costUsd ?? 0, ...(d.terminalReason ? { terminalReason: d.terminalReason } : {}) }];
     case "error":
       return [...log, { kind: "message", role: "assistant", content: `⚠ ${d.message}` }];
     case "notice":

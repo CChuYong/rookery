@@ -612,6 +612,17 @@ describe("worker result telemetry → metrics LogItem", () => {
     const log = applySubEvent([], { kind: "result", subtype: "success", costUsd: 0, numTurns: 1 });
     expect(log.some((i) => i.kind === "metrics")).toBe(true);
   });
+  it("worker result carrying terminalReason passes it through to the metrics LogItem", () => {
+    const log = applySubEvent([], { kind: "result", subtype: "error", costUsd: 0.1, numTurns: 1, terminalReason: "api_error" });
+    const m = log.find((i) => i.kind === "metrics");
+    expect(m).toMatchObject({ kind: "metrics", terminalReason: "api_error" });
+  });
+  it("worker result without terminalReason omits the field (no undefined leaking in)", () => {
+    const log = applySubEvent([], { kind: "result", subtype: "success", costUsd: 0.1, numTurns: 1 });
+    const m = log.find((i) => i.kind === "metrics") as any;
+    expect(m.terminalReason).toBeUndefined();
+    expect("terminalReason" in m).toBe(false);
+  });
 });
 
 describe("Side conversation reducer", () => {

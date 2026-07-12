@@ -8,7 +8,7 @@ import { useT } from "../i18n/provider.js";
 export function MetricsView({ items }: { items: LogItem[] }): JSX.Element | null {
   const t = useT();
   const m = [...items].reverse().find((it) => it.kind === "metrics") as
-    | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number }
+    | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; terminalReason?: string }
     | undefined;
   if (!m) return null;
   return (
@@ -20,6 +20,12 @@ export function MetricsView({ items }: { items: LogItem[] }): JSX.Element | null
       <span>{t("sessionMetrics.turns", { count: m.turns })}</span>
       <span>·</span>
       <span>{fmtUsd(m.cost)}</span>
+      {m.terminalReason && (
+        <>
+          <span>·</span>
+          <span className="text-fail" title={t("sessionMetrics.terminalReason")}>⚠ {m.terminalReason}</span>
+        </>
+      )}
     </span>
   );
 }
