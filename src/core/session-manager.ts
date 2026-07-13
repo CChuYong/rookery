@@ -184,13 +184,21 @@ export class SessionManager {
       sourceSessionId: sessionId,
       newSessionId: id,
     });
-    // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
-    this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
-    this.deps.repos.setSdkSessionId(id, forkedUuid);
-    this.deps.repos.copySessionEvents(sessionId, id);
-    this.deps.repos.setSessionLabel(id, forkLabel);
-    this.deps.bus.emit({ type: "session.label", sessionId: id, label: forkLabel }); // live UI label
-    return this.build(id, row.cwd, forkedUuid, null);
+    try {
+      // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
+      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
+      this.deps.repos.setSdkSessionId(id, forkedUuid);
+      this.deps.repos.copySessionEvents(sessionId, id);
+      this.deps.repos.setSessionLabel(id, forkLabel);
+      this.deps.bus.emit({ type: "session.label", sessionId: id, label: forkLabel }); // live UI label
+      return this.build(id, row.cwd, forkedUuid, null);
+    } catch (error) {
+      // Codex's native fork router seeds the new target home before this DB row exists. If persistence
+      // fails, no normal session.delete can discover that home, so roll back both ownership records.
+      try { if (this.deps.repos.getSession(id)) this.deps.repos.deleteSession(id); } catch { /* best-effort */ }
+      try { this.deps.onSessionDelete?.(id); } catch { /* best-effort */ }
+      throw error;
+    }
   }
 
   get(id: string): Session | undefined {

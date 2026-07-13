@@ -236,6 +236,33 @@ describe("FleetOrchestrator", () => {
     expect(repos.getWorker(id)!.provider).toBe("codex");
   });
 
+  it("reclaims provider-owned target state when a native fork succeeds but worktree provisioning fails", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build", worktreePath: "/wt/src", branch: "rookery/src", provider: "codex" });
+    repos.setWorkerSdkSessionId("src", "src-thread");
+    class FailingGit extends FakeGitOps {
+      async addWorktree(): Promise<void> { throw new Error("worktree boom"); }
+    }
+    const cleaned: Array<{ id: string; provider?: string }> = [];
+    const fleet = new FleetOrchestrator({
+      repos,
+      bus: new EventBus(),
+      git: new FailingGit({ checkpointSha: "snap0" }),
+      factory: () => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} }),
+      worktreesDir: "/wt",
+      forkSession: async () => ({ sessionId: "forked-thread" }),
+      onWorkerDiscard: (id, provider) => cleaned.push({ id, provider }),
+      exists: () => true,
+      idgen: () => "fk-failed",
+    });
+
+    await expect(fleet.fork("src")).rejects.toThrow("worktree boom");
+
+    expect(cleaned).toEqual([{ id: "fk-failed", provider: "codex" }]);
+    expect(repos.getWorker("fk-failed")).toBeUndefined();
+  });
+
   it("passes spawn-time model/effort override to the factory", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "sA", cwd: "/x" });

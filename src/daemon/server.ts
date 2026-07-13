@@ -296,8 +296,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       seedCodexWorkerHomeFromSource(config.home, sourceWorkerId, newWorkerId, result.sessionId);
       return result;
     },
-    onWorkerDiscard: (id) => {
-      if ((repos.getWorker(id)?.provider || "claude") === "codex") removeCodexWorkerHome(config.home, id);
+    onWorkerDiscard: (id, provider) => {
+      if ((provider ?? repos.getWorker(id)?.provider ?? "claude") === "codex") removeCodexWorkerHome(config.home, id);
     },
   });
   // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
@@ -324,12 +324,12 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
   // P3 Track A (docs/2026-07-06-p3-codex-fork-automation.md): forks a codex MASTER session. Unlike
-  // fleet's codex fork (workers share one CODEX_HOME, so a plain forkSession(threadId) suffices),
-  // a codex master's rollouts live in a per-session CODEX_HOME — the fork child must run there
+  // fleet's Codex fork (which runs in the source worker's isolated home), a Codex master's rollouts
+  // live in a per-session CODEX_HOME — the fork child must run there
   // (thread/fork looks up threadId in the CWD it's spawned with), and the NEW session's home must be
   // pre-seeded with the source's sessions/ tree (parent + forked rollout) so context survives (the
   // forked rollout is a delta referencing the parent — see codex-home.ts seedCodexHomeFromSource).
-  // Only reachable via SessionManager's forkSession router below — the fleet/worker one is unchanged.
+  // Only reachable via SessionManager's forkSession router below.
   const forkCodexMaster = async (sourceThreadId: string, opts?: { sourceSessionId?: string; newSessionId?: string }): Promise<{ sessionId: string }> => {
     const sourceSessionId = opts?.sourceSessionId;
     const newSessionId = opts?.newSessionId;

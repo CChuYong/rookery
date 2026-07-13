@@ -61,7 +61,7 @@ export interface FleetDeps {
   }) => Promise<{ sessionId: string }>;
   // Permanent worktree discard owns provider-home cleanup. It runs best-effort in discard's
   // finally path, including worker.delete (which delegates to discard), but never on ordinary stop.
-  onWorkerDiscard?: (id: string) => void;
+  onWorkerDiscard?: (id: string, provider?: string) => void;
 }
 
 interface Entry {
@@ -293,6 +293,9 @@ export class FleetOrchestrator {
       // removeWorktree is harmless if addWorktree itself threw: RealGitOps ignores not-a-working-tree errors.
       try { await this.deps.git.removeWorktree(src.repo_path, worktreePath, branch); } catch { /* best-effort */ }
       try { await this.deps.git.removeCheckpointRefs(src.repo_path, newId); } catch { /* best-effort */ }
+      // A provider-native fork may have materialized target-owned state before git/DB provisioning.
+      // There is no worker row to drive ordinary discard cleanup yet, so reclaim it explicitly.
+      try { this.deps.onWorkerDiscard?.(newId, provider); } catch { /* best-effort */ }
       throw err;
     }
   }
@@ -644,7 +647,7 @@ export class FleetOrchestrator {
       await inflight.catch(() => {});
       if (!this.entries.has(id)) {
         this.setStatusRowOnly(id, "stopped");
-        try { this.deps.onWorkerDiscard?.(id); } catch { /* best-effort */ }
+        try { this.deps.onWorkerDiscard?.(id, this.deps.repos.getWorker(id)?.provider ?? undefined); } catch { /* best-effort */ }
         return;
       }
     }
@@ -663,7 +666,7 @@ export class FleetOrchestrator {
       await this.deps.git.removeWorktree(e.repoPath, e.worktreePath, e.branch);
     } finally {
       this.setStatus(id, "stopped", true); // status always settles even if removeWorktree throws (FL-4) — the error propagates after finally
-      try { this.deps.onWorkerDiscard?.(id); } catch { /* best-effort */ }
+      try { this.deps.onWorkerDiscard?.(id, e.provider); } catch { /* best-effort */ }
     }
   }
 
