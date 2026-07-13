@@ -37,7 +37,7 @@ function setup() {
   const sent: string[] = [];
   const socket: ClientSocket = { send: (d) => sent.push(d) };
   const conn = new Connection(socket, sm, bus, fleet, repos);
-  return { conn, sent, repos };
+  return { conn, sent, repos, bus, fleet, sm, socket };
 }
 
 type FleetOverride = {
@@ -109,6 +109,41 @@ function parsed(sent: string[]): Array<Record<string, unknown>> {
 }
 
 describe("Connection", () => {
+  it("routes capabilities.snapshot to the injected provider and preserves reqId", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const snapshot = {
+      target: { kind: "session" as const, id: "s1", label: "Main", provider: "claude" as const, cwd: "/repo" },
+      generatedAt: "2026-07-13T12:00:00.000Z",
+      entries: [],
+      diagnostics: [],
+    };
+    const capabilities = { snapshot: vi.fn(async () => snapshot) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.snapshot", reqId: "cap-1", target: { kind: "session", id: "s1" } }));
+
+    expect(capabilities.snapshot).toHaveBeenCalledWith({ kind: "session", id: "s1" });
+    expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.snapshot.result", reqId: "cap-1", snapshot });
+  });
+
+  it("returns a correlated error when capability snapshot resolution fails", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const capabilities = { snapshot: vi.fn(async () => { throw new Error("unknown capability target: worker:missing"); }) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.snapshot", reqId: "cap-2", target: { kind: "worker", id: "missing" } }));
+
+    expect(parsed(sent).at(-1)).toMatchObject({ type: "error", reqId: "cap-2", message: expect.stringContaining("unknown capability target: worker:missing") });
+  });
+
   it("starts Side only after replying with its id, routes lifecycle commands, and cleans owned Side threads on dispose", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();

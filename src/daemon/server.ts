@@ -31,6 +31,8 @@ import { makeModelsProvider } from "../core/models-provider.js";
 import { makeCodexModelsProvider } from "../core/codex-models-provider.js";
 import { makeCodexUsageProvider } from "../core/codex-usage-provider.js";
 import { makeCodexAuthProvider } from "../core/codex-auth-provider.js";
+import { makeCodexCapabilitiesProvider } from "../core/codex-capabilities-provider.js";
+import { CapabilityService } from "../core/capabilities/service.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -360,6 +362,33 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // Codex auth-readiness probe (for the desktop Settings Codex sub-tab): spawns a short-lived app-server
   // child and reads its account state. NOT cached (auth changes at runtime) — see codex-auth-provider.ts.
   const codexAuthProvider = makeCodexAuthProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
+  // Read-only provider-neutral inventory for Capability Center. Codex structured probes share the
+  // same binary/auth environment as turns; master targets override CODEX_HOME with their materialized
+  // per-session home when one exists so the snapshot observes the same config/MCP/skills as the turn.
+  const codexCapabilitiesProvider = makeCodexCapabilitiesProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
+  const capabilityService = new CapabilityService({
+    getSession: (id) => {
+      const row = repos.getSession(id);
+      return row ? { id: row.id, cwd: row.cwd, label: row.label, provider: row.provider } : undefined;
+    },
+    getWorker: (id) => {
+      const row = repos.getWorker(id);
+      return row ? { id: row.id, worktreePath: row.worktree_path, repoPath: row.repo_path, label: row.label, provider: row.provider } : undefined;
+    },
+    listClaudeCommands: async ({ target, cwd }) => {
+      if (target.kind === "worker") {
+        const live = await fleet.listCommands(target.id);
+        if (live.length > 0) return { commands: live };
+      }
+      return commandCatalog.inspect(cwd);
+    },
+    listCodexCapabilities: ({ cwd, env }) => codexCapabilitiesProvider.list({ cwd, ...(env ? { env } : {}) }),
+    codexEnvForTarget: (target) => {
+      if (target.kind !== "session") return undefined;
+      const sessionHome = path.join(config.home, "codex-homes", target.id);
+      return fs.existsSync(sessionHome) ? { CODEX_HOME: sessionHome } : undefined;
+    },
+  });
 
   // External MCP server (rookery-as-MCP): a SECOND McpBridge mounted at /mcp-ext, gating fleet control for
   // external MCP clients (Claude Code/Cursor/Codex). Off by default (fail-closed) via the mcpExposure setting;
@@ -506,7 +535,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides, capabilityService);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });

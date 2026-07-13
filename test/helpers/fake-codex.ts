@@ -38,6 +38,13 @@ export interface FakeCodexServerOpts {
   modelList?: unknown[]; // scripted `model/list` data[] rows (codex-models-provider.ts tests) — absent → responds with an empty data[]
   rateLimits?: unknown; // account/rateLimits/read result (absent → generic empty {} via the fallback)
   accountUsage?: unknown; // account/usage/read result (absent → generic empty {})
+  // Extra JSON-RPC scripts for focused provider tests. Existing built-in handlers still win;
+  // this hook handles methods that would otherwise receive the generic empty result.
+  rpc?: Record<string, (params: Record<string, unknown>, call: number) => {
+    result?: unknown;
+    error?: { code: number; message: string };
+    silent?: boolean;
+  }>;
 }
 
 // Drives CodexClient exactly like fakeStreamingQuery drives ClaudeBackend: per turn/start, replays the
@@ -67,6 +74,7 @@ export function fakeCodexSpawn(
     let killed = false;
     let turnCount = 0;
     let provisioned = false; // set once account/login/start is called → subsequent account/read reports an authed apiKey account (mirrors real provisioning)
+    const rpcCalls = new Map<string, number>();
     let currentTurnId: string | null = null; // the most recently turn/start-ed turn's id — turn/interrupt targets THIS, not a recomputed/advanced counter
     const send = (o: unknown) => { if (!killed) queueMicrotask(() => { if (!killed) lineCb(JSON.stringify(o)); }); };
     const transport: CodexTransport = {
@@ -181,6 +189,16 @@ export function fakeCodexSpawn(
         if (msg.method === "account/login/start") { provisioned = true; send({ id: msg.id, result: {} }); return; }
         if (msg.method === "account/rateLimits/read") { send({ id: msg.id, result: opts.rateLimits ?? {} }); return; }
         if (msg.method === "account/usage/read") { send({ id: msg.id, result: opts.accountUsage ?? {} }); return; }
+        const rpc = opts.rpc?.[msg.method];
+        if (rpc) {
+          const call = rpcCalls.get(msg.method) ?? 0;
+          rpcCalls.set(msg.method, call + 1);
+          const scripted = rpc(msg.params ?? {}, call);
+          if (scripted.silent) return;
+          if (scripted.error) send({ id: msg.id, error: scripted.error });
+          else send({ id: msg.id, result: scripted.result });
+          return;
+        }
         // any other request: generic empty result
         send({ id: msg.id, result: {} });
       },

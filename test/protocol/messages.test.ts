@@ -3,6 +3,18 @@ import { parseClientMessage, serializeServerMessage, clientMessageSchema } from 
 import type { ServerMessage } from "../../src/protocol/messages.js";
 
 describe("protocol v2 client messages", () => {
+  it("parses capability snapshots for session and worker targets and rejects invalid targets", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" },
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" },
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c3", target: { kind: "repo", id: "r1" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c4", target: { kind: "session", id: "" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", target: { kind: "session", id: "s1" } }))).toThrow();
+  });
+
   it("settings.set: accepts null (reset-to-default) and validates effort against the enum", () => {
     // null → reset to default (only reachable if the schema is nullable)
     expect(() => parseClientMessage(JSON.stringify({ type: "settings.set", reqId: "q", settings: { masterModel: null } }))).not.toThrow();

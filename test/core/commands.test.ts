@@ -38,5 +38,12 @@ describe("CommandCatalog", () => {
     const qfn = (() => { throw new Error("nope"); }) as unknown as QueryFn;
     const cat = new CommandCatalog(qfn, { model: "m" });
     expect(await cat.forCwd("/r")).toEqual([]);
+    expect(await cat.inspect("/r")).toEqual({ commands: [], error: "nope" });
+  });
+
+  it("exposes successful empty discovery without an error", async () => {
+    const qfn = fakeQuery([], { commands: [] }) as unknown as QueryFn;
+    const cat = new CommandCatalog(qfn, { model: "m" });
+    expect(await cat.inspect("/r")).toEqual({ commands: [] });
   });
 });

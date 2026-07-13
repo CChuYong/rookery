@@ -5,6 +5,7 @@ import type { SettingsValues } from "../core/settings.js";
 import type { SlashCommandInfo } from "../core/commands.js";
 import type { SourceItem } from "../core/source-intake.js";
 import type { AuthStatus } from "../core/auth-status.js";
+import type { CapabilitySnapshot } from "../core/capabilities/types.js";
 import type { Automation, AutomationInput } from "../persistence/repositories.js";
 import { isValidCron } from "../core/cron.js";
 
@@ -111,6 +112,14 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
   // Slash command/skill candidates. If workerId is given, probe within that live session; otherwise probe by cwd.
   z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
+  z.object({
+    type: z.literal("capabilities.snapshot"),
+    reqId: z.string(),
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("session"), id: z.string().min(1) }),
+      z.object({ kind: z.literal("worker"), id: z.string().min(1) }),
+    ]),
+  }),
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
   z.object({ type: z.literal("models.list"), reqId: z.string() }),
   z.object({ type: z.literal("codex.models.list"), reqId: z.string() }),
@@ -246,6 +255,7 @@ export type ServerMessage =
   | { type: "codex.models.result"; reqId: string; models: CodexModelInfo[] | null }
   | { type: "codex.authStatus.result"; reqId: string; status: CodexAuthStatus | null }
   | { type: "commands.result"; reqId: string; commands: SlashCommandInfo[] }
+  | { type: "capabilities.snapshot.result"; reqId: string; snapshot: CapabilitySnapshot }
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
   | { type: "mcp.status.result"; reqId: string; scope: "off" | "readonly" | "full"; url: string | null }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
@@ -304,6 +314,7 @@ export interface RequestResultMap {
   "codex.models.list": Extract<ServerMessage, { type: "codex.models.result" }>;
   "codex.authStatus": Extract<ServerMessage, { type: "codex.authStatus.result" }>;
   "commands.list": Extract<ServerMessage, { type: "commands.result" }>;
+  "capabilities.snapshot": Extract<ServerMessage, { type: "capabilities.snapshot.result" }>;
   "settings.get": Extract<ServerMessage, { type: "settings.result" }>;
   "settings.set": Extract<ServerMessage, { type: "settings.result" }>;
   "mcp.status": Extract<ServerMessage, { type: "mcp.status.result" }>;

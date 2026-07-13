@@ -25,6 +25,7 @@ import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
 import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
 import type { SideSourceKind } from "../core/side-conversation.js";
+import type { CapabilitySnapshot, CapabilityTarget } from "../core/capabilities/types.js";
 
 export interface UsageProvider {
   snapshot(): UsageSnapshot;
@@ -55,6 +56,10 @@ export interface SettingsProvider {
 
 export interface CommandProvider {
   forCwd(cwd: string): Promise<SlashCommandInfo[]>;
+}
+
+export interface CapabilitySnapshotProvider {
+  snapshot(target: CapabilityTarget): Promise<CapabilitySnapshot>;
 }
 
 export interface SourceProvider {
@@ -120,6 +125,7 @@ export class Connection {
     private readonly codexAuth?: CodexAuthProvider,
     private readonly externalMcp?: ExternalMcpController,
     private readonly sides?: SideConversationController,
+    private readonly capabilities?: CapabilitySnapshotProvider,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -499,6 +505,12 @@ export class Connection {
           if (cwd && this.commands) commands = await this.commands.forCwd(cwd);
         }
         this.reply({ type: "commands.result", reqId: msg.reqId, commands });
+        return;
+      }
+      case "capabilities.snapshot": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability snapshots unavailable", reqId: msg.reqId });
+        const snapshot = await this.capabilities.snapshot(msg.target);
+        this.reply({ type: "capabilities.snapshot.result", reqId: msg.reqId, snapshot });
         return;
       }
       case "usage.get": {
