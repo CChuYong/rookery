@@ -6,6 +6,7 @@ import { MessageQueue } from "../../../src/core/message-queue.js";
 import { openDb } from "../../../src/persistence/db.js";
 import { Repositories } from "../../../src/persistence/repositories.js";
 import { scheduleToolDefs } from "../../../src/tools/schedule-tools.js";
+import type { ResolvedAgentCapabilities } from "../../../src/core/capabilities/types.js";
 
 async function collect(stream: AgentStream): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
@@ -22,7 +23,76 @@ function baseOpts(over: Record<string, unknown> = {}) {
   return { cwd: "/wt", model: "gpt-5.5", effort: "high", permissionMode: "bypassPermissions", abortController: new AbortController(), ...over };
 }
 
+function managedCapabilities(revision = "managed-revision"): ResolvedAgentCapabilities {
+  return { revision, blocked: false, instructions: [], skills: [], mcpServers: [] };
+}
+
 describe("CodexBackend.openSession — translation", () => {
+  it("materializes a worker target before spawn and merges its isolated home, aliases, and instructions", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const calls: Array<{ key: string; capabilities: ResolvedAgentCapabilities }> = [];
+    const runtime = {
+      prepareWorker(key: string, capabilities: ResolvedAgentCapabilities) {
+        calls.push({ key, capabilities });
+        return {
+          codexHome: "/rookery/codex-homes/worker-worker-1",
+          env: { ROOKERY_CAP_SECRET_A: "actual-secret-value" },
+          systemPromptAppend: "MANAGED-CODEX-INSTRUCTIONS",
+        };
+      },
+      prepareMaster: vi.fn(),
+    };
+    const b = new CodexBackend({
+      spawn: fake.spawn,
+      defaultModel: () => "gpt-5.5",
+      env: () => ({ CODEX_HOME: "/shared", OTHER: "kept" }),
+      runtime,
+    });
+    const capabilities = managedCapabilities();
+    const q = new MessageQueue(); q.push("go"); q.close();
+    await collect(b.openSession(q, baseOpts({
+      runtimeKey: "worker-1",
+      capabilities,
+      systemPromptAppend: "WORKER-FENCE",
+    })));
+
+    expect(calls).toEqual([{ key: "worker-1", capabilities }]);
+    expect(fake.spawns[0]!.env).toEqual({
+      CODEX_HOME: "/rookery/codex-homes/worker-worker-1",
+      OTHER: "kept",
+      ROOKERY_CAP_SECRET_A: "actual-secret-value",
+    });
+    expect(fake.spawns[0]!.args).toBeUndefined();
+    expect(fake.requests.find((request) => request.method === "thread/start")!.params).toMatchObject({
+      developerInstructions: "WORKER-FENCE\n\nMANAGED-CODEX-INSTRUCTIONS",
+    });
+    expect(JSON.stringify(fake.requests)).not.toContain("actual-secret-value");
+  });
+
+  it("fails managed worker materialization synchronously before spawning a provider child", () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({
+      spawn: fake.spawn,
+      defaultModel: () => "gpt-5.5",
+      runtime: {
+        prepareWorker: () => { throw new Error("materialization failed"); },
+        prepareMaster: vi.fn(),
+      },
+    });
+    expect(() => b.openSession(new MessageQueue(), baseOpts({
+      runtimeKey: "worker-1",
+      capabilities: managedCapabilities(),
+    }))).toThrow("materialization failed");
+    expect(fake.spawns).toHaveLength(0);
+  });
+
+  it("rejects managed worker capabilities without a stable runtime key", () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    expect(() => b.openSession(new MessageQueue(), baseOpts({ capabilities: managedCapabilities() }))).toThrow("runtimeKey");
+    expect(fake.spawns).toHaveLength(0);
+  });
+
   it("runs one turn: early session_id, deltas, message, command tool pair, telemetry", async () => {
     const { backend: b } = backend(() => [
       { kind: "reasoningDelta", text: "hmm" },
@@ -224,6 +294,73 @@ describe("CodexBackend.startTurn", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.key).toBe("sess-1");
     expect(calls[0]!.defs().map((d) => d.name).sort()).toEqual(["list_repos", "remember"]);
+  });
+
+  it("materializes master bridge and managed capabilities together before spawn", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+    const calls: Array<{ key: string; names: string[]; capabilities: ResolvedAgentCapabilities }> = [];
+    const runtime = {
+      prepareWorker: vi.fn(),
+      prepareMaster(key: string, defs: () => ProviderToolDef[], capabilities: ResolvedAgentCapabilities) {
+        calls.push({ key, names: defs().map((def) => def.name), capabilities });
+        return {
+          codexHome: "/rookery/codex-homes/master-1",
+          env: { ROOKERY_CAP_SECRET_MASTER: "master-secret-value" },
+          systemPromptAppend: "MASTER-MANAGED",
+        };
+      },
+    };
+    const b = new CodexBackend({
+      spawn: fake.spawn,
+      defaultModel: () => "gpt-5.5",
+      env: () => ({ OTHER: "kept" }),
+      runtime,
+    });
+    const capabilities = managedCapabilities("master-revision");
+    await collect(b.startTurn("go", baseOpts({
+      sessionKey: "master-1",
+      runtimeKey: "master-1",
+      capabilities,
+      systemPromptAppend: "MASTER-BASE",
+      toolDefs: { memory: [fakeToolDef("remember")] },
+    }) as never));
+
+    expect(calls).toEqual([{ key: "master-1", names: ["remember"], capabilities }]);
+    expect(fake.spawns[0]!.env).toEqual({
+      OTHER: "kept",
+      ROOKERY_CAP_SECRET_MASTER: "master-secret-value",
+      CODEX_HOME: "/rookery/codex-homes/master-1",
+    });
+    expect(fake.requests.find((request) => request.method === "thread/start")!.params).toMatchObject({
+      developerInstructions: "MASTER-BASE\n\nMASTER-MANAGED",
+    });
+    expect(JSON.stringify(fake.requests)).not.toContain("master-secret-value");
+  });
+
+  it("rejects managed MCP on a read-only Side before materialization", () => {
+    const fake = fakeCodexSpawn(() => []);
+    const prepareMaster = vi.fn();
+    const capabilities = managedCapabilities();
+    capabilities.mcpServers = [{
+      generatedName: "rookery__pack__mcp",
+      packInstanceId: "p",
+      packId: "pack",
+      digest: "d",
+      sourcePath: "/pack",
+      spec: { id: "mcp", transport: "streamable-http", url: "https://example.test/mcp" },
+    }];
+    const b = new CodexBackend({
+      spawn: fake.spawn,
+      defaultModel: () => "gpt-5.5",
+      runtime: { prepareWorker: vi.fn(), prepareMaster },
+    });
+    expect(() => b.startTurn("inspect", baseOpts({
+      readOnly: true,
+      runtimeKey: "side-1",
+      capabilities,
+    }) as never)).toThrow("read-only");
+    expect(prepareMaster).not.toHaveBeenCalled();
+    expect(fake.spawns).toHaveLength(0);
   });
 
   // P2.5 Track A reconciliation (item 4): a codex master turn's per-session CODEX_HOME (from the
