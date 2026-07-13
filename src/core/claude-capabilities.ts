@@ -29,6 +29,14 @@ export interface ClaudeCapabilityPlan {
   diagnostics: string[];
 }
 
+export interface ClaudeRuntimeLaunchOptions {
+  revision: string;
+  plugins: Array<{ type: "local"; path: string }>;
+  env: Record<string, string>;
+  systemPromptAppend?: string;
+  diagnostics: string[];
+}
+
 function safeName(value: string, separator: "_" | "-"): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, separator).replace(new RegExp(`^\\${separator}+|\\${separator}+$`, "g"), "");
 }

@@ -4,18 +4,11 @@ import path from "node:path";
 import {
   compileClaudeCapabilities,
   type ClaudeCapabilityPlan,
+  type ClaudeRuntimeLaunchOptions,
   type ClaudeSecretBinding,
 } from "../core/claude-capabilities.js";
 import { validateCapabilityPack } from "../core/capabilities/manifest.js";
 import type { ResolvedAgentCapabilities, SecretRef } from "../core/capabilities/types.js";
-
-export interface MaterializedClaudeCapabilities {
-  revision: string;
-  plugins: Array<{ type: "local"; path: string }>;
-  env: Record<string, string>;
-  systemPromptAppend?: string;
-  diagnostics: string[];
-}
 
 export interface CapabilityRuntimeOptions {
   env?: NodeJS.ProcessEnv;
@@ -91,7 +84,7 @@ export class CapabilityRuntime {
     this.env = options.env ?? process.env;
   }
 
-  materializeClaude(capabilities: ResolvedAgentCapabilities): MaterializedClaudeCapabilities {
+  materializeClaude(capabilities: ResolvedAgentCapabilities): ClaudeRuntimeLaunchOptions {
     if (capabilities.blocked) {
       throw new Error(`capability runtime ${capabilities.revision} is blocked`);
     }
@@ -177,7 +170,7 @@ export class CapabilityRuntime {
     }
   }
 
-  private launchOptions(plan: ClaudeCapabilityPlan, finalRoot: string): MaterializedClaudeCapabilities {
+  private launchOptions(plan: ClaudeCapabilityPlan, finalRoot: string): ClaudeRuntimeLaunchOptions {
     const env: Record<string, string> = {};
     for (const binding of plan.secretBindings) {
       const value = refValue(binding, this.options, this.env);

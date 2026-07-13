@@ -228,6 +228,54 @@ describe("ClaudeBackend — option assembly", () => {
     expect(o.mcpServers).toBe(mcp);
   });
 
+  it("adds materialized plugins, environment aliases, and instructions without replacing direct MCP or native settings", async () => {
+    const cap = capture(RESULT);
+    const managed = {
+      revision: "revision-a",
+      blocked: false,
+      instructions: [],
+      skills: [],
+      mcpServers: [],
+    };
+    const loads: unknown[] = [];
+    const backend = new ClaudeBackend(cap.fn, (capabilities) => {
+      loads.push(capabilities);
+      return {
+        revision: capabilities.revision,
+        plugins: [{ type: "local", path: "/rookery/runtime/plugin" }],
+        env: { ROOKERY_CAP_SECRET_SAFE_ALIAS: "actual-secret-value" },
+        systemPromptAppend: "MANAGED INSTRUCTIONS",
+        diagnostics: [],
+      };
+    });
+    const mcp = { fleet: { marker: true } };
+
+    await collect(backend.startTurn("hi", {
+      ...baseOpts({ runtimeKey: "session-1", capabilities: managed, systemPromptAppend: "BASE INSTRUCTIONS" }),
+      mcpServers: mcp,
+    }));
+
+    const options = cap.input().options!;
+    expect(loads).toEqual([managed]);
+    expect(options.plugins).toEqual([{ type: "local", path: "/rookery/runtime/plugin" }]);
+    expect(options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: "BASE INSTRUCTIONS\n\nMANAGED INSTRUCTIONS",
+    });
+    expect((options.env as Record<string, string>).ROOKERY_CAP_SECRET_SAFE_ALIAS).toBe("actual-secret-value");
+    expect(options.mcpServers).toBe(mcp);
+    expect(options.settingSources).toBeUndefined();
+  });
+
+  it("fails closed when managed capabilities have no runtime key or loader", () => {
+    const managed = { revision: "r", blocked: false, instructions: [], skills: [], mcpServers: [] };
+    expect(() => new ClaudeBackend(fakeQuery([])).startTurn("hi", baseOpts({ capabilities: managed })))
+      .toThrow("runtimeKey");
+    expect(() => new ClaudeBackend(fakeQuery([])).startTurn("hi", baseOpts({ capabilities: managed, runtimeKey: "s1" })))
+      .toThrow("runtime is unavailable");
+  });
+
   // PICKUP from Task 2 review (M1): wrapped base servers must advertise version "0.0.1" (parity with the
   // pre-refactor inline createMemoryToolsServer()/createSdkMcpServer() calls, which always passed version).
   // The wrapped McpSdkServerConfigWithInstance only exposes {type, name, instance} publicly — the version
