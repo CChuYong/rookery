@@ -124,6 +124,8 @@ describe("CapabilityRegistry", () => {
     expect(() => subject.setSecret(added.instanceId, "issue-token", "")).toThrow(/empty/i);
     expect(subject.setSecret(added.instanceId, "issue-token", "actual-secret-value"))
       .toEqual({ key: "issue-token", configured: true });
+    expect(subject.getSecretValueForRuntime(added.instanceId, "issue-token")).toBe("actual-secret-value");
+    expect(() => subject.getSecretValueForRuntime(added.instanceId, "other")).toThrow(/not declared/i);
     expect(JSON.stringify(subject.list())).not.toContain("actual-secret-value");
     expect(subject.list().packs[0]?.secrets).toEqual([{ key: "issue-token", configured: true }]);
     subject.deleteSecret(added.instanceId, "issue-token");

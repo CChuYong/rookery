@@ -296,6 +296,13 @@ export class CapabilityRegistry {
       .map((secret) => [secret.key, secret.version]));
   }
 
+  // Daemon/runtime boundary only. Callers must never place this value in a protocol projection,
+  // event, generated file, command line, diagnostic, or log.
+  getSecretValueForRuntime(instanceId: string, key: string): string | undefined {
+    this.assertDeclaredSecret(instanceId, key);
+    return this.repos.getCapabilitySecretValue(instanceId, key);
+  }
+
   private assertScopeAuthority(input: CapabilityBindingInput): void {
     if (!this.repos.getCapabilityPack(input.packInstanceId)) {
       throw new Error(`unknown capability pack: ${input.packInstanceId}`);
