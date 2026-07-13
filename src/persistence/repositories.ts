@@ -1,4 +1,13 @@
 import type { DB } from "./db.js";
+import type {
+  CapabilityAgentKind,
+  CapabilityAudience,
+  CapabilityBinding,
+  CapabilityBindingInput,
+  CapabilityOrigin,
+  CapabilityPackSourceKind,
+  CapabilityScopeKind,
+} from "../core/capabilities/types.js";
 
 export interface SessionRow {
   id: string;
@@ -72,6 +81,45 @@ export interface MemoryRow {
   created_at: string;
 }
 
+export interface CapabilityPackRow {
+  instance_id: string;
+  logical_id: string;
+  source_kind: CapabilityPackSourceKind;
+  owner_repo_id: string | null;
+  source_path: string;
+  manifest_json: string;
+  digest: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapabilityPackRowInput {
+  instanceId: string;
+  logicalId: string;
+  sourceKind: CapabilityPackSourceKind;
+  ownerRepoId: string | null;
+  sourcePath: string;
+  manifestJson: string;
+  digest: string;
+}
+
+interface CapabilityBindingRow {
+  id: string;
+  pack_instance_id: string;
+  scope_kind: CapabilityScopeKind;
+  scope_ref: string;
+  audience_json: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapabilitySecretMetadata {
+  key: string;
+  configured: true;
+  version: number;
+}
+
 export type AutomationTrigger =
   | { kind: "cron"; cron: string; timezone: string }
   | { kind: "interval"; everyMinutes: number } // Recurring, forward-from-now. Fires every everyMinutes minutes (min 1).
@@ -112,6 +160,29 @@ export interface AutomationInput {
 
 // Worker terminal statuses (for the setWorkerStatus write-once guard). Same set as FleetOrchestrator.isTerminal — a domain invariant.
 const TERMINAL_WORKER_STATUSES = new Set(["stopped", "done", "error", "failed", "orphaned"]);
+const CAPABILITY_AGENT_ORDER: CapabilityAgentKind[] = ["master", "worker", "side"];
+const CAPABILITY_ORIGIN_ORDER: CapabilityOrigin[] = ["ui", "slack", "automation", "external"];
+
+function orderedUnique<T extends string>(values: T[], allowed: readonly T[], label: string): T[] {
+  const valueSet = new Set(values);
+  if (valueSet.size === 0) throw new Error(`${label} must not be empty`);
+  for (const value of valueSet) {
+    if (!allowed.includes(value)) throw new Error(`unsupported ${label} value: ${value}`);
+  }
+  return allowed.filter((value) => valueSet.has(value));
+}
+
+function normalizeCapabilityAudience(audience: CapabilityAudience): CapabilityAudience {
+  return {
+    agents: orderedUnique(audience.agents, CAPABILITY_AGENT_ORDER, "capability audience agents"),
+    origins: orderedUnique(audience.origins, CAPABILITY_ORIGIN_ORDER, "capability audience origins"),
+  };
+}
+
+function audiencesOverlap(a: CapabilityAudience, b: CapabilityAudience): boolean {
+  return a.agents.some((agent) => b.agents.includes(agent))
+    && a.origins.some((origin) => b.origins.includes(origin));
+}
 
 export class Repositories {
   private readonly warnedCorrupt = new Set<string>();
@@ -120,6 +191,191 @@ export class Repositories {
     private readonly db: DB,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
+
+  createCapabilityPack(input: CapabilityPackRowInput): CapabilityPackRow {
+    const ts = this.now();
+    this.db.prepare(
+      `INSERT INTO capability_packs
+        (instance_id, logical_id, source_kind, owner_repo_id, source_path, manifest_json, digest, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.instanceId,
+      input.logicalId,
+      input.sourceKind,
+      input.ownerRepoId,
+      input.sourcePath,
+      input.manifestJson,
+      input.digest,
+      ts,
+      ts,
+    );
+    return this.getCapabilityPack(input.instanceId)!;
+  }
+
+  updateCapabilityPack(
+    instanceId: string,
+    patch: { logicalId: string; manifestJson: string; digest: string },
+  ): CapabilityPackRow {
+    const result = this.db.prepare(
+      "UPDATE capability_packs SET logical_id = ?, manifest_json = ?, digest = ?, updated_at = ? WHERE instance_id = ?",
+    ).run(patch.logicalId, patch.manifestJson, patch.digest, this.now(), instanceId);
+    if (result.changes === 0) throw new Error(`unknown capability pack: ${instanceId}`);
+    return this.getCapabilityPack(instanceId)!;
+  }
+
+  getCapabilityPack(instanceId: string): CapabilityPackRow | undefined {
+    return this.db.prepare("SELECT * FROM capability_packs WHERE instance_id = ?")
+      .get(instanceId) as CapabilityPackRow | undefined;
+  }
+
+  listCapabilityPacks(): CapabilityPackRow[] {
+    return this.db.prepare("SELECT * FROM capability_packs ORDER BY logical_id, instance_id")
+      .all() as CapabilityPackRow[];
+  }
+
+  private deleteCapabilityPackRows(instanceId: string): void {
+    this.db.prepare("DELETE FROM capability_bindings WHERE pack_instance_id = ?").run(instanceId);
+    this.db.prepare("DELETE FROM capability_trust WHERE pack_instance_id = ?").run(instanceId);
+    this.db.prepare("DELETE FROM capability_secrets WHERE pack_instance_id = ?").run(instanceId);
+    this.db.prepare("DELETE FROM capability_packs WHERE instance_id = ?").run(instanceId);
+  }
+
+  deleteCapabilityPack(instanceId: string): void {
+    this.db.transaction(() => this.deleteCapabilityPackRows(instanceId))();
+  }
+
+  private capabilityBindingFromRow(row: CapabilityBindingRow): CapabilityBinding {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.audience_json);
+    } catch {
+      throw new Error(`capability binding ${row.id} has corrupt audience JSON`);
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      throw new Error(`capability binding ${row.id} has invalid audience JSON`);
+    }
+    const audience = parsed as Partial<CapabilityAudience>;
+    if (!Array.isArray(audience.agents) || !Array.isArray(audience.origins)) {
+      throw new Error(`capability binding ${row.id} has invalid audience JSON`);
+    }
+    return {
+      id: row.id,
+      packInstanceId: row.pack_instance_id,
+      scopeKind: row.scope_kind,
+      scopeRef: row.scope_ref,
+      audience: normalizeCapabilityAudience({
+        agents: audience.agents as CapabilityAgentKind[],
+        origins: audience.origins as CapabilityOrigin[],
+      }),
+      enabled: row.enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  setCapabilityBinding(id: string, input: CapabilityBindingInput): CapabilityBinding {
+    if (input.id !== undefined && input.id !== id) throw new Error(`capability binding id mismatch: ${input.id} != ${id}`);
+    const audience = normalizeCapabilityAudience(input.audience);
+    const peers = this.db.prepare(
+      `SELECT * FROM capability_bindings
+       WHERE pack_instance_id = ? AND scope_kind = ? AND scope_ref = ? AND id <> ?`,
+    ).all(input.packInstanceId, input.scopeKind, input.scopeRef, id) as CapabilityBindingRow[];
+    for (const peer of peers) {
+      if (audiencesOverlap(audience, this.capabilityBindingFromRow(peer).audience)) {
+        throw new Error(`capability binding audience overlaps ${peer.id} at ${input.scopeKind}:${input.scopeRef}`);
+      }
+    }
+
+    const ts = this.now();
+    const existing = this.getCapabilityBinding(id);
+    const audienceJson = JSON.stringify(audience);
+    if (existing) {
+      this.db.prepare(
+        `UPDATE capability_bindings
+         SET pack_instance_id = ?, scope_kind = ?, scope_ref = ?, audience_json = ?, enabled = ?, updated_at = ?
+         WHERE id = ?`,
+      ).run(input.packInstanceId, input.scopeKind, input.scopeRef, audienceJson, input.enabled ? 1 : 0, ts, id);
+    } else {
+      this.db.prepare(
+        `INSERT INTO capability_bindings
+          (id, pack_instance_id, scope_kind, scope_ref, audience_json, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(id, input.packInstanceId, input.scopeKind, input.scopeRef, audienceJson, input.enabled ? 1 : 0, ts, ts);
+    }
+    return this.getCapabilityBinding(id)!;
+  }
+
+  getCapabilityBinding(id: string): CapabilityBinding | undefined {
+    const row = this.db.prepare("SELECT * FROM capability_bindings WHERE id = ?")
+      .get(id) as CapabilityBindingRow | undefined;
+    return row ? this.capabilityBindingFromRow(row) : undefined;
+  }
+
+  listCapabilityBindings(packInstanceId?: string): CapabilityBinding[] {
+    const rows = packInstanceId === undefined
+      ? this.db.prepare("SELECT * FROM capability_bindings ORDER BY pack_instance_id, scope_kind, scope_ref, id").all()
+      : this.db.prepare("SELECT * FROM capability_bindings WHERE pack_instance_id = ? ORDER BY scope_kind, scope_ref, id").all(packInstanceId);
+    return (rows as CapabilityBindingRow[]).map((row) => this.capabilityBindingFromRow(row));
+  }
+
+  deleteCapabilityBinding(id: string): void {
+    this.db.prepare("DELETE FROM capability_bindings WHERE id = ?").run(id);
+  }
+
+  setCapabilityTrust(instanceId: string, digest: string, trusted: boolean): void {
+    if (!this.getCapabilityPack(instanceId)) throw new Error(`unknown capability pack: ${instanceId}`);
+    if (!trusted) {
+      this.db.prepare("DELETE FROM capability_trust WHERE pack_instance_id = ? AND digest = ?")
+        .run(instanceId, digest);
+      return;
+    }
+    this.db.prepare(
+      `INSERT INTO capability_trust(pack_instance_id, digest, trusted_at) VALUES (?, ?, ?)
+       ON CONFLICT(pack_instance_id, digest) DO UPDATE SET trusted_at = excluded.trusted_at`,
+    ).run(instanceId, digest, this.now());
+  }
+
+  isCapabilityDigestTrusted(instanceId: string, digest: string): boolean {
+    return this.db.prepare("SELECT 1 FROM capability_trust WHERE pack_instance_id = ? AND digest = ?")
+      .get(instanceId, digest) !== undefined;
+  }
+
+  setCapabilitySecret(instanceId: string, key: string, value: string): CapabilitySecretMetadata {
+    if (!this.getCapabilityPack(instanceId)) throw new Error(`unknown capability pack: ${instanceId}`);
+    const current = this.db.prepare(
+      "SELECT secret_version FROM capability_secrets WHERE pack_instance_id = ? AND secret_key = ?",
+    ).get(instanceId, key) as { secret_version: number } | undefined;
+    const version = (current?.secret_version ?? 0) + 1;
+    this.db.prepare(
+      `INSERT INTO capability_secrets(pack_instance_id, secret_key, secret_value, secret_version, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(pack_instance_id, secret_key) DO UPDATE SET
+         secret_value = excluded.secret_value,
+         secret_version = excluded.secret_version,
+         updated_at = excluded.updated_at`,
+    ).run(instanceId, key, value, version, this.now());
+    return { key, configured: true, version };
+  }
+
+  deleteCapabilitySecret(instanceId: string, key: string): void {
+    this.db.prepare("DELETE FROM capability_secrets WHERE pack_instance_id = ? AND secret_key = ?")
+      .run(instanceId, key);
+  }
+
+  listCapabilitySecretMetadata(instanceId: string): CapabilitySecretMetadata[] {
+    const rows = this.db.prepare(
+      "SELECT secret_key AS key, secret_version AS version FROM capability_secrets WHERE pack_instance_id = ? ORDER BY secret_key",
+    ).all(instanceId) as Array<{ key: string; version: number }>;
+    return rows.map((row) => ({ key: row.key, configured: true, version: row.version }));
+  }
+
+  // Daemon-internal runtime boundary. Protocol and Library projections use metadata only.
+  getCapabilitySecretValue(instanceId: string, key: string): string | undefined {
+    const row = this.db.prepare(
+      "SELECT secret_value FROM capability_secrets WHERE pack_instance_id = ? AND secret_key = ?",
+    ).get(instanceId, key) as { secret_value: string } | undefined;
+    return row?.secret_value;
+  }
 
   createSession(input: { id: string; cwd: string; externalKey?: string; origin?: string; originRef?: string | null; provider?: string }): SessionRow {
     const ts = this.now();
@@ -190,6 +446,7 @@ export class Repositories {
     this.db.transaction(() => {
       const subIds = (this.db.prepare("SELECT id FROM workers WHERE session_id = ?").all(id) as Array<{ id: string }>).map((r) => r.id);
       for (const sid of subIds) this.deleteWorker(sid);
+      this.db.prepare("DELETE FROM capability_bindings WHERE scope_kind = 'session' AND scope_ref = ?").run(id);
       this.db.prepare("DELETE FROM session_events WHERE session_id = ?").run(id);
       this.db.prepare("DELETE FROM messages WHERE session_id = ?").run(id);
       this.db.prepare("DELETE FROM pending_notifications WHERE session_id = ?").run(id);
@@ -206,6 +463,7 @@ export class Repositories {
   // Permanently delete the worker DB row (cascades to events/checkpoints). Worktree removal is handled by the caller (fleet.discard).
   deleteWorker(id: string): void {
     this.db.transaction(() => {
+      this.db.prepare("DELETE FROM capability_bindings WHERE scope_kind = 'worker' AND scope_ref = ?").run(id);
       this.db.prepare("DELETE FROM worker_checkpoints WHERE worker_id = ?").run(id);
       this.db.prepare("DELETE FROM worker_events WHERE worker_id = ?").run(id);
       this.db.prepare("DELETE FROM workers WHERE id = ?").run(id);
@@ -402,7 +660,17 @@ export class Repositories {
   }
 
   removeRepo(name: string): void {
-    this.db.prepare("DELETE FROM repos WHERE name = ?").run(name);
+    const repo = this.getRepoByName(name);
+    if (!repo) return;
+    this.db.transaction(() => {
+      this.db.prepare(
+        "DELETE FROM capability_bindings WHERE scope_kind IN ('repo-local', 'repo-shared') AND scope_ref = ?",
+      ).run(repo.id);
+      const owned = this.db.prepare("SELECT instance_id FROM capability_packs WHERE owner_repo_id = ?")
+        .all(repo.id) as Array<{ instance_id: string }>;
+      for (const pack of owned) this.deleteCapabilityPackRows(pack.instance_id);
+      this.db.prepare("DELETE FROM repos WHERE id = ?").run(repo.id);
+    })();
   }
 
   // Terminal status write-once (single chokepoint): both writers (Worker.transition / FleetOrchestrator.setStatus)
