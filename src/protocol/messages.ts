@@ -5,7 +5,13 @@ import type { SettingsValues } from "../core/settings.js";
 import type { SlashCommandInfo } from "../core/commands.js";
 import type { SourceItem } from "../core/source-intake.js";
 import type { AuthStatus } from "../core/auth-status.js";
-import type { CapabilitySnapshot } from "../core/capabilities/types.js";
+import type {
+  CapabilityBinding,
+  CapabilityLibraryEntry,
+  CapabilityLibrarySnapshot,
+  CapabilitySecretStatus,
+  CapabilitySnapshot,
+} from "../core/capabilities/types.js";
 import type { Automation, AutomationInput } from "../persistence/repositories.js";
 import { isValidCron } from "../core/cron.js";
 
@@ -25,6 +31,27 @@ const actionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("master"), prompt: z.string(), cwd: z.string(), sessionMode: z.enum(["reuse", "fresh"]) }),
   z.object({ kind: z.literal("worker"), repo: z.string(), task: z.string(), base: z.string().optional() }),
 ]);
+
+const capabilityIdSchema = z.string().trim().min(1);
+const capabilityScopeKindSchema = z.enum(["rookery", "repo-local", "repo-shared", "session", "worker"]);
+const capabilityAudienceSchema = z.object({
+  agents: z.array(z.enum(["master", "worker", "side"])).min(1),
+  origins: z.array(z.enum(["ui", "slack", "automation", "external"])).min(1),
+}).strict();
+const capabilityBindingInputSchema = z.object({
+  packInstanceId: capabilityIdSchema,
+  scopeKind: capabilityScopeKindSchema,
+  scopeRef: z.string(),
+  audience: capabilityAudienceSchema,
+  enabled: z.boolean(),
+}).strict().superRefine((binding, context) => {
+  if (binding.scopeKind === "rookery" && binding.scopeRef !== "") {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["scopeRef"], message: "rookery scopeRef must be empty" });
+  }
+  if (binding.scopeKind !== "rookery" && !binding.scopeRef.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["scopeRef"], message: `${binding.scopeKind} scopeRef must not be empty` });
+  }
+});
 
 const automationInputSchema = z.object({
   name: z.string(),
@@ -120,6 +147,27 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
       z.object({ kind: z.literal("worker"), id: z.string().min(1) }),
     ]),
   }),
+  z.object({ type: z.literal("capabilities.library"), reqId: capabilityIdSchema }),
+  z.object({ type: z.literal("capabilities.pack.add"), reqId: capabilityIdSchema, path: z.string().trim().min(1) }),
+  z.object({ type: z.literal("capabilities.pack.remove"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema }),
+  z.object({ type: z.literal("capabilities.binding.set"), reqId: capabilityIdSchema, id: capabilityIdSchema, binding: capabilityBindingInputSchema }),
+  z.object({ type: z.literal("capabilities.binding.delete"), reqId: capabilityIdSchema, id: capabilityIdSchema }),
+  z.object({
+    type: z.literal("capabilities.trust.set"),
+    reqId: capabilityIdSchema,
+    instanceId: capabilityIdSchema,
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    trusted: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("capabilities.secret.set"),
+    reqId: capabilityIdSchema,
+    instanceId: capabilityIdSchema,
+    key: capabilityIdSchema,
+    value: z.string().refine((value) => value.trim().length > 0, "secret value must not be empty"),
+  }),
+  z.object({ type: z.literal("capabilities.secret.delete"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema, key: capabilityIdSchema }),
+  z.object({ type: z.literal("capabilities.refresh"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema.optional() }),
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
   z.object({ type: z.literal("models.list"), reqId: z.string() }),
   z.object({ type: z.literal("codex.models.list"), reqId: z.string() }),
@@ -239,7 +287,7 @@ export type ServerMessage =
   | { type: "fleet.list.result"; reqId: string; fleet: Array<WorkerRow & { archived: boolean }> }
   | { type: "fleet.diff.result"; reqId: string; id: string; diff: string }
   | { type: "fleet.ack"; reqId: string; action: string; id: string }
-  | { type: "repos.list.result"; reqId: string; repos: Array<{ name: string; path: string; description: string; base: string | null }> }
+  | { type: "repos.list.result"; reqId: string; repos: Array<{ id: string; name: string; path: string; description: string; base: string | null }> }
   | { type: "repo.branches.result"; reqId: string; branches: string[] }
   | { type: "source.fetch.result"; reqId: string; item: { title: string; body: string } | null }
   | { type: "source.search.result"; reqId: string; items: SourceItem[] }
@@ -256,6 +304,11 @@ export type ServerMessage =
   | { type: "codex.authStatus.result"; reqId: string; status: CodexAuthStatus | null }
   | { type: "commands.result"; reqId: string; commands: SlashCommandInfo[] }
   | { type: "capabilities.snapshot.result"; reqId: string; snapshot: CapabilitySnapshot }
+  | { type: "capabilities.library.result"; reqId: string; library: CapabilityLibrarySnapshot }
+  | { type: "capabilities.pack.result"; reqId: string; pack: CapabilityLibraryEntry | null }
+  | { type: "capabilities.binding.result"; reqId: string; binding: CapabilityBinding | null }
+  | { type: "capabilities.secret.result"; reqId: string; instanceId: string; secret: CapabilitySecretStatus }
+  | { type: "capabilities.refresh.result"; reqId: string; library: CapabilityLibrarySnapshot }
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
   | { type: "mcp.status.result"; reqId: string; scope: "off" | "readonly" | "full"; url: string | null }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
@@ -315,6 +368,15 @@ export interface RequestResultMap {
   "codex.authStatus": Extract<ServerMessage, { type: "codex.authStatus.result" }>;
   "commands.list": Extract<ServerMessage, { type: "commands.result" }>;
   "capabilities.snapshot": Extract<ServerMessage, { type: "capabilities.snapshot.result" }>;
+  "capabilities.library": Extract<ServerMessage, { type: "capabilities.library.result" }>;
+  "capabilities.pack.add": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
+  "capabilities.pack.remove": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
+  "capabilities.binding.set": Extract<ServerMessage, { type: "capabilities.binding.result" }>;
+  "capabilities.binding.delete": Extract<ServerMessage, { type: "capabilities.binding.result" }>;
+  "capabilities.trust.set": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
+  "capabilities.secret.set": Extract<ServerMessage, { type: "capabilities.secret.result" }>;
+  "capabilities.secret.delete": Extract<ServerMessage, { type: "capabilities.secret.result" }>;
+  "capabilities.refresh": Extract<ServerMessage, { type: "capabilities.refresh.result" }>;
   "settings.get": Extract<ServerMessage, { type: "settings.result" }>;
   "settings.set": Extract<ServerMessage, { type: "settings.result" }>;
   "mcp.status": Extract<ServerMessage, { type: "mcp.status.result" }>;

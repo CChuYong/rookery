@@ -142,4 +142,106 @@ describe("CapabilityService", () => {
       getWorker: () => ({ id: "w1", worktreePath: null, repoPath: "/repo", label: "W", provider: "future" }),
     }).snapshot({ kind: "worker", id: "w1" })).rejects.toThrow("unsupported capability provider: future");
   });
+
+  it("resolves desired state from authoritative session origin and longest registered repo", async () => {
+    const resolve = vi.fn(() => ({
+      revision: "desired-revision",
+      blocked: true,
+      entries: [{
+        id: "managed.pack.instruction.rules",
+        kind: "instruction" as const,
+        name: "rules",
+        provider: "rookery" as const,
+        source: "Team Pack",
+        scope: "repo" as const,
+        state: "blocked" as const,
+        evidence: "declared" as const,
+      }],
+      diagnostics: [{ id: "managed.blocked", source: "Team Pack", severity: "error" as const, message: "review required" }],
+    }));
+    const capabilities = service({
+      getSession: () => ({
+        id: "s1", cwd: "/repo/packages/web/src", label: "Main", provider: "codex",
+        origin: "slack", externalKey: "slack:T:C:1",
+      }),
+      listRepos: () => [
+        { id: "repo-root", path: "/repo" },
+        { id: "repo-web", path: "/repo/packages/web" },
+      ],
+      resolver: { resolve } as never,
+    });
+
+    const snapshot = await capabilities.snapshot({ kind: "session", id: "s1" });
+    expect(resolve).toHaveBeenCalledWith({
+      kind: "master",
+      id: "s1",
+      provider: "codex",
+      origin: "slack",
+      cwd: "/repo/packages/web/src",
+      repoId: "repo-web",
+      homeSessionId: "s1",
+    });
+    expect(snapshot).toMatchObject({ desiredRevision: "desired-revision", desiredBlocked: true });
+    expect(snapshot.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([
+      "managed.pack.instruction.rules", "codex.skill.ship", "rookery.command.btw",
+    ]));
+    expect(snapshot.diagnostics.map((diagnostic) => diagnostic.id)).toContain("managed.blocked");
+  });
+
+  it("uses worker repo_path ownership and home-session origin instead of its worktree", async () => {
+    const resolve = vi.fn(() => ({ revision: "r", blocked: false, entries: [], diagnostics: [] }));
+    const capabilities = service({
+      getSession: (id) => id === "home" ? {
+        id, cwd: "/repo", label: null, provider: "claude", origin: "automation", externalKey: "automation:a1",
+      } : undefined,
+      getWorker: () => ({
+        id: "w1", worktreePath: "/repo/packages/nested/.worktrees/w1", repoPath: "/repo",
+        label: "Worker", provider: "claude", homeSessionId: "home",
+      }),
+      listRepos: () => [
+        { id: "repo-root", path: "/repo" },
+        { id: "repo-nested", path: "/repo/packages/nested" },
+      ],
+      resolver: { resolve } as never,
+    });
+
+    await capabilities.snapshot({ kind: "worker", id: "w1" });
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "worker", id: "w1", repoId: "repo-root", homeSessionId: "home", origin: "automation",
+      cwd: "/repo/packages/nested/.worktrees/w1",
+    }));
+  });
+
+  it("delegates sanitized registry mutations through the service facade", () => {
+    const library = { generation: 1, packs: [], bindings: [] };
+    const registry = {
+      list: vi.fn(() => library),
+      add: vi.fn(() => ({ instanceId: "pack-1" })),
+      remove: vi.fn(),
+      setBinding: vi.fn(() => ({ id: "binding-1" })),
+      deleteBinding: vi.fn(),
+      setTrust: vi.fn(() => ({ instanceId: "pack-1", status: "trusted" })),
+      setSecret: vi.fn(() => ({ key: "token", configured: true })),
+      deleteSecret: vi.fn(() => ({ key: "token", configured: false })),
+      refresh: vi.fn(() => library),
+    };
+    const capabilities = service({ registry: registry as never });
+    const binding = {
+      packInstanceId: "pack-1", scopeKind: "rookery" as const, scopeRef: "",
+      audience: { agents: ["master" as const], origins: ["ui" as const] }, enabled: true,
+    };
+
+    expect(capabilities.library()).toBe(library);
+    capabilities.addPack("/pack");
+    capabilities.removePack("pack-1");
+    capabilities.setBinding("binding-1", binding);
+    capabilities.deleteBinding("binding-1");
+    capabilities.setTrust("pack-1", "a".repeat(64), true);
+    expect(capabilities.setSecret("pack-1", "token", "actual-secret-value")).toEqual({ key: "token", configured: true });
+    capabilities.deleteSecret("pack-1", "token");
+    capabilities.refresh("pack-1");
+
+    expect(registry.setSecret).toHaveBeenCalledWith("pack-1", "token", "actual-secret-value");
+    expect(JSON.stringify(capabilities.library())).not.toContain("actual-secret-value");
+  });
 });

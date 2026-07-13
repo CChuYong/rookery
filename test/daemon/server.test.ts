@@ -62,6 +62,56 @@ describe("startDaemon (integration)", () => {
     }
   });
 
+  it("registers a capability pack and broadcasts its generation through the live daemon", async () => {
+    const home = "/tmp/rookery-server-capabilities";
+    const packRoot = "/tmp/rookery-server-capabilities-pack";
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(packRoot, { recursive: true, force: true });
+    fs.mkdirSync(packRoot, { recursive: true });
+    fs.writeFileSync(path.join(packRoot, "capability.json"), JSON.stringify({
+      schemaVersion: 1,
+      id: "daemon-smoke",
+      displayName: "Daemon Smoke",
+      version: "1.0.0",
+      description: "Composition-root registry test",
+    }));
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) });
+    try {
+      const ws = await connect(daemon.port, daemon.token);
+      ws.send(JSON.stringify({ type: "events.subscribe" }));
+      const received: Record<string, unknown>[] = [];
+      const done = new Promise<void>((resolve) => {
+        ws.on("message", (data) => {
+          const message = JSON.parse(data.toString()) as Record<string, unknown>;
+          received.push(message);
+          const hasResult = received.some((item) => item.type === "capabilities.pack.result" && item.reqId === "pack-add");
+          const hasEvent = received.some((item) => item.type === "event"
+            && (item.event as { type?: string } | undefined)?.type === "capabilities.changed");
+          if (hasResult && hasEvent) resolve();
+        });
+      });
+      ws.send(JSON.stringify({ type: "capabilities.pack.add", reqId: "pack-add", path: packRoot }));
+      await done;
+
+      const result = received.find((item) => item.type === "capabilities.pack.result")!;
+      expect(result).toMatchObject({ reqId: "pack-add", pack: { status: "untrusted", manifest: { id: "daemon-smoke" } } });
+      const event = received.find((item) => item.type === "event"
+        && (item.event as { type?: string } | undefined)?.type === "capabilities.changed")?.event;
+      expect(event).toMatchObject({ type: "capabilities.changed", generation: 1, affected: [] });
+
+      ws.send(JSON.stringify({ type: "capabilities.library", reqId: "library" }));
+      let library: Record<string, unknown>;
+      do library = await nextMessage(ws); while (library.reqId !== "library");
+      expect(library).toMatchObject({ type: "capabilities.library.result", library: { generation: 1 } });
+      ws.close();
+    } finally {
+      await daemon.close();
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(packRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects on port bind failure and releases the PID lock (no zombie)", { timeout: 10000 }, async () => {
     // Occupy a port first.
     const blocker = http.createServer(() => {});

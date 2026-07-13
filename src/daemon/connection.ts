@@ -25,7 +25,15 @@ import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
 import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
 import type { SideSourceKind } from "../core/side-conversation.js";
-import type { CapabilitySnapshot, CapabilityTarget } from "../core/capabilities/types.js";
+import type {
+  CapabilityBinding,
+  CapabilityBindingInput,
+  CapabilityLibraryEntry,
+  CapabilityLibrarySnapshot,
+  CapabilitySecretStatus,
+  CapabilitySnapshot,
+  CapabilityTarget,
+} from "../core/capabilities/types.js";
 
 export interface UsageProvider {
   snapshot(): UsageSnapshot;
@@ -60,6 +68,18 @@ export interface CommandProvider {
 
 export interface CapabilitySnapshotProvider {
   snapshot(target: CapabilityTarget): Promise<CapabilitySnapshot>;
+}
+
+export interface CapabilityProvider extends CapabilitySnapshotProvider {
+  library(): CapabilityLibrarySnapshot;
+  addPack(sourcePath: string): CapabilityLibraryEntry;
+  removePack(instanceId: string): void;
+  setBinding(id: string, input: CapabilityBindingInput): CapabilityBinding;
+  deleteBinding(id: string): void;
+  setTrust(instanceId: string, digest: string, trusted: boolean): CapabilityLibraryEntry;
+  setSecret(instanceId: string, key: string, value: string): CapabilitySecretStatus;
+  deleteSecret(instanceId: string, key: string): CapabilitySecretStatus;
+  refresh(instanceId?: string): CapabilityLibrarySnapshot;
 }
 
 export interface SourceProvider {
@@ -125,7 +145,7 @@ export class Connection {
     private readonly codexAuth?: CodexAuthProvider,
     private readonly externalMcp?: ExternalMcpController,
     private readonly sides?: SideConversationController,
-    private readonly capabilities?: CapabilitySnapshotProvider,
+    private readonly capabilities?: CapabilityProvider,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -362,7 +382,7 @@ export class Connection {
         return;
       }
       case "repos.list": {
-        this.reply({ type: "repos.list.result", reqId: msg.reqId, repos: this.repos.listRepos().map((r) => ({ name: r.name, path: r.path, description: r.description, base: r.base })) });
+        this.reply({ type: "repos.list.result", reqId: msg.reqId, repos: this.repos.listRepos().map((r) => ({ id: r.id, name: r.name, path: r.path, description: r.description, base: r.base })) });
         return;
       }
       case "repo.branches": {
@@ -511,6 +531,71 @@ export class Connection {
         if (!this.capabilities) return this.reply({ type: "error", message: "capability snapshots unavailable", reqId: msg.reqId });
         const snapshot = await this.capabilities.snapshot(msg.target);
         this.reply({ type: "capabilities.snapshot.result", reqId: msg.reqId, snapshot });
+        return;
+      }
+      case "capabilities.library": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({ type: "capabilities.library.result", reqId: msg.reqId, library: this.capabilities.library() });
+        return;
+      }
+      case "capabilities.pack.add": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({ type: "capabilities.pack.result", reqId: msg.reqId, pack: this.capabilities.addPack(msg.path) });
+        return;
+      }
+      case "capabilities.pack.remove": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.capabilities.removePack(msg.instanceId);
+        this.reply({ type: "capabilities.pack.result", reqId: msg.reqId, pack: null });
+        return;
+      }
+      case "capabilities.binding.set": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({ type: "capabilities.binding.result", reqId: msg.reqId, binding: this.capabilities.setBinding(msg.id, msg.binding) });
+        return;
+      }
+      case "capabilities.binding.delete": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.capabilities.deleteBinding(msg.id);
+        this.reply({ type: "capabilities.binding.result", reqId: msg.reqId, binding: null });
+        return;
+      }
+      case "capabilities.trust.set": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({
+          type: "capabilities.pack.result",
+          reqId: msg.reqId,
+          pack: this.capabilities.setTrust(msg.instanceId, msg.digest, msg.trusted),
+        });
+        return;
+      }
+      case "capabilities.secret.set": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({
+          type: "capabilities.secret.result",
+          reqId: msg.reqId,
+          instanceId: msg.instanceId,
+          secret: this.capabilities.setSecret(msg.instanceId, msg.key, msg.value),
+        });
+        return;
+      }
+      case "capabilities.secret.delete": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({
+          type: "capabilities.secret.result",
+          reqId: msg.reqId,
+          instanceId: msg.instanceId,
+          secret: this.capabilities.deleteSecret(msg.instanceId, msg.key),
+        });
+        return;
+      }
+      case "capabilities.refresh": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({
+          type: "capabilities.refresh.result",
+          reqId: msg.reqId,
+          library: this.capabilities.refresh(msg.instanceId),
+        });
         return;
       }
       case "usage.get": {

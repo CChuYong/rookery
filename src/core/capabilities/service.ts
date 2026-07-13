@@ -1,9 +1,18 @@
 import type { SlashCommandInfo } from "../agent-backend.js";
+import { canonicalPath, longestContainingRepo } from "../repo-path.js";
 import { claudeCommandCapabilities, rookeryCapabilities } from "./builtins.js";
+import type { CapabilityRegistry } from "./registry.js";
+import type { CapabilityResolver, ResolvedCapabilityTarget } from "./resolver.js";
 import type {
+  CapabilityBinding,
+  CapabilityBindingInput,
   CapabilityContribution,
   CapabilityDiagnostic,
   CapabilityEntry,
+  CapabilityLibraryEntry,
+  CapabilityLibrarySnapshot,
+  CapabilityOrigin,
+  CapabilitySecretStatus,
   CapabilitySnapshot,
   CapabilityTarget,
 } from "./types.js";
@@ -14,6 +23,8 @@ export interface CapabilitySessionRecord {
   cwd: string;
   label: string | null;
   provider: string;
+  origin?: string | null;
+  externalKey?: string | null;
 }
 
 export interface CapabilityWorkerRecord {
@@ -22,6 +33,12 @@ export interface CapabilityWorkerRecord {
   repoPath: string;
   label: string;
   provider: string;
+  homeSessionId?: string;
+}
+
+export interface CapabilityRepoRecord {
+  id: string;
+  path: string;
 }
 
 export interface ClaudeCommandDiscovery {
@@ -32,9 +49,12 @@ export interface ClaudeCommandDiscovery {
 export interface CapabilityServiceDeps {
   getSession(id: string): CapabilitySessionRecord | undefined;
   getWorker(id: string): CapabilityWorkerRecord | undefined;
+  listRepos?(): CapabilityRepoRecord[];
   listClaudeCommands(input: { target: CapabilityTarget; cwd: string }): Promise<ClaudeCommandDiscovery>;
   listCodexCapabilities(input: { target: CapabilityTarget; cwd: string; env?: NodeJS.ProcessEnv }): Promise<CapabilityContribution>;
   codexEnvForTarget?(target: CapabilityTarget): NodeJS.ProcessEnv | undefined;
+  registry?: CapabilityRegistry;
+  resolver?: CapabilityResolver;
   now?: () => Date;
 }
 
@@ -61,6 +81,14 @@ function providerFailure(provider: "claude" | "codex", error: unknown): Capabili
 function providerOf(value: string): "claude" | "codex" {
   if (value === "claude" || value === "codex") return value;
   throw new Error(`unsupported capability provider: ${value}`);
+}
+
+function originOf(origin: string | null | undefined, externalKey: string | null | undefined): CapabilityOrigin {
+  if (origin === "ui" || origin === "slack" || origin === "automation" || origin === "external") return origin;
+  if (externalKey?.startsWith("slack:")) return "slack";
+  if (externalKey?.startsWith("automation:")) return "automation";
+  if (externalKey?.startsWith("external:")) return "external";
+  return "ui";
 }
 
 function deduplicateEntries(entries: CapabilityEntry[]): CapabilityEntry[] {
@@ -99,31 +127,108 @@ export class CapabilityService {
       }
     }
 
+    const desired = this.deps.resolver?.resolve(resolved.desired);
     return {
-      target: { ...target, ...resolved },
+      target: { ...target, label: resolved.label, provider: resolved.provider, cwd: resolved.cwd },
       generatedAt: this.now().toISOString(),
-      entries: deduplicateEntries([...rookery.entries, ...providerContribution.entries]),
-      diagnostics: sortCapabilityDiagnostics([...rookery.diagnostics, ...providerContribution.diagnostics]),
+      ...(desired ? { desiredRevision: desired.revision, desiredBlocked: desired.blocked } : {}),
+      entries: deduplicateEntries([...(desired?.entries ?? []), ...rookery.entries, ...providerContribution.entries]),
+      diagnostics: sortCapabilityDiagnostics([...(desired?.diagnostics ?? []), ...rookery.diagnostics, ...providerContribution.diagnostics]),
     };
   }
 
-  private resolveTarget(target: CapabilityTarget): { label: string; provider: "claude" | "codex"; cwd: string } {
+  library(): CapabilityLibrarySnapshot {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.list();
+  }
+
+  addPack(sourcePath: string): CapabilityLibraryEntry {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.add(sourcePath);
+  }
+
+  removePack(instanceId: string): void {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    this.deps.registry.remove(instanceId);
+  }
+
+  setBinding(id: string, input: CapabilityBindingInput): CapabilityBinding {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.setBinding(id, input);
+  }
+
+  deleteBinding(id: string): void {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    this.deps.registry.deleteBinding(id);
+  }
+
+  setTrust(instanceId: string, digest: string, trusted: boolean): CapabilityLibraryEntry {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.setTrust(instanceId, digest, trusted);
+  }
+
+  setSecret(instanceId: string, key: string, value: string): CapabilitySecretStatus {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.setSecret(instanceId, key, value);
+  }
+
+  deleteSecret(instanceId: string, key: string): CapabilitySecretStatus {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.deleteSecret(instanceId, key);
+  }
+
+  refresh(instanceId?: string): CapabilityLibrarySnapshot {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.refresh(instanceId);
+  }
+
+  private resolveTarget(target: CapabilityTarget): {
+    label: string;
+    provider: "claude" | "codex";
+    cwd: string;
+    desired: ResolvedCapabilityTarget;
+  } {
     if (target.kind === "session") {
       const session = this.deps.getSession(target.id);
       if (!session) throw new Error(`unknown capability target: session:${target.id}`);
+      const provider = providerOf(session.provider);
+      const repo = longestContainingRepo(session.cwd, this.deps.listRepos?.() ?? []);
       return {
         label: session.label?.trim() || session.cwd,
-        provider: providerOf(session.provider),
+        provider,
         cwd: session.cwd,
+        desired: {
+          kind: "master",
+          id: session.id,
+          provider,
+          origin: originOf(session.origin, session.externalKey),
+          cwd: session.cwd,
+          ...(repo ? { repoId: repo.id } : {}),
+          homeSessionId: session.id,
+        },
       };
     }
 
     const worker = this.deps.getWorker(target.id);
     if (!worker) throw new Error(`unknown capability target: worker:${target.id}`);
+    const provider = providerOf(worker.provider);
+    const homeSession = worker.homeSessionId ? this.deps.getSession(worker.homeSessionId) : undefined;
+    const repo = (this.deps.listRepos?.() ?? []).find((candidate) =>
+      canonicalPath(candidate.path) === canonicalPath(worker.repoPath));
+    const cwd = worker.worktreePath ?? worker.repoPath;
     return {
       label: worker.label,
-      provider: providerOf(worker.provider),
-      cwd: worker.worktreePath ?? worker.repoPath,
+      provider,
+      cwd,
+      desired: {
+        kind: "worker",
+        id: worker.id,
+        provider,
+        origin: originOf(homeSession?.origin, homeSession?.externalKey),
+        cwd,
+        ...(repo ? { repoId: repo.id } : {}),
+        ...(worker.homeSessionId ? { homeSessionId: worker.homeSessionId } : {}),
+      },
     };
   }
 }
