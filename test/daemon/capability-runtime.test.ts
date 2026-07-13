@@ -141,6 +141,63 @@ describe("CapabilityRuntime", () => {
     expect(fs.existsSync(path.join(home, "capability-runtime", "a".repeat(64)))).toBe(false);
   });
 
+  it("materializes Codex skill/MCP artifacts while keeping secret values environment-only", () => {
+    const source = temp("rk-cap-source-");
+    const home = temp("rk-cap-home-");
+    const pack = writePack(source);
+    const runtime = new CapabilityRuntime(home, {
+      env: { PATH: "/usr/bin" },
+      getSecretValue: (instanceId, key) => instanceId === "instance-1" && key === "fixture-token" ? "actual-secret-value" : undefined,
+    });
+
+    const launch = runtime.materializeCodex(resolved(pack));
+    expect(launch.revision).toBe("a".repeat(64));
+    expect(launch.skills).toEqual([{
+      id: "runtime-check",
+      path: expect.stringMatching(/capability-runtime.*source.*skills[/\\]runtime-check[/\\]SKILL\.md$/),
+    }]);
+    expect(launch.systemPromptAppend).toContain("RK_SLICE3");
+    expect(Object.values(launch.env)).toContain("actual-secret-value");
+    expect(launch.env.PATH).toBeUndefined();
+
+    const local = launch.mcpServers.find((server) => server.generatedName === "rookery__smoke_pack__local")!;
+    expect(local.config).toMatchObject({
+      transport: "stdio",
+      command: process.execPath,
+      envVars: [expect.stringMatching(/^ROOKERY_CAP_SECRET_/)],
+    });
+    const args = (local.config as { args: string[] }).args;
+    expect(fs.readFileSync(args[0]!, "utf8")).toContain("config.secretEnv");
+    expect(JSON.parse(fs.readFileSync(args[1]!, "utf8"))).toEqual({
+      command: "node",
+      args: ["fixture.mjs"],
+      cwd: expect.stringMatching(/capability-runtime.*source.*server$/),
+      secretEnv: { TOKEN: expect.stringMatching(/^ROOKERY_CAP_SECRET_/) },
+    });
+
+    const remote = launch.mcpServers.find((server) => server.generatedName === "rookery__smoke_pack__fixture")!;
+    expect(remote.config).toMatchObject({
+      transport: "streamable-http",
+      bearerTokenEnvVar: expect.stringMatching(/^ROOKERY_CAP_SECRET_/),
+    });
+
+    const revisionRoot = path.join(home, "capability-runtime", "a".repeat(64));
+    const generated = fs.readdirSync(revisionRoot, { recursive: true })
+      .filter((entry): entry is string => typeof entry === "string")
+      .flatMap((entry) => {
+        const candidate = path.join(revisionRoot, entry);
+        return fs.statSync(candidate).isFile() ? [fs.readFileSync(candidate, "utf8")] : [];
+      })
+      .join("\n");
+    expect(generated).toContain("ROOKERY_CAP_SECRET_");
+    expect(generated).not.toContain("actual-secret-value");
+    expect(fs.statSync(args[0]!).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(args[1]!).mode & 0o777).toBe(0o600);
+
+    const second = runtime.materializeCodex(resolved(pack));
+    expect(second).toEqual(launch);
+  });
+
   it("does not create a runtime directory for an empty projection", () => {
     const home = temp("rk-cap-home-");
     const runtime = new CapabilityRuntime(home, { getSecretValue: () => undefined });
@@ -148,5 +205,8 @@ describe("CapabilityRuntime", () => {
       revision: "empty", blocked: false, instructions: [], skills: [], mcpServers: [],
     })).toEqual({ revision: "empty", plugins: [], env: {}, diagnostics: [] });
     expect(fs.existsSync(path.join(home, "capability-runtime"))).toBe(false);
+    expect(runtime.materializeCodex({
+      revision: "empty", blocked: false, instructions: [], skills: [], mcpServers: [],
+    })).toEqual({ revision: "empty", skills: [], mcpServers: [], env: {}, diagnostics: [] });
   });
 });

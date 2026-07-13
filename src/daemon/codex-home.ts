@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { CodexMcpConfig } from "../core/codex/codex-capabilities.js";
+import type { CodexRuntimeLaunchOptions } from "./capability-runtime.js";
 
 // Track A (docs/2026-07-06-p25-codex-hardening.md) — closes P2 review I3: the bridge URL used to ride
 // the per-turn child's argv (`-c mcp_servers.rookery.url="..."`), which on multi-user Linux is readable
@@ -17,14 +19,25 @@ export interface MaterializeCodexHomeOpts {
   // The user's real CODEX_HOME (process.env.CODEX_HOME || ~/.codex) — source for config.toml
   // passthrough (model_providers/base_url/etc) and for the auth.json symlink target.
   realCodexHome: string;
+  // Workers use a prefixed directory in the same codex-homes parent so every target is isolated
+  // without creating another git worktree. Omitted for backwards-compatible master behavior.
+  kind?: "master" | "worker";
+  // Public, secret-free config projection. Secret values live only in managed.env and are merged
+  // into the provider child environment by the backend; this module deliberately never reads them.
+  managed?: CodexRuntimeLaunchOptions;
 }
 
 // Per-session CODEX_HOME directory rookery materializes for a codex master turn. Called fresh on
 // every ensureSession (i.e. every turn): idempotent, so re-materializing never accumulates duplicate
 // config blocks and a user's live edit to their real config.toml propagates on the session's NEXT
 // turn (documented risk — see the spec's Risks section).
-export function materializeCodexHome(rookeryHome: string, sessionKey: string, bridgeUrl: string, opts: MaterializeCodexHomeOpts): string {
-  const dir = codexHomeDirFor(rookeryHome, sessionKey);
+export function materializeCodexHome(
+  rookeryHome: string,
+  sessionKey: string,
+  bridgeUrl: string | undefined,
+  opts: MaterializeCodexHomeOpts,
+): string {
+  const dir = codexHomeDirFor(rookeryHome, sessionKey, opts.kind ?? "master");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     fs.chmodSync(dir, 0o700); // repair mode if the dir pre-existed with a looser mode (mkdirSync's mode is only applied on creation)
@@ -33,12 +46,7 @@ export function materializeCodexHome(rookeryHome: string, sessionKey: string, br
   }
 
   const configPath = path.join(dir, "config.toml");
-  fs.writeFileSync(configPath, buildConfigToml(opts.realCodexHome, bridgeUrl), { mode: 0o600 });
-  try {
-    fs.chmodSync(configPath, 0o600); // repair mode if the file pre-existed (writeFileSync's mode only applies on creation)
-  } catch {
-    /* best-effort */
-  }
+  writeConfigAtomically(configPath, buildConfigToml(opts.realCodexHome, bridgeUrl, opts.managed));
 
   if (!opts.apiKeySet) {
     const authLinkPath = path.join(dir, "auth.json");
@@ -83,9 +91,22 @@ export function materializeCodexHome(rookeryHome: string, sessionKey: string, br
 // home was GC'd) is a silent no-op — the fork still runs, just without prior context — and this must
 // never throw (called after the ephemeral fork child has already succeeded).
 export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: string, newSessionId: string): void {
-  const src = path.join(rookeryHome, "codex-homes", sourceSessionId, "sessions");
+  seedCodexTargetHomeFromSource(rookeryHome, sourceSessionId, newSessionId, "master");
+}
+
+export function seedCodexWorkerHomeFromSource(rookeryHome: string, sourceWorkerId: string, newWorkerId: string): void {
+  seedCodexTargetHomeFromSource(rookeryHome, sourceWorkerId, newWorkerId, "worker");
+}
+
+function seedCodexTargetHomeFromSource(
+  rookeryHome: string,
+  sourceId: string,
+  newId: string,
+  kind: "master" | "worker",
+): void {
+  const src = path.join(codexHomeDirFor(rookeryHome, sourceId, kind), "sessions");
   if (!fs.existsSync(src)) return;
-  const dst = path.join(rookeryHome, "codex-homes", newSessionId, "sessions");
+  const dst = path.join(codexHomeDirFor(rookeryHome, newId, kind), "sessions");
   // Best-effort, never throws (finding [21]): mkdirSync/cpSync can fail (ENOSPC, EACCES on a rollout
   // file, or the source home ripped out mid-copy by a concurrent session.delete). This runs AFTER the
   // ephemeral fork child already succeeded, so a copy failure must degrade to "fork without prior
@@ -106,14 +127,26 @@ export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: st
 // CODEX_HOME (config.toml + auth.json + any codex-written rollout/session state under it).
 export function removeCodexHome(rookeryHome: string, sessionKey: string): void {
   try {
-    fs.rmSync(codexHomeDirFor(rookeryHome, sessionKey), { recursive: true, force: true });
+    fs.rmSync(codexHomeDirFor(rookeryHome, sessionKey, "master"), { recursive: true, force: true });
   } catch {
     /* best-effort */
   }
 }
 
-function codexHomeDirFor(rookeryHome: string, sessionKey: string): string {
-  return path.join(rookeryHome, "codex-homes", sessionKey);
+export function removeCodexWorkerHome(rookeryHome: string, workerId: string): void {
+  try {
+    fs.rmSync(codexHomeDirFor(rookeryHome, workerId, "worker"), { recursive: true, force: true });
+  } catch {
+    /* best-effort */
+  }
+}
+
+export function codexHomeDirFor(
+  rookeryHome: string,
+  targetId: string,
+  kind: "master" | "worker" = "master",
+): string {
+  return path.join(rookeryHome, "codex-homes", kind === "worker" ? `worker-${targetId}` : targetId);
 }
 
 // P3-remaining Track B #7 — boot sweep for orphaned per-session CODEX_HOME dirs (docs/2026-07-06-p3r-
@@ -125,7 +158,11 @@ function codexHomeDirFor(rookeryHome: string, sessionKey: string): string {
 // daemon hasn't accepted any connections yet), so this must NOT be called during normal operation.
 // Best-effort, never throws — a missing codex-homes dir or a readdir failure (e.g. permission error, or
 // the path existing as a non-directory) is a silent no-op.
-export function gcOrphanCodexHomes(rookeryHome: string, liveSessionIds: Set<string>): void {
+export function gcOrphanCodexHomes(
+  rookeryHome: string,
+  liveSessionIds: Set<string>,
+  liveWorkerIds: Set<string> = new Set(),
+): void {
   const base = path.join(rookeryHome, "codex-homes");
   if (!fs.existsSync(base)) return;
   let names: string[];
@@ -135,7 +172,12 @@ export function gcOrphanCodexHomes(rookeryHome: string, liveSessionIds: Set<stri
     return; // best-effort
   }
   for (const name of names) {
-    if (!liveSessionIds.has(name)) removeCodexHome(rookeryHome, name); // removeCodexHome itself never throws
+    if (name.startsWith("worker-")) {
+      const workerId = name.slice("worker-".length);
+      if (!liveWorkerIds.has(workerId)) removeCodexWorkerHome(rookeryHome, workerId);
+    } else if (!liveSessionIds.has(name)) {
+      removeCodexHome(rookeryHome, name); // removeCodexHome itself never throws
+    }
   }
 }
 
@@ -144,10 +186,104 @@ export function gcOrphanCodexHomes(rookeryHome: string, liveSessionIds: Set<stri
 // rookery mcp block (defensive: idempotent even if the real file itself somehow carries one), then
 // appends a fresh block carrying the CURRENT bridge URL. A read failure (permission error, not-a-file,
 // etc.) falls back to an empty base + a comment note rather than failing the turn.
-function buildConfigToml(realCodexHome: string, bridgeUrl: string): string {
+function buildConfigToml(
+  realCodexHome: string,
+  bridgeUrl: string | undefined,
+  managed: CodexRuntimeLaunchOptions | undefined,
+): string {
   const base = loadBaseConfig(realCodexHome);
-  const rookeryBlock = `${ROOKERY_BLOCK_HEADER}\nurl = "${bridgeUrl}"\n`;
-  return base ? `${base.replace(/\s*$/, "")}\n\n${rookeryBlock}` : rookeryBlock;
+  assertNoManagedMcpCollisions(base, managed?.mcpServers ?? []);
+  const blocks: string[] = [];
+  if (bridgeUrl) blocks.push(`${ROOKERY_BLOCK_HEADER}\nurl = ${tomlString(bridgeUrl)}\n`);
+  for (const skill of managed?.skills ?? []) {
+    blocks.push(`[[skills.config]]\npath = ${tomlString(skill.path)}\nenabled = true\n`);
+  }
+  for (const server of managed?.mcpServers ?? []) {
+    blocks.push(renderMcpServer(server.generatedName, server.config));
+  }
+  const generated = blocks.join("\n");
+  if (!base) return generated;
+  return generated ? `${base.replace(/\s*$/, "")}\n\n${generated}` : `${base.replace(/\s*$/, "")}\n`;
+}
+
+function writeConfigAtomically(configPath: string, content: string): void {
+  const tmp = `${configPath}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
+  try {
+    fs.writeFileSync(tmp, content, { mode: 0o600 });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, configPath);
+    fs.chmodSync(configPath, 0o600);
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* best-effort */ }
+  }
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function tomlArray(values: string[]): string {
+  return JSON.stringify(values);
+}
+
+function tomlKey(value: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(value) ? value : tomlString(value);
+}
+
+function tomlInlineTable(values: Record<string, string>): string {
+  const entries = Object.entries(values)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${tomlKey(key)} = ${tomlString(value)}`);
+  return `{ ${entries.join(", ")} }`;
+}
+
+function renderMcpCommon(config: CodexMcpConfig): string[] {
+  return [
+    "enabled = true",
+    ...(config.required ? ["required = true"] : []),
+    ...(config.startupTimeoutSec !== undefined ? [`startup_timeout_sec = ${config.startupTimeoutSec}`] : []),
+    ...(config.toolTimeoutSec !== undefined ? [`tool_timeout_sec = ${config.toolTimeoutSec}`] : []),
+    ...(config.enabledTools?.length ? [`enabled_tools = ${tomlArray(config.enabledTools)}`] : []),
+    ...(config.disabledTools?.length ? [`disabled_tools = ${tomlArray(config.disabledTools)}`] : []),
+  ];
+}
+
+function renderMcpServer(generatedName: string, config: CodexMcpConfig): string {
+  const lines = [`[mcp_servers.${generatedName}]`];
+  if (config.transport === "stdio") {
+    lines.push(`command = ${tomlString(config.command)}`);
+    if (config.args?.length) lines.push(`args = ${tomlArray(config.args)}`);
+    if (config.cwd) lines.push(`cwd = ${tomlString(config.cwd)}`);
+    if (config.env && Object.keys(config.env).length > 0) lines.push(`env = ${tomlInlineTable(config.env)}`);
+    if (config.envVars?.length) lines.push(`env_vars = ${tomlArray(config.envVars)}`);
+  } else {
+    lines.push(`url = ${tomlString(config.url)}`);
+    if (config.bearerTokenEnvVar) lines.push(`bearer_token_env_var = ${tomlString(config.bearerTokenEnvVar)}`);
+    if (config.httpHeaders && Object.keys(config.httpHeaders).length > 0) {
+      lines.push(`http_headers = ${tomlInlineTable(config.httpHeaders)}`);
+    }
+    if (config.envHttpHeaders && Object.keys(config.envHttpHeaders).length > 0) {
+      lines.push(`env_http_headers = ${tomlInlineTable(config.envHttpHeaders)}`);
+    }
+  }
+  lines.push(...renderMcpCommon(config));
+  return `${lines.join("\n")}\n`;
+}
+
+function assertNoManagedMcpCollisions(
+  base: string,
+  servers: CodexRuntimeLaunchOptions["mcpServers"],
+): void {
+  const headers = base.split("\n").map((line) => line.trim());
+  for (const server of servers) {
+    const bare = `[mcp_servers.${server.generatedName}]`;
+    const quoted = `[mcp_servers.${tomlString(server.generatedName)}]`;
+    const bareSubtable = `[mcp_servers.${server.generatedName}.`;
+    const quotedSubtable = `[mcp_servers.${tomlString(server.generatedName)}.`;
+    if (headers.some((header) => header === bare || header === quoted || header.startsWith(bareSubtable) || header.startsWith(quotedSubtable))) {
+      throw new Error(`managed Codex MCP server ${server.generatedName} collides with preserved native config`);
+    }
+  }
 }
 
 function loadBaseConfig(realCodexHome: string): string {
