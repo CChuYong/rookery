@@ -29,12 +29,19 @@ import type {
 import { useT } from "../i18n/provider.js";
 import { cn } from "../lib/cn.js";
 import { Button } from "../ui/button.js";
+import { CapabilityAssignmentsTab } from "./capabilities/CapabilityAssignmentsTab.js";
+import { CapabilityLibraryTab } from "./capabilities/CapabilityLibraryTab.js";
+import type { CapabilityCenterApi, CapabilityTargetOptions } from "./capabilities/types.js";
 
 type Category = "all" | "instructions" | "skills" | "tools" | "hooks" | "plugins";
+type CenterTab = "effective" | "library" | "assignments";
 
 export interface CapabilitiesPageProps {
   target: CapabilityTarget | null;
-  loadSnapshot(target: CapabilityTarget): Promise<CapabilitySnapshot>;
+  api: CapabilityCenterApi;
+  targets: CapabilityTargetOptions;
+  generation: number;
+  pickDirectory(): Promise<string | null>;
   onClose(): void;
 }
 
@@ -49,8 +56,10 @@ const CATEGORIES: Array<{ id: Category; kinds?: CapabilityKind[]; labelKey: stri
 
 const STATE_KEYS: Record<CapabilityState, string> = {
   applied: "capabilities.stateApplied",
+  desired: "capabilities.stateDesired",
   unavailable: "capabilities.stateUnavailable",
   blocked: "capabilities.stateBlocked",
+  suppressed: "capabilities.stateSuppressed",
   error: "capabilities.stateError",
 };
 
@@ -99,7 +108,7 @@ function KindIcon({ kind }: { kind: CapabilityKind }): JSX.Element {
 }
 
 function stateTone(state: CapabilityState): string {
-  if (state === "applied") return "border-pr/30 bg-pr/10 text-pr";
+  if (state === "applied" || state === "desired") return "border-pr/30 bg-pr/10 text-pr";
   if (state === "blocked" || state === "error") return "border-fail/30 bg-fail/10 text-fail";
   return "border-line bg-raised text-muted";
 }
@@ -123,6 +132,7 @@ function EntryRow({ entry }: { entry: CapabilityEntry }): JSX.Element {
             <span>{t(SCOPE_KEYS[entry.scope])}</span>
             <span>{t(EVIDENCE_KEYS[entry.evidence])}</span>
             <span>{entry.provider === "rookery" ? "Rookery" : entry.provider === "claude" ? "Claude" : "Codex"}</span>
+            {entry.managed && <span>{entry.managed.packId} · {entry.managed.scopeKind}</span>}
           </div>
         </div>
       </div>
@@ -130,13 +140,14 @@ function EntryRow({ entry }: { entry: CapabilityEntry }): JSX.Element {
   );
 }
 
-export function CapabilitiesPage({ target, loadSnapshot, onClose }: CapabilitiesPageProps): JSX.Element {
+export function CapabilitiesPage({ target, api, targets, generation, pickDirectory, onClose }: CapabilitiesPageProps): JSX.Element {
   const t = useT();
   const [snapshot, setSnapshot] = useState<CapabilitySnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState<Category>("all");
   const [refresh, setRefresh] = useState(0);
+  const [tab, setTab] = useState<CenterTab>("effective");
   const targetKey = target ? `${target.kind}:${target.id}` : "none";
 
   useEffect(() => {
@@ -144,6 +155,7 @@ export function CapabilitiesPage({ target, loadSnapshot, onClose }: Capabilities
   }, [targetKey]);
 
   useEffect(() => {
+    if (tab !== "effective") return;
     if (!target) {
       setSnapshot(null);
       setLoading(false);
@@ -154,12 +166,12 @@ export function CapabilitiesPage({ target, loadSnapshot, onClose }: Capabilities
     setLoading(true);
     setError(null);
     setSnapshot(null);
-    void loadSnapshot(target).then(
+    void api.loadSnapshot(target).then(
       (next) => { if (current) { setSnapshot(next); setLoading(false); } },
       (cause) => { if (current) { setError(errorMessage(cause)); setLoading(false); } },
     );
     return () => { current = false; };
-  }, [targetKey, refresh, loadSnapshot]);
+  }, [targetKey, refresh, generation, api, tab]);
 
   const visibleEntries = useMemo(() => {
     const kinds = CATEGORIES.find((item) => item.id === category)?.kinds;
@@ -167,7 +179,7 @@ export function CapabilitiesPage({ target, loadSnapshot, onClose }: Capabilities
   }, [category, snapshot]);
 
   const counts = useMemo(() => {
-    const initial: Record<CapabilityState, number> = { applied: 0, unavailable: 0, blocked: 0, error: 0 };
+    const initial: Record<CapabilityState, number> = { applied: 0, desired: 0, unavailable: 0, blocked: 0, suppressed: 0, error: 0 };
     for (const entry of snapshot?.entries ?? []) initial[entry.state]++;
     return initial;
   }, [snapshot]);
@@ -177,18 +189,28 @@ export function CapabilitiesPage({ target, loadSnapshot, onClose }: Capabilities
       <header className="drag flex min-h-11 shrink-0 items-center gap-2 border-b border-line px-5 py-2 text-[13px]">
         <Blocks size={16} className="text-accent" />
         <span className="font-semibold tracking-[-0.01em]">{t("capabilities.title")}</span>
-        <span className="rounded-md border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">{t("capabilities.effective")}</span>
+        <nav className="no-drag ml-2 flex items-center gap-1" aria-label={t("capabilities.title")}>
+          {(["effective", "library", "assignments"] as CenterTab[]).map((item) => (
+            <button key={item} aria-pressed={tab === item} onClick={() => setTab(item)} className={cn("rounded-md px-2.5 py-1 text-[11px] transition-colors", tab === item ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>{t(`capabilities.${item}`)}</button>
+          ))}
+        </nav>
         <div className="no-drag ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={!target || loading} onClick={() => setRefresh((value) => value + 1)}>
-            <RefreshCw size={14} className={cn(loading && "animate-spin")} />
-          </Button>
+          {tab === "effective" && (
+            <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={!target || loading} onClick={() => setRefresh((value) => value + 1)}>
+              <RefreshCw size={14} className={cn(loading && "animate-spin")} />
+            </Button>
+          )}
           <button onClick={onClose} aria-label={t("common.close")} className="rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim"><X size={16} /></button>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-6">
-          {!target ? (
+          {tab === "library" ? (
+            <CapabilityLibraryTab api={api} generation={generation} pickDirectory={pickDirectory} />
+          ) : tab === "assignments" ? (
+            <CapabilityAssignmentsTab api={api} generation={generation} targets={targets} />
+          ) : !target ? (
             <div className="flex flex-col items-center justify-center gap-3 py-24 text-center text-muted">
               <Bot size={32} className="opacity-40" />
               <p className="text-[12.5px]">{t("capabilities.noTarget")}</p>
@@ -213,6 +235,7 @@ export function CapabilitiesPage({ target, loadSnapshot, onClose }: Capabilities
                       <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-fg-dim">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
                     </div>
                     <p className="mt-1 truncate font-mono text-[11px] text-muted" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>
+                    {snapshot.desiredRevision && <p className="mt-1 font-mono text-[10px] text-muted">{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</p>}
                   </div>
                   <p className="font-mono text-[10px] text-muted">{t("capabilities.generatedAt", { time: new Date(snapshot.generatedAt).toLocaleString() })}</p>
                 </div>

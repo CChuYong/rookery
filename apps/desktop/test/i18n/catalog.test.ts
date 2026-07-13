@@ -16,4 +16,10 @@ describe("i18n catalogs", () => {
     expect(catalogs.ko["common.save"]).toBe("저장");
     expect(catalogs.en["common.save"]).toBe("Save");
   });
+  it("translates every Capability Center tab and managed state", () => {
+    for (const key of ["capabilities.effective", "capabilities.library", "capabilities.assignments", "capabilities.stateDesired", "capabilities.stateSuppressed"]) {
+      expect(catalogs.ko[key]).toBeTruthy();
+      expect(catalogs.en[key]).toBeTruthy();
+    }
+  });
 });

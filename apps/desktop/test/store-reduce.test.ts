@@ -4,6 +4,16 @@ import type { LogItem } from "../src/renderer/store/reduce.js";
 import { useStore } from "../src/renderer/store/store.js";
 import { fmtTokens, fmtDuration, contextPct } from "../src/renderer/format.js";
 
+describe("capability generation", () => {
+  it("takes the daemon generation from capabilities.changed in the pure reducer and store", () => {
+    const event = { type: "capabilities.changed" as const, sessionId: "@all", generation: 7, affected: [{ scopeKind: "rookery" as const, scopeRef: "" }] };
+    expect(reduceEvent(emptyState(), event).capabilityGeneration).toBe(7);
+    useStore.setState({ capabilityGeneration: 0 });
+    useStore.getState().applyEvent(event);
+    expect(useStore.getState().capabilityGeneration).toBe(7);
+  });
+});
+
 describe("pendingBySession reconcile", () => {
   it("master.message user with clientMsgId appends committed AND removes matching pending", () => {
     let s = emptyState();

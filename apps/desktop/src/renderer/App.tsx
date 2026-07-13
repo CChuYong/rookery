@@ -3,7 +3,7 @@ import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, B
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
-import type { CapabilitySnapshot, CapabilityTarget } from "@daemon/core/capabilities/types.js";
+import type { CapabilityTarget } from "@daemon/core/capabilities/types.js";
 import { useStore } from "./store/store.js";
 import { baseName } from "./lib/path.js";
 import { resolveMasterControls } from "./lib/master-controls.js";
@@ -34,6 +34,7 @@ import type { SlashCommand } from "./views/Conversation.js";
 import { AutomationPage } from "./components/AutomationPage.js";
 import { AutomationForm } from "./components/AutomationForm.js";
 import { CapabilitiesPage } from "./components/CapabilitiesPage.js";
+import type { CapabilityCenterApi } from "./components/capabilities/types.js";
 import { WorkerHeader, SessionHeader } from "./components/WorkspaceHeaders.js";
 import { WindowControls } from "./components/WindowControls.js";
 import { DaemonDownBanner } from "./components/DaemonDownBanner.js";
@@ -157,6 +158,7 @@ type AppSelected = Pick<
   | "authStatus"
   | "codexModels"
   | "mcpStatus"
+  | "capabilityGeneration"
 >;
 
 export function App(): JSX.Element {
@@ -193,6 +195,7 @@ export function App(): JSX.Element {
         integrations: st.integrations,
         authStatus: st.authStatus,
         mcpStatus: st.mcpStatus,
+        capabilityGeneration: st.capabilityGeneration,
         automations: st.automations,
         automationsLoaded: st.automationsLoaded,
         automationsLoadFailed: st.automationsLoadFailed,
@@ -836,20 +839,43 @@ export function App(): JSX.Element {
       client ? client.request({ type: "commands.list", cwd }).then((r) => r.commands ?? []).catch(() => []) : Promise.resolve([]),
     [client],
   );
-  const loadCapabilitySnapshot = useCallback(
-    (target: CapabilityTarget): Promise<CapabilitySnapshot> => {
-      const c = client;
-      return c
-        ? c.request({ type: "capabilities.snapshot", target }).then((response) => response.snapshot)
-        : Promise.reject(new Error("daemon not connected"));
-    },
-    [],
-  );
+  const capabilityApi = useMemo<CapabilityCenterApi>(() => {
+    const connected = (): WsClient => {
+      if (!client) throw new Error("daemon not connected");
+      return client;
+    };
+    return {
+      loadSnapshot: (target) => connected().request({ type: "capabilities.snapshot", target }).then((response) => response.snapshot),
+      loadLibrary: () => connected().request({ type: "capabilities.library" }).then((response) => response.library),
+      addPack: (sourcePath) => connected().request({ type: "capabilities.pack.add", path: sourcePath }).then((response) => {
+        if (!response.pack) throw new Error("capability pack add returned no pack");
+        return response.pack;
+      }),
+      removePack: (instanceId) => connected().request({ type: "capabilities.pack.remove", instanceId }).then(() => undefined),
+      setTrust: (instanceId, digest, trusted) => connected().request({ type: "capabilities.trust.set", instanceId, digest, trusted }).then((response) => {
+        if (!response.pack) throw new Error("capability trust update returned no pack");
+        return response.pack;
+      }),
+      setSecret: (instanceId, key, value) => connected().request({ type: "capabilities.secret.set", instanceId, key, value }).then((response) => response.secret),
+      deleteSecret: (instanceId, key) => connected().request({ type: "capabilities.secret.delete", instanceId, key }).then((response) => response.secret),
+      refresh: (instanceId) => connected().request({ type: "capabilities.refresh", ...(instanceId ? { instanceId } : {}) }).then((response) => response.library),
+      setBinding: (id, binding) => connected().request({ type: "capabilities.binding.set", id, binding }).then((response) => {
+        if (!response.binding) throw new Error("capability binding update returned no binding");
+        return response.binding;
+      }),
+      deleteBinding: (id) => connected().request({ type: "capabilities.binding.delete", id }).then(() => undefined),
+    };
+  }, []);
 
   const activeSub = s.activeWorkerId ? s.fleet[s.activeWorkerId] : undefined;
   const capabilityTarget: CapabilityTarget | null = showRepos
     ? activeSub ? { kind: "worker", id: activeSub.id } : null
     : s.activeSessionId ? { kind: "session", id: s.activeSessionId } : null;
+  const capabilityTargetOptions = useMemo(() => ({
+    repos: s.repos.map((repo) => ({ id: repo.id, label: repo.name })),
+    sessions: s.sessions.map((session) => ({ id: session.id, label: session.label?.trim() || session.cwd })),
+    workers: Object.values(s.fleet).map((worker) => ({ id: worker.id, label: worker.label })),
+  }), [s.repos, s.sessions, s.fleet]);
   const fleet = useMemo(() => Object.values(s.fleet), [s.fleet]); // used in RepoTree (Repos view)
   // Master composer model/effort controls — inline would be a new ref every render, breaking the Conversation memo. Keep the same ref
   // across unrelated re-renders like usage polling (deps: settings/active session/overrides only).
@@ -1178,7 +1204,14 @@ export function App(): JSX.Element {
         {/* replay rise-in on every page/overlay swap (key=pageId). Keep TerminalPanel outside this div to preserve the xterm. */}
         <div key={pageId} className="flex min-h-0 flex-1 flex-col rise-in">
         {overlay === "capabilities" ? (
-          <CapabilitiesPage target={capabilityTarget} loadSnapshot={loadCapabilitySnapshot} onClose={closeOverlay} />
+          <CapabilitiesPage
+            target={capabilityTarget}
+            api={capabilityApi}
+            targets={capabilityTargetOptions}
+            generation={s.capabilityGeneration}
+            pickDirectory={() => window.rookery.pickDirectory()}
+            onClose={closeOverlay}
+          />
         ) : overlay === "settings" && s.settings ? (
           <SettingsPage
             settings={s.settings}

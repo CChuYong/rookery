@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { CapabilitiesPage } from "../src/renderer/components/CapabilitiesPage.js";
 import type { CapabilitySnapshot, CapabilityTarget } from "@daemon/core/capabilities/types.js";
+import type { CapabilityCenterApi } from "../src/renderer/components/capabilities/types.js";
 
 const target: CapabilityTarget = { kind: "session", id: "s1" };
 const snapshot: CapabilitySnapshot = {
@@ -12,9 +13,33 @@ const snapshot: CapabilitySnapshot = {
     { id: "mcp", kind: "mcp", name: "notion", description: "MCP server", detail: "Not logged in", provider: "codex", source: "Codex mcpServerStatus/list", scope: "session", state: "unavailable", evidence: "runtime" },
     { id: "hook", kind: "hook", name: "guard", provider: "codex", source: "Codex hooks/list", scope: "repo", state: "blocked", evidence: "runtime" },
     { id: "command", kind: "command", name: "/btw", provider: "rookery", source: "Rookery desktop", scope: "builtin", state: "applied", evidence: "declared" },
+    { id: "managed-rules", kind: "instruction", name: "team-rules", provider: "rookery", source: "Team Pack", scope: "repo", state: "desired", evidence: "declared", managed: { packInstanceId: "pack-1", packId: "team-pack", bindingId: "binding-1", scopeKind: "repo-local", enabled: true } },
+    { id: "managed-side-mcp", kind: "mcp", name: "side-search", provider: "rookery", source: "Team Pack", scope: "session", state: "suppressed", evidence: "declared", managed: { packInstanceId: "pack-1", packId: "team-pack", bindingId: "binding-2", scopeKind: "session", enabled: false } },
   ],
+  desiredRevision: "1234567890abcdef",
+  desiredBlocked: true,
   diagnostics: [{ id: "apps", source: "Codex app/list", severity: "warning", message: "method not found" }],
 };
+
+const targets = { repos: [], sessions: [], workers: [] };
+function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilitySnapshot>): CapabilityCenterApi {
+  return {
+    loadSnapshot,
+    loadLibrary: async () => ({ generation: 0, packs: [], bindings: [] }),
+    addPack: async () => { throw new Error("unused"); },
+    removePack: async () => {},
+    setTrust: async () => { throw new Error("unused"); },
+    setSecret: async (_instanceId, key) => ({ key, configured: true }),
+    deleteSecret: async (_instanceId, key) => ({ key, configured: false }),
+    refresh: async () => ({ generation: 0, packs: [], bindings: [] }),
+    setBinding: async () => { throw new Error("unused"); },
+    deleteBinding: async () => {},
+  };
+}
+
+function pageProps(api: CapabilityCenterApi, generation = 0) {
+  return { api, targets, generation, pickDirectory: async () => null, onClose: () => {} };
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -26,7 +51,7 @@ function deferred<T>() {
 describe("CapabilitiesPage", () => {
   it("loads and renders authoritative target metadata, summaries, evidence, and diagnostics", async () => {
     const loadSnapshot = vi.fn(async () => snapshot);
-    render(<CapabilitiesPage target={target} loadSnapshot={loadSnapshot} onClose={() => {}} />);
+    render(<CapabilitiesPage target={target} {...pageProps(makeApi(loadSnapshot))} />);
 
     expect(screen.getByText("불러오는 중…")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Main")).toBeInTheDocument());
@@ -39,11 +64,15 @@ describe("CapabilitiesPage", () => {
     expect(screen.getAllByText("런타임 확인").length).toBeGreaterThan(0);
     expect(screen.getByText("일부 항목을 확인하지 못했어요")).toBeInTheDocument();
     expect(screen.getByText("method not found")).toBeInTheDocument();
+    expect(screen.getByText("team-rules")).toBeInTheDocument();
+    expect(screen.getAllByText("적용 예정").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("억제됨").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Desired revision 1234567890ab/)).toBeInTheDocument();
     expect(within(screen.getByTestId("capability-summary")).getByText("2")).toBeInTheDocument();
   });
 
   it("filters entries by the five capability categories", async () => {
-    render(<CapabilitiesPage target={target} loadSnapshot={async () => snapshot} onClose={() => {}} />);
+    render(<CapabilitiesPage target={target} {...pageProps(makeApi(async () => snapshot))} />);
     await screen.findByText("release");
 
     fireEvent.click(screen.getByRole("button", { name: "도구 & MCP" }));
@@ -61,16 +90,19 @@ describe("CapabilitiesPage", () => {
 
   it("shows an explicit no-target state without making a request", () => {
     const loadSnapshot = vi.fn(async () => snapshot);
-    render(<CapabilitiesPage target={null} loadSnapshot={loadSnapshot} onClose={() => {}} />);
+    render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
     expect(screen.getByText("먼저 세션이나 워커를 선택하세요.")).toBeInTheDocument();
     expect(loadSnapshot).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "유효 상태" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "라이브러리" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "할당" })).toBeInTheDocument();
   });
 
   it("shows request errors and retries", async () => {
     const loadSnapshot = vi.fn()
       .mockRejectedValueOnce(new Error("daemon unavailable"))
       .mockResolvedValueOnce(snapshot);
-    render(<CapabilitiesPage target={target} loadSnapshot={loadSnapshot} onClose={() => {}} />);
+    render(<CapabilitiesPage target={target} {...pageProps(makeApi(loadSnapshot))} />);
 
     expect(await screen.findByText("daemon unavailable")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
@@ -80,7 +112,7 @@ describe("CapabilitiesPage", () => {
 
   it("refreshes on demand", async () => {
     const loadSnapshot = vi.fn(async () => snapshot);
-    render(<CapabilitiesPage target={target} loadSnapshot={loadSnapshot} onClose={() => {}} />);
+    render(<CapabilitiesPage target={target} {...pageProps(makeApi(loadSnapshot))} />);
     await screen.findByText("release");
     fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
     await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
@@ -97,9 +129,10 @@ describe("CapabilitiesPage", () => {
       diagnostics: [],
     };
     const loadSnapshot = vi.fn((next: CapabilityTarget) => next.id === "s1" ? first.promise : second.promise);
-    const { rerender } = render(<CapabilitiesPage target={target} loadSnapshot={loadSnapshot} onClose={() => {}} />);
+    const api = makeApi(loadSnapshot);
+    const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api)} />);
 
-    rerender(<CapabilitiesPage target={workerTarget} loadSnapshot={loadSnapshot} onClose={() => {}} />);
+    rerender(<CapabilitiesPage target={workerTarget} {...pageProps(api)} />);
     second.resolve(workerSnapshot);
     expect(await screen.findByText("worker-only")).toBeInTheDocument();
     first.resolve(snapshot);
@@ -109,9 +142,18 @@ describe("CapabilitiesPage", () => {
   });
 
   it("shows an explicit filtered-empty state and exposes no mutation controls", async () => {
-    render(<CapabilitiesPage target={target} loadSnapshot={async () => ({ ...snapshot, entries: [], diagnostics: [] })} onClose={() => {}} />);
+    render(<CapabilitiesPage target={target} {...pageProps(makeApi(async () => ({ ...snapshot, entries: [], diagnostics: [] })))} />);
     expect(await screen.findByText("이 범주에 표시할 capability가 없어요.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /설치|활성화|편집/ })).toBeNull();
     expect(screen.getByText("유효 상태")).toBeInTheDocument();
+  });
+
+  it("reloads the active Effective tab when capability generation changes", async () => {
+    const loadSnapshot = vi.fn(async () => snapshot);
+    const api = makeApi(loadSnapshot);
+    const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api, 1)} />);
+    await screen.findByText("team-rules");
+    rerender(<CapabilitiesPage target={target} {...pageProps(api, 2)} />);
+    await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
   });
 });
