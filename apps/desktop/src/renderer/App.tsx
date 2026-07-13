@@ -456,7 +456,7 @@ export function App(): JSX.Element {
       () => new WebSocket(url) as unknown as SocketLike,
       (e) => {
         // OS notification: read prev first at the moment of the status transition (before applyEvent). Suppressed when main is focused.
-        if (e.type === "worker.status" && notifyRef.current) {
+        if (e.type === "worker.status" && notifyRef.current && !useStore.getState().deletingWorkers[e.workerId]) {
           const row = useStore.getState().fleet[e.workerId];
           const n = notifyFor(row?.status, e.status, row?.label ?? e.workerId, tRef.current);
           if (n) void window.rookery.notify({ ...n, workerId: e.workerId });
@@ -473,6 +473,9 @@ export function App(): JSX.Element {
         }
         useStore.getState().applyEvent(e);
         if (e.type === "automation.changed") { void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => {}); }
+        if (e.type === "worker.deletion" && e.phase === "failed") {
+          void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});
+        }
         // Session activity/appearance → refresh the list. (For agent.* events that are results or for a session we don't know yet.)
         if (e.type.startsWith("master.")) {
           const sid = (e as { sessionId?: string }).sessionId;
@@ -480,7 +483,11 @@ export function App(): JSX.Element {
             scheduleSessionRefresh(c);
           }
         }
-        if (e.type === "worker.status" && ["failed", "stopped", "error"].includes(e.status)) {
+        if (
+          e.type === "worker.status" &&
+          ["failed", "stopped", "error"].includes(e.status) &&
+          !useStore.getState().deletingWorkers[e.workerId]
+        ) {
           void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});
         }
       },
@@ -490,6 +497,7 @@ export function App(): JSX.Element {
       if (startTimer) { clearTimeout(startTimer); startTimer = null; } // connection succeeded → release the fallback timer (DSK-10)
       useStore.getState().resetLiveInteractions(); // must precede events.subscribe: the replay repopulates the set
       useStore.getState().bumpConnectionEpoch(); // pending bubbles from before this reconnect become prunable at seed time
+      useStore.getState().resetWorkerDeletions(); // daemon restart recovery: an uncommitted deletion may legitimately return
       useStore.getState().setDaemon("up");
       // A rejection here (vs. the swallowed .catch(()=>{}) elsewhere) sets the loadFailed flag so Sessions/RepoTree can
       // show an error+retry row instead of staying blank forever when the initial fetch never arrives (audit #14).
@@ -609,13 +617,17 @@ export function App(): JSX.Element {
   const renameSub = useCallback((id: string, label: string) => { void client?.request({ type: "worker.rename", id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   const archiveSub = useCallback((id: string, archived: boolean) => { void client?.request({ type: "worker.archive", id, archived }).then(refetchFleet).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchFleet]);
   const deleteSub = useCallback((id: string) => {
-    // Optimistic removal — mirrors deleteSession (refetch reconciles; restored on failure).
-    if (useStore.getState().activeWorkerId === id) useStore.getState().navigate({ subId: null });
-    useStore.setState((st) => { const f = { ...st.fleet }; delete f[id]; return { fleet: f }; });
+    const store = useStore.getState();
+    if (store.activeWorkerId === id) store.navigate({ subId: null });
+    store.beginWorkerDeletion(id);
     void client?.request({ type: "worker.delete", id }).then(() => {
       useLayoutStore.getState().clear_(id); // only after the daemon confirms (audit #34) — a failed delete restores the row AND keeps its layout
+      useStore.getState().completeWorkerDeletion(id); // idempotent fallback if the lifecycle event was missed
+    }).catch((e) => {
+      useStore.getState().failWorkerDeletion(id);
+      toast.error(tRef.current("toast.deleteFailed"), String(e));
       refetchFleet();
-    }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchFleet(); });
+    });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
   const startSession = (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string }) => {

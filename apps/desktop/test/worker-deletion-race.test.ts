@@ -45,4 +45,26 @@ describe("overlapping worker deletion reconciliation", () => {
     useStore.getState().setFleet([row("w1")]);
     expect(useStore.getState().fleet.w1).toMatchObject({ id: "w1", label: "w1" });
   });
+
+  it("accepts duplicate local/server lifecycle phases idempotently", () => {
+    useStore.getState().setFleet([row("w1")]);
+    useStore.getState().beginWorkerDeletion("w1");
+    useStore.getState().applyEvent({
+      type: "worker.deletion", sessionId: "s1", workerId: "w1", phase: "started",
+    });
+    useStore.getState().completeWorkerDeletion("w1");
+    useStore.getState().applyEvent({
+      type: "worker.deletion", sessionId: "s1", workerId: "w1", phase: "completed",
+    });
+    expect(useStore.getState().fleet.w1).toBeUndefined();
+    expect(useStore.getState().deletingWorkers.w1).toBeUndefined();
+  });
+
+  it("drops stale local deletion intents on reconnect before the fresh fleet seed", () => {
+    useStore.getState().setFleet([row("w1")]);
+    useStore.getState().beginWorkerDeletion("w1");
+    useStore.getState().resetWorkerDeletions();
+    useStore.getState().setFleet([row("w1")]);
+    expect(useStore.getState().fleet.w1).toBeDefined();
+  });
 });
