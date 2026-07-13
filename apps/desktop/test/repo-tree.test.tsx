@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { RepoTree } from "../src/renderer/views/RepoTree.js";
 import { useStore } from "../src/renderer/store/store.js";
+import { useRepoTreeStore } from "../src/renderer/store/repotree.js";
 import type { LogItem } from "../src/renderer/store/reduce.js";
 
 const repo = { name: "app", path: "/code/app", description: "", base: null };
@@ -299,6 +300,65 @@ describe("RepoTree provider badge (Codex)", () => {
       />,
     );
     expect(screen.queryByText("Codex")).toBeNull();
+  });
+});
+
+// The sidebar renders RepoTree ⟷ Sessions conditionally (App.tsx), so a Sessions↔Repos tab switch
+// unmounts the tree. Fold state therefore lives in the persisted useRepoTreeStore — it must survive
+// a full unmount+remount (and, via localStorage, an app restart).
+describe("RepoTree fold state survives unmount/remount (tab switch)", () => {
+  const treeProps = {
+    repos: [repo] as never,
+    fleet: [worker] as never,
+    activeSubId: null,
+    onSelectSub: () => {},
+    onNewRepo: () => {},
+    onRemoveRepo: () => {},
+    onNewSub: () => {},
+  };
+  // The store is module-global — reset on BOTH sides so fold state can't leak into other describes
+  // in this file (they render the same tree and assume everything is expanded).
+  const reset = () => {
+    localStorage.clear();
+    useRepoTreeStore.setState({ collapsed: {}, archOpen: false });
+  };
+  beforeEach(reset);
+  afterEach(reset);
+
+  it("a collapsed repo group stays collapsed after remount", () => {
+    const first = render(<RepoTree {...treeProps} />);
+    expect(screen.getByText("worker1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "app 1" })); // fold the repo group
+    first.unmount();
+    render(<RepoTree {...treeProps} />);
+    // Collapse's lazy render-latch: a group mounted closed renders no children at all.
+    expect(screen.queryByText("worker1")).toBeNull();
+  });
+
+  it("re-expanding before the switch is also remembered", () => {
+    const first = render(<RepoTree {...treeProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "app 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "app 1" })); // expand again
+    first.unmount();
+    render(<RepoTree {...treeProps} />);
+    expect(screen.getByText("worker1")).toBeInTheDocument();
+  });
+
+  it("the archive section's open state survives remount", () => {
+    const props = { ...treeProps, fleet: [{ ...worker, archived: true }] as never };
+    const first = render(<RepoTree {...props} />);
+    expect(screen.queryByText("worker1")).toBeNull(); // archive starts closed
+    fireEvent.click(screen.getByRole("button", { name: /보관함/ }));
+    expect(screen.getByText("worker1")).toBeInTheDocument();
+    first.unmount();
+    render(<RepoTree {...props} />);
+    expect(screen.getByText("worker1")).toBeInTheDocument();
+  });
+
+  it("prunes fold keys of repos that no longer exist once repos are known", () => {
+    useRepoTreeStore.setState({ collapsed: { "removed-repo": true, app: true } });
+    render(<RepoTree {...treeProps} />);
+    expect(useRepoTreeStore.getState().collapsed).toEqual({ app: true });
   });
 });
 

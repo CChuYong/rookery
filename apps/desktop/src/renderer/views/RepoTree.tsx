@@ -1,6 +1,7 @@
-import { memo, useState, useRef } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreHorizontal } from "lucide-react";
 import { useStore } from "../store/store.js";
+import { useRepoTreeStore } from "../store/repotree.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
 import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
@@ -77,8 +78,13 @@ function RepoTreeImpl(p: {
   onDeleteSub?: (id: string) => void;
 }): JSX.Element {
   const t = useT();
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [archOpen, setArchOpen] = useState(false); // archive collapsed by default
+  // Fold state lives in a persisted store, NOT component state: the sidebar conditionally renders
+  // RepoTree vs Sessions, so a tab switch unmounts this component — local state would re-expand
+  // everything. localStorage persistence also carries it across app restarts.
+  const collapsed = useRepoTreeStore((s) => s.collapsed);
+  const setCollapsed = useRepoTreeStore((s) => s.setCollapsed);
+  const archOpen = useRepoTreeStore((s) => s.archOpen); // archive collapsed by default
+  const setArchOpen = useRepoTreeStore((s) => s.setArchOpen);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
@@ -91,6 +97,11 @@ function RepoTreeImpl(p: {
   const spawnSeedRef = useRef<Set<string> | null>(null);
   if (spawnSeedRef.current === null && p.fleet.length > 0) spawnSeedRef.current = new Set(p.fleet.map((f) => f.id));
   const isFreshSpawn = (id: string): boolean => spawnSeedRef.current !== null && !spawnSeedRef.current.has(id);
+  // Drop fold keys of repos that were unregistered/renamed. Gated on a non-empty list so the
+  // cold-connect snapshot (before repos.list arrives) can't wipe the saved state.
+  useEffect(() => {
+    if (p.repos.length > 0) useRepoTreeStore.getState().prune(new Set([...p.repos.map((r) => r.name), "__orphans__"]));
+  }, [p.repos]);
   const knownPaths = new Set(p.repos.map((r) => r.path));
   const repoNameByPath = new Map(p.repos.map((r) => [r.path, r.name])); // for detecting the repo-name label fallback (audit #46)
   const live = p.fleet.filter((f) => !f.archived); // archived workers are hidden from the tree
@@ -189,7 +200,7 @@ function RepoTreeImpl(p: {
       <div key={key}>
         <div className="group flex items-center rounded-lg pr-1 hover:bg-raised/60">
           {foldable ? (
-            <button onClick={() => setCollapsed((c) => ({ ...c, [key]: open }))} className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-[12.5px] font-medium text-fg-dim">
+            <button onClick={() => setCollapsed(key, open)} className="flex flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-[12.5px] font-medium text-fg-dim">
               {headerInner}
             </button>
           ) : (
@@ -254,7 +265,7 @@ function RepoTreeImpl(p: {
 
       {archived.length > 0 && (
         <div className="mt-1">
-          <button onClick={() => setArchOpen((v) => !v)} className="eyebrow flex w-full items-center gap-1.5 px-2 py-1.5 text-left eyebrow-sm font-medium uppercase text-muted hover:text-fg-dim">
+          <button onClick={() => setArchOpen(!archOpen)} className="eyebrow flex w-full items-center gap-1.5 px-2 py-1.5 text-left eyebrow-sm font-medium uppercase text-muted hover:text-fg-dim">
             <ChevronRight size={11} className={cn("transition-transform duration-200 ease-out", archOpen && "rotate-90")} />
             <Archive size={11} /> {t("repoTree.archive")} {archived.length}
           </button>
