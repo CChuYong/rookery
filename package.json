@@ -24,6 +24,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke:capabilities": "node scripts/smoke-capability-runtime.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
