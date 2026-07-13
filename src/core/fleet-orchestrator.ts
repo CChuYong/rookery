@@ -701,10 +701,12 @@ export class FleetOrchestrator {
       // void: just trigger stop so each flow settles; the actual completion wait is handled by the drain below.
       if (e.agent && (live === "running" || live === "idle" || live === "background")) void e.agent.stop().catch(() => {});
     }
-    // only after draining all worker flows + in-flight checkpoint writes does the caller call db.close().
-    // (checkpoints aren't in flows so wait for them separately — otherwise addCheckpoint throws on a closed DB.)
+    // Only after draining worker flows, permanent deletions, and in-flight checkpoint writes does the caller call
+    // db.close(). Deletions/checkpoints aren't in `flows`, so wait for them separately or their final DB write can
+    // race the close. A delete failure is already reported to its requester; shutdown still drains the promise.
     const drain = (async () => {
       await this.waitAllSettled();
+      while (this.deletionFlows.size > 0) await Promise.allSettled([...this.deletionFlows.values()]);
       while (this.checkpointWrites.size > 0) await Promise.all([...this.checkpointWrites]);
     })();
     let timer: ReturnType<typeof setTimeout> | undefined;
