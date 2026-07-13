@@ -14,7 +14,15 @@ export type CapabilityKind =
   | "plugin"
   | "app";
 
-export type CapabilityState = "applied" | "desired" | "unavailable" | "blocked" | "suppressed" | "error";
+export type CapabilityState =
+  | "applied"
+  | "desired"
+  | "pending-next-turn"
+  | "pending-reload"
+  | "unavailable"
+  | "blocked"
+  | "suppressed"
+  | "error";
 export type CapabilityEvidence = "runtime" | "declared" | "inferred";
 export type CapabilityScope = "builtin" | "session" | "worker" | "repo" | "user" | "system" | "admin" | "plugin";
 
@@ -147,6 +155,34 @@ export interface CapabilityLibrarySnapshot {
   bindings: CapabilityBinding[];
 }
 
+export interface ResolvedCapabilitySource {
+  packInstanceId: string;
+  packId: string;
+  digest: string;
+  sourcePath: string;
+}
+
+export interface ResolvedCapabilityFile extends ResolvedCapabilitySource {
+  id: string;
+  path: string;
+}
+
+export interface ResolvedMcpServer extends ResolvedCapabilitySource {
+  generatedName: string;
+  spec: McpServerSpec;
+}
+
+// Internal provider input. It is safe to pass across core/daemon boundaries because it contains
+// public specs and secret references only; actual secret values are resolved by the daemon-owned
+// runtime materializer immediately before the provider child is spawned.
+export interface ResolvedAgentCapabilities {
+  revision: string;
+  blocked: boolean;
+  instructions: ResolvedCapabilityFile[];
+  skills: ResolvedCapabilityFile[];
+  mcpServers: ResolvedMcpServer[];
+}
+
 export interface CapabilityEntry {
   id: string;
   kind: CapabilityKind;
@@ -187,6 +223,7 @@ export interface CapabilitySnapshot {
   };
   generatedAt: string;
   desiredRevision?: string;
+  appliedRevision?: string | null;
   desiredBlocked?: boolean;
   entries: CapabilityEntry[];
   diagnostics: CapabilityDiagnostic[];

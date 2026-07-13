@@ -12,6 +12,9 @@ import type {
   CapabilityScopeKind,
   CapabilityState,
   McpServerSpec,
+  ResolvedAgentCapabilities,
+  ResolvedCapabilityFile,
+  ResolvedMcpServer,
   SecretRef,
 } from "./types.js";
 
@@ -28,6 +31,7 @@ export interface ResolvedCapabilityTarget {
 export interface DesiredCapabilityManifest {
   revision: string;
   blocked: boolean;
+  runtime: ResolvedAgentCapabilities;
   entries: CapabilityEntry[];
   diagnostics: CapabilityDiagnostic[];
 }
@@ -111,6 +115,10 @@ function publicServerSpec(server: McpServerSpec): unknown {
   };
 }
 
+function providerSafeId(id: string): string {
+  return id.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 export class CapabilityResolver {
   private readonly env: NodeJS.ProcessEnv;
 
@@ -185,6 +193,9 @@ export class CapabilityResolver {
     const selected = this.select(target);
     const entries: CapabilityEntry[] = [];
     const diagnostics: CapabilityDiagnostic[] = [];
+    const runtimeInstructions: ResolvedCapabilityFile[] = [];
+    const runtimeSkills: ResolvedCapabilityFile[] = [];
+    const runtimeMcpServers: ResolvedMcpServer[] = [];
     let blocked = false;
     const revisionProjection: unknown[] = [];
 
@@ -213,6 +224,12 @@ export class CapabilityResolver {
         evidence: "declared" as const,
         managed,
       };
+      const runtimeSource = {
+        packInstanceId: pack.instanceId,
+        packId: pack.manifest.id,
+        digest: pack.digest,
+        sourcePath: pack.sourcePath,
+      };
 
       for (const instruction of pack.manifest.instructions ?? []) {
         entries.push({
@@ -224,6 +241,7 @@ export class CapabilityResolver {
           state: baseState,
           ...common,
         });
+        if (baseState === "desired") runtimeInstructions.push({ ...runtimeSource, ...instruction });
       }
       for (const skill of pack.manifest.skills ?? []) {
         entries.push({
@@ -235,6 +253,7 @@ export class CapabilityResolver {
           state: baseState,
           ...common,
         });
+        if (baseState === "desired") runtimeSkills.push({ ...runtimeSource, ...skill });
       }
       for (const server of pack.manifest.mcpServers ?? []) {
         let state = baseState;
@@ -272,6 +291,13 @@ export class CapabilityResolver {
           state,
           ...common,
         });
+        if (state === "desired") {
+          runtimeMcpServers.push({
+            ...runtimeSource,
+            generatedName: `rookery__${providerSafeId(pack.manifest.id)}__${providerSafeId(server.id)}`,
+            spec: server,
+          });
+        }
       }
 
       revisionProjection.push({
@@ -304,6 +330,15 @@ export class CapabilityResolver {
     const revision = createHash("sha256")
       .update(stableStringify({ targetKind: target.kind, selected: revisionProjection }))
       .digest("hex");
-    return { revision, blocked, entries, diagnostics };
+    const runtime: ResolvedAgentCapabilities = {
+      revision,
+      blocked,
+      instructions: runtimeInstructions,
+      skills: runtimeSkills,
+      // A blocked desired manifest must never partially launch provider MCP processes. Instructions
+      // and skills remain projected for review, but the backend rejects the whole runtime before spawn.
+      mcpServers: blocked ? [] : runtimeMcpServers,
+    };
+    return { revision, blocked, runtime, entries, diagnostics };
   }
 }

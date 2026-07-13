@@ -167,6 +167,7 @@ describe("CapabilityResolver", () => {
     const resolver = new CapabilityResolver(registry, { env });
     const missing = resolver.resolve(master);
     expect(missing.blocked).toBe(true);
+    expect(missing.runtime.mcpServers).toEqual([]);
     expect(missing.entries.find((entry) => entry.name === "required")?.state).toBe("blocked");
     expect(missing.entries.find((entry) => entry.name === "optional")?.state).toBe("unavailable");
 
@@ -176,9 +177,68 @@ describe("CapabilityResolver", () => {
     expect(configured.entries.find((entry) => entry.name === "required")?.state).toBe("desired");
     expect(configured.revision).not.toBe(missing.revision);
     expect(JSON.stringify(configured)).not.toContain("actual-secret-value");
+    expect(configured.runtime).toMatchObject({
+      revision: configured.revision,
+      blocked: false,
+      mcpServers: [{
+        generatedName: "rookery__mcp_pack__required",
+        packInstanceId: pack.instanceId,
+        packId: "mcp-pack",
+        digest: pack.digest,
+        sourcePath: pack.sourcePath,
+        spec: expect.objectContaining({ id: "required", transport: "stdio" }),
+      }],
+    });
+    expect(JSON.stringify(configured.runtime)).not.toContain("actual-secret-value");
     const revision = configured.revision;
     registry.setSecret(pack.instanceId, "token", "rotated-secret-value");
     expect(resolver.resolve(master).revision).not.toBe(revision);
+  });
+
+  it("projects trusted instructions and skills for immutable provider materialization", () => {
+    const pack = addPack({
+      id: "team.pack",
+      instructions: [{ id: "rules", path: "rules.md" }],
+      skills: [{ id: "review-pr", path: "skills/review-pr" }],
+      mcpServers: [{ id: "lookup-api", transport: "streamable-http", url: "https://example.test/mcp" }],
+    });
+    registry.setBinding("binding", {
+      packInstanceId: pack.instanceId,
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] },
+      enabled: true,
+    });
+
+    const result = new CapabilityResolver(registry).resolve(master);
+    expect(result.runtime).toEqual({
+      revision: result.revision,
+      blocked: false,
+      instructions: [{
+        id: "rules",
+        packInstanceId: pack.instanceId,
+        packId: "team.pack",
+        digest: pack.digest,
+        sourcePath: pack.sourcePath,
+        path: "rules.md",
+      }],
+      skills: [{
+        id: "review-pr",
+        packInstanceId: pack.instanceId,
+        packId: "team.pack",
+        digest: pack.digest,
+        sourcePath: pack.sourcePath,
+        path: "skills/review-pr",
+      }],
+      mcpServers: [{
+        generatedName: "rookery__team_pack__lookup_api",
+        packInstanceId: pack.instanceId,
+        packId: "team.pack",
+        digest: pack.digest,
+        sourcePath: pack.sourcePath,
+        spec: { id: "lookup-api", transport: "streamable-http", url: "https://example.test/mcp" },
+      }],
+    });
   });
 
   it("selects worker, home-session, repo, then global scopes in order", () => {

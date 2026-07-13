@@ -63,6 +63,7 @@ export type CoreEvent =
   // Response handling done → replace the card with a result summary (remove buttons). Other clients/reloads of the same session also sync.
   | { type: "interaction.resolved"; sessionId: string; requestId: string; summary: string }
   | { type: "capabilities.changed"; sessionId: string; generation: number; affected: import("./capabilities/types.js").CapabilityScopeRef[] }
+  | { type: "capabilities.runtime"; sessionId: string; targetKind: "master" | "worker"; targetId: string; desiredRevision: string; appliedRevision: string | null; state: import("./capabilities/runtime-state.js").CapabilityRuntimeStatus }
   | { type: "automation.changed"; sessionId: string }
   | { type: "error"; sessionId: string; message: string };
 
