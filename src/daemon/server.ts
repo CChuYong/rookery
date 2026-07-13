@@ -45,7 +45,15 @@ import { Connection } from "./connection.js";
 import { McpBridge } from "./mcp-bridge.js";
 import { ExternalMcpController } from "./external-mcp-controller.js";
 import { externalToolDefs } from "../tools/external-tools.js";
-import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource, gcOrphanCodexHomes } from "./codex-home.js";
+import {
+  codexHomeDirFor,
+  materializeCodexHome,
+  removeCodexHome,
+  removeCodexWorkerHome,
+  seedCodexHomeFromSource,
+  seedCodexWorkerHomeFromSource,
+  gcOrphanCodexHomes,
+} from "./codex-home.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -152,6 +160,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P1.5: an in-app codexApiKey (settings) redirects the child to a rookery-managed CODEX_HOME and
   // provisions auth.json via RPC (see codex-backend.ts pump()), leaving the user's ~/.codex untouched.
   const codexHomeDir = path.join(config.home, "codex-home");
+  const realCodexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   // Shared codex auth resolvers — used by BOTH the turn children (CodexBackend below) and the model/list
   // catalog child (makeCodexModelsProvider) so the catalog authenticates under the SAME account the turns
   // run under (findings [25]/[26]). When an in-app codexApiKey is set the child is redirected to the
@@ -176,6 +185,36 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // turn/start's response).
     handshakeTimeoutMs: () => settings.codexHandshakeTimeoutMs(),
     env: codexEnv,
+    runtime: {
+      prepareWorker: (key, capabilities) => {
+        const managed = capabilityRuntime.materializeCodex(capabilities);
+        const codexHome = materializeCodexHome(config.home, key, undefined, {
+          kind: "worker",
+          apiKeySet: !!settings.codexApiKey(),
+          realCodexHome,
+          managed,
+        });
+        return {
+          codexHome,
+          env: managed.env,
+          ...(managed.systemPromptAppend ? { systemPromptAppend: managed.systemPromptAppend } : {}),
+        };
+      },
+      prepareMaster: (key, defs, capabilities) => {
+        const managed = capabilityRuntime.materializeCodex(capabilities);
+        const { url } = bridge.ensureSession(key, defs);
+        const codexHome = materializeCodexHome(config.home, key, url(config.host, boundPort), {
+          apiKeySet: !!settings.codexApiKey(),
+          realCodexHome,
+          managed,
+        });
+        return {
+          codexHome,
+          env: managed.env,
+          ...(managed.systemPromptAppend ? { systemPromptAppend: managed.systemPromptAppend } : {}),
+        };
+      },
+    },
     // P2.5 Track A (docs/2026-07-06-p25-codex-hardening.md): the closure materializes the per-session
     // CODEX_HOME (config.toml with the bridge url + auth.json passthrough, see codex-home.ts) and hands
     // the backend back just the directory path — core must not import daemon code, see codex-backend.ts's
@@ -185,7 +224,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         const { url } = bridge.ensureSession(key, defs);
         const codexHome = materializeCodexHome(config.home, key, url(config.host, boundPort), {
           apiKeySet: !!settings.codexApiKey(),
-          realCodexHome: process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+          realCodexHome,
         });
         return { codexHome };
       },
@@ -220,10 +259,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns,
         // explicit spawn override wins; else the settings default; else unlimited (null/0/negative/malformed → null via the getter).
         costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
-        ...((o.provider ?? "claude") === "claude" ? {
-          managedCapabilities: () => capabilityService.resolveManaged({ kind: "worker", id: o.id }),
-          capabilityRuntime: capabilityRuntimeState,
-        } : {}),
+        managedCapabilities: () => capabilityService.resolveManaged({ kind: "worker", id: o.id }),
+        capabilityRuntime: capabilityRuntimeState,
       },
       sdkSessionId: o.sdkSessionId ?? null,
       handoffSeed: o.handoffSeed, // cross-provider fork: seed the first turn's backend text
@@ -246,7 +283,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P3-remaining Track B #7 (docs/2026-07-06-p3r-codex-hardening-finish.md): sweep orphaned per-session
   // CODEX_HOME dirs (no backing session row — left behind by a crash mid-delete or mid-fork). Boot-only:
   // no in-flight fork/create can race it this early (before any WS connection is accepted).
-  gcOrphanCodexHomes(config.home, new Set(repos.listSessions().map((s) => s.id)));
+  gcOrphanCodexHomes(
+    config.home,
+    new Set(repos.listSessions().map((s) => s.id)),
+    new Set(repos.listAllWorkers().map((worker) => worker.id)),
+  );
   // Slack holders (bridge / thread reader / reporter-ensure) — installed by startSlack on connect, released
   // owner-scoped on stop (clearIf) so a stale connection's late stop can't clobber the live one's holders.
   const bridgeHolder = makeHolder<SlackInteractionBridge>();
@@ -424,9 +465,16 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     },
     listCodexCapabilities: ({ cwd, env }) => codexCapabilitiesProvider.list({ cwd, ...(env ? { env } : {}) }),
     codexEnvForTarget: (target) => {
-      if (target.kind !== "session") return undefined;
-      const sessionHome = path.join(config.home, "codex-homes", target.id);
-      return fs.existsSync(sessionHome) ? { CODEX_HOME: sessionHome } : undefined;
+      const targetHome = codexHomeDirFor(config.home, target.id, target.kind === "worker" ? "worker" : "master");
+      if (!fs.existsSync(targetHome)) return undefined;
+      // Probe with the current desired aliases when available. The target home itself is never
+      // rewritten from this read path, so applied-vs-desired drift remains truthful.
+      try {
+        const managed = capabilityRuntime.materializeCodex(capabilityService.resolveManaged(target));
+        return { ...managed.env, CODEX_HOME: targetHome };
+      } catch {
+        return { CODEX_HOME: targetHome };
+      }
     },
     registry: capabilityRegistry,
     resolver: capabilityResolver,

@@ -285,7 +285,7 @@ describe("CapabilityService", () => {
     });
   });
 
-  it("surfaces a sanitized Claude runtime error without changing Codex desired inventory", async () => {
+  it("surfaces the same sanitized runtime error state for Claude and Codex", async () => {
     const runtimeState = new CapabilityRuntimeState(new EventBus());
     runtimeState.setError(
       { targetKind: "master", targetId: "s1", sessionId: "s1" },
@@ -320,8 +320,12 @@ describe("CapabilityService", () => {
       runtimeState,
     });
     const codexSnapshot = await codex.snapshot({ kind: "session", id: "s1" });
-    expect(codexSnapshot.appliedRevision).toBeUndefined();
-    expect(codexSnapshot.entries.find((candidate) => candidate.id === "managed")?.state).toBe("desired");
+    expect(codexSnapshot.appliedRevision).toBeNull();
+    expect(codexSnapshot.entries.find((candidate) => candidate.id === "managed")?.state).toBe("error");
+    expect(codexSnapshot.diagnostics).toContainEqual(expect.objectContaining({
+      id: "capabilities.runtime.master.s1",
+      message: "Capability runtime application failed.",
+    }));
   });
 
   it("delegates sanitized registry mutations through the service facade", () => {

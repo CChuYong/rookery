@@ -485,7 +485,7 @@ describe("SessionManager", () => {
     expect(sm.list().some((s) => s.cwd === "/x")).toBe(false);
   });
 
-  it("injects managed capability resolution only into Claude masters", async () => {
+  it("injects managed capability resolution into Claude and Codex masters", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
@@ -504,8 +504,9 @@ describe("SessionManager", () => {
     sm.create("/claude", { provider: "claude" });
     sm.create("/codex", { provider: "codex" });
 
-    expect(makeManagedCapabilities).toHaveBeenCalledTimes(1);
-    expect(makeManagedCapabilities).toHaveBeenCalledWith("s0");
+    expect(makeManagedCapabilities).toHaveBeenCalledTimes(2);
+    expect(makeManagedCapabilities).toHaveBeenNthCalledWith(1, "s0");
+    expect(makeManagedCapabilities).toHaveBeenNthCalledWith(2, "s1");
   });
 
 });

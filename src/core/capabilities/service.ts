@@ -136,7 +136,7 @@ export class CapabilityService {
 
     const desired = this.deps.resolver?.resolve(resolved.desired);
     const runtimeTarget = this.runtimeTarget(resolved.desired);
-    const runtime = resolved.provider === "claude" && desired && this.deps.runtimeState
+    const runtime = desired && this.deps.runtimeState
       ? this.deps.runtimeState.inspect(runtimeTarget, desired.revision, desired.blocked)
       : undefined;
     const desiredEntries = this.projectRuntimeEntries(desired?.entries ?? [], runtime);

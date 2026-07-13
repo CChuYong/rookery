@@ -50,8 +50,8 @@ export interface SessionManagerDeps {
   makeCanUseTool?: (externalKey: string | null, sessionId: string) => ProviderPermissionCallback | undefined;
   // Builds a per-source dynamic capability resolver from the session's externalKey (slack: etc.) (assembled by the daemon). base only if not injected/undefined.
   makeCapabilities?: (externalKey: string | null, sessionId: string) => (() => TurnCapabilities) | undefined;
-  // Slice 3 provider runtime: only Claude masters receive this resolver. It is invoked by MasterAgent
-  // per turn, not while the Session object is cached.
+  // Provider runtime resolver. It is invoked by MasterAgent per turn, not while the Session object
+  // is cached, so both Claude and Codex masters observe binding changes on the next turn.
   makeManagedCapabilities?: (sessionId: string) => (() => ResolvedAgentCapabilities) | undefined;
   capabilityRuntime?: CapabilityRuntimeReporter;
   // Forks a session's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
@@ -104,7 +104,7 @@ export class SessionManager {
     const origin = row?.origin || deriveOrigin(externalKey).origin;
     const canUseTool = origin === "automation" ? undefined : makeCanUseTool?.(externalKey, id); // session-bound approval/question callback (slack thread etc.). auto-allow if absent.
     const capabilities = makeCapabilities?.(externalKey, id); // session-bound per-source capability resolver (slack thread tools etc.). base only if absent.
-    const managedCapabilities = provider === "claude" ? makeManagedCapabilities?.(id) : undefined;
+    const managedCapabilities = makeManagedCapabilities?.(id);
     const master = new MasterAgent({
       sessionId: id,
       cwd,
