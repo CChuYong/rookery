@@ -406,6 +406,35 @@ describe("reduceEvent", () => {
     expect(s2.fleet["ghost"]).toBeUndefined();
   });
 
+  it("worker deletion tombstones block status resurrection", () => {
+    let state = reduceEvent(emptyState(), {
+      type: "worker.spawned", sessionId: "s1", workerId: "w1", repoPath: "/r", label: "one",
+    });
+    state = reduceEvent(state, {
+      type: "worker.deletion", sessionId: "s1", workerId: "w1", phase: "started",
+    });
+    expect(state.fleet.w1).toBeUndefined();
+    expect(state.deletingWorkers.w1).toBe(true);
+
+    state = reduceEvent(state, {
+      type: "worker.status", sessionId: "s1", workerId: "w1", status: "stopped",
+    });
+    expect(state.fleet.w1).toBeUndefined();
+
+    state = reduceEvent(state, {
+      type: "worker.deletion", sessionId: "s1", workerId: "w1", phase: "completed",
+    });
+    expect(state.fleet.w1).toBeUndefined();
+    expect(state.deletingWorkers.w1).toBeUndefined();
+  });
+
+  it("worker.status never creates membership without worker.spawned or fleet.list", () => {
+    const state = reduceEvent(emptyState(), {
+      type: "worker.status", sessionId: "s1", workerId: "ghost", status: "stopped",
+    });
+    expect(state.fleet.ghost).toBeUndefined();
+  });
+
   it("worker events update fleet map", () => {
     let s = emptyState();
     s = reduceEvent(s, { type: "worker.spawned", sessionId: "s1", workerId: "a1", repoPath: "/r", label: "app" });
@@ -463,6 +492,9 @@ describe("store.applyEvent", () => {
   // (the busy map is gone — the composer's "in progress" is derived by ConversationPane from running ‖ pending. See conversation-pane.test.)
 
   it("attention: settles to unread when not viewed; cleared on select + on running", () => {
+    useStore.getState().setFleet(["a1", "a2", "a3"].map((id) => ({
+      id, label: id, repoPath: "/r", status: "running", branch: null, model: null,
+    })));
     useStore.setState({ attention: {}, activeWorkerId: null });
     // an unviewed worker settles to idle → unread
     useStore.getState().applyEvent({ type: "worker.status", sessionId: "x", workerId: "a1", status: "idle" });

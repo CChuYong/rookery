@@ -20,6 +20,9 @@ export interface AppState {
   logsBySession: Record<string, LogItem[]>;
   workerLogs: Record<string, LogItem[]>;
   fleet: Record<string, FleetRow>;
+  // Optimistic/server-confirmed permanent deletions. While present, neither snapshots nor late worker events may
+  // restore membership. Volatile by design; reconnect resets it before the authoritative fleet seed.
+  deletingWorkers: Record<string, true>;
   // Native nested subagent activity (live-only, not persisted): workerId → parentToolUseId (= Task call id) → logs.
   nested: Record<string, Record<string, LogItem[]>>;
   // Ephemeral read-only Side conversations. Volatile by design: no history request or persistence.
@@ -32,7 +35,7 @@ export interface AppState {
 }
 
 export function emptyState(): AppState {
-  return { logsBySession: {}, workerLogs: {}, fleet: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {} };
+  return { logsBySession: {}, workerLogs: {}, fleet: {}, deletingWorkers: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {} };
 }
 
 function finalizeSideItems(items: LogItem[]): LogItem[] {
@@ -281,12 +284,29 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
       return { ...state, fleet: { ...state.fleet, [e.workerId]: row }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status }) } };
     }
+    case "worker.deletion": {
+      const deletingWorkers = { ...state.deletingWorkers };
+      const fleet = { ...state.fleet };
+      const pendingByWorker = { ...state.pendingByWorker };
+      if (e.phase === "started") deletingWorkers[e.workerId] = true;
+      else delete deletingWorkers[e.workerId];
+      if (e.phase !== "failed") {
+        delete fleet[e.workerId];
+        delete pendingByWorker[e.workerId];
+      }
+      return { ...state, deletingWorkers, fleet, pendingByWorker };
+    }
     case "worker.status": {
-      const prev = state.fleet[e.workerId] ?? { id: e.workerId, label: e.workerId, repoPath: "", status: e.status, branch: null, model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null };
+      // Membership belongs to worker.spawned/fleet.list. A late stop/error event from a permanent delete must not
+      // invent a fallback row, and an event racing a tombstone must not resurrect one either.
+      const prev = state.fleet[e.workerId];
       // Once it leaves running (stopped/error/done), any remaining "pending" bubbles get no boundary echo, so clean them up — prevents ghost bubbles.
       const pendingByWorker = e.status !== "running" && state.pendingByWorker[e.workerId]?.length
         ? { ...state.pendingByWorker, [e.workerId]: [] }
         : state.pendingByWorker;
+      if (!prev || state.deletingWorkers[e.workerId]) {
+        return pendingByWorker === state.pendingByWorker ? state : { ...state, pendingByWorker };
+      }
       return { ...state, pendingByWorker, fleet: { ...state.fleet, [e.workerId]: { ...prev, status: e.status } }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status: e.status }) } };
     }
     case "worker.label": {

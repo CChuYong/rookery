@@ -376,10 +376,12 @@ case "worker.deletion": {
 }
 case "worker.status": {
   const prev = state.fleet[e.workerId];
-  if (!prev || state.deletingWorkers[e.workerId]) return state;
   const pendingByWorker = e.status !== "running" && state.pendingByWorker[e.workerId]?.length
     ? { ...state.pendingByWorker, [e.workerId]: [] }
     : state.pendingByWorker;
+  if (!prev || state.deletingWorkers[e.workerId]) {
+    return pendingByWorker === state.pendingByWorker ? state : { ...state, pendingByWorker };
+  }
   return {
     ...state,
     pendingByWorker,
