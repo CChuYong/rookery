@@ -54,7 +54,14 @@ export interface FleetDeps {
   summarizeLabel?: (task: string) => Promise<string | null>;
   // Forks a worker's SDK conversation into a new branch, routed by the source worker's provider
   // (e.g. "claude" → SDK forkSession, "codex" → CodexBackend.forkSession). Absent → fork() is unavailable.
-  forkSession?: (provider: string, sdkSessionId: string, opts?: { title?: string }) => Promise<{ sessionId: string }>;
+  forkSession?: (provider: string, sdkSessionId: string, opts?: {
+    title?: string;
+    sourceWorkerId?: string;
+    newWorkerId?: string;
+  }) => Promise<{ sessionId: string }>;
+  // Permanent worktree discard owns provider-home cleanup. It runs best-effort in discard's
+  // finally path, including worker.delete (which delegates to discard), but never on ordinary stop.
+  onWorkerDiscard?: (id: string) => void;
 }
 
 interface Entry {
@@ -239,7 +246,11 @@ export class FleetOrchestrator {
     const label = handoff ? `${src.label} (→ ${target!.provider})` : `${src.label} (fork)`;
     const provider = handoff ? target!.provider! : srcProvider;
     // Native fork only in the same-provider path; a handoff has no cross-provider handle to copy.
-    const forkedUuid = handoff ? null : (await this.deps.forkSession!(srcProvider, src.sdk_session_id!, { title: label })).sessionId;
+    const forkedUuid = handoff ? null : (await this.deps.forkSession!(srcProvider, src.sdk_session_id!, {
+      title: label,
+      sourceWorkerId: id,
+      newWorkerId: newId,
+    })).sessionId;
     // Snapshot the source worktree's full state (tracked + untracked) → overlay it onto the fork so uncommitted work carries over.
     let snapSha: string | null = null;
     try { snapSha = await this.deps.git.checkpoint(src.worktree_path, `refs/rookery/fork/${newId}`); } catch { snapSha = null; }
@@ -631,7 +642,11 @@ export class FleetOrchestrator {
     if (inflight && !this.entries.has(id)) {
       this.cancelledSpawns.add(id);
       await inflight.catch(() => {});
-      if (!this.entries.has(id)) { this.setStatusRowOnly(id, "stopped"); return; }
+      if (!this.entries.has(id)) {
+        this.setStatusRowOnly(id, "stopped");
+        try { this.deps.onWorkerDiscard?.(id); } catch { /* best-effort */ }
+        return;
+      }
     }
     const e = this.require(id);
     if (e.agent) {
@@ -648,6 +663,7 @@ export class FleetOrchestrator {
       await this.deps.git.removeWorktree(e.repoPath, e.worktreePath, e.branch);
     } finally {
       this.setStatus(id, "stopped", true); // status always settles even if removeWorktree throws (FL-4) — the error propagates after finally
+      try { this.deps.onWorkerDiscard?.(id); } catch { /* best-effort */ }
     }
   }
 

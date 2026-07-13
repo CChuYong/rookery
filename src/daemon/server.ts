@@ -51,6 +51,7 @@ import {
   removeCodexHome,
   removeCodexWorkerHome,
   seedCodexHomeFromSource,
+  seedCodexWorkerHomeFromLegacy,
   seedCodexWorkerHomeFromSource,
   gcOrphanCodexHomes,
 } from "./codex-home.js";
@@ -171,6 +172,29 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     fs.mkdirSync(codexHomeDir, { recursive: true });
     return { CODEX_HOME: codexHomeDir };
   };
+  const prepareCodexWorker = (key: string, capabilities: import("../core/capabilities/types.js").ResolvedAgentCapabilities) => {
+    const row = repos.getWorker(key);
+    if (row?.sdk_session_id) {
+      // Slice 4 migration: older workers wrote rollouts to either the API-key shared home or the
+      // user's real home. Copy only this thread (plus ancestors) before the first isolated resume.
+      const legacyHomes = [...new Set([codexHomeDir, realCodexHome])];
+      for (const legacyHome of legacyHomes) {
+        if (seedCodexWorkerHomeFromLegacy(config.home, key, row.sdk_session_id, legacyHome)) break;
+      }
+    }
+    const managed = capabilityRuntime.materializeCodex(capabilities);
+    const codexHome = materializeCodexHome(config.home, key, undefined, {
+      kind: "worker",
+      apiKeySet: !!settings.codexApiKey(),
+      realCodexHome,
+      managed,
+    });
+    return {
+      codexHome,
+      env: managed.env,
+      ...(managed.systemPromptAppend ? { systemPromptAppend: managed.systemPromptAppend } : {}),
+    };
+  };
   const codexBackend = new CodexBackend({
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
@@ -186,20 +210,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     handshakeTimeoutMs: () => settings.codexHandshakeTimeoutMs(),
     env: codexEnv,
     runtime: {
-      prepareWorker: (key, capabilities) => {
-        const managed = capabilityRuntime.materializeCodex(capabilities);
-        const codexHome = materializeCodexHome(config.home, key, undefined, {
-          kind: "worker",
-          apiKeySet: !!settings.codexApiKey(),
-          realCodexHome,
-          managed,
-        });
-        return {
-          codexHome,
-          env: managed.env,
-          ...(managed.systemPromptAppend ? { systemPromptAppend: managed.systemPromptAppend } : {}),
-        };
-      },
+      prepareWorker: prepareCodexWorker,
       prepareMaster: (key, defs, capabilities) => {
         const managed = capabilityRuntime.materializeCodex(capabilities);
         const { url } = bridge.ensureSession(key, defs);
@@ -270,8 +281,24 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const summarizeLabel = makeLabeler(queryFn);
   const fleet = new FleetOrchestrator({
     repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel,
-    // Fork routing by provider: codex forks via an ephemeral app-server child (CodexBackend.forkSession); claude keeps the SDK's own forkSession.
-    forkSession: (provider, id, opts) => (provider === "codex" ? codexBackend.forkSession(id) : sdkForkSession(id, opts)),
+    // Codex native forks must run in the SOURCE worker's isolated home. The new fork rollout and
+    // its ancestors are then copied into the target home; target bindings compile lazily on resume.
+    forkSession: async (provider, id, opts) => {
+      if (provider !== "codex") return sdkForkSession(id, opts);
+      const sourceWorkerId = opts?.sourceWorkerId;
+      const newWorkerId = opts?.newWorkerId;
+      if (!sourceWorkerId || !newWorkerId) throw new Error("cannot fork codex worker: missing source/new worker id");
+      const capabilities = capabilityService.resolveManaged({ kind: "worker", id: sourceWorkerId });
+      const source = prepareCodexWorker(sourceWorkerId, capabilities);
+      const result = await codexBackend.forkSession(id, {
+        env: { ...process.env, ...source.env, CODEX_HOME: source.codexHome },
+      });
+      seedCodexWorkerHomeFromSource(config.home, sourceWorkerId, newWorkerId, result.sessionId);
+      return result;
+    },
+    onWorkerDiscard: (id) => {
+      if ((repos.getWorker(id)?.provider || "claude") === "codex") removeCodexWorkerHome(config.home, id);
+    },
   });
   // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
   // clean up running/idle zombies to orphaned. (Live conversations can't be revived — the SDK session dies with the process.)
@@ -310,7 +337,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     const sourceHome = path.join(config.home, "codex-homes", sourceSessionId);
     if (!fs.existsSync(sourceHome)) throw new Error("cannot fork codex session: source CODEX_HOME missing (run a turn first)");
     const { sessionId: forkedUuid } = await codexBackend.forkSession(sourceThreadId, { env: { ...process.env, CODEX_HOME: sourceHome } });
-    seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId);
+    seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId, forkedUuid);
     return { sessionId: forkedUuid };
   };
   const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,

@@ -253,15 +253,15 @@ describe("CapabilityService", () => {
     expect(applied.entries.find((entry) => entry.id.startsWith("managed:"))?.state).toBe("applied");
   });
 
-  it("projects worker drift as pending reload and keeps blocked/unavailable/suppressed states intact", async () => {
+  it("projects Codex worker drift as pending reload and keeps blocked/unavailable/suppressed states intact", async () => {
     const runtimeState = new CapabilityRuntimeState(new EventBus());
     const target = { targetKind: "worker" as const, targetId: "w1", sessionId: "home" };
     runtimeState.setDesired(target, "revision-old", false);
     runtimeState.setApplied(target, "revision-old");
     const managed = { packInstanceId: "pack", packId: "team", bindingId: "binding", scopeKind: "worker" as const, enabled: true };
     const capabilities = service({
-      getSession: () => ({ id: "home", cwd: "/repo", label: null, provider: "claude" }),
-      getWorker: () => ({ id: "w1", worktreePath: "/repo/.wt/w1", repoPath: "/repo", label: "Worker", provider: "claude", homeSessionId: "home" }),
+      getSession: () => ({ id: "home", cwd: "/repo", label: null, provider: "codex" }),
+      getWorker: () => ({ id: "w1", worktreePath: "/repo/.wt/w1", repoPath: "/repo", label: "Worker", provider: "codex", homeSessionId: "home" }),
       resolver: { resolve: vi.fn(() => ({
         revision: "revision-new",
         blocked: false,

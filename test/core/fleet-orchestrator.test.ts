@@ -216,20 +216,23 @@ describe("FleetOrchestrator", () => {
     expect(repos.getWorker(id)!.provider).toBe("codex");
   });
 
-  it("fork() of a codex worker calls forkSession('codex', ...) and the fork inherits the provider", async () => {
+  it("fork() of a codex worker supplies source/new worker ids and the fork inherits the provider", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "home", cwd: "/x" });
     repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", provider: "codex" });
     repos.setWorkerSdkSessionId("src", "src-thread");
     const git = new FakeGitOps({ checkpointSha: "snap0" });
     const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, resume: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} });
-    const forkCalls: Array<{ provider: string; id: string }> = [];
-    const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, id: sdkSessionId }); return { sessionId: "forked-thread" }; };
+    const forkCalls: Array<{ provider: string; id: string; sourceWorkerId?: string; newWorkerId?: string }> = [];
+    const forkSession = async (provider: string, sdkSessionId: string, opts?: { sourceWorkerId?: string; newWorkerId?: string }) => {
+      forkCalls.push({ provider, id: sdkSessionId, sourceWorkerId: opts?.sourceWorkerId, newWorkerId: opts?.newWorkerId });
+      return { sessionId: "forked-thread" };
+    };
     const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk9" });
 
     const { id } = await fleet.fork("src");
 
-    expect(forkCalls).toEqual([{ provider: "codex", id: "src-thread" }]);
+    expect(forkCalls).toEqual([{ provider: "codex", id: "src-thread", sourceWorkerId: "src", newWorkerId: "fk9" }]);
     expect(repos.getWorker(id)!.provider).toBe("codex");
   });
 
@@ -667,6 +670,30 @@ describe("FleetOrchestrator", () => {
     expect(await s.fleet.diff("a0")).toBe("DIFF");
     await s.fleet.discard("a0");
     expect(s.git.calls).toContain("removeWorktree /code/app /wt/a0 rookery/a0");
+  });
+
+  it("runs provider-home cleanup on discard/delete but not ordinary stop", async () => {
+    const cleaned: string[] = [];
+    const s = setup();
+    const fleet = new FleetOrchestrator({
+      repos: s.repos,
+      bus: s.bus,
+      git: s.git,
+      factory: () => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "done", waitUntilSettled: async () => {} }),
+      worktreesDir: "/wt-cleanup",
+      idgen: (() => { let n = 0; return () => `clean-${n++}`; })(),
+      onWorkerDiscard: (id) => cleaned.push(id),
+    });
+    const first = await fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "A", task: "a" });
+    const second = await fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "B", task: "b" });
+    await fleet.waitAllSettled();
+
+    await fleet.stop(first.id);
+    expect(cleaned).toEqual([]);
+    await fleet.discard(first.id);
+    expect(cleaned).toEqual([first.id]);
+    await fleet.delete(second.id);
+    expect(cleaned).toEqual([first.id, second.id]);
   });
 
   it("does not cap concurrent spawns (ROOKERY_MAX_WORKERS concept removed)", async () => {

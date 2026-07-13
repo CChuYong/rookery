@@ -90,12 +90,151 @@ export function materializeCodexHome(
 // the whole tree preserves context. Best-effort: a missing source `sessions/` dir (e.g. the source
 // home was GC'd) is a silent no-op — the fork still runs, just without prior context — and this must
 // never throw (called after the ephemeral fork child has already succeeded).
-export function seedCodexHomeFromSource(rookeryHome: string, sourceSessionId: string, newSessionId: string): void {
+export function seedCodexHomeFromSource(
+  rookeryHome: string,
+  sourceSessionId: string,
+  newSessionId: string,
+  threadId?: string,
+): void {
+  if (threadId) {
+    seedCodexTargetThreadFromHome(
+      path.join(codexHomeDirFor(rookeryHome, sourceSessionId, "master"), "sessions"),
+      path.join(codexHomeDirFor(rookeryHome, newSessionId, "master"), "sessions"),
+      threadId,
+    );
+    return;
+  }
   seedCodexTargetHomeFromSource(rookeryHome, sourceSessionId, newSessionId, "master");
 }
 
-export function seedCodexWorkerHomeFromSource(rookeryHome: string, sourceWorkerId: string, newWorkerId: string): void {
+export function seedCodexWorkerHomeFromSource(
+  rookeryHome: string,
+  sourceWorkerId: string,
+  newWorkerId: string,
+  threadId?: string,
+): void {
+  if (threadId) {
+    seedCodexTargetThreadFromHome(
+      path.join(codexHomeDirFor(rookeryHome, sourceWorkerId, "worker"), "sessions"),
+      path.join(codexHomeDirFor(rookeryHome, newWorkerId, "worker"), "sessions"),
+      threadId,
+    );
+    return;
+  }
   seedCodexTargetHomeFromSource(rookeryHome, sourceWorkerId, newWorkerId, "worker");
+}
+
+// One-time Slice 4 migration for workers created before per-worker homes existed. Only the selected
+// rollout plus its fork/control ancestors are copied from the legacy shared/user home; unrelated
+// conversations never enter the worker's isolated state tree. Returns true when the requested thread
+// was found and copied. Best-effort and never throws.
+export function seedCodexWorkerHomeFromLegacy(
+  rookeryHome: string,
+  workerId: string,
+  threadId: string,
+  legacyCodexHome: string,
+): boolean {
+  return seedCodexTargetThreadFromHome(
+    path.join(legacyCodexHome, "sessions"),
+    path.join(codexHomeDirFor(rookeryHome, workerId, "worker"), "sessions"),
+    threadId,
+  );
+}
+
+interface RolloutIndexEntry {
+  file: string;
+  relative: string;
+  parents: string[];
+}
+
+function firstLine(file: string, maxBytes = 4 * 1024 * 1024): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, "r");
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total < maxBytes) {
+      const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes - total));
+      const read = fs.readSync(fd, buffer, 0, buffer.length, total);
+      if (read === 0) break;
+      const chunk = buffer.subarray(0, read);
+      const newline = chunk.indexOf(0x0a);
+      chunks.push(newline >= 0 ? chunk.subarray(0, newline) : chunk);
+      total += newline >= 0 ? newline : read;
+      if (newline >= 0) return Buffer.concat(chunks).toString("utf8");
+    }
+    return chunks.length > 0 ? Buffer.concat(chunks).toString("utf8") : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch { /* best-effort */ }
+  }
+}
+
+function rolloutFiles(root: string): string[] {
+  const files: string[] = [];
+  const visit = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(file);
+    }
+  };
+  visit(root);
+  return files.sort((a, b) => a.localeCompare(b));
+}
+
+function rolloutIndex(root: string): Map<string, RolloutIndexEntry> {
+  const index = new Map<string, RolloutIndexEntry>();
+  for (const file of rolloutFiles(root)) {
+    const line = firstLine(file);
+    if (!line) continue;
+    try {
+      const parsed = JSON.parse(line) as {
+        type?: string;
+        payload?: { id?: string; forked_from_id?: string | null; parent_thread_id?: string | null };
+      };
+      if (parsed.type !== "session_meta" || !parsed.payload?.id) continue;
+      index.set(parsed.payload.id, {
+        file,
+        relative: path.relative(root, file),
+        parents: [parsed.payload.forked_from_id, parsed.payload.parent_thread_id]
+          .filter((value): value is string => typeof value === "string" && value.length > 0),
+      });
+    } catch {
+      // Malformed/unrelated rollout: ignore it rather than widening the copy boundary.
+    }
+  }
+  return index;
+}
+
+function seedCodexTargetThreadFromHome(sourceSessions: string, destinationSessions: string, threadId: string): boolean {
+  if (!fs.existsSync(sourceSessions) || fs.existsSync(destinationSessions)) return false;
+  try {
+    const index = rolloutIndex(sourceSessions);
+    if (!index.has(threadId)) return false;
+    const selected = new Map<string, RolloutIndexEntry>();
+    const visit = (id: string): void => {
+      if (selected.has(id)) return;
+      const entry = index.get(id);
+      if (!entry) return;
+      selected.set(id, entry);
+      for (const parent of entry.parents) visit(parent);
+    };
+    visit(threadId);
+    for (const entry of selected.values()) {
+      const destination = path.join(destinationSessions, entry.relative);
+      fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+      fs.copyFileSync(entry.file, destination);
+      fs.chmodSync(destination, 0o600);
+    }
+    return true;
+  } catch {
+    try { fs.rmSync(destinationSessions, { recursive: true, force: true }); } catch { /* best-effort */ }
+    return false;
+  }
 }
 
 function seedCodexTargetHomeFromSource(

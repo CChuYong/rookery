@@ -8,6 +8,7 @@ import {
   removeCodexHome,
   removeCodexWorkerHome,
   seedCodexHomeFromSource,
+  seedCodexWorkerHomeFromLegacy,
   seedCodexWorkerHomeFromSource,
 } from "../../src/daemon/codex-home.js";
 import type { CodexRuntimeLaunchOptions } from "../../src/daemon/capability-runtime.js";
@@ -332,6 +333,53 @@ describe("seedCodexHomeFromSource", () => {
       expect(fs.readFileSync(dst, "utf8")).toBe('{"type":"worker"}\n');
     } finally {
       fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("copies only the selected fork rollout and its ancestors between worker homes", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const srcSessions = path.join(rookeryHome, "codex-homes", "worker-src", "sessions", "2026", "07");
+      fs.mkdirSync(srcSessions, { recursive: true });
+      const writeRollout = (name: string, id: string, forkedFrom?: string): void => {
+        fs.writeFileSync(path.join(srcSessions, name), `${JSON.stringify({
+          type: "session_meta",
+          payload: { id, ...(forkedFrom ? { forked_from_id: forkedFrom } : {}) },
+        })}\n{"type":"event_msg"}\n`);
+      };
+      writeRollout("parent.jsonl", "parent-thread");
+      writeRollout("fork.jsonl", "fork-thread", "parent-thread");
+      writeRollout("unrelated.jsonl", "unrelated-thread");
+
+      seedCodexWorkerHomeFromSource(rookeryHome, "src", "new", "fork-thread");
+
+      const dst = path.join(rookeryHome, "codex-homes", "worker-new", "sessions", "2026", "07");
+      expect(fs.existsSync(path.join(dst, "parent.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(dst, "fork.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(dst, "unrelated.jsonl"))).toBe(false);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates one legacy worker thread without copying unrelated user rollouts", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    const legacyHome = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-codex-home-"));
+    try {
+      const legacySessions = path.join(legacyHome, "sessions", "2026", "07");
+      fs.mkdirSync(legacySessions, { recursive: true });
+      fs.writeFileSync(path.join(legacySessions, "worker.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "worker-thread" } })}\n`);
+      fs.writeFileSync(path.join(legacySessions, "personal.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "personal-thread" } })}\n`);
+
+      expect(seedCodexWorkerHomeFromLegacy(rookeryHome, "worker-1", "worker-thread", legacyHome)).toBe(true);
+
+      const dst = path.join(rookeryHome, "codex-homes", "worker-worker-1", "sessions", "2026", "07");
+      expect(fs.existsSync(path.join(dst, "worker.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(dst, "personal.jsonl"))).toBe(false);
+      expect(seedCodexWorkerHomeFromLegacy(rookeryHome, "worker-1", "worker-thread", legacyHome)).toBe(false);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+      fs.rmSync(legacyHome, { recursive: true, force: true });
     }
   });
 
