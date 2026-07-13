@@ -48,7 +48,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `fleet.spawn` | ✓ | `repo`, `task?`, `label?`, `model?`, `effort?`, `permissionMode?`, `base?`, `ticketKey?`, `ticketUrl?` | spawn a worker from the UI | `fleet.spawn.result` |
 | `fleet.subscribe` | — | — | subscribe to `@fleet` | (none) |
 | `events.subscribe` | — | — | subscribe to `@all` (+ initial `slack.status`) | (none; events) |
-| `repos.list` | ✓ | — | list registered repos | `repos.list.result` |
+| `repos.list` | ✓ | — | list registered repos with authoritative ids | `repos.list.result` |
 | `repo.branches` | ✓ | `repo` | list branches of a repo | `repo.branches.result` |
 | `repos.register` | ✓ | `name`, `path`, `description`, `base?` | register a repo (`base` ref-validated) | `repos.ack` (`register`) |
 | `repos.update` | ✓ | `name`, `description?`, `base?` | update a repo | `repos.ack` (`update`) |
@@ -59,6 +59,15 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `auth.status` | ✓ | — | active Claude auth (api-key vs OAuth) | `auth.status.result` |
 | `commands.list` | ✓ | `cwd?`, `workerId?` | slash-command/skill candidates | `commands.result` |
 | `capabilities.snapshot` | ✓ | `target: {kind:"session"\|"worker", id}` | read the selected target's effective capability inventory | `capabilities.snapshot.result` |
+| `capabilities.library` | ✓ | — | list sanitized packs, bindings, secret metadata, and generation | `capabilities.library.result` |
+| `capabilities.pack.add` | ✓ | `path` | validate and register a local pack directory | `capabilities.pack.result` |
+| `capabilities.pack.remove` | ✓ | `instanceId` | remove a pack and its dependent local state | `capabilities.pack.result` (`pack:null`) |
+| `capabilities.binding.set` | ✓ | `id`, `binding` | create or replace one scoped binding | `capabilities.binding.result` |
+| `capabilities.binding.delete` | ✓ | `id` | delete one binding | `capabilities.binding.result` (`binding:null`) |
+| `capabilities.trust.set` | ✓ | `instanceId`, `digest`, `trusted` | trust or untrust the exact current pack digest | `capabilities.pack.result` |
+| `capabilities.secret.set` | ✓ | `instanceId`, `key`, `value` | set a declared write-only pack secret | `capabilities.secret.result` |
+| `capabilities.secret.delete` | ✓ | `instanceId`, `key` | clear a declared pack secret | `capabilities.secret.result` |
+| `capabilities.refresh` | ✓ | `instanceId?` | revalidate one pack or the whole library | `capabilities.refresh.result` |
 | `usage.get` | ✓ | — | usage snapshot | `usage.result` |
 | `models.list` | ✓ | — | available models (live or static) | `models.result` |
 | `settings.get` | ✓ | — | read settings | `settings.result` |
@@ -72,7 +81,9 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `automation.run` | ✓ | `id`, `vars?` | fire once now | `fleet.ack` (`run`) |
 
 Notes:
-- **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins with provider inventory. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list. Slice 1 is read-only and supports session/worker targets only.
+- **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, repository, origin, home session, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins, provider inventory, and Slice 2 desired entries. `desiredRevision` is deterministic and `desiredBlocked` reports fail-closed required state. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list.
+- **Binding shape:** `binding` is `{packInstanceId, scopeKind, scopeRef, audience:{agents,origins}, enabled}`. `scopeKind` is `rookery|repo-local|repo-shared|session|worker`; Rookery uses an empty `scopeRef`, while every other scope uses the authoritative repo/session/worker id. Audience agents are `master|worker|side` and origins are `ui|slack|automation|external`.
+- **Capability secret boundary:** `value` exists only on `capabilities.secret.set`. Library and mutation replies expose only `{key, configured}`; pack documents contain secret references, never expanded values. The daemon rejects undeclared keys.
 - **`settings.set` `settings` object:** `masterName`, `masterModel`, `workerModel`, `masterEffort`, `workerEffort`, `slackCwd`, `slackAllowedUsers`, `slackAllowAll`, `slackRefuseReply`, `slackRefusalMessage`, `slackLocale`, `usageRefreshMs`, `hasAcceptedDataNotice` (echoed back), and write-only secrets **not echoed**: `linearApiKey`, `anthropicApiKey`, `slackBotToken`, `slackAppToken`. `null`/empty string clears a key (reverts to config default). `effort` fields are membership-validated against `low\|medium\|high\|xhigh\|max`. Changing a Slack token triggers `slack.reconcile()`.
 - **`automation` / `patch` (`automationInputSchema`):** `name`, `enabled?`, `trigger` (discriminated on `kind`: `cron`{`cron`,`timezone`} validated by `isValidCron` in `superRefine`, or `slack`{`channels?`,`keyword?`,`fromUsers?`}), `action` (`master`{`prompt`,`cwd`,`sessionMode:reuse\|fresh`} or `worker`{`repo`,`task`,`base?`}), `model?`, `effort?`, `permissionMode?`, `maxTurns?`.
 - **`automation.run` `vars`:** partial `{message, channel, user, ts, threadTs, team}`.
@@ -88,7 +99,7 @@ Notes:
 | `fleet.diff.result` | `reqId`, `id`, `diff` | worktree diff text |
 | `fleet.ack` | `reqId`, `action`, `id` | generic mutation ack (stop/discard/delete/archive/rename/pin/restore/interrupt/run) |
 | `fleet.spawn.result` | `reqId`, `id` | new worker id |
-| `repos.list.result` | `reqId`, `repos[]` (`name,path,description,base`) | repo list |
+| `repos.list.result` | `reqId`, `repos[]` (`id,name,path,description,base`) | repo list with ids used by capability scopes |
 | `repo.branches.result` | `reqId`, `branches[]` | branch list |
 | `repos.ack` | `reqId`, `action`, `name` | repo mutation ack |
 | `source.fetch.result` | `reqId`, `item: {title,body}\|null` | fetched source item |
@@ -102,6 +113,11 @@ Notes:
 | `models.result` | `reqId`, `models[]` (`id,displayName`) | model picker list |
 | `commands.result` | `reqId`, `commands: SlashCommandInfo[]` | slash-command candidates |
 | `capabilities.snapshot.result` | `reqId`, `snapshot: CapabilitySnapshot` | authoritative target metadata, effective entries, and per-source diagnostics |
+| `capabilities.library.result` | `reqId`, `library: CapabilityLibrarySnapshot` | sanitized pack and binding inventory |
+| `capabilities.pack.result` | `reqId`, `pack: CapabilityLibraryEntry\|null` | pack mutation result |
+| `capabilities.binding.result` | `reqId`, `binding: CapabilityBinding\|null` | binding mutation result |
+| `capabilities.secret.result` | `reqId`, `instanceId`, `secret:{key,configured}` | write-only secret mutation status |
+| `capabilities.refresh.result` | `reqId`, `library: CapabilityLibrarySnapshot` | sanitized post-refresh inventory |
 | `settings.result` | `reqId`, `settings: SettingsValues` | settings (secrets omitted) |
 | `slack.ack` | `reqId?`, `status: SlackStatus` | Slack toggle result |
 | `automation.list.result` | `reqId`, `automations: Automation[]` | automation list |
@@ -110,3 +126,7 @@ Notes:
 | `error` | `message`, `reqId?` | parse/handler failure |
 
 `WorkerRow` (shared by worker.list/fleet.list): `id`, `label`, `repoPath`, `status`, `branch`, `model`, `permissionMode?`, `ticketKey?`, `ticketUrl?` (no `pr_url` — there is no automatic PR pipeline).
+
+Capability mutations emit `capabilities.changed` on `@all`. Clients use its monotonic
+in-process `generation` as an invalidation signal and refetch; the event does not carry
+pack bodies, instructions, public config, or secret values.

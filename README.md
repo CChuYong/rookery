@@ -47,6 +47,26 @@ Sessions and the live fleet at a glance: streaming conversations with plan cards
 
 Spawn workers from chat in natural language, from the spawn dialog, or **straight from a GitHub issue or Linear ticket** — the task is pre-filled from the ticket body.
 
+### Capability Center
+
+Register a local capability pack once, review its complete file digest, and assign it to
+all of Rookery or to a repository, session, or worker. Audience filters target master,
+worker, or Side agents and UI, Slack, automation, or external origins. More specific
+assignments override broader ones, including disabled assignments used as tombstones.
+
+The **Library** tab handles validation, trust, refresh, removal, and write-only secrets;
+**Assignments** manages scope and audience; **Effective** shows the native inventory plus
+the deterministic desired result for the selected master or worker. Slice 2 records
+desired state only—it does not yet install anything into Claude or Codex, start pack MCP
+servers, or modify provider configuration.
+
+Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
+
+1. Open Capability Center → Library and add the example directory.
+2. Review the files and public MCP configuration, then trust the displayed digest.
+3. Save the declared secret if needed; secret values are never returned to the UI.
+4. Create an assignment and inspect the selected target in Effective.
+
 ### The fleet
 
 The master routes tasks across your registered repos, spawns workers, watches them, steers them mid-flight (send follow-ups / interrupt), and gets woken when they finish. Follow-up instructions continue the same worker session with full context. After a daemon restart, workers rehydrate from disk — diffs, stop, and resume keep working.

@@ -20,7 +20,7 @@ Delivery rules:
 - **Per-listener isolation:** `deliver()` wraps each listener in `try/catch`; a throwing listener is logged once (`warnedListeners` WeakSet) and suppressed thereafter, never blocking siblings. Delivery iterates a copy (`[...set]`) so listeners may unsubscribe during dispatch.
 - **`@all` subscription dedupe:** done at the consumer, not the bus — `Connection.subscribe` skips per-session/fleet subscriptions once `@all` is subscribed, and tears down existing per-key subscriptions when `@all` is added (prevents double delivery on one socket).
 
-Special `sessionId` values used as routing addresses (not real sessions): `connection.ts` emits `worker.label` with `sessionId:""` and `automation.changed`/`slack.status` with `sessionId: ALL_CHANNEL`.
+Special `sessionId` values used as routing addresses (not real sessions): `connection.ts` emits `worker.label` with `sessionId:""`; `automation.changed`, `slack.status`, and `capabilities.changed` use `sessionId: ALL_CHANNEL`.
 
 ## CoreEvent variants
 
@@ -48,6 +48,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `slack.status` | `status: SlackStatus` | `SlackController` state transition; initial sync on `events.subscribe` | no | `unconfigured\|off\|connecting\|up\|error`; broadcast to `ALL_CHANNEL` |
 | `interaction.request` | `requestId`, `kind: approve\|ask`, `toolName?`, `inputText?`, `questions?` | master `canUseTool` surfaces approval/AskUserQuestion to non-Slack clients | no | master turn waits for `interaction.respond`; `requestId` = toolUseID |
 | `interaction.resolved` | `requestId`, `summary` | a pending interaction is answered | no | replaces the card with a summary; syncs other clients/reloads |
+| `capabilities.changed` | (`sessionId: @all`), `generation`, `affected[]` (`scopeKind,scopeRef`) | a pack, trust decision, secret, binding, or refresh changes desired capability state | no | invalidation signal only; contains no pack body, public config, or secret value |
 | `automation.changed` | (`sessionId: @all`) | automation create/update/set_enabled/delete/run; dispatcher run | no | UI `AutomationPage` refetches |
 | `error` | `message` | master turn failure (`recordEvent`); core error paths | yes (when via `recordEvent`) | |
 

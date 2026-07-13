@@ -681,11 +681,10 @@ the queue and is intentionally terminal.
 
 ## Effective inventory model
 
-### Slice 1 shipped contract
+### Slice 1 contract and Slice 2 additions
 
-Slice 1 deliberately uses the smallest contract needed for trustworthy read-only
-inventory. It does not serialize desired/applied revisions or mutation metadata before
-those concepts exist:
+Slice 1 deliberately used the smallest contract needed for trustworthy read-only
+inventory:
 
 ```ts
 export type CapabilityTarget =
@@ -717,9 +716,12 @@ export interface CapabilitySnapshot {
 }
 ```
 
-The broader model below is the target for the managed-capability milestone. Later slices
-add origin, revisions, invocation, richer states, and structured source metadata without
-changing Slice 1's rule that unknown is never encoded as empty success.
+Slice 2 preserves that shape and adds `state: "desired"|"suppressed"`, optional managed
+binding provenance, and optional `desiredRevision`/`desiredBlocked` snapshot fields. It
+does not add `appliedRevision`: no provider runtime is changed yet. The broader model
+below remains the target for the managed-capability milestone. Later slices add runtime
+application, invocation, richer states, and structured source metadata without changing
+Slice 1's rule that unknown is never encoded as empty success.
 
 ```ts
 export type CapabilityKind =
@@ -810,7 +812,7 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 { type: "capabilities.library", reqId }
 { type: "capabilities.pack.add", reqId, path: string }
 { type: "capabilities.pack.remove", reqId, instanceId: string }
-{ type: "capabilities.binding.set", reqId, binding: CapabilityBindingInput }
+{ type: "capabilities.binding.set", reqId, id: string, binding: CapabilityBindingInput }
 { type: "capabilities.binding.delete", reqId, id: string }
 { type: "capabilities.trust.set", reqId, instanceId: string, digest: string, trusted: boolean }
 { type: "capabilities.secret.set", reqId, instanceId: string, key: string, value: string }
@@ -818,6 +820,11 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 { type: "capabilities.refresh", reqId, instanceId?: string }
 { type: "capabilities.worker.reload", reqId, workerId: string, whenIdle?: boolean }
 ```
+
+Through Slice 2, every request above is shipped except `capabilities.worker.reload`, which
+belongs to the runtime-application slices. Library projections include file paths, modes,
+hashes, public MCP configuration, validation/change metadata, and secret configured
+booleans; they never include instruction bodies, skill bodies, or secret values.
 
 Secret responses contain only `{ key, configured: boolean }`. The value is write-only.
 Mutation replies return the affected sanitized Library entry or binding so the desktop can
@@ -831,6 +838,10 @@ update without a full reload.
   desiredRevision: string, appliedRevision: string | null,
   state: "current" | "pending-next-turn" | "pending-reload" | "blocked" | "error" }
 ```
+
+`capabilities.changed` is shipped in Slice 2 as an `@all` invalidation event. The runtime
+event is reserved for later slices once desired state can actually be compiled and
+applied.
 
 Events contain no pack bodies, instruction contents, command lines containing expanded
 secrets, or secret values.
@@ -1036,8 +1047,35 @@ Verification evidence:
 - Write-only local secrets and trust UI.
 - Desired manifests only; no provider application yet.
 
+Implemented on 2026-07-13. Capability Center now has Effective, Library, and Assignments
+tabs. Local directories are strictly validated and whole-pack hashed; trust is bound to
+the exact digest; declared Rookery secrets are write-only. Authoritative Rookery,
+repository, session, and worker bindings resolve by audience and by precedence
+`worker > session > repo-local > repo-shared > rookery`; a disabled winning binding is a
+tombstone. Snapshots merge deterministic desired, blocked, unavailable, and suppressed
+managed entries with the existing native inventory.
+
+This slice intentionally creates no `capability-runtime` directory, provider home, plugin,
+MCP process, or provider configuration. "Desired" means selected configuration only;
+Claude/Codex application, applied revisions, worker reload, and runtime events remain
+unshipped in Slices 3–5.
+
+The checked-in [`docs/examples/capability-pack`](../../examples/capability-pack/) exercises
+the real validator and demonstrates an instruction, a skill, and an optional HTTP MCP
+whose bearer token is a write-only Rookery secret.
+
 Exit: A user can add a local pack, bind it, and see the deterministic desired result and
 blocked/missing-secret state without changing any agent runtime.
+
+Verification evidence:
+
+- Core tests cover schema/path/frontmatter/digest limits, repository cleanup, exact-digest
+  trust, secret-safe projections, binding precedence/audience/tombstones, and stable desired
+  revisions.
+- Protocol and live-server tests cover all sanitized mutations and `capabilities.changed`
+  fan-out.
+- Desktop tests cover Library review/trust/secret actions, Assignments CRUD, all three tabs,
+  desired states, target changes, and stale-response rejection.
 
 ### Slice 3 — Claude application
 
