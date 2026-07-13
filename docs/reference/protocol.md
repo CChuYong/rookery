@@ -58,6 +58,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `integrations.status` | ✓ | — | gh/linear connection status | `integrations.status.result` |
 | `auth.status` | ✓ | — | active Claude auth (api-key vs OAuth) | `auth.status.result` |
 | `commands.list` | ✓ | `cwd?`, `workerId?` | slash-command/skill candidates | `commands.result` |
+| `capabilities.snapshot` | ✓ | `target: {kind:"session"\|"worker", id}` | read the selected target's effective capability inventory | `capabilities.snapshot.result` |
 | `usage.get` | ✓ | — | usage snapshot | `usage.result` |
 | `models.list` | ✓ | — | available models (live or static) | `models.result` |
 | `settings.get` | ✓ | — | read settings | `settings.result` |
@@ -71,6 +72,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `automation.run` | ✓ | `id`, `vars?` | fire once now | `fleet.ack` (`run`) |
 
 Notes:
+- **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins with provider inventory. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list. Slice 1 is read-only and supports session/worker targets only.
 - **`settings.set` `settings` object:** `masterName`, `masterModel`, `workerModel`, `masterEffort`, `workerEffort`, `slackCwd`, `slackAllowedUsers`, `slackAllowAll`, `slackRefuseReply`, `slackRefusalMessage`, `slackLocale`, `usageRefreshMs`, `hasAcceptedDataNotice` (echoed back), and write-only secrets **not echoed**: `linearApiKey`, `anthropicApiKey`, `slackBotToken`, `slackAppToken`. `null`/empty string clears a key (reverts to config default). `effort` fields are membership-validated against `low\|medium\|high\|xhigh\|max`. Changing a Slack token triggers `slack.reconcile()`.
 - **`automation` / `patch` (`automationInputSchema`):** `name`, `enabled?`, `trigger` (discriminated on `kind`: `cron`{`cron`,`timezone`} validated by `isValidCron` in `superRefine`, or `slack`{`channels?`,`keyword?`,`fromUsers?`}), `action` (`master`{`prompt`,`cwd`,`sessionMode:reuse\|fresh`} or `worker`{`repo`,`task`,`base?`}), `model?`, `effort?`, `permissionMode?`, `maxTurns?`.
 - **`automation.run` `vars`:** partial `{message, channel, user, ts, threadTs, team}`.
@@ -99,6 +101,7 @@ Notes:
 | `usage.result` | `reqId`, `usage: UsageSnapshot` | usage snapshot |
 | `models.result` | `reqId`, `models[]` (`id,displayName`) | model picker list |
 | `commands.result` | `reqId`, `commands: SlashCommandInfo[]` | slash-command candidates |
+| `capabilities.snapshot.result` | `reqId`, `snapshot: CapabilitySnapshot` | authoritative target metadata, effective entries, and per-source diagnostics |
 | `settings.result` | `reqId`, `settings: SettingsValues` | settings (secrets omitted) |
 | `slack.ack` | `reqId?`, `status: SlackStatus` | Slack toggle result |
 | `automation.list.result` | `reqId`, `automations: Automation[]` | automation list |
