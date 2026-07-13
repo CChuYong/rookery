@@ -35,7 +35,7 @@
 - Produces `FleetOrchestrator.deleting: Set<string>` and `deletionFlows: Map<string, Promise<void>>`; `list()` never returns an id in `deleting`.
 - Keeps `FleetOrchestrator.delete(id): Promise<void>` as the public API; duplicate calls for one id share the same in-flight promise and emit one lifecycle.
 
-- [ ] **Step 1: Write the overlapping-delete regression test**
+- [x] **Step 1: Write the overlapping-delete regression test**
 
 Add a gated `FakeGitOps` test that holds worker `a0` inside `removeWorktree`, lets `a1` finish first, and proves the pending worker never re-enters `list()`:
 
@@ -75,7 +75,7 @@ it("hides every deleting worker from fleet.list while overlapping deletes finish
 });
 ```
 
-- [ ] **Step 2: Write deletion idempotency and failure tests**
+- [x] **Step 2: Write deletion idempotency and failure tests**
 
 Add two tests next to the overlap test:
 
@@ -110,13 +110,13 @@ it("re-exposes the row and emits failed when the DB commit fails", async () => {
 
 Import `vi` from Vitest in this test file.
 
-- [ ] **Step 3: Run the core tests and confirm the missing lifecycle fails**
+- [x] **Step 3: Run the core tests and confirm the missing lifecycle fails**
 
 Run: `npx vitest run test/core/fleet-orchestrator.test.ts`
 
 Expected: FAIL because `worker.deletion` is not a `CoreEvent`, `list()` still exposes the gated worker, and duplicate deletes do not share an operation.
 
-- [ ] **Step 4: Add the phase-based CoreEvent and orchestrator state**
+- [x] **Step 4: Add the phase-based CoreEvent and orchestrator state**
 
 Add this member to `CoreEvent` immediately after `worker.status`:
 
@@ -184,7 +184,7 @@ Filter the batched list after mapping and before caller filters:
 .filter((row) => (filter?.repoPath ? row.repoPath === filter.repoPath : true));
 ```
 
-- [ ] **Step 5: Return a correlated error when the DB commit fails**
+- [x] **Step 5: Return a correlated error when the DB commit fails**
 
 Change the `worker.delete` connection case so the desktop promise cannot hang on an exception:
 
@@ -221,7 +221,7 @@ it("worker.delete returns a correlated error when the delete commit fails", asyn
 });
 ```
 
-- [ ] **Step 6: Document the new event and run the focused gate**
+- [x] **Step 6: Document the new event and run the focused gate**
 
 Add this row to `docs/reference/events.md`:
 
@@ -233,7 +233,7 @@ Run: `npx vitest run test/core/fleet-orchestrator.test.ts test/daemon/connection
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the daemon lifecycle**
+- [x] **Step 7: Commit the daemon lifecycle**
 
 ```bash
 git add src/core/events.ts src/core/fleet-orchestrator.ts src/daemon/connection.ts docs/reference/events.md test/core/fleet-orchestrator.test.ts test/daemon/connection.test.ts
@@ -255,7 +255,7 @@ git commit -m "fix(core): make worker deletion a fleet lifecycle"
 - Extends the Zustand store with `beginWorkerDeletion(id)`, `completeWorkerDeletion(id)`, `failWorkerDeletion(id)`, and `resetWorkerDeletions()`.
 - Changes the membership invariant: `worker.status` is ignored when its worker is absent or tombstoned; `setFleet()` filters tombstoned ids before replacing `fleet`.
 
-- [ ] **Step 1: Write reducer tests for lifecycle phases and status-event resurrection**
+- [x] **Step 1: Write reducer tests for lifecycle phases and status-event resurrection**
 
 Add these assertions to `apps/desktop/test/store-reduce.test.ts`:
 
@@ -290,7 +290,7 @@ it("worker.status never creates membership without worker.spawned or fleet.list"
 });
 ```
 
-- [ ] **Step 2: Write the exact three-worker out-of-order store regression**
+- [x] **Step 2: Write the exact three-worker out-of-order store regression**
 
 Create `apps/desktop/test/worker-deletion-race.test.ts`:
 
@@ -340,13 +340,13 @@ describe("overlapping worker deletion reconciliation", () => {
 });
 ```
 
-- [ ] **Step 3: Run the desktop tests and confirm they fail**
+- [x] **Step 3: Run the desktop tests and confirm they fail**
 
 Run: `npm -w apps/desktop test -- --run test/store-reduce.test.ts test/worker-deletion-race.test.ts`
 
 Expected: FAIL because `deletingWorkers` and the four store actions do not exist, and `worker.status` currently creates a fallback row.
 
-- [ ] **Step 4: Add deletion state to the pure reducer**
+- [x] **Step 4: Add deletion state to the pure reducer**
 
 Extend `AppState` and `emptyState()`:
 
@@ -424,7 +424,7 @@ if (e.type === "worker.deletion") {
 
 Keep the pure reducer responsible for `fleet`, `deletingWorkers`, and `pendingByWorker`; the helper owns only the store-level attention cleanup.
 
-- [ ] **Step 5: Add idempotent store actions and tombstone-aware list replacement**
+- [x] **Step 5: Add idempotent store actions and tombstone-aware list replacement**
 
 Add these methods to `Store` and its creator:
 
@@ -468,7 +468,7 @@ setFleet: (rows) => set((state) => {
 
 Before the existing attention logic for `worker.status`, return an empty patch when `!s.fleet[e.workerId] || s.deletingWorkers[e.workerId]` so a late event creates neither a row nor an unread dot.
 
-- [ ] **Step 6: Run the focused desktop tests and typecheck**
+- [x] **Step 6: Run the focused desktop tests and typecheck**
 
 Run: `npm -w apps/desktop test -- --run test/store-reduce.test.ts test/worker-deletion-race.test.ts test/repos.test.tsx`
 
@@ -476,7 +476,7 @@ Run: `npm -w apps/desktop run typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the renderer state model**
+- [x] **Step 7: Commit the renderer state model**
 
 ```bash
 git add apps/desktop/src/renderer/store/reduce.ts apps/desktop/src/renderer/store/store.ts apps/desktop/test/store-reduce.test.ts apps/desktop/test/worker-deletion-race.test.ts
@@ -496,7 +496,7 @@ git commit -m "fix(desktop): tombstone in-flight worker deletions"
 - Successful `worker.delete` clears layout and completes the local tombstone as an ack fallback; it does not start a per-delete success refetch.
 - A `failed` lifecycle event or request rejection clears the tombstone and requests one authoritative fleet snapshot.
 
-- [ ] **Step 1: Extend the race test with lifecycle event idempotency and reconnect reset**
+- [x] **Step 1: Extend the race test with lifecycle event idempotency and reconnect reset**
 
 Add these cases:
 
@@ -524,7 +524,7 @@ it("drops stale local deletion intents on reconnect before the fresh fleet seed"
 });
 ```
 
-- [ ] **Step 2: Wire optimistic start, ack fallback, and failure recovery**
+- [x] **Step 2: Wire optimistic start, ack fallback, and failure recovery**
 
 Replace `deleteSub` with:
 
@@ -546,7 +546,7 @@ const deleteSub = useCallback((id: string) => {
 
 Do not remove or disable the delete action for other workers while this promise is pending.
 
-- [ ] **Step 3: Wire cross-client failure recovery and reconnect cleanup**
+- [x] **Step 3: Wire cross-client failure recovery and reconnect cleanup**
 
 After `applyEvent(e)` in the WebSocket callback, refetch on failed lifecycle:
 
@@ -580,7 +580,7 @@ useStore.getState().resetWorkerDeletions();
 
 This makes daemon restart recovery authoritative: a deletion that never committed may legitimately return after reconnect.
 
-- [ ] **Step 4: Run focused tests, typecheck, and commit**
+- [x] **Step 4: Run focused tests, typecheck, and commit**
 
 Run: `npm -w apps/desktop test -- --run test/worker-deletion-race.test.ts test/store-reduce.test.ts test/repos.test.tsx test/ws-client.test.ts`
 
@@ -603,7 +603,7 @@ git commit -m "fix(desktop): reconcile overlapping worker deletes"
 **Interfaces:**
 - No new interfaces; proves deletion is monotonic across core, protocol, store, and Electron UI.
 
-- [ ] **Step 1: Run every automated gate with Node 22**
+- [x] **Step 1: Run every automated gate with Node 22**
 
 Run: `npm test`
 
@@ -617,7 +617,7 @@ Run: `npm run build && npm -w apps/desktop run build`
 
 Expected: all commands PASS.
 
-- [ ] **Step 2: Launch Electron and verify rapid deletion**
+- [x] **Step 2: Launch Electron and verify rapid deletion**
 
 Run: `ROOKERY_DEBUG_PORT=9231 npm -w apps/desktop run dev`
 
@@ -630,7 +630,7 @@ Expected:
 - No `workerId` fallback row or unread dot appears from late `worker.status:stopped` events.
 - A second connected desktop window receives the same removals from `worker.deletion` events without manual refresh.
 
-- [ ] **Step 3: Verify failure recovery with the deterministic tests**
+- [x] **Step 3: Verify failure recovery with the deterministic tests**
 
 Run: `npx vitest run test/core/fleet-orchestrator.test.ts -t "re-exposes the row"`
 
@@ -638,7 +638,7 @@ Run: `npm -w apps/desktop test -- --run test/worker-deletion-race.test.ts -t "fa
 
 Expected: both PASS; the row returns only after `phase:"failed"` and an authoritative list seed.
 
-- [ ] **Step 4: Inspect the final change set**
+- [x] **Step 4: Inspect the final change set**
 
 Run: `git diff --check`
 
