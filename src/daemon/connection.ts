@@ -287,7 +287,12 @@ export class Connection {
         return;
       }
       case "worker.delete": {
-        await this.fleet.delete(msg.id); // discard(worktree) + remove DB row
+        try {
+          await this.fleet.delete(msg.id); // discard(worktree) + remove DB row
+        } catch (error) {
+          this.reply({ type: "error", message: String(error), reqId: msg.reqId });
+          return;
+        }
         this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "delete", id: msg.id });
         return;
       }

@@ -804,6 +804,22 @@ describe("Connection settings", () => {
     expect(sent.filter((m) => m.type === "fleet.ack").map((m) => m.action)).toEqual(["rename", "archive", "delete", "rename", "archive", "delete"]);
   });
 
+  it("worker.delete returns a correlated error when the delete commit fails", async () => {
+    const fleet = {
+      delete: async () => { throw new Error("db delete failed"); },
+    } as unknown as FleetOrchestrator;
+    const repos = new Repositories(openDb(":memory:"));
+    const sent: any[] = [];
+    const socket: ClientSocket = { send: (data) => sent.push(JSON.parse(data) as unknown) };
+    const conn = new Connection(socket, {} as SessionManager, new EventBus(), fleet, repos);
+
+    await conn.handleRaw(JSON.stringify({ type: "worker.delete", reqId: "q-delete", id: "w1" }));
+
+    expect(sent.at(-1)).toMatchObject({
+      type: "error", reqId: "q-delete", message: "Error: db delete failed",
+    });
+  });
+
   // P3-remaining Track B #3 (docs/2026-07-06-p3r-codex-hardening-finish.md): the daemon-only teardown
   // (McpBridge release + CODEX_HOME removal) moved OFF the Connection ctor/call path and into
   // SessionManager.delete (SessionManagerDeps.onSessionDelete) — the single owner. This exercises the

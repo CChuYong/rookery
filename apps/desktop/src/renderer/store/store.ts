@@ -98,6 +98,10 @@ interface Store extends AppState {
   setActiveSub: (id: string | null) => void;
   // Accepts the protocol fleet shape (permissionMode optional/absent) — the impl defaults permissionMode to bypassPermissions when missing.
   setFleet: (rows: Array<WorkerRow & { archived?: boolean }>) => void;
+  beginWorkerDeletion: (id: string) => void;
+  completeWorkerDeletion: (id: string) => void;
+  failWorkerDeletion: (id: string) => void;
+  resetWorkerDeletions: () => void;
   automations: Automation[];
   setAutomations: (automations: Automation[]) => void;
   // Same loaded/loadFailed gate as sessions/fleet, for AutomationPage (audit #14) — no automation-list-specific state existed before.
@@ -144,6 +148,18 @@ function saveOverrides(o: Overrides): void {
 // Reconstruct the current location from the store's flat fields / spread a NavState into flat fields.
 const locOf = (s: Store): Location => ({ overlay: s.overlay, showRepos: s.showRepos, sessionId: s.activeSessionId, subId: s.activeWorkerId });
 const spreadNav = (nav: NavState) => ({ overlay: nav.loc.overlay, showRepos: nav.loc.showRepos, activeSessionId: nav.loc.sessionId, activeWorkerId: nav.loc.subId, navBack: nav.back, navFwd: nav.forward });
+
+function applyWorkerDeletionState(
+  state: Store,
+  workerId: string,
+  phase: "started" | "completed" | "failed",
+): Partial<Store> {
+  const base = reduceEvent(state, { type: "worker.deletion", sessionId: "", workerId, phase });
+  if (phase === "failed") return base;
+  const attention = { ...state.attention };
+  delete attention[workerId];
+  return { ...base, attention };
+}
 
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
@@ -228,8 +244,12 @@ export const useStore = create<Store>((set, get) => ({
         if (e.status === "running") return { running, sessionAttention: { ...s.sessionAttention, [e.sessionId]: false } };
         return { running };
       }
+      if (e.type === "worker.deletion") {
+        return applyWorkerDeletionState(s, e.workerId, e.phase);
+      }
       // A worker settled while the user wasn't looking → mark unread (attention). Not marked if being viewed; cleared when running resumes.
       if (e.type === "worker.status") {
+        if (!s.fleet[e.workerId] || s.deletingWorkers[e.workerId]) return {};
         const base = reduceEvent(s, e, now);
         if (e.workerId === s.activeWorkerId) return base; // The worker currently being viewed isn't unread
         if (e.status === "idle" || e.status === "done" || e.status === "error" || e.status === "failed") {
@@ -259,9 +279,24 @@ export const useStore = create<Store>((set, get) => ({
   // setActive/setActiveSub are thin aliases over navigate (navigate handles clearing unread). Just patch the id.
   setActive: (id) => get().navigate({ sessionId: id }),
   setActiveSub: (id) => get().navigate({ subId: id }),
+  beginWorkerDeletion: (id) => set((state) => applyWorkerDeletionState(state, id, "started")),
+  completeWorkerDeletion: (id) => set((state) => applyWorkerDeletionState(state, id, "completed")),
+  failWorkerDeletion: (id) => set((state) => applyWorkerDeletionState(state, id, "failed")),
+  resetWorkerDeletions: () => set({ deletingWorkers: {} }),
   // Clean up unread entries for workers that vanished (so a tab badge doesn't stay lit after delete/discard).
   // Prune vanished workers. Even for those that remain, if non-running, clear pending (A6: prevent ghost "pending" bubbles for settled workers on reconnect) — preserved only while running.
-  setFleet: (rows) => set((s) => ({ fleet: Object.fromEntries(rows.map((r) => [r.id, { ...r, permissionMode: r.permissionMode ?? "bypassPermissions" }])), fleetLoaded: true, fleetLoadFailed: false, attention: Object.fromEntries(Object.entries(s.attention).filter(([k]) => rows.some((r) => r.id === k))), pendingByWorker: Object.fromEntries(Object.entries(s.pendingByWorker).filter(([k]) => rows.some((r) => r.id === k && r.status === "running"))) })),
+  setFleet: (rows) => set((s) => {
+    const visible = rows.filter((row) => !s.deletingWorkers[row.id]);
+    const ids = new Set(visible.map((row) => row.id));
+    const rowsById = new Map(visible.map((row) => [row.id, row]));
+    return {
+      fleet: Object.fromEntries(visible.map((row) => [row.id, { ...row, permissionMode: row.permissionMode ?? "bypassPermissions" }])),
+      fleetLoaded: true,
+      fleetLoadFailed: false,
+      attention: Object.fromEntries(Object.entries(s.attention).filter(([id]) => ids.has(id))),
+      pendingByWorker: Object.fromEntries(Object.entries(s.pendingByWorker).filter(([id]) => rowsById.get(id)?.status === "running")),
+    };
+  }),
   setFleetLoadFailed: (v) => set({ fleetLoadFailed: v }),
   automations: [], automationsLoaded: false, automationsLoadFailed: false,
   setAutomations: (automations) => set({ automations, automationsLoaded: true, automationsLoadFailed: false }),

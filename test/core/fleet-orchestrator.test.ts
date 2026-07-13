@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
@@ -750,6 +750,69 @@ describe("FleetOrchestrator", () => {
     await s.fleet.discard(id);
     await s.fleet.waitAllSettled();
     expect(terminals).toEqual(["stopped"]); // exactly once (no duplicate emit / flip-flop)
+  });
+
+  it("hides every deleting worker from fleet.list while overlapping deletes finish out of order", async () => {
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+    class OutOfOrderDeleteGit extends FakeGitOps {
+      override async removeWorktree(repo: string, wt: string, branch: string): Promise<void> {
+        if (wt.endsWith("/a0")) await gateA;
+        await super.removeWorktree(repo, wt, branch);
+      }
+    }
+    const x = setup({ git: new OutOfOrderDeleteGit({ headValue: "base0" }) });
+    const a = await x.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "A", task: "a" });
+    const b = await x.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "B", task: "b" });
+    const c = await x.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "C", task: "c" });
+    await x.fleet.waitAllSettled();
+    const phases: string[] = [];
+    x.bus.subscribe("@all", (event) => {
+      if (event.type === "worker.deletion") phases.push(`${event.workerId}:${event.phase}`);
+    });
+
+    const deleteA = x.fleet.delete(a.id);
+    await until(() => phases.includes(`${a.id}:started`));
+    const deleteB = x.fleet.delete(b.id);
+    await deleteB;
+
+    expect(x.fleet.list().map((row) => row.id)).toEqual([c.id]);
+    expect(x.repos.getWorker(a.id)).toBeDefined();
+    releaseA();
+    await deleteA;
+    expect(x.fleet.list().map((row) => row.id)).toEqual([c.id]);
+    expect(phases).toEqual([
+      `${a.id}:started`, `${b.id}:started`, `${b.id}:completed`, `${a.id}:completed`,
+    ]);
+  });
+
+  it("shares a duplicate delete and emits one started/completed pair", async () => {
+    const x = setup();
+    const { id } = await x.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "A", task: "a" });
+    await x.fleet.waitAllSettled();
+    const events: string[] = [];
+    x.bus.subscribe("@all", (event) => {
+      if (event.type === "worker.deletion") events.push(event.phase);
+    });
+    await Promise.all([x.fleet.delete(id), x.fleet.delete(id)]);
+    expect(events).toEqual(["started", "completed"]);
+  });
+
+  it("re-exposes the row and emits failed when the DB commit fails", async () => {
+    const x = setup();
+    const { id } = await x.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "A", task: "a" });
+    await x.fleet.waitAllSettled();
+    const events: Array<{ phase: string; message?: string }> = [];
+    x.bus.subscribe("@all", (event) => {
+      if (event.type === "worker.deletion") events.push(event);
+    });
+    vi.spyOn(x.repos, "deleteWorker").mockImplementationOnce(() => { throw new Error("db delete failed"); });
+
+    await expect(x.fleet.delete(id)).rejects.toThrow("db delete failed");
+
+    expect(x.fleet.list().map((row) => row.id)).toContain(id);
+    expect(events.map((event) => event.phase)).toEqual(["started", "failed"]);
+    expect(events.at(-1)?.message).toContain("db delete failed");
   });
 
   it("delete during provisioning cancels the spawn: no worktree leak, no ghost entry, row removed (audit #12)", async () => {

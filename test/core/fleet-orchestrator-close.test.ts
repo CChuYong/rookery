@@ -56,6 +56,36 @@ describe("FleetOrchestrator.close (shutdown drain)", () => {
     expect(stopped).toBe(true); // launch flow is drained (stopped) before shutdown → no writes after db.close
   });
 
+  it("drains a permanent deletion before the caller closes the DB", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    repos.createWorker({
+      id: "a0", sessionId: "sA", repoPath: "/code", label: "c",
+      worktreePath: "/wt/a0", branch: "rookery/a0", base: "main",
+    });
+    repos.setWorkerStatus("a0", "stopped", true);
+    let releaseDelete!: () => void;
+    const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    const git = new FakeGitOps();
+    git.removeWorktree = async () => { await deleteGate; };
+    const fleet = new FleetOrchestrator({
+      repos, bus: new EventBus(), git, factory: (() => ({})) as never,
+      worktreesDir: "/wt", exists: () => false,
+    });
+    fleet.rehydrate();
+
+    const deletion = fleet.delete("a0");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    let closed = false;
+    const closing = fleet.close(1000).then(() => { closed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(closed).toBe(false);
+
+    releaseDelete();
+    await Promise.all([deletion, closing]);
+    expect(repos.getWorker("a0")).toBeUndefined();
+  });
+
   it("resolves without hanging when there are no live agents", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory: (() => ({})) as never, worktreesDir: "/wt" });
