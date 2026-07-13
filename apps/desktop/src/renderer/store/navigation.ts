@@ -5,7 +5,7 @@
 //  a ref stack + a 4-axis diff effect, which made back/forward and selection highlighting get out of sync —
 //  this model is the single source.)
 
-export type Overlay = "settings" | "newSession" | "automation" | null;
+export type Overlay = "settings" | "newSession" | "automation" | "capabilities" | null;
 
 export interface Location {
   overlay: Overlay;

@@ -17,6 +17,7 @@ export default {
   "app.navRepos": "레포",
   "app.newSession": "새 세션",
   "app.automation": "자동화",
+  "app.capabilityCenter": "Capability Center",
   "app.worker": "워커",
   "app.master": "마스터",
   "app.busyAddable": "작업 중… (메시지 추가 가능)",

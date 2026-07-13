@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellOff, Plus, Clock, RotateCcw, Loader2 } from "lucide-react";
+import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellOff, Plus, Clock, RotateCcw, Loader2, Blocks } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
+import type { CapabilitySnapshot, CapabilityTarget } from "@daemon/core/capabilities/types.js";
 import { useStore } from "./store/store.js";
 import { baseName } from "./lib/path.js";
 import { resolveMasterControls } from "./lib/master-controls.js";
@@ -32,6 +33,7 @@ import { NewSessionPage, NEW_SESSION_DRAFT_KEY } from "./components/NewSessionPa
 import type { SlashCommand } from "./views/Conversation.js";
 import { AutomationPage } from "./components/AutomationPage.js";
 import { AutomationForm } from "./components/AutomationForm.js";
+import { CapabilitiesPage } from "./components/CapabilitiesPage.js";
 import { WorkerHeader, SessionHeader } from "./components/WorkspaceHeaders.js";
 import { WindowControls } from "./components/WindowControls.js";
 import { DaemonDownBanner } from "./components/DaemonDownBanner.js";
@@ -834,8 +836,20 @@ export function App(): JSX.Element {
       client ? client.request({ type: "commands.list", cwd }).then((r) => r.commands ?? []).catch(() => []) : Promise.resolve([]),
     [client],
   );
+  const loadCapabilitySnapshot = useCallback(
+    (target: CapabilityTarget): Promise<CapabilitySnapshot> => {
+      const c = client;
+      return c
+        ? c.request({ type: "capabilities.snapshot", target }).then((response) => response.snapshot)
+        : Promise.reject(new Error("daemon not connected"));
+    },
+    [],
+  );
 
   const activeSub = s.activeWorkerId ? s.fleet[s.activeWorkerId] : undefined;
+  const capabilityTarget: CapabilityTarget | null = showRepos
+    ? activeSub ? { kind: "worker", id: activeSub.id } : null
+    : s.activeSessionId ? { kind: "session", id: s.activeSessionId } : null;
   const fleet = useMemo(() => Object.values(s.fleet), [s.fleet]); // used in RepoTree (Repos view)
   // Master composer model/effort controls — inline would be a new ref every render, breaking the Conversation memo. Keep the same ref
   // across unrelated re-renders like usage polling (deps: settings/active session/overrides only).
@@ -1053,6 +1067,11 @@ export function App(): JSX.Element {
             {/* Automation is a top-level feature (audit #22) — the collapsed rail needs the same reachable-from-anywhere
                 entry as the expanded footer, not just restart/Settings. */}
             <AttentionBell onNavigate={onAttentionNav} />
+            <Tooltip label={t("app.capabilityCenter")} side="right">
+              <button onClick={() => { navigate({ overlay: overlay === "capabilities" ? null : "capabilities" }); }} aria-label={t("app.capabilityCenter")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                <Blocks size={16} />
+              </button>
+            </Tooltip>
             <Tooltip label={t("app.automation")} side="right">
               <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                 <Clock size={16} />
@@ -1120,6 +1139,11 @@ export function App(): JSX.Element {
               <div className="flex items-center justify-end gap-1">
                 {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
                     shouldn't require switching to the Sessions tab first. */}
+                <Tooltip label={t("app.capabilityCenter")} side="top">
+                  <button onClick={() => { navigate({ overlay: overlay === "capabilities" ? null : "capabilities" }); }} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                    <Blocks size={14} />
+                  </button>
+                </Tooltip>
                 <Tooltip label={t("app.automation")} side="top">
                   <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                     <Clock size={14} />
@@ -1153,7 +1177,9 @@ export function App(): JSX.Element {
         )}
         {/* replay rise-in on every page/overlay swap (key=pageId). Keep TerminalPanel outside this div to preserve the xterm. */}
         <div key={pageId} className="flex min-h-0 flex-1 flex-col rise-in">
-        {overlay === "settings" && s.settings ? (
+        {overlay === "capabilities" ? (
+          <CapabilitiesPage target={capabilityTarget} loadSnapshot={loadCapabilitySnapshot} onClose={closeOverlay} />
+        ) : overlay === "settings" && s.settings ? (
           <SettingsPage
             settings={s.settings}
             onSave={saveSettings}

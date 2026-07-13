@@ -17,6 +17,7 @@ export default {
   "app.navRepos": "Repos",
   "app.newSession": "New session",
   "app.automation": "Automation",
+  "app.capabilityCenter": "Capability Center",
   "app.worker": "Worker",
   "app.master": "Master",
   "app.busyAddable": "Working… (you can add messages)",
