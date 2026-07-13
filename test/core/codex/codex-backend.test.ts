@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { CodexBackend, formatDuration } from "../../../src/core/codex/codex-backend.js";
+import { CODEX_MANAGED_SECRET_SAFETY_ARGS, codexManagedSecretSafetyArgs } from "../../../src/core/codex/codex-transport.js";
 import { fakeCodexSpawn, type CodexStep } from "../../helpers/fake-codex.js";
 import type { AgentEvent, AgentStream, ProviderToolDef } from "../../../src/core/agent-backend.js";
 import { MessageQueue } from "../../../src/core/message-queue.js";
@@ -62,7 +63,8 @@ describe("CodexBackend.openSession — translation", () => {
       OTHER: "kept",
       ROOKERY_CAP_SECRET_A: "actual-secret-value",
     });
-    expect(fake.spawns[0]!.args).toBeUndefined();
+    expect(fake.spawns[0]!.args).toEqual(CODEX_MANAGED_SECRET_SAFETY_ARGS);
+    expect(JSON.stringify(fake.spawns[0]!.args)).not.toContain("actual-secret-value");
     expect(fake.requests.find((request) => request.method === "thread/start")!.params).toMatchObject({
       developerInstructions: "WORKER-FENCE\n\nMANAGED-CODEX-INSTRUCTIONS",
     });
@@ -279,7 +281,7 @@ describe("CodexBackend.startTurn", () => {
 
     const start = fake.requests.find((r) => r.method === "thread/start")!.params;
     expect(start).toMatchObject({ cwd: "/wt", model: "gpt-5.5", approvalPolicy: "never", sandbox: "danger-full-access", developerInstructions: "SYS-PROMPT-1" });
-    // Token out of argv (P2.5 Track A): the bridge-materialized CODEX_HOME travels as env, and no -c/args are ever passed.
+    // Token out of argv (P2.5 Track A): this bridge-only launch needs no managed-secret safety args.
     expect(fake.spawns[0]!.env).toMatchObject({ CODEX_HOME: "/tmp/codex-homes/sess-1" });
     expect(fake.spawns[0]!.args).toBeUndefined();
 
@@ -331,6 +333,7 @@ describe("CodexBackend.startTurn", () => {
       ROOKERY_CAP_SECRET_MASTER: "master-secret-value",
       CODEX_HOME: "/rookery/codex-homes/master-1",
     });
+    expect(fake.spawns[0]!.args).toEqual(CODEX_MANAGED_SECRET_SAFETY_ARGS);
     expect(fake.requests.find((request) => request.method === "thread/start")!.params).toMatchObject({
       developerInstructions: "MASTER-BASE\n\nMASTER-MANAGED",
     });
@@ -703,6 +706,13 @@ describe("CodexBackend — pricing aggregation", () => {
 });
 
 describe("CodexBackend — fork timeout & explicit sandbox", () => {
+  it("adds fixed snapshot/shell safety overrides only when a managed secret alias is present", () => {
+    expect(codexManagedSecretSafetyArgs(undefined)).toBeUndefined();
+    expect(codexManagedSecretSafetyArgs({ CODEX_HOME: "/x" })).toBeUndefined();
+    expect(codexManagedSecretSafetyArgs({ ROOKERY_CAP_SECRET_ABC: "never-in-argv" })).toEqual(CODEX_MANAGED_SECRET_SAFETY_ARGS);
+    expect(JSON.stringify(codexManagedSecretSafetyArgs({ ROOKERY_CAP_SECRET_ABC: "never-in-argv" }))).not.toContain("never-in-argv");
+  });
+
   // P3 Track A: the daemon's codex MASTER fork router passes an explicit env override so the
   // ephemeral fork child runs in the SOURCE session's per-session CODEX_HOME (where thread/fork can
   // find the thread) instead of the shared home — verify the override reaches the spawn verbatim.
@@ -711,6 +721,15 @@ describe("CodexBackend — fork timeout & explicit sandbox", () => {
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
     await b.forkSession("th-1", { env: { CODEX_HOME: "/x" } });
     expect(fake.spawns[0]!.env).toEqual({ CODEX_HOME: "/x" });
+    expect(fake.spawns[0]!.args).toBeUndefined();
+  });
+
+  it("forkSession applies managed-secret snapshot/shell safety without putting the value in argv", async () => {
+    const fake = fakeCodexSpawn(() => []);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    await b.forkSession("th-1", { env: { CODEX_HOME: "/x", ROOKERY_CAP_SECRET_FORK: "fork-secret" } });
+    expect(fake.spawns[0]!.args).toEqual(CODEX_MANAGED_SECRET_SAFETY_ARGS);
+    expect(JSON.stringify(fake.spawns[0]!.args)).not.toContain("fork-secret");
   });
 
   // No opts (worker/claude fork paths): falls back to deps.env() exactly as before P3.

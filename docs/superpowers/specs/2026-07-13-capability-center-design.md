@@ -1121,6 +1121,14 @@ only its selected rollout and ancestors, then recompiles against the target's bi
 Generated config, launch descriptors, protocol state, and persisted events contain aliases
 only; write-only secret values exist solely in the provider child environment.
 
+Live verification used Codex CLI 0.144.1 and its live default model. A first run exposed that
+Codex shell snapshots persisted inherited secret aliases; Slice 4 now disables snapshots and
+excludes managed aliases from model shell environments only for secret-bearing launches, using
+fixed public overrides. The repeated isolated smoke proved instruction/skill/MCP execution in a
+master and worker, restart resume, native fork context and target recompilation, selective rollout
+copy, target-specific aliases, orphan GC, permanent cleanup, secret-free generated state/events/argv,
+and byte/metadata-identical user Codex config/auth before and after.
+
 Exit: The same pack works in Codex masters and workers without touching the user's real
 Codex config or leaking one worker's bindings to another.
 

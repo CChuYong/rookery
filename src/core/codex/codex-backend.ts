@@ -1,7 +1,7 @@
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
-import type { CodexSpawn } from "./codex-transport.js";
+import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex-transport.js";
 import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
 import { turnCostUsd, isRatedModel } from "./codex-pricing.js";
@@ -288,8 +288,8 @@ abstract class CodexSessionBase implements AgentStream {
   // Spawns the child, wires the client's close/notification/server-request handlers, completes the
   // initialize handshake, and provisions the in-app API key if configured. `envOverride` carries the
   // master turn's per-session CODEX_HOME (`{CODEX_HOME: <bridge-materialized dir>}` — P2.5 Track A;
-  // absent for workers and tool-less master turns, which fall back to `deps.env` alone). No `-c` arg
-  // is ever passed anymore — the bridge URL lives only in that dir's config.toml (mode 0600).
+  // absent for tool-less master turns, which fall back to `deps.env` alone). Bridge/runtime values
+  // never enter argv; managed-secret launches add only fixed public safety overrides.
   protected async openClient(envOverride?: NodeJS.ProcessEnv): Promise<CodexClient> {
     const abort = this.opts.abortController;
     // envOverride (when present) wins over the base env — a per-turn per-session CODEX_HOME must
@@ -298,7 +298,7 @@ abstract class CodexSessionBase implements AgentStream {
     // object is harmless either way, but `undefined` reads as "nothing to add" and matches prior behavior.
     const baseEnv = this.deps.env?.();
     const env = envOverride ? { ...(baseEnv ?? {}), ...envOverride } : baseEnv;
-    const transport = this.deps.spawn({ env, args: undefined });
+    const transport = this.deps.spawn({ env, args: codexManagedSecretSafetyArgs(env) });
     const client = new CodexClient(transport);
     this.client = client;
     this.clientClosedP = new Promise((resolve) => { this.resolveClientClosed = resolve; });
@@ -909,7 +909,8 @@ export class CodexBackend implements AgentBackend {
   // fork child runs in the SOURCE session's per-session home (where thread/fork can find the thread);
   // worker/claude callers pass no opts, so `deps.env?.()` (the shared home) is unchanged.
   async forkSession(threadId: string, opts?: { env?: NodeJS.ProcessEnv }): Promise<{ sessionId: string }> {
-    const transport = this.deps.spawn({ env: opts?.env ?? this.deps.env?.() });
+    const env = opts?.env ?? this.deps.env?.();
+    const transport = this.deps.spawn({ env, args: codexManagedSecretSafetyArgs(env) });
     const client = new CodexClient(transport);
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Fork honors codexHandshakeTimeoutMs for coherence with the rest of the codex handshake phase

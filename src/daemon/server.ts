@@ -336,7 +336,13 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     if (!sourceSessionId || !newSessionId) throw new Error("cannot fork codex session: missing sourceSessionId/newSessionId");
     const sourceHome = path.join(config.home, "codex-homes", sourceSessionId);
     if (!fs.existsSync(sourceHome)) throw new Error("cannot fork codex session: source CODEX_HOME missing (run a turn first)");
-    const { sessionId: forkedUuid } = await codexBackend.forkSession(sourceThreadId, { env: { ...process.env, CODEX_HOME: sourceHome } });
+    // initialize loads the source home's managed MCP config even though thread/fork itself does not
+    // call those tools. Supply the same alias values as a turn so required servers can initialize;
+    // CodexBackend applies the fixed shell-snapshot/shell-env safety overrides automatically.
+    const managed = capabilityRuntime.materializeCodex(capabilityService.resolveManaged({ kind: "session", id: sourceSessionId }));
+    const { sessionId: forkedUuid } = await codexBackend.forkSession(sourceThreadId, {
+      env: { ...process.env, ...managed.env, CODEX_HOME: sourceHome },
+    });
     seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId, forkedUuid);
     return { sessionId: forkedUuid };
   };

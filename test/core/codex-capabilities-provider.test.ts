@@ -9,7 +9,7 @@ import {
   mapSkillsResponse,
 } from "../../src/core/codex-capabilities-provider.js";
 import { fakeCodexSpawn } from "../helpers/fake-codex.js";
-import type { CodexSpawn, CodexTransport } from "../../src/core/codex/codex-transport.js";
+import { CODEX_MANAGED_SECRET_SAFETY_ARGS, type CodexSpawn, type CodexTransport } from "../../src/core/codex/codex-transport.js";
 
 const skillResponse = {
   data: [{
@@ -150,7 +150,7 @@ describe("makeCodexCapabilitiesProvider", () => {
   it("uses one initialized child, target cwd, configured env, and bounded MCP pagination", async () => {
     const fake = fakeCodexSpawn(() => [], { rpc: allRpc() });
     const provider = makeCodexCapabilitiesProvider({ spawn: fake.spawn, env: () => ({ BASE: "yes" }) });
-    const result = await provider.list({ cwd: "/repo", env: { CODEX_HOME: "/target-home" } });
+    const result = await provider.list({ cwd: "/repo", env: { CODEX_HOME: "/target-home", ROOKERY_CAP_SECRET_INVENTORY: "inventory-secret" } });
 
     expect(result.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([
       "codex.skill.release./repo/.agents/skills/release/SKILL.md",
@@ -158,7 +158,9 @@ describe("makeCodexCapabilitiesProvider", () => {
       "codex.mcp.two",
     ]));
     expect(fake.spawns).toHaveLength(1);
-    expect(fake.spawns[0]?.env).toMatchObject({ BASE: "yes", CODEX_HOME: "/target-home" });
+    expect(fake.spawns[0]?.env).toMatchObject({ BASE: "yes", CODEX_HOME: "/target-home", ROOKERY_CAP_SECRET_INVENTORY: "inventory-secret" });
+    expect(fake.spawns[0]?.args).toEqual(CODEX_MANAGED_SECRET_SAFETY_ARGS);
+    expect(JSON.stringify(fake.spawns[0]?.args)).not.toContain("inventory-secret");
     expect(fake.killed[0]).toBe(true);
     expect(fake.requests.find((request) => request.method === "skills/list")?.params).toEqual({ cwds: ["/repo"], forceReload: false });
     expect(fake.requests.find((request) => request.method === "hooks/list")?.params).toEqual({ cwds: ["/repo"] });

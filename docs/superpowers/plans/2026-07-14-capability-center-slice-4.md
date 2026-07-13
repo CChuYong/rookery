@@ -78,7 +78,7 @@
 - Modify: `test/daemon/connection.test.ts`
 
 1. Add lifecycle hooks that give a same-provider Codex fork both source and new worker ids before the native fork call.
-2. Run `thread/fork` in the source worker home, copy the complete source rollout tree into the new worker home, then recompile against the new worker's bindings on lazy resume.
+2. Run `thread/fork` in the source worker home, copy the returned fork rollout and its referenced ancestors into the new worker home, then recompile against the new worker's bindings on lazy resume.
 3. Keep cross-provider handoff on a fresh target home with existing transcript seeding.
 4. Remove worker homes only at permanent discard/delete ownership boundaries and sweep orphan homes once at boot from authoritative worker rows.
 5. Probe Codex native inventory using the selected target's exact effective home/environment so the Center describes what that target will run.
@@ -113,6 +113,7 @@
 3. Exercise a Codex master and Codex worker, then resume and same-provider fork the worker.
 4. Prove the instruction/skill/MCP behavior, distinct target homes, target-specific config, preserved rollout context, cleanup, and desired/applied state.
 5. Scan generated config, argv/event captures, and daemon output to prove the secret value is absent; compare the user's real Codex config/auth metadata before and after.
+   Secret-bearing launches must also prevent Codex shell snapshots and model-invoked shell environments from persisting/exposing managed aliases.
 6. Review `git diff`, ensure the worktree is clean of runtime/dependency artifacts, and commit the smoke evidence.
 
 ## Required completion evidence

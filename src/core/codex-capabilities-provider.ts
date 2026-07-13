@@ -1,5 +1,5 @@
 import { CodexClient } from "./codex/codex-client.js";
-import type { CodexSpawn } from "./codex/codex-transport.js";
+import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex/codex-transport.js";
 import type {
   CapabilityContribution,
   CapabilityDiagnostic,
@@ -406,7 +406,8 @@ export function makeCodexCapabilitiesProvider(opts: {
       let client: CodexClient | undefined;
       const setupDiagnostics: CapabilityDiagnostic[] = [];
       try {
-        client = new CodexClient(opts.spawn({ env: { ...(opts.env?.() ?? {}), ...(input.env ?? {}) } }));
+        const env = { ...(opts.env?.() ?? {}), ...(input.env ?? {}) };
+        client = new CodexClient(opts.spawn({ env, args: codexManagedSecretSafetyArgs(env) }));
         await withTimeout(
           client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: true, requestAttestation: false } }),
           timeoutMs,

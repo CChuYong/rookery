@@ -80,6 +80,9 @@ configuration. Codex masters and workers each receive a separate generated home,
 rollout tree, and secret alias overlay. For a stdio MCP with a pack-relative `cwd`, Rookery
 generates a small Node launcher inside the immutable runtime so the declared working
 directory is honored without invoking a shell.
+For secret-bearing Codex launches, Rookery also disables Codex shell snapshots and removes
+managed aliases from model-invoked shell environments using fixed public overrides; no
+secret name or value is placed in argv.
 
 ### The fleet
 

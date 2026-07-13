@@ -101,6 +101,10 @@ an immutable direct-spawn launcher, so values stay in the child environment and 
 argv, descriptors, events, and logs. Homes are compiled before initial/lazy stream open.
 Native same-provider forks run in the source home, then copy only the fork rollout and its
 ancestors into the target home; target bindings compile independently on first resume.
+Because Codex 0.144.x captures its inherited environment in on-disk shell snapshots before
+applying shell policy, secret-bearing launches add fixed public overrides that disable that
+snapshot feature and exclude `ROOKERY_CAP_SECRET_*` from model-invoked shell environments.
+The override strings contain neither secret names nor values.
 
 ## Sessions
 
