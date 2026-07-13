@@ -77,9 +77,9 @@ The master's tools are assembled per turn (`doTurn`, `master-agent.ts:222-273`) 
 - **Overlay** `caps = capabilities?.()` (`TurnCapabilities`, `master-agent.ts:36`): `mcpServers` (+, caps wins on key collision), `allowedTools` (+), `systemPromptAppend` (+, kept fixed within a session to preserve the cache prefix), `denyTools` (−, filtered out of the allowlist).
 - `disallowedTools: NATIVE_SCHEDULE_TOOLS` always removes the harness's native schedule/watch tools (they no-op in a headless `query()`); the daemon re-exposes equivalent `schedule_*` MCP tools through the overlay instead.
 
-`SessionManager` builds the overlay resolver via `makeCapabilities(externalKey, sessionId)` — e.g. a Slack-origin session gets `slack-thread` tools, an automation session gets `schedule` tools. This path is distinct from managed packs. Workers still receive none of Rookery's in-process memory/repo/fleet/schedule servers, but a trusted managed pack may add its own provider-native MCP through the generated Claude plugin.
+`SessionManager` builds the overlay resolver via `makeCapabilities(externalKey, sessionId)` — e.g. a Slack-origin session gets `slack-thread` tools, an automation session gets `schedule` tools. This path is distinct from managed packs. Workers still receive none of Rookery's in-process memory/repo/fleet/schedule servers, but a trusted managed pack may add its own provider-native MCP through a generated Claude plugin or isolated Codex home.
 
-## Managed Claude capability runtime
+## Managed provider capability runtime
 
 The resolver emits a secret-free projection with a deterministic revision. `CapabilityRuntime`
 copies each selected pack into `~/.rookery/capability-runtime/<revision>/source/`, revalidates
@@ -92,6 +92,15 @@ stdio server, the materializer replaces that field with an immutable generated N
 and a public launch descriptor. The launcher uses `spawn()` directly (no shell), inherits the
 already-resolved environment, and keeps every secret value out of generated files and argv.
 Native Claude filesystem settings stay additive (`settingSources` is not disabled).
+
+The same immutable source tree also produces Codex-native skill and MCP TOML. Every master
+and worker receives a separate `~/.rookery/codex-homes/<target>/` assembled from the user's
+base config without writing it; master homes contain both the Rookery MCP bridge and managed
+servers. HTTP credentials use environment-backed aliases. Stdio secrets are translated by
+an immutable direct-spawn launcher, so values stay in the child environment and out of TOML,
+argv, descriptors, events, and logs. Homes are compiled before initial/lazy stream open.
+Native same-provider forks run in the source home, then copy only the fork rollout and its
+ancestors into the target home; target bindings compile independently on first resume.
 
 ## Sessions
 

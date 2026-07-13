@@ -723,9 +723,9 @@ export interface CapabilitySnapshot {
 Slice 2 preserves that shape and adds `state: "desired"|"suppressed"`, optional managed
 binding provenance, and optional `desiredRevision`/`desiredBlocked` snapshot fields.
 Slice 3 adds `pending-next-turn`, `pending-reload`, and optional `appliedRevision` for
-Claude targets. Codex targets remain desired-only. Later slices add Codex application,
-worker hot reload, invocation, and structured source metadata without changing Slice 1's
-rule that unknown is never encoded as empty success.
+Claude targets; Slice 4 applies the same runtime projection to Codex targets. Later slices
+add worker hot reload, invocation, and structured source metadata without changing Slice
+1's rule that unknown is never encoded as empty success.
 
 ```ts
 export type CapabilityKind =
@@ -1111,6 +1111,15 @@ Exit: The same pack works in Claude masters and newly started/resumed Claude wor
 - Codex config compiler and extended master home materialization.
 - Per-worker Codex homes, auth/state handling, cleanup, fork behavior.
 - Codex master/worker application and runtime verification.
+
+Implemented on 2026-07-14. The provider-neutral resolved manifest now compiles to
+Codex-native skills, MCP TOML, instruction append text, and secret aliases from the same
+immutable revision used by Claude. Every Codex master and worker launches from a distinct
+Rookery-owned home assembled from the user's base config without writing it. Worker resume,
+same-provider fork, permanent cleanup, and boot GC preserve target ownership; a fork copies
+only its selected rollout and ancestors, then recompiles against the target's bindings.
+Generated config, launch descriptors, protocol state, and persisted events contain aliases
+only; write-only secret values exist solely in the provider child environment.
 
 Exit: The same pack works in Codex masters and workers without touching the user's real
 Codex config or leaking one worker's bindings to another.

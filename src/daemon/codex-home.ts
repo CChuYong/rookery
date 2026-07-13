@@ -82,12 +82,13 @@ export function materializeCodexHome(
 }
 
 // P3 Track A (docs/2026-07-06-p3-codex-fork-automation.md) — seeds a freshly-forked codex master
-// session's per-session CODEX_HOME with the SOURCE session's ENTIRE `sessions/` tree (parent +
-// forked rollouts). `thread/fork` writes the forked rollout into whatever CODEX_HOME the fork child
+// session's per-session CODEX_HOME with the returned fork rollout and its referenced ancestors.
+// `thread/fork` writes the forked rollout into whatever CODEX_HOME the fork child
 // ran in (the source's home — see server.ts's forkCodexMaster), and that forked rollout is a DELTA
 // that references the parent rollout: copying only the forked file would let `thread/resume` find the
 // thread but lose conversation context (verified in `.superpowers/sdd/probe-fork-home2.mjs`). Copying
-// the whole tree preserves context. Best-effort: a missing source `sessions/` dir (e.g. the source
+// the selected ancestry preserves context without leaking unrelated rollouts. The optional legacy
+// no-thread-id path still copies the complete tree for backward compatibility. Best-effort: a missing source `sessions/` dir (e.g. the source
 // home was GC'd) is a silent no-op — the fork still runs, just without prior context — and this must
 // never throw (called after the ephemeral fork child has already succeeded).
 export function seedCodexHomeFromSource(

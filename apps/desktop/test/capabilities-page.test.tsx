@@ -160,7 +160,7 @@ describe("CapabilitiesPage", () => {
   it("renders desired/applied drift and the pending lifecycle labels", async () => {
     const runtimeSnapshot: CapabilitySnapshot = {
       ...snapshot,
-      target: { ...target, label: "Claude Main", provider: "claude", cwd: "/repo" },
+      target: { ...target, label: "Codex Main", provider: "codex", cwd: "/repo" },
       desiredRevision: "abcdef1234567890",
       appliedRevision: "0011223344556677",
       desiredBlocked: false,
@@ -172,7 +172,7 @@ describe("CapabilitiesPage", () => {
     };
     render(<CapabilitiesPage target={target} {...pageProps(makeApi(async () => runtimeSnapshot))} />);
 
-    await screen.findByText("Claude Main");
+    await screen.findByText("Codex Main");
     expect(screen.getByText(/원하는 리비전 abcdef123456/)).toBeInTheDocument();
     expect(screen.getByText(/적용된 리비전 001122334455/)).toBeInTheDocument();
     expect(screen.getAllByText("다음 턴에 적용").length).toBeGreaterThan(0);

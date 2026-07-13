@@ -250,11 +250,9 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
                     {snapshot.desiredRevision && (
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-muted">
                         <span>{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</span>
-                        {snapshot.target.provider === "claude" && (
-                          <span>{snapshot.appliedRevision
-                            ? t("capabilities.appliedRevision", { revision: snapshot.appliedRevision.slice(0, 12) })
-                            : t("capabilities.appliedRevisionNone")}</span>
-                        )}
+                        <span>{snapshot.appliedRevision
+                          ? t("capabilities.appliedRevision", { revision: snapshot.appliedRevision.slice(0, 12) })
+                          : t("capabilities.appliedRevisionNone")}</span>
                       </div>
                     )}
                   </div>

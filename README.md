@@ -57,27 +57,29 @@ assignments override broader ones, including disabled assignments used as tombst
 The **Library** tab handles validation, trust, refresh, removal, and write-only secrets;
 **Assignments** manages scope and audience; **Effective** shows native inventory plus the
 deterministic desired and applied revisions for the selected master or worker. Trusted
-packs now apply to **Claude** without changing `~/.claude` or repository `.claude` files:
-instructions append to the turn prompt, skills load through generated local plugins, and
-pack MCP servers use generated plugin configuration. Masters pick up changes on their next
-turn; newly started or lazily resumed workers apply once when their provider stream opens.
-An already-live worker reports **Reload required** until explicit hot reload ships. Codex
-managed-pack application is a later slice, so Codex targets continue to show desired state.
+packs apply to both **Claude and Codex** without changing the user's `~/.claude`,
+`~/.codex/config.toml`, or repository provider files. Instructions append to the turn
+prompt. Claude loads skills and MCP through generated local plugins; Codex loads them from
+Rookery-owned, target-specific `CODEX_HOME` directories. Masters pick up changes on their
+next turn; newly started or lazily resumed workers apply once when their provider stream
+opens. An already-live worker reports **Reload required** until explicit hot reload ships.
 
 Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
 
 1. Open Capability Center → Library and add the example directory.
 2. Review the files and public MCP configuration, then trust the displayed digest.
 3. Save the declared secret if needed; secret values are never returned to the UI.
-4. Create an assignment, run the next Claude turn (or start/resume a Claude worker), and
-   inspect the matching desired/applied revision in Effective.
+4. Create an assignment, run the next Claude or Codex turn (or start/resume a matching
+   worker), and inspect the matching desired/applied revision in Effective.
 
 Rookery copies trusted bytes into an immutable
 `~/.rookery/capability-runtime/<revision>/` directory at launch. Generated files contain
-only environment aliases; write-only secret values are passed only in the Claude child
-environment and are never returned to the UI or written into plugin configuration. For a
-stdio MCP with a pack-relative `cwd`, Rookery generates a small Node launcher inside the
-same immutable plugin so the declared working directory is honored without invoking a shell.
+only environment aliases; write-only secret values are passed only in the selected provider
+child environment and are never returned to the UI or written into plugin/TOML
+configuration. Codex masters and workers each receive a separate generated home, config,
+rollout tree, and secret alias overlay. For a stdio MCP with a pack-relative `cwd`, Rookery
+generates a small Node launcher inside the immutable runtime so the declared working
+directory is honored without invoking a shell.
 
 ### The fleet
 
