@@ -55,17 +55,27 @@ worker, or Side agents and UI, Slack, automation, or external origins. More spec
 assignments override broader ones, including disabled assignments used as tombstones.
 
 The **Library** tab handles validation, trust, refresh, removal, and write-only secrets;
-**Assignments** manages scope and audience; **Effective** shows the native inventory plus
-the deterministic desired result for the selected master or worker. Slice 2 records
-desired state only—it does not yet install anything into Claude or Codex, start pack MCP
-servers, or modify provider configuration.
+**Assignments** manages scope and audience; **Effective** shows native inventory plus the
+deterministic desired and applied revisions for the selected master or worker. Trusted
+packs now apply to **Claude** without changing `~/.claude` or repository `.claude` files:
+instructions append to the turn prompt, skills load through generated local plugins, and
+pack MCP servers use generated plugin configuration. Masters pick up changes on their next
+turn; newly started or lazily resumed workers apply once when their provider stream opens.
+An already-live worker reports **Reload required** until explicit hot reload ships. Codex
+managed-pack application is a later slice, so Codex targets continue to show desired state.
 
 Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
 
 1. Open Capability Center → Library and add the example directory.
 2. Review the files and public MCP configuration, then trust the displayed digest.
 3. Save the declared secret if needed; secret values are never returned to the UI.
-4. Create an assignment and inspect the selected target in Effective.
+4. Create an assignment, run the next Claude turn (or start/resume a Claude worker), and
+   inspect the matching desired/applied revision in Effective.
+
+Rookery copies trusted bytes into an immutable
+`~/.rookery/capability-runtime/<revision>/` directory at launch. Generated files contain
+only environment aliases; write-only secret values are passed only in the Claude child
+environment and are never returned to the UI or written into plugin configuration.
 
 ### The fleet
 

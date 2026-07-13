@@ -39,14 +39,16 @@ Turns are **strictly serialized per session**: two concurrent `runTurn` calls ru
 1. Resolve per-turn `model`/`effort`/`permissionMode` (override → resolver/default), `caps = capabilities?.()`.
 2. Emit `master.status running`, persist session status `running`.
 3. Record the user message (`master.message`) — **unless** `asNotice` (worker-notification turns are recorded as `master.notice`, no relabel). Kick off `maybeLabel` concurrently.
-4. Iterate the `query()` stream: `stream_event` → text/thinking deltas; `assistant` → flush thinking, record message + tool starts; `user` → record tool results; `system` → classify (`commands.changed` / `master.notice` / `master.system`); `tool_progress` → progress; `result` → capture `sdk_session_id`, accumulate `cumCostUsd`/`cumTurns`, record `master.result`, emit `notice.turnCap` if `maxTurns` reached (**warning only — master is never aborted**).
-5. `catch`: a user-stop abort is surfaced as `notice.interrupted` and resolves normally; any other error records `error` and rethrows (so the caller sees the failure).
-6. `finally`: flush trailing thinking, release abort handle, emit `master.status idle`, persist `idle`, await label.
+4. Immediately before `startTurn`, resolve the target's secret-free managed projection, publish desired state, fail before provider spawn if blocked, and pass `runtimeKey` + `capabilities`. Claude materializes/loads the revision synchronously; successful stream creation marks it applied.
+5. Iterate the stream: `stream_event` → text/thinking deltas; `assistant` → flush thinking, record message + tool starts; `user` → record tool results; `system` → classify (`commands.changed` / `master.notice` / `master.system`); `tool_progress` → progress; `result` → capture `sdk_session_id`, accumulate `cumCostUsd`/`cumTurns`, record `master.result`, emit `notice.turnCap` if `maxTurns` reached (**warning only — master is never aborted**).
+6. `catch`: a pre-application failure records a sanitized capability-runtime error; a user-stop abort is surfaced as `notice.interrupted` and resolves normally; any other error records `error` and rethrows.
+7. `finally`: flush trailing thinking, release abort handle, emit `master.status idle`, persist `idle`, await label.
 
 `stop()` (`master-agent.ts:144`) aborts the current `AbortController` and calls `query.interrupt()`; the notice is emitted from the catch (after the stream drains) so it lands after the text, not mid-stream.
 
 ### Worker turn (`consume` loop)
 Same message taxonomy, with extra handling:
+- At `consume()` entry, resolve managed capabilities exactly once, publish desired state, and pass the immutable projection to `openSession`. The first provider frame confirms the revision applied. Later registry changes do not mutate or restart this stream; snapshots report `pending-reload`.
 - **Native nested subagent** messages carry `parent_tool_use_id` and are emitted live-only via `emitNested` (no persistence), keyed by `parentToolUseId`; their `stream_event`/`system`/`tool_progress`/`result` are ignored so they never touch the parent's state/`sdkSessionId`. Enabled by `forwardSubagentText:true`.
 - On `result`: capture `sdk_session_id`, accumulate cost/turns, record `result`. `maxTurns` for a worker is **enforced** (compare `r.num_turns` directly, not `cumTurns`): on cap it records a notice, interrupts, closes the queue, aborts, transitions `stopped`, clears `deferred`.
 - After `result`, the **deferred-echo** drain runs (below). If nothing is deferred and the worker is still `running`, it transitions to `idle`.
@@ -75,7 +77,17 @@ The master's tools are assembled per turn (`doTurn`, `master-agent.ts:222-273`) 
 - **Overlay** `caps = capabilities?.()` (`TurnCapabilities`, `master-agent.ts:36`): `mcpServers` (+, caps wins on key collision), `allowedTools` (+), `systemPromptAppend` (+, kept fixed within a session to preserve the cache prefix), `denyTools` (−, filtered out of the allowlist).
 - `disallowedTools: NATIVE_SCHEDULE_TOOLS` always removes the harness's native schedule/watch tools (they no-op in a headless `query()`); the daemon re-exposes equivalent `schedule_*` MCP tools through the overlay instead.
 
-`SessionManager` builds the overlay resolver via `makeCapabilities(externalKey, sessionId)` (`session-manager.ts:35`) — e.g. a Slack-origin session gets `slack-thread` tools, an automation session gets `schedule` tools. Base behavior is unchanged when no overlay is injected. Workers receive **no** MCP servers at all (only `WORKER_FENCE_INSTRUCTION` appended to the `claude_code` preset) — they cannot spawn fleet or touch memory.
+`SessionManager` builds the overlay resolver via `makeCapabilities(externalKey, sessionId)` — e.g. a Slack-origin session gets `slack-thread` tools, an automation session gets `schedule` tools. This path is distinct from managed packs. Workers still receive none of Rookery's in-process memory/repo/fleet/schedule servers, but a trusted managed pack may add its own provider-native MCP through the generated Claude plugin.
+
+## Managed Claude capability runtime
+
+The resolver emits a secret-free projection with a deterministic revision. `CapabilityRuntime`
+copies each selected pack into `~/.rookery/capability-runtime/<revision>/source/`, revalidates
+the copied digest, then atomically publishes generated plugins under
+`claude/rookery-<pack-id>-<instance-hash>/`. Direct Rookery master tool servers remain on
+the existing SDK `mcpServers` path; managed MCP lives in each plugin's `.mcp.json` and uses
+`${ROOKERY_CAP_SECRET_*}` aliases. Values exist only in the Claude child `env` overlay.
+Native Claude filesystem settings stay additive (`settingSources` is not disabled).
 
 ## Sessions
 

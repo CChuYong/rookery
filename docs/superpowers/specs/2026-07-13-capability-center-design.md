@@ -541,7 +541,7 @@ appended system prompt.
 For each runtime revision, Rookery materializes a generated local Claude plugin beneath:
 
 ```text
-~/.rookery/capability-runtime/<revision>/claude/<pack-id>/
+~/.rookery/capability-runtime/<revision>/claude/rookery-<pack-id>-<instance-hash>/
 ```
 
 It contains a minimal `.claude-plugin/plugin.json`, links/copies the pack's `skills/`
@@ -658,11 +658,11 @@ the queue and is intentionally terminal.
 
 - Runtime revision state is in memory because a provider process does not survive daemon
   restart.
-- After restart, detached resumable workers show `pending-start`; the latest desired
-  capabilities compile when the worker is lazily materialized.
-- Orphan cleanup covers per-worker Codex homes using the worker table as the live-id set.
-- Generated `capability-runtime/<revision>` directories are immutable and garbage-collected
-  at boot when no installed pack/current desired revision references them.
+- After restart, a detached resumable worker appears `pending-reload`; the latest desired
+  capabilities compile when the worker is lazily materialized and its first provider
+  frame confirms application.
+- Per-worker Codex-home cleanup and generated runtime revision garbage collection belong
+  to later slices. Slice 3 revision directories are immutable and may accumulate.
 
 ### Fork, Side, Slack, automation, and External MCP
 
@@ -681,7 +681,7 @@ the queue and is intentionally terminal.
 
 ## Effective inventory model
 
-### Slice 1 contract and Slice 2 additions
+### Slice 1 contract and Slice 2/3 additions
 
 Slice 1 deliberately used the smallest contract needed for trustworthy read-only
 inventory:
@@ -717,11 +717,11 @@ export interface CapabilitySnapshot {
 ```
 
 Slice 2 preserves that shape and adds `state: "desired"|"suppressed"`, optional managed
-binding provenance, and optional `desiredRevision`/`desiredBlocked` snapshot fields. It
-does not add `appliedRevision`: no provider runtime is changed yet. The broader model
-below remains the target for the managed-capability milestone. Later slices add runtime
-application, invocation, richer states, and structured source metadata without changing
-Slice 1's rule that unknown is never encoded as empty success.
+binding provenance, and optional `desiredRevision`/`desiredBlocked` snapshot fields.
+Slice 3 adds `pending-next-turn`, `pending-reload`, and optional `appliedRevision` for
+Claude targets. Codex targets remain desired-only. Later slices add Codex application,
+worker hot reload, invocation, and structured source metadata without changing Slice 1's
+rule that unknown is never encoded as empty success.
 
 ```ts
 export type CapabilityKind =
@@ -821,8 +821,8 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 { type: "capabilities.worker.reload", reqId, workerId: string, whenIdle?: boolean }
 ```
 
-Through Slice 2, every request above is shipped except `capabilities.worker.reload`, which
-belongs to the runtime-application slices. Library projections include file paths, modes,
+Through Slice 3, every request above is shipped except `capabilities.worker.reload`, which
+belongs to Slice 5. Library projections include file paths, modes,
 hashes, public MCP configuration, validation/change metadata, and secret configured
 booleans; they never include instruction bodies, skill bodies, or secret values.
 
@@ -839,9 +839,9 @@ update without a full reload.
   state: "current" | "pending-next-turn" | "pending-reload" | "blocked" | "error" }
 ```
 
-`capabilities.changed` is shipped in Slice 2 as an `@all` invalidation event. The runtime
-event is reserved for later slices once desired state can actually be compiled and
-applied.
+`capabilities.changed` is an `@all` invalidation event. Slice 3 ships
+`capabilities.runtime` for Claude master/worker desired, applied, blocked, drift, and
+application-error transitions. It contains target identifiers and revisions only.
 
 Events contain no pack bodies, instruction contents, command lines containing expanded
 secrets, or secret values.
@@ -1055,10 +1055,9 @@ repository, session, and worker bindings resolve by audience and by precedence
 tombstone. Snapshots merge deterministic desired, blocked, unavailable, and suppressed
 managed entries with the existing native inventory.
 
-This slice intentionally creates no `capability-runtime` directory, provider home, plugin,
-MCP process, or provider configuration. "Desired" means selected configuration only;
-Claude/Codex application, applied revisions, worker reload, and runtime events remain
-unshipped in Slices 3–5.
+At the Slice 2 delivery point, no `capability-runtime` directory, provider home, plugin,
+MCP process, or provider configuration was created. "Desired" meant selected
+configuration only; later slices were responsible for application.
 
 The checked-in [`docs/examples/capability-pack`](../../examples/capability-pack/) exercises
 the real validator and demonstrates an instruction, a skill, and an optional HTTP MCP
@@ -1083,6 +1082,21 @@ Verification evidence:
 - Master next-turn application.
 - Worker initial application and applied revision tracking.
 - Claude runtime verification and tests.
+
+Implemented on 2026-07-13. Trusted bytes are copied and digest-revalidated into an
+immutable `capability-runtime/<revision>` tree, then lowered into collision-safe local
+Claude plugins. Instructions append after the existing system fragment; skills retain
+their resources/scripts; generated `.mcp.json` files contain environment aliases only.
+Secret values are resolved at the daemon materializer boundary and passed only in the
+Claude child environment. Native Claude filesystem settings and Rookery's direct master
+MCP servers remain additive.
+
+Masters re-resolve on every serialized turn and mark the revision applied after provider
+stream construction. Workers resolve once on initial or lazy-resumed stream open and mark
+applied on the first provider frame; later changes display `pending-reload` without an
+automatic restart. Effective snapshots and `capabilities.runtime` expose secret-free
+desired/applied drift. Codex application, worker hot reload, repository-shared discovery,
+runtime GC, and command actions are explicitly outside this slice.
 
 Exit: The same pack works in Claude masters and newly started/resumed Claude workers.
 

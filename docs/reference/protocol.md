@@ -81,7 +81,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `automation.run` | ✓ | `id`, `vars?` | fire once now | `fleet.ack` (`run`) |
 
 Notes:
-- **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, repository, origin, home session, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins, provider inventory, and Slice 2 desired entries. `desiredRevision` is deterministic and `desiredBlocked` reports fail-closed required state. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list.
+- **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, repository, origin, home session, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins, provider inventory, and managed entries. `desiredRevision` is deterministic and `desiredBlocked` reports fail-closed required state. Claude snapshots additionally expose `appliedRevision` (`null` before confirmation) and remap launchable managed entries to `applied`, `pending-next-turn`, `pending-reload`, or `error`; blocked/unavailable/suppressed entries retain their more precise resolver state. Codex remains desired-only in Slice 3. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list.
 - **Binding shape:** `binding` is `{packInstanceId, scopeKind, scopeRef, audience:{agents,origins}, enabled}`. `scopeKind` is `rookery|repo-local|repo-shared|session|worker`; Rookery uses an empty `scopeRef`, while every other scope uses the authoritative repo/session/worker id. Audience agents are `master|worker|side` and origins are `ui|slack|automation|external`.
 - **Capability secret boundary:** `value` exists only on `capabilities.secret.set`. Library and mutation replies expose only `{key, configured}`; pack documents contain secret references, never expanded values. The daemon rejects undeclared keys.
 - **`settings.set` `settings` object:** `masterName`, `masterModel`, `workerModel`, `masterEffort`, `workerEffort`, `slackCwd`, `slackAllowedUsers`, `slackAllowAll`, `slackRefuseReply`, `slackRefusalMessage`, `slackLocale`, `usageRefreshMs`, `hasAcceptedDataNotice` (echoed back), and write-only secrets **not echoed**: `linearApiKey`, `anthropicApiKey`, `slackBotToken`, `slackAppToken`. `null`/empty string clears a key (reverts to config default). `effort` fields are membership-validated against `low\|medium\|high\|xhigh\|max`. Changing a Slack token triggers `slack.reconcile()`.
@@ -128,5 +128,7 @@ Notes:
 `WorkerRow` (shared by worker.list/fleet.list): `id`, `label`, `repoPath`, `status`, `branch`, `model`, `permissionMode?`, `ticketKey?`, `ticketUrl?` (no `pr_url` — there is no automatic PR pipeline).
 
 Capability mutations emit `capabilities.changed` on `@all`. Clients use its monotonic
-in-process `generation` as an invalidation signal and refetch; the event does not carry
-pack bodies, instructions, public config, or secret values.
+in-process `generation` as an invalidation signal and refetch. Claude application also
+emits target-routed `capabilities.runtime`; clients increment their local invalidation
+clock and refetch the authoritative snapshot. Neither event carries pack bodies,
+instructions, public config, command lines, or secret values.
