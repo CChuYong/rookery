@@ -28,6 +28,10 @@ export interface CapabilityRuntimeReporter {
   setError(target: CapabilityRuntimeTarget, revision: string, message: string): void;
 }
 
+export interface CapabilityRuntimeInspector {
+  inspect(target: CapabilityRuntimeTarget, desiredRevision: string, blocked: boolean): CapabilityRuntimeView;
+}
+
 interface RuntimeRecord {
   desiredRevision: string;
   appliedRevision: string | null;

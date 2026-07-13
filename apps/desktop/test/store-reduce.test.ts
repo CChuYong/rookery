@@ -12,6 +12,20 @@ describe("capability generation", () => {
     useStore.getState().applyEvent(event);
     expect(useStore.getState().capabilityGeneration).toBe(7);
   });
+
+  it("monotonically invalidates the active Effective view on capabilities.runtime", () => {
+    const state = { ...emptyState(), capabilityGeneration: 7 };
+    const event = {
+      type: "capabilities.runtime" as const,
+      sessionId: "s1",
+      targetKind: "master" as const,
+      targetId: "s1",
+      desiredRevision: "revision-a",
+      appliedRevision: "revision-a",
+      state: "current" as const,
+    };
+    expect(reduceEvent(state, event).capabilityGeneration).toBe(8);
+  });
 });
 
 describe("pendingBySession reconcile", () => {

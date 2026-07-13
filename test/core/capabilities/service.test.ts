@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { CapabilityService } from "../../../src/core/capabilities/service.js";
 import type { CapabilityContribution } from "../../../src/core/capabilities/types.js";
+import { CapabilityRuntimeState } from "../../../src/core/capabilities/runtime-state.js";
+import { EventBus } from "../../../src/core/events.js";
 
 const codexContribution: CapabilityContribution = {
   entries: [{
@@ -210,6 +212,116 @@ describe("CapabilityService", () => {
       kind: "worker", id: "w1", repoId: "repo-root", homeSessionId: "home", origin: "automation",
       cwd: "/repo/packages/nested/.worktrees/w1",
     }));
+  });
+
+  it("projects Claude master desired/applied runtime state and exposes the secret-free agent projection", async () => {
+    const runtimeState = new CapabilityRuntimeState(new EventBus());
+    const target = { targetKind: "master" as const, targetId: "s1", sessionId: "s1" };
+    const runtime = { revision: "revision-a", blocked: false, instructions: [], skills: [], mcpServers: [] };
+    const desired = {
+      revision: runtime.revision,
+      blocked: false,
+      runtime,
+      entries: [{
+        id: "managed:pack:instruction:rules",
+        kind: "instruction" as const,
+        name: "rules",
+        provider: "rookery" as const,
+        source: "Team Pack",
+        scope: "session" as const,
+        state: "desired" as const,
+        evidence: "declared" as const,
+        managed: { packInstanceId: "pack", packId: "team", bindingId: "binding", scopeKind: "session" as const, enabled: true },
+      }],
+      diagnostics: [],
+    };
+    const capabilities = service({
+      getSession: () => ({ id: "s1", cwd: "/repo", label: "Main", provider: "claude" }),
+      resolver: { resolve: vi.fn(() => desired) } as never,
+      runtimeState,
+    });
+
+    expect(capabilities.resolveManaged({ kind: "session", id: "s1" })).toBe(runtime);
+    const pending = await capabilities.snapshot({ kind: "session", id: "s1" });
+    expect(pending.appliedRevision).toBeNull();
+    expect(pending.entries.find((entry) => entry.id.startsWith("managed:"))?.state).toBe("pending-next-turn");
+
+    runtimeState.setDesired(target, runtime.revision, false);
+    runtimeState.setApplied(target, runtime.revision);
+    const applied = await capabilities.snapshot({ kind: "session", id: "s1" });
+    expect(applied.appliedRevision).toBe(runtime.revision);
+    expect(applied.entries.find((entry) => entry.id.startsWith("managed:"))?.state).toBe("applied");
+  });
+
+  it("projects worker drift as pending reload and keeps blocked/unavailable/suppressed states intact", async () => {
+    const runtimeState = new CapabilityRuntimeState(new EventBus());
+    const target = { targetKind: "worker" as const, targetId: "w1", sessionId: "home" };
+    runtimeState.setDesired(target, "revision-old", false);
+    runtimeState.setApplied(target, "revision-old");
+    const managed = { packInstanceId: "pack", packId: "team", bindingId: "binding", scopeKind: "worker" as const, enabled: true };
+    const capabilities = service({
+      getSession: () => ({ id: "home", cwd: "/repo", label: null, provider: "claude" }),
+      getWorker: () => ({ id: "w1", worktreePath: "/repo/.wt/w1", repoPath: "/repo", label: "Worker", provider: "claude", homeSessionId: "home" }),
+      resolver: { resolve: vi.fn(() => ({
+        revision: "revision-new",
+        blocked: false,
+        runtime: { revision: "revision-new", blocked: false, instructions: [], skills: [], mcpServers: [] },
+        entries: [
+          { id: "desired", kind: "skill", name: "desired", provider: "rookery", source: "Pack", scope: "worker", state: "desired", evidence: "declared", managed },
+          { id: "unavailable", kind: "mcp", name: "optional", provider: "rookery", source: "Pack", scope: "worker", state: "unavailable", evidence: "declared", managed },
+          { id: "suppressed", kind: "mcp", name: "off", provider: "rookery", source: "Pack", scope: "worker", state: "suppressed", evidence: "declared", managed },
+        ],
+        diagnostics: [],
+      })) } as never,
+      runtimeState,
+    });
+
+    const snapshot = await capabilities.snapshot({ kind: "worker", id: "w1" });
+    expect(snapshot.appliedRevision).toBe("revision-old");
+    expect(Object.fromEntries(snapshot.entries.filter((entry) => ["desired", "unavailable", "suppressed"].includes(entry.id)).map((entry) => [entry.id, entry.state]))).toEqual({
+      desired: "pending-reload",
+      suppressed: "suppressed",
+      unavailable: "unavailable",
+    });
+  });
+
+  it("surfaces a sanitized Claude runtime error without changing Codex desired inventory", async () => {
+    const runtimeState = new CapabilityRuntimeState(new EventBus());
+    runtimeState.setError(
+      { targetKind: "master", targetId: "s1", sessionId: "s1" },
+      "revision-a",
+      "Capability runtime application failed.",
+    );
+    const entry = {
+      id: "managed", kind: "instruction" as const, name: "rules", provider: "rookery" as const,
+      source: "Pack", scope: "session" as const, state: "desired" as const, evidence: "declared" as const,
+      managed: { packInstanceId: "pack", packId: "team", bindingId: "binding", scopeKind: "session" as const, enabled: true },
+    };
+    const desired = {
+      revision: "revision-a", blocked: false,
+      runtime: { revision: "revision-a", blocked: false, instructions: [], skills: [], mcpServers: [] },
+      entries: [entry], diagnostics: [],
+    };
+    const claude = service({
+      getSession: () => ({ id: "s1", cwd: "/repo", label: "Main", provider: "claude" }),
+      resolver: { resolve: () => desired } as never,
+      runtimeState,
+    });
+    const failed = await claude.snapshot({ kind: "session", id: "s1" });
+    expect(failed.entries.find((candidate) => candidate.id === "managed")?.state).toBe("error");
+    expect(failed.diagnostics).toContainEqual(expect.objectContaining({
+      id: "capabilities.runtime.master.s1",
+      message: "Capability runtime application failed.",
+    }));
+
+    const codex = service({
+      getSession: () => ({ id: "s1", cwd: "/repo", label: "Main", provider: "codex" }),
+      resolver: { resolve: () => desired } as never,
+      runtimeState,
+    });
+    const codexSnapshot = await codex.snapshot({ kind: "session", id: "s1" });
+    expect(codexSnapshot.appliedRevision).toBeUndefined();
+    expect(codexSnapshot.entries.find((candidate) => candidate.id === "managed")?.state).toBe("desired");
   });
 
   it("delegates sanitized registry mutations through the service facade", () => {

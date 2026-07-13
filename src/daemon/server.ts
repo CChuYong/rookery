@@ -35,6 +35,8 @@ import { makeCodexCapabilitiesProvider } from "../core/codex-capabilities-provid
 import { CapabilityService } from "../core/capabilities/service.js";
 import { CapabilityRegistry } from "../core/capabilities/registry.js";
 import { CapabilityResolver } from "../core/capabilities/resolver.js";
+import { CapabilityRuntimeState } from "../core/capabilities/runtime-state.js";
+import { CapabilityRuntime } from "./capability-runtime.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -85,9 +87,6 @@ export interface StartDaemonOptions {
 export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandle> {
   const { config } = opts;
   const queryFn: QueryFn = opts.queryFn ?? sdkQuery;
-  // Provider-neutral backend over the injected queryFn (P0 seam). CommandCatalog/makeLabeler stay on the raw
-  // queryFn deliberately — Claude-specific aux paths, gated per provider in P1.
-  const backend = new ClaudeBackend(queryFn);
   // Non-loopback binds send the token in plaintext over ws:// → fail-closed reject unless explicitly opted in (G-ORIGIN-AUTH).
   // Check before touching lock/DB so we fail fast without side effects.
   const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(config.host);
@@ -122,6 +121,24 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const git = new RealGitOps();
   const settings = new Settings(repos, config);
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
+  // Capability runtime composition precedes every agent factory. Registry/resolver projections remain
+  // secret-free; the materializer is the sole reader of values and returns them only as a child env overlay.
+  const capabilityRegistry = new CapabilityRegistry(repos, {
+    onChanged: ({ generation, affected }) => {
+      bus.emit({ type: "capabilities.changed", sessionId: ALL_CHANNEL, generation, affected });
+    },
+  });
+  const capabilityResolver = new CapabilityResolver(capabilityRegistry);
+  const capabilityRuntimeState = new CapabilityRuntimeState(bus);
+  const capabilityRuntime = new CapabilityRuntime(config.home, {
+    getSecretValue: (packInstanceId, key) => capabilityRegistry.getSecretValueForRuntime(packInstanceId, key),
+  });
+  // Provider-neutral backend over the injected queryFn (P0 seam). CommandCatalog/makeLabeler stay on the raw
+  // queryFn deliberately — Claude-specific aux paths, gated per provider in P1.
+  const backend = new ClaudeBackend(queryFn, (capabilities) => capabilityRuntime.materializeClaude(capabilities));
+  // Agent factories close over this target resolver. They are invoked only after composition finishes
+  // (rehydrate creates detached metadata; lazy materialize happens on a later user action).
+  let capabilityService!: CapabilityService;
   // Daemon-hosted MCP bridge (P2 — docs/2026-07-06-p2-codex-master.md): mounted on THIS http server (see
   // below, before existing routing) so a codex master turn's per-turn ephemeral child can reach rookery's
   // in-process tool servers (memory/repos/fleet/schedule) the way the Claude Agent SDK reaches them in-process.
@@ -203,6 +220,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns,
         // explicit spawn override wins; else the settings default; else unlimited (null/0/negative/malformed → null via the getter).
         costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
+        ...((o.provider ?? "claude") === "claude" ? {
+          managedCapabilities: () => capabilityService.resolveManaged({ kind: "worker", id: o.id }),
+          capabilityRuntime: capabilityRuntimeState,
+        } : {}),
       },
       sdkSessionId: o.sdkSessionId ?? null,
       handoffSeed: o.handoffSeed, // cross-provider fork: seed the first turn's backend text
@@ -256,6 +277,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // relocation, see above); claude keeps the SDK's own (eager) forkSession.
     forkSession: (provider, id, opts) => (provider === "codex" ? forkCodexMaster(id, opts) : sdkForkSession(id, opts)),
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
+    makeManagedCapabilities: (sessionId) => () => capabilityService.resolveManaged({ kind: "session", id: sessionId }),
+    capabilityRuntime: capabilityRuntimeState,
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.
     // Schedule travels the toolDefs channel (not mcpServers): codex ignores opts.mcpServers (it has no
@@ -368,13 +391,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // same binary/auth environment as turns; master targets override CODEX_HOME with their materialized
   // per-session home when one exists so the snapshot observes the same config/MCP/skills as the turn.
   const codexCapabilitiesProvider = makeCodexCapabilitiesProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
-  const capabilityRegistry = new CapabilityRegistry(repos, {
-    onChanged: ({ generation, affected }) => {
-      bus.emit({ type: "capabilities.changed", sessionId: ALL_CHANNEL, generation, affected });
-    },
-  });
-  const capabilityResolver = new CapabilityResolver(capabilityRegistry);
-  const capabilityService = new CapabilityService({
+  capabilityService = new CapabilityService({
     getSession: (id) => {
       const row = repos.getSession(id);
       return row ? {
@@ -413,6 +430,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     },
     registry: capabilityRegistry,
     resolver: capabilityResolver,
+    runtimeState: capabilityRuntimeState,
   });
 
   // External MCP server (rookery-as-MCP): a SECOND McpBridge mounted at /mcp-ext, gating fleet control for

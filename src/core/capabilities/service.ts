@@ -3,6 +3,12 @@ import { canonicalPath, longestContainingRepo } from "../repo-path.js";
 import { claudeCommandCapabilities, rookeryCapabilities } from "./builtins.js";
 import type { CapabilityRegistry } from "./registry.js";
 import type { CapabilityResolver, ResolvedCapabilityTarget } from "./resolver.js";
+import type { ResolvedAgentCapabilities } from "./types.js";
+import type {
+  CapabilityRuntimeInspector,
+  CapabilityRuntimeTarget,
+  CapabilityRuntimeView,
+} from "./runtime-state.js";
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
@@ -55,6 +61,7 @@ export interface CapabilityServiceDeps {
   codexEnvForTarget?(target: CapabilityTarget): NodeJS.ProcessEnv | undefined;
   registry?: CapabilityRegistry;
   resolver?: CapabilityResolver;
+  runtimeState?: CapabilityRuntimeInspector;
   now?: () => Date;
 }
 
@@ -128,13 +135,34 @@ export class CapabilityService {
     }
 
     const desired = this.deps.resolver?.resolve(resolved.desired);
+    const runtimeTarget = this.runtimeTarget(resolved.desired);
+    const runtime = resolved.provider === "claude" && desired && this.deps.runtimeState
+      ? this.deps.runtimeState.inspect(runtimeTarget, desired.revision, desired.blocked)
+      : undefined;
+    const desiredEntries = this.projectRuntimeEntries(desired?.entries ?? [], runtime);
+    const runtimeDiagnostics: CapabilityDiagnostic[] = runtime?.state === "error" && runtime.error
+      ? [{
+          id: `capabilities.runtime.${runtimeTarget.targetKind}.${runtimeTarget.targetId}`,
+          source: "Rookery capability runtime",
+          severity: "error",
+          message: runtime.error,
+        }]
+      : [];
     return {
       target: { ...target, label: resolved.label, provider: resolved.provider, cwd: resolved.cwd },
       generatedAt: this.now().toISOString(),
       ...(desired ? { desiredRevision: desired.revision, desiredBlocked: desired.blocked } : {}),
-      entries: deduplicateEntries([...(desired?.entries ?? []), ...rookery.entries, ...providerContribution.entries]),
-      diagnostics: sortCapabilityDiagnostics([...(desired?.diagnostics ?? []), ...rookery.diagnostics, ...providerContribution.diagnostics]),
+      ...(runtime ? { appliedRevision: runtime.appliedRevision } : {}),
+      entries: deduplicateEntries([...desiredEntries, ...rookery.entries, ...providerContribution.entries]),
+      diagnostics: sortCapabilityDiagnostics([...(desired?.diagnostics ?? []), ...runtimeDiagnostics, ...rookery.diagnostics, ...providerContribution.diagnostics]),
     };
+  }
+
+  // Internal composition-root port. The returned value contains only trusted public specs and secret
+  // references; actual values remain behind CapabilityRuntime's daemon-only lookup.
+  resolveManaged(target: CapabilityTarget): ResolvedAgentCapabilities {
+    if (!this.deps.resolver) throw new Error("capability resolver unavailable");
+    return this.deps.resolver.resolve(this.resolveTarget(target).desired).runtime;
   }
 
   library(): CapabilityLibrarySnapshot {
@@ -180,6 +208,31 @@ export class CapabilityService {
   refresh(instanceId?: string): CapabilityLibrarySnapshot {
     if (!this.deps.registry) throw new Error("capability registry unavailable");
     return this.deps.registry.refresh(instanceId);
+  }
+
+  private runtimeTarget(target: ResolvedCapabilityTarget): CapabilityRuntimeTarget {
+    if (target.kind === "master") {
+      return { targetKind: "master", targetId: target.id, sessionId: target.homeSessionId ?? target.id };
+    }
+    return { targetKind: "worker", targetId: target.id, sessionId: target.homeSessionId ?? target.id };
+  }
+
+  private projectRuntimeEntries(
+    entries: CapabilityEntry[],
+    runtime: CapabilityRuntimeView | undefined,
+  ): CapabilityEntry[] {
+    if (!runtime) return entries;
+    return entries.map((entry) => {
+      // Resolver-specific blocking/unavailability/suppression is more precise than revision drift and
+      // must survive projection. Runtime state only replaces entries that were launchable (`desired`).
+      if (!entry.managed || entry.state !== "desired") return entry;
+      if (runtime.state === "current") return { ...entry, state: "applied", evidence: "runtime" };
+      if (runtime.state === "pending-next-turn" || runtime.state === "pending-reload") {
+        return { ...entry, state: runtime.state };
+      }
+      if (runtime.state === "blocked" || runtime.state === "error") return { ...entry, state: runtime.state };
+      return entry;
+    });
   }
 
   private resolveTarget(target: CapabilityTarget): {

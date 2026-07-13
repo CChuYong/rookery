@@ -57,6 +57,8 @@ const CATEGORIES: Array<{ id: Category; kinds?: CapabilityKind[]; labelKey: stri
 const STATE_KEYS: Record<CapabilityState, string> = {
   applied: "capabilities.stateApplied",
   desired: "capabilities.stateDesired",
+  "pending-next-turn": "capabilities.statePendingNextTurn",
+  "pending-reload": "capabilities.statePendingReload",
   unavailable: "capabilities.stateUnavailable",
   blocked: "capabilities.stateBlocked",
   suppressed: "capabilities.stateSuppressed",
@@ -109,6 +111,7 @@ function KindIcon({ kind }: { kind: CapabilityKind }): JSX.Element {
 
 function stateTone(state: CapabilityState): string {
   if (state === "applied" || state === "desired") return "border-pr/30 bg-pr/10 text-pr";
+  if (state === "pending-next-turn" || state === "pending-reload") return "border-run/30 bg-run/10 text-run";
   if (state === "blocked" || state === "error") return "border-fail/30 bg-fail/10 text-fail";
   return "border-line bg-raised text-muted";
 }
@@ -179,7 +182,16 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
   }, [category, snapshot]);
 
   const counts = useMemo(() => {
-    const initial: Record<CapabilityState, number> = { applied: 0, desired: 0, unavailable: 0, blocked: 0, suppressed: 0, error: 0 };
+    const initial: Record<CapabilityState, number> = {
+      applied: 0,
+      desired: 0,
+      "pending-next-turn": 0,
+      "pending-reload": 0,
+      unavailable: 0,
+      blocked: 0,
+      suppressed: 0,
+      error: 0,
+    };
     for (const entry of snapshot?.entries ?? []) initial[entry.state]++;
     return initial;
   }, [snapshot]);
@@ -235,7 +247,16 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
                       <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-fg-dim">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
                     </div>
                     <p className="mt-1 truncate font-mono text-[11px] text-muted" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>
-                    {snapshot.desiredRevision && <p className="mt-1 font-mono text-[10px] text-muted">{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</p>}
+                    {snapshot.desiredRevision && (
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-muted">
+                        <span>{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</span>
+                        {snapshot.target.provider === "claude" && (
+                          <span>{snapshot.appliedRevision
+                            ? t("capabilities.appliedRevision", { revision: snapshot.appliedRevision.slice(0, 12) })
+                            : t("capabilities.appliedRevisionNone")}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <p className="font-mono text-[10px] text-muted">{t("capabilities.generatedAt", { time: new Date(snapshot.generatedAt).toLocaleString() })}</p>
                 </div>

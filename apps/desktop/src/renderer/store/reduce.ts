@@ -184,6 +184,10 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
   switch (e.type) {
     case "capabilities.changed":
       return { ...state, capabilityGeneration: e.generation };
+    case "capabilities.runtime":
+      // Runtime events have no registry generation. Increment the same invalidation clock so an open
+      // Effective tab refetches desired/applied state while preserving stale-response protection.
+      return { ...state, capabilityGeneration: state.capabilityGeneration + 1 };
     case "side.event": {
       const prev = state.sideConversations[e.sideId] ?? { sourceKind: e.sourceKind, sourceId: e.sourceId, status: "running" as const, items: [] };
       const next = { ...prev, sourceKind: e.sourceKind, sourceId: e.sourceId, items: applySubEvent(prev.items, e.data, now) };
