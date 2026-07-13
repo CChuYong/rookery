@@ -93,6 +93,10 @@ export class FleetOrchestrator {
   // it just created and never registering an entry/agent — so nothing leaks and no ghost survives (audit #12).
   private readonly flowById = new Map<string, Promise<void>>();
   private readonly cancelledSpawns = new Set<string>();
+  // Permanent deletes are slow (agent stop + git cleanup). Hide them from every authoritative snapshot immediately,
+  // and share duplicate requests so multiple clients cannot run destructive cleanup twice for the same worker.
+  private readonly deleting = new Set<string>();
+  private readonly deletionFlows = new Map<string, Promise<void>>();
   private readonly idgen: () => string;
   private readonly exists: (p: string) => boolean;
   private closing = false; // close() in progress — even a just-started launch flow stops and finishes its DB writes (G-SHUTDOWN-RACE)
@@ -652,15 +656,39 @@ export class FleetOrchestrator {
     this.deps.repos.setWorkerArchived(id, archived);
   }
 
-  // permanent delete: discard (remove worktree+branch) then also remove the DB row → disappears from the tree. Removes the row even if worktree removal fails.
+  // Permanent delete: mark first so concurrent fleet.list calls cannot expose the row while slow cleanup runs.
+  // The DB delete is the commit point; worktree/checkpoint cleanup remains best-effort as before.
   async delete(id: string): Promise<void> {
+    const current = this.deletionFlows.get(id);
+    if (current) return current;
+    const row = this.deps.repos.getWorker(id);
+    const entry = this.entries.get(id);
+    if (!row && !entry && !this.flowById.has(id)) return;
+    const sessionId = row?.session_id ?? entry?.homeSessionId ?? "";
+    const flow = this.performDelete(id, sessionId);
+    this.deletionFlows.set(id, flow);
+    return flow;
+  }
+
+  private async performDelete(id: string, sessionId: string): Promise<void> {
+    this.deleting.add(id);
+    this.deps.bus.emit({ type: "worker.deletion", sessionId, workerId: id, phase: "started" });
     try {
-      await this.discard(id);
-    } catch {
-      /* worktree removal failed — best-effort, the row is removed below */
+      try {
+        await this.discard(id);
+      } catch {
+        /* worktree removal failed — best-effort, the row is removed below */
+      }
+      this.deps.repos.deleteWorker(id);
+      this.entries.delete(id);
+      this.deps.bus.emit({ type: "worker.deletion", sessionId, workerId: id, phase: "completed" });
+    } catch (error) {
+      this.deps.bus.emit({ type: "worker.deletion", sessionId, workerId: id, phase: "failed", message: String(error) });
+      throw error;
+    } finally {
+      this.deleting.delete(id);
+      this.deletionFlows.delete(id);
     }
-    this.deps.repos.deleteWorker(id);
-    this.entries.delete(id);
   }
 
   // daemon shutdown drain (G-SHUTDOWN-RACE): stop() live workers, and only after all in-flight flows
@@ -706,6 +734,7 @@ export class FleetOrchestrator {
         costBudgetUsd: r.cost_budget_usd, // explicit per-worker $ ceiling override; null = none set (the workerCostBudgetUsd settings default may still apply — see server.ts subFactory)
         ...(metrics.get(r.id) ?? {}), // lastActivityTs / costUsd from worker_events (absent when the worker has neither)
       }))
+      .filter((x) => !this.deleting.has(x.id))
       .filter((x) => (filter?.status ? x.status === filter.status : true))
       .filter((x) => (filter?.repoPath ? x.repoPath === filter.repoPath : true));
   }

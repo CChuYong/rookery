@@ -51,6 +51,9 @@ export type CoreEvent =
   // bg: present only while harness-tracked background tasks run (status "background") — count + distinct
   // task types (e.g. local_bash) so clients can label WHY the worker is still busy after its turn ended.
   | { type: "worker.status"; sessionId: string; workerId: string; status: string; bg?: { count: number; types: string[] } }
+  // Permanent deletion lifecycle. While started, fleet.list excludes the worker even though slow worktree cleanup may
+  // still be running and the DB row remains. Completed/failed is the commit/rollback boundary for every client.
+  | { type: "worker.deletion"; sessionId: string; workerId: string; phase: "started" | "completed" | "failed"; message?: string }
   // When label auto-generation (Haiku) updates the placeholder to a better label — for live UI updates.
   | { type: "worker.label"; sessionId: string; workerId: string; label: string }
   | { type: "master.tool"; sessionId: string; toolId: string; name: string; phase: "start" | "end" | "progress"; ok?: boolean; input?: string; result?: string; elapsedSec?: number }
