@@ -24,6 +24,8 @@ function writePack(root: string): ReturnType<typeof validateCapabilityPack> {
   fs.mkdirSync(path.join(root, "skills", "runtime-check", "scripts"), { recursive: true });
   fs.writeFileSync(path.join(root, "skills", "runtime-check", "SKILL.md"), "---\nname: runtime-check\ndescription: Check the managed runtime\n---\nUse the bundled script.\n");
   fs.writeFileSync(path.join(root, "skills", "runtime-check", "scripts", "check.sh"), "#!/bin/sh\necho runtime-ok\n", { mode: 0o755 });
+  fs.mkdirSync(path.join(root, "server"), { recursive: true });
+  fs.writeFileSync(path.join(root, "server", "fixture.mjs"), "process.stdin.pipe(process.stdout);\n");
   fs.writeFileSync(path.join(root, "capability.json"), JSON.stringify({
     schemaVersion: 1,
     id: "smoke-pack",
@@ -32,12 +34,22 @@ function writePack(root: string): ReturnType<typeof validateCapabilityPack> {
     description: "Safe runtime fixture",
     instructions: [{ id: "rules", path: "instructions/rules.md" }],
     skills: [{ id: "runtime-check", path: "skills/runtime-check" }],
-    mcpServers: [{
-      id: "fixture",
-      transport: "streamable-http",
-      url: "http://127.0.0.1:1/mcp",
-      auth: { bearerToken: { source: "rookery-secret", key: "fixture-token" } },
-    }],
+    mcpServers: [
+      {
+        id: "fixture",
+        transport: "streamable-http",
+        url: "http://127.0.0.1:1/mcp",
+        auth: { bearerToken: { source: "rookery-secret", key: "fixture-token" } },
+      },
+      {
+        id: "local",
+        transport: "stdio",
+        command: "node",
+        args: ["fixture.mjs"],
+        cwd: "server",
+        secretEnv: { TOKEN: { source: "rookery-secret", key: "fixture-token" } },
+      },
+    ],
   }, null, 2));
   return validateCapabilityPack(root);
 }
@@ -54,11 +66,11 @@ function resolved(pack: ReturnType<typeof validateCapabilityPack>): ResolvedAgen
     blocked: false,
     instructions: [{ ...common, id: "rules", path: "instructions/rules.md" }],
     skills: [{ ...common, id: "runtime-check", path: "skills/runtime-check" }],
-    mcpServers: [{
+    mcpServers: pack.manifest.mcpServers!.map((spec) => ({
       ...common,
-      generatedName: "rookery__smoke_pack__fixture",
-      spec: pack.manifest.mcpServers![0]!,
-    }],
+      generatedName: `rookery__smoke_pack__${spec.id}`,
+      spec,
+    })),
   };
 }
 
@@ -85,6 +97,22 @@ describe("CapabilityRuntime", () => {
     expect(fs.statSync(path.join(pluginRoot, ".claude-plugin", "plugin.json")).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.join(pluginRoot, ".mcp.json")).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.join(pluginRoot, "skills", "runtime-check", "scripts", "check.sh")).mode & 0o111).not.toBe(0);
+
+    const mcpConfig = JSON.parse(fs.readFileSync(path.join(pluginRoot, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, { command: string; args: string[]; cwd?: string; env?: Record<string, string> }>;
+    };
+    const local = mcpConfig.mcpServers.rookery__smoke_pack__local!;
+    expect(local.command).toBe(process.execPath);
+    expect(local.cwd).toBeUndefined();
+    expect(local.args).toHaveLength(2);
+    expect(local.args.every((arg) => arg.startsWith(pluginRoot))).toBe(true);
+    expect(local.env?.TOKEN).toMatch(/^\$\{ROOKERY_CAP_SECRET_/);
+    expect(fs.readFileSync(local.args[0]!, "utf8")).toContain("spawn(config.command");
+    expect(JSON.parse(fs.readFileSync(local.args[1]!, "utf8"))).toEqual({
+      command: "node",
+      args: ["fixture.mjs"],
+      cwd: expect.stringMatching(/capability-runtime.*source.*server$/),
+    });
 
     const generated = fs.readdirSync(revisionRoot, { recursive: true })
       .filter((entry): entry is string => typeof entry === "string")

@@ -32,6 +32,73 @@ function writeJson(filePath: string, value: unknown): void {
   fs.chmodSync(filePath, 0o600);
 }
 
+function writeText(filePath: string, value: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(filePath, value, { mode: 0o600 });
+  fs.chmodSync(filePath, 0o600);
+}
+
+// Claude's plugin MCP loader currently discovers a stdio server's `cwd` field but does not apply
+// it when spawning the command. A tiny generated Node launcher makes the pack contract explicit and
+// cross-platform: all public process metadata stays in immutable files, while secret aliases remain
+// on the MCP entry and are expanded into the inherited child environment by Claude.
+const STDIO_LAUNCHER = `import fs from "node:fs";
+import { spawn } from "node:child_process";
+
+const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const child = spawn(config.command, config.args, {
+  cwd: config.cwd,
+  env: process.env,
+  stdio: "inherit",
+  windowsHide: true,
+});
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => { try { child.kill(signal); } catch { /* already gone */ } });
+}
+child.once("error", (error) => {
+  process.stderr.write(\`Rookery MCP launcher failed: \${error instanceof Error ? error.message : String(error)}\\n\`);
+  process.exitCode = 1;
+});
+child.once("exit", (code) => { process.exitCode = code ?? 1; });
+`;
+
+function materializeMcpConfig(
+  config: ClaudeCapabilityPlan["plugins"][number]["mcpConfig"],
+  stagingPluginRoot: string,
+  finalPluginRoot: string,
+): ClaudeCapabilityPlan["plugins"][number]["mcpConfig"] {
+  let wroteLauncher = false;
+  const mcpServers = Object.fromEntries(Object.entries(config.mcpServers).map(([name, raw]) => {
+    const server = raw as Record<string, unknown>;
+    if (server.type !== "stdio" || typeof server.cwd !== "string") return [name, server];
+
+    const runtimeDir = path.join(".rookery", "mcp-runtime");
+    const configName = `${Buffer.from(name).toString("hex")}.json`;
+    const stagingConfig = path.join(stagingPluginRoot, runtimeDir, configName);
+    const finalConfig = path.join(finalPluginRoot, runtimeDir, configName);
+    const stagingLauncher = path.join(stagingPluginRoot, runtimeDir, "stdio-launcher.mjs");
+    const finalLauncher = path.join(finalPluginRoot, runtimeDir, "stdio-launcher.mjs");
+    if (!wroteLauncher) {
+      writeText(stagingLauncher, STDIO_LAUNCHER);
+      wroteLauncher = true;
+    }
+
+    const { command, args, cwd, ...rest } = server;
+    writeJson(stagingConfig, {
+      command,
+      args: Array.isArray(args) ? args : [],
+      cwd,
+    });
+    return [name, {
+      ...rest,
+      type: "stdio",
+      command: process.execPath,
+      args: [finalLauncher, finalConfig],
+    }];
+  }));
+  return { mcpServers };
+}
+
 function hardenTree(root: string): void {
   const visit = (entry: string): void => {
     const stat = fs.statSync(entry);
@@ -147,7 +214,11 @@ export class CapabilityRuntime {
           fs.cpSync(path.join(sourceRoot, skill.path), destination, { recursive: true, dereference: true, preserveTimestamps: false });
         }
         if (Object.keys(plugin.mcpConfig.mcpServers).length > 0) {
-          writeJson(path.join(pluginRoot, ".mcp.json"), plugin.mcpConfig);
+          const finalPluginRoot = path.join(finalRoot, "claude", plugin.pluginDirName);
+          writeJson(
+            path.join(pluginRoot, ".mcp.json"),
+            materializeMcpConfig(plugin.mcpConfig, pluginRoot, finalPluginRoot),
+          );
         }
       }
       writeJson(path.join(stagingRoot, ".complete.json"), {

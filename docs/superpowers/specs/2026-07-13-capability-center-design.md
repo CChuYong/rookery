@@ -546,6 +546,10 @@ For each runtime revision, Rookery materializes a generated local Claude plugin 
 
 It contains a minimal `.claude-plugin/plugin.json`, links/copies the pack's `skills/`
 entries, and writes a generated `.mcp.json` containing environment-variable references.
+For stdio entries with a pack-relative `cwd`, it also writes a tiny Node launcher and public
+launch descriptor under the immutable plugin. This compensates for Claude's plugin loader
+discovering but not applying that field, without a shell and without putting secret values in
+files or argv.
 The plugin path is passed through the SDK's `plugins` option. The SDK's direct
 `mcpServers` option remains reserved for Rookery's existing in-process master tools, so
 managed credentials never become inline `--mcp-config` argv JSON. Instruction contents
@@ -1087,6 +1091,8 @@ Implemented on 2026-07-13. Trusted bytes are copied and digest-revalidated into 
 immutable `capability-runtime/<revision>` tree, then lowered into collision-safe local
 Claude plugins. Instructions append after the existing system fragment; skills retain
 their resources/scripts; generated `.mcp.json` files contain environment aliases only.
+Pack-relative stdio working directories are enforced by an immutable generated Node launcher
+that spawns without a shell; its descriptor contains public command metadata only.
 Secret values are resolved at the daemon materializer boundary and passed only in the
 Claude child environment. Native Claude filesystem settings and Rookery's direct master
 MCP servers remain additive.

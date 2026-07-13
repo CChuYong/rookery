@@ -87,6 +87,10 @@ the copied digest, then atomically publishes generated plugins under
 `claude/rookery-<pack-id>-<instance-hash>/`. Direct Rookery master tool servers remain on
 the existing SDK `mcpServers` path; managed MCP lives in each plugin's `.mcp.json` and uses
 `${ROOKERY_CAP_SECRET_*}` aliases. Values exist only in the Claude child `env` overlay.
+Because Claude's plugin loader does not apply the portable pack `cwd` field when spawning a
+stdio server, the materializer replaces that field with an immutable generated Node launcher
+and a public launch descriptor. The launcher uses `spawn()` directly (no shell), inherits the
+already-resolved environment, and keeps every secret value out of generated files and argv.
 Native Claude filesystem settings stay additive (`settingSources` is not disabled).
 
 ## Sessions

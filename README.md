@@ -75,7 +75,9 @@ Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
 Rookery copies trusted bytes into an immutable
 `~/.rookery/capability-runtime/<revision>/` directory at launch. Generated files contain
 only environment aliases; write-only secret values are passed only in the Claude child
-environment and are never returned to the UI or written into plugin configuration.
+environment and are never returned to the UI or written into plugin configuration. For a
+stdio MCP with a pack-relative `cwd`, Rookery generates a small Node launcher inside the
+same immutable plugin so the declared working directory is honored without invoking a shell.
 
 ### The fleet
 
