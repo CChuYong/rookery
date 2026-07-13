@@ -6,6 +6,8 @@ import { MasterAgent } from "./master-agent.js";
 import type { TurnCapabilities } from "./master-agent.js";
 import type { FleetOrchestrator } from "./fleet-orchestrator.js";
 import { parseNotification, type WorkerNotification } from "./worker-notifier.js";
+import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
+import type { CapabilityRuntimeReporter } from "./capabilities/runtime-state.js";
 
 // Home session (container) for workers spawned directly by the UI. Not exposed in the Sessions list.
 export const UI_FLEET_SESSION_KEY = "ui:fleet";
@@ -48,6 +50,10 @@ export interface SessionManagerDeps {
   makeCanUseTool?: (externalKey: string | null, sessionId: string) => ProviderPermissionCallback | undefined;
   // Builds a per-source dynamic capability resolver from the session's externalKey (slack: etc.) (assembled by the daemon). base only if not injected/undefined.
   makeCapabilities?: (externalKey: string | null, sessionId: string) => (() => TurnCapabilities) | undefined;
+  // Slice 3 provider runtime: only Claude masters receive this resolver. It is invoked by MasterAgent
+  // per turn, not while the Session object is cached.
+  makeManagedCapabilities?: (sessionId: string) => (() => ResolvedAgentCapabilities) | undefined;
+  capabilityRuntime?: CapabilityRuntimeReporter;
   // Forks a session's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
   forkSession?: ForkFn;
   // P3-remaining Track B #3 (docs/2026-07-06-p3r-codex-hardening-finish.md): best-effort per-session
@@ -80,7 +86,7 @@ export class SessionManager {
   }
 
   private build(id: string, cwd: string, sdkSessionId: string | null, externalKey: string | null): Session {
-    const { repos, bus, backends, masterModel, masterModelByProvider, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
+    const { repos, bus, backends, masterModel, masterModelByProvider, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities, makeManagedCapabilities, capabilityRuntime } = this.deps;
     // Single row read (was two separate getSession(id) calls) — same DB row backs both provider routing and origin below.
     const row = repos.getSession(id);
     // Provider routing (P2, mirrors FleetOrchestrator's worker provider routing): pick the backend + the
@@ -98,11 +104,12 @@ export class SessionManager {
     const origin = row?.origin || deriveOrigin(externalKey).origin;
     const canUseTool = origin === "automation" ? undefined : makeCanUseTool?.(externalKey, id); // session-bound approval/question callback (slack thread etc.). auto-allow if absent.
     const capabilities = makeCapabilities?.(externalKey, id); // session-bound per-source capability resolver (slack thread tools etc.). base only if absent.
+    const managedCapabilities = provider === "claude" ? makeManagedCapabilities?.(id) : undefined;
     const master = new MasterAgent({
       sessionId: id,
       cwd,
       sdkSessionId,
-      deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities },
+      deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities, managedCapabilities, capabilityRuntime },
     });
     const session: Session = { id, cwd, master };
     this.sessions.set(id, session);

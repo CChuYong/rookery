@@ -20,6 +20,14 @@ export interface CapabilityRuntimeView {
   error?: string;
 }
 
+// Narrow provider-neutral port used by live agents. Keeping the store behind this interface lets
+// MasterAgent/Worker report lifecycle transitions without owning snapshot or EventBus concerns.
+export interface CapabilityRuntimeReporter {
+  setDesired(target: CapabilityRuntimeTarget, revision: string, blocked: boolean): void;
+  setApplied(target: CapabilityRuntimeTarget, revision: string): void;
+  setError(target: CapabilityRuntimeTarget, revision: string, message: string): void;
+}
+
 interface RuntimeRecord {
   desiredRevision: string;
   appliedRevision: string | null;

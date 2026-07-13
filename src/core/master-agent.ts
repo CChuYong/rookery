@@ -12,6 +12,8 @@ import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { truncateBytes } from "./truncate.js";
 import { buildHandoffSeed } from "./handoff.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
+import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
+import type { CapabilityRuntimeReporter, CapabilityRuntimeTarget } from "./capabilities/runtime-state.js";
 
 // Structural signature of the SDK's CanUseTool — defined locally (not imported) to keep this module
 // SDK-import-free (neutrality gate; see test/core/provider-neutral.test.ts). The third arg mirrors
@@ -40,6 +42,10 @@ export interface MasterAgentDeps {
   // Per-source (per-session) dynamic capability. Resolved per turn → adds/removes tools and system prompt on top of base (memory/repos/fleet).
   // If not injected, identical to current behavior. The daemon injects it via makeCapabilities keyed by externalKey (slack:, etc.).
   capabilities?: () => TurnCapabilities;
+  // Managed pack projection (Claude in Slice 3). Masters resolve this for every serialized turn so
+  // assignment/trust/secret changes take effect at the next provider spawn without rebuilding the session.
+  managedCapabilities?: () => ResolvedAgentCapabilities;
+  capabilityRuntime?: CapabilityRuntimeReporter;
 }
 
 // Per-source turn capability that adds (+) or removes (−) on top of base. The core knows only this shape; the daemon (server.ts) decides what to put in.
@@ -293,6 +299,9 @@ export class MasterAgent {
     const permissionMode = override?.permissionMode?.trim() || "bypassPermissions";
     const clientMsgId = override?.clientMsgId;
     const sessionId = this.opts.sessionId;
+    const runtimeTarget: CapabilityRuntimeTarget = { targetKind: "master", targetId: sessionId, sessionId };
+    let managed: ResolvedAgentCapabilities | undefined;
+    let managedApplied = false;
     // Per-source dynamic capability (resolved per turn). If not injected, an empty object → base unchanged (current).
     const caps = this.opts.deps.capabilities?.() ?? {};
     const deny = new Set(caps.denyTools ?? []);
@@ -328,6 +337,13 @@ export class MasterAgent {
         bus.emit({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId }); // Live echo — accurate timeline position after passing through the turn queue
         // Auto-generate a label from the first message (run concurrently so it doesn't block the response, finalized with await at the end of the turn).
         labelDone = this.maybeLabel(userText);
+      }
+      // Resolve as late as possible inside the serialized turn. In particular, queued turns observe
+      // capability mutations that land while an earlier turn is still running.
+      managed = this.opts.deps.managedCapabilities?.();
+      if (managed) {
+        this.opts.deps.capabilityRuntime?.setDesired(runtimeTarget, managed.revision, managed.blocked);
+        if (managed.blocked) throw new Error("managed capabilities are blocked");
       }
       const stream = this.opts.deps.backend.startTurn(promptText, {
         cwd: this.opts.cwd,
@@ -386,7 +402,12 @@ export class MasterAgent {
         allowedTools: baseAllowed.filter((t) => !deny.has(t)),
         // Remove native harness schedule tools — headless no-ops that confuse with our schedule_* MCP tools.
         disallowedTools: NATIVE_SCHEDULE_TOOLS,
+        ...(managed ? { runtimeKey: sessionId, capabilities: managed } : {}),
       });
+      if (managed) {
+        this.opts.deps.capabilityRuntime?.setApplied(runtimeTarget, managed.revision);
+        managedApplied = true;
+      }
       this.currentQuery = stream; // Handle to interrupt from stop()
 
       for await (const ev of stream) {
@@ -469,6 +490,13 @@ export class MasterAgent {
         return;
       }
     } catch (err) {
+      if (managed && !managed.blocked && !managedApplied) {
+        this.opts.deps.capabilityRuntime?.setError(
+          runtimeTarget,
+          managed.revision,
+          "Capability runtime application failed.",
+        );
+      }
       // If the abort is from a user stop, it's not a turn failure. Now that the stream loop has fully drained (after all deltas),
       // flow the notice so it doesn't land in the middle of the text, and runTurn resolves normally.
       if (abort.signal.aborted) {

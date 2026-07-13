@@ -485,4 +485,27 @@ describe("SessionManager", () => {
     expect(sm.list().some((s) => s.cwd === "/x")).toBe(false);
   });
 
+  it("injects managed capability resolution only into Claude masters", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const makeManagedCapabilities = vi.fn(() => () => ({ revision: "r", blocked: false, instructions: [], skills: [], mcpServers: [] }));
+    let n = 0;
+    const sm = new SessionManager({
+      repos,
+      bus,
+      backends: { claude: fakeBackend([]), codex: fakeBackend([]) },
+      masterModel: "m",
+      fleet,
+      makeManagedCapabilities,
+    }, () => `s${n++}`);
+
+    sm.create("/claude", { provider: "claude" });
+    sm.create("/codex", { provider: "codex" });
+
+    expect(makeManagedCapabilities).toHaveBeenCalledTimes(1);
+    expect(makeManagedCapabilities).toHaveBeenCalledWith("s0");
+  });
+
 });
