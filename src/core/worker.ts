@@ -46,8 +46,8 @@ export interface WorkerDeps {
   // beat early). The wake cancels the grace (→ running, no idle ever emitted); expiry means no wake came
   // (→ idle, truthful). Injectable for deterministic tests.
   settleGraceMs?: number;
-  // Resolved once for this provider stream. A live worker deliberately keeps its original revision;
-  // later desired changes are surfaced as pending-reload until Slice 5 adds an explicit reload path.
+  // Resolved once for each provider stream. A live worker deliberately keeps its original revision;
+  // later desired changes are surfaced as pending-reload until an explicit immediate/when-idle reload.
   managedCapabilities?: () => ResolvedAgentCapabilities;
   capabilityRuntime?: CapabilityRuntimeReporter;
 }
