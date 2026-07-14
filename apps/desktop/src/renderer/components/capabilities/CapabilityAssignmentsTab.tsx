@@ -82,7 +82,19 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
     if (!packInstanceId && library?.packs[0]) setPackInstanceId(library.packs[0].instanceId);
   }, [library, packInstanceId]);
 
-  const scopeTargets = useMemo(() => targetValues(scopeKind, targets), [scopeKind, targets]);
+  const selectedPack = library?.packs.find((pack) => pack.instanceId === packInstanceId);
+  const scopeTargets = useMemo(() => {
+    const values = targetValues(scopeKind, targets);
+    if (scopeKind !== "repo-shared") return values;
+    if (selectedPack?.sourceKind !== "repo-shared" || !selectedPack.ownerRepoId) return [];
+    return values.filter((target) => target.id === selectedPack.ownerRepoId);
+  }, [scopeKind, targets, selectedPack]);
+
+  useEffect(() => {
+    if (scopeKind !== "repo-shared") return;
+    const owner = selectedPack?.sourceKind === "repo-shared" ? selectedPack.ownerRepoId : null;
+    if (scopeRef !== (owner ?? "")) setScopeRef(owner ?? "");
+  }, [scopeKind, scopeRef, selectedPack]);
 
   const resetForm = (): void => {
     setEditingId(null);

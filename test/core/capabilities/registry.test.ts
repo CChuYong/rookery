@@ -37,6 +37,11 @@ function writePack(root: string, input: {
   }, null, 2));
 }
 
+function writeSharedIndex(repo: string, packs: Array<{ path: string; disabled?: boolean }>): void {
+  fs.mkdirSync(path.join(repo, ".rookery"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".rookery", "capabilities.json"), JSON.stringify({ schemaVersion: 1, packs }));
+}
+
 describe("CapabilityRegistry", () => {
   let root: string;
   let repos: Repositories;
@@ -177,5 +182,94 @@ describe("CapabilityRegistry", () => {
     expect(changes[2]?.affected).toEqual([{ scopeKind: "rookery", scopeRef: "" }]);
     expect(changes[4]?.affected).toEqual([{ scopeKind: "rookery", scopeRef: "" }]);
     expect(subject.list().generation).toBe(5);
+  });
+
+  it("discovers repo-owned shared packs without auto-trusting or auto-binding them", () => {
+    const repo = path.join(root, "repo");
+    const packRoot = path.join(repo, ".rookery", "capabilities", "team");
+    writePack(packRoot, { secretKey: "issue-token" });
+    writeSharedIndex(repo, [{ path: "team" }]);
+    repos.createRepo({ id: "repo-1", name: "app", path: repo, description: "" });
+    const subject = registry();
+
+    const library = subject.reconcileRepoShared("repo-1");
+
+    expect(library.packs).toHaveLength(1);
+    expect(library.packs[0]).toMatchObject({
+      instanceId: "pack-1", sourceKind: "repo-shared", ownerRepoId: "repo-1",
+      sourcePath: fs.realpathSync.native(packRoot), status: "untrusted",
+    });
+    expect(library.bindings).toEqual([]);
+    expect(library.diagnostics).toEqual([]);
+  });
+
+  it("keeps repo-shared identity, bindings, and secrets while digest trust fails closed on change", () => {
+    const repo = path.join(root, "repo");
+    const packRoot = path.join(repo, ".rookery", "capabilities", "team");
+    writePack(packRoot, { secretKey: "issue-token" });
+    writeSharedIndex(repo, [{ path: "team" }]);
+    repos.createRepo({ id: "repo-1", name: "app", path: repo, description: "" });
+    const subject = registry();
+    const initial = subject.reconcileRepoShared("repo-1").packs[0]!;
+    subject.setTrust(initial.instanceId, initial.digest, true);
+    subject.setSecret(initial.instanceId, "issue-token", "secret-value");
+    subject.setBinding("shared-binding", {
+      packInstanceId: initial.instanceId, scopeKind: "repo-shared", scopeRef: "repo-1",
+      audience: { agents: ["master", "worker"], origins: ["ui"] }, enabled: true,
+    });
+
+    fs.appendFileSync(path.join(packRoot, "instructions.md"), "Changed.\n");
+    const changed = subject.reconcileRepoShared("repo-1").packs[0]!;
+
+    expect(changed.instanceId).toBe(initial.instanceId);
+    expect(changed.digest).not.toBe(initial.digest);
+    expect(changed.status).toBe("untrusted");
+    expect(changed.secrets).toEqual([{ key: "issue-token", configured: true }]);
+    expect(subject.list().bindings.map((binding) => binding.id)).toEqual(["shared-binding"]);
+  });
+
+  it("treats disabled, stale, and missing repo index entries as authoritative removal tombstones", () => {
+    const repo = path.join(root, "repo");
+    const packRoot = path.join(repo, ".rookery", "capabilities", "team");
+    writePack(packRoot);
+    writeSharedIndex(repo, [{ path: "team" }]);
+    repos.createRepo({ id: "repo-1", name: "app", path: repo, description: "" });
+    const subject = registry();
+    subject.reconcileRepoShared("repo-1");
+
+    writeSharedIndex(repo, [{ path: "team", disabled: true }]);
+    expect(subject.reconcileRepoShared("repo-1").packs).toEqual([]);
+    writeSharedIndex(repo, [{ path: "team" }]);
+    expect(subject.reconcileRepoShared("repo-1").packs).toHaveLength(1);
+    writeSharedIndex(repo, []);
+    expect(subject.reconcileRepoShared("repo-1").packs).toEqual([]);
+    writeSharedIndex(repo, [{ path: "team" }]);
+    subject.reconcileRepoShared("repo-1");
+    fs.rmSync(path.join(repo, ".rookery", "capabilities.json"));
+    expect(subject.reconcileRepoShared("repo-1").packs).toEqual([]);
+  });
+
+  it("keeps existing rows fail-closed for an invalid index and isolates invalid siblings", () => {
+    const repo = path.join(root, "repo");
+    const team = path.join(repo, ".rookery", "capabilities", "team");
+    const valid = path.join(repo, ".rookery", "capabilities", "valid");
+    writePack(team);
+    writePack(valid, { id: "valid-pack" });
+    writeSharedIndex(repo, [{ path: "team" }]);
+    repos.createRepo({ id: "repo-1", name: "app", path: repo, description: "" });
+    const subject = registry();
+    const instanceId = subject.reconcileRepoShared("repo-1").packs[0]!.instanceId;
+    fs.writeFileSync(path.join(repo, ".rookery", "capabilities.json"), "{ bad json");
+
+    const invalidIndex = subject.reconcileRepoShared("repo-1");
+    expect(invalidIndex.packs[0]).toMatchObject({ instanceId, status: "invalid" });
+    expect(invalidIndex.diagnostics).toHaveLength(1);
+
+    writeSharedIndex(repo, [{ path: "team" }, { path: "missing" }, { path: "valid" }]);
+    const recovered = subject.reconcileRepoShared("repo-1");
+    expect(recovered.packs.map((pack) => pack.manifest.id)).toEqual(["team-pack", "valid-pack"]);
+    expect(recovered.packs.find((pack) => pack.instanceId === instanceId)?.status).toBe("untrusted");
+    expect(recovered.diagnostics).toHaveLength(1);
+    expect(recovered.diagnostics[0]?.source).toContain("#missing");
   });
 });

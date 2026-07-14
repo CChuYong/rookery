@@ -25,13 +25,13 @@ const targets = { repos: [], sessions: [], workers: [] };
 function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilitySnapshot>): CapabilityCenterApi {
   return {
     loadSnapshot,
-    loadLibrary: async () => ({ generation: 0, packs: [], bindings: [] }),
+    loadLibrary: async () => ({ generation: 0, packs: [], bindings: [], diagnostics: [] }),
     addPack: async () => { throw new Error("unused"); },
     removePack: async () => {},
     setTrust: async () => { throw new Error("unused"); },
     setSecret: async (_instanceId, key) => ({ key, configured: true }),
     deleteSecret: async (_instanceId, key) => ({ key, configured: false }),
-    refresh: async () => ({ generation: 0, packs: [], bindings: [] }),
+    refresh: async () => ({ generation: 0, packs: [], bindings: [], diagnostics: [] }),
     reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
     setBinding: async () => { throw new Error("unused"); },
     deleteBinding: async () => {},

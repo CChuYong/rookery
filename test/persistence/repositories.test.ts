@@ -644,6 +644,29 @@ describe("repos registry + fleet workers", () => {
     expect(r.getRepoByName("app-api")).toBeUndefined();
   });
 
+  it("publishes repo changes from every mutation path with removal scopes captured before cascade", () => {
+    const r = repos();
+    const changes: Array<{ kind: string; repo: { id: string }; affected?: unknown[] }> = [];
+    const unsubscribe = r.onRepoChanged((change) => changes.push(change));
+    r.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    r.updateRepo("app", { description: "updated" });
+    r.createCapabilityPack({
+      instanceId: "shared", logicalId: "shared", sourceKind: "repo-shared", ownerRepoId: "r1",
+      sourcePath: "/code/app/.rookery/capabilities/shared", manifestJson: "{}", digest: "a".repeat(64),
+    });
+    r.setCapabilityBinding("global-shared", {
+      packInstanceId: "shared", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] }, enabled: true,
+    });
+    r.removeRepo("app");
+    unsubscribe();
+
+    expect(changes.map((change) => change.kind)).toEqual(["created", "updated", "removed"]);
+    expect(changes[2]?.affected).toEqual([{ scopeKind: "rookery", scopeRef: "" }]);
+    r.createRepo({ id: "r2", name: "ignored", path: "/code/ignored", description: "" });
+    expect(changes).toHaveLength(3);
+  });
+
   it("stores fleet columns on workers and lists globally", () => {
     const r = repos();
     r.createSession({ id: "sA", cwd: "/x" });

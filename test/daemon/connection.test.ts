@@ -146,7 +146,7 @@ describe("Connection", () => {
 
   it("routes every capability registry mutation with sanitized correlated results", async () => {
     const { sent, repos, bus, fleet, sm, socket } = setup();
-    const library = { generation: 4, packs: [], bindings: [] };
+    const library = { generation: 4, packs: [], bindings: [], diagnostics: [] };
     const pack = { instanceId: "pack-1", status: "trusted" };
     const binding = {
       id: "binding-1",

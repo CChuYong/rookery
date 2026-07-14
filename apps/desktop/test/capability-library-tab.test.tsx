@@ -35,7 +35,7 @@ const pack: CapabilityLibraryEntry = {
   updatedAt: "2026-07-13T00:00:00.000Z",
 };
 
-const library: CapabilityLibrarySnapshot = { generation: 1, packs: [pack], bindings: [] };
+const library: CapabilityLibrarySnapshot = { generation: 1, packs: [pack], bindings: [], diagnostics: [] };
 
 function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi {
   return {
@@ -58,11 +58,11 @@ describe("CapabilityLibraryTab", () => {
   it("renders loading, empty, failure, and retry states", async () => {
     let resolve!: (snapshot: CapabilityLibrarySnapshot) => void;
     const pending = new Promise<CapabilityLibrarySnapshot>((done) => { resolve = done; });
-    const loadLibrary = vi.fn().mockReturnValueOnce(pending).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ generation: 0, packs: [], bindings: [] });
+    const loadLibrary = vi.fn().mockReturnValueOnce(pending).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ generation: 0, packs: [], bindings: [], diagnostics: [] });
     const subject = api({ loadLibrary });
     const { rerender } = render(<CapabilityLibraryTab api={subject} generation={0} pickDirectory={async () => null} />);
     expect(screen.getByText("불러오는 중…")).toBeInTheDocument();
-    resolve({ generation: 0, packs: [], bindings: [] });
+    resolve({ generation: 0, packs: [], bindings: [], diagnostics: [] });
     expect(await screen.findByText("아직 등록된 capability pack이 없어요.")).toBeInTheDocument();
 
     rerender(<CapabilityLibraryTab api={subject} generation={1} pickDirectory={async () => null} />);
@@ -92,7 +92,7 @@ describe("CapabilityLibraryTab", () => {
 
   it("keeps secret values write-only and resets the password input after save", async () => {
     const configured = { ...pack, secrets: [{ key: "issue-token", configured: true }] };
-    const loadLibrary = vi.fn().mockResolvedValueOnce(library).mockResolvedValue({ generation: 2, packs: [configured], bindings: [] });
+    const loadLibrary = vi.fn().mockResolvedValueOnce(library).mockResolvedValue({ generation: 2, packs: [configured], bindings: [], diagnostics: [] });
     const setSecret = vi.fn(async (_id: string, key: string) => ({ key, configured: true }));
     render(<CapabilityLibraryTab api={api({ loadLibrary, setSecret })} generation={0} pickDirectory={async () => null} />);
     const card = await screen.findByTestId("capability-pack-pack-1");
@@ -122,5 +122,27 @@ describe("CapabilityLibraryTab", () => {
     expect(removePack).not.toHaveBeenCalled();
     fireEvent.click(within(card).getByRole("button", { name: "Pack 제거" }));
     await waitFor(() => expect(removePack).toHaveBeenCalledWith("pack-1"));
+  });
+
+  it("labels repo-owned packs, renders discovery diagnostics, and leaves removal to the repo index", async () => {
+    const shared: CapabilityLibraryEntry = {
+      ...pack,
+      instanceId: "shared-pack",
+      sourceKind: "repo-shared",
+      ownerRepoId: "repo-1",
+      sourcePath: "/repo/.rookery/capabilities/team",
+    };
+    const sharedLibrary: CapabilityLibrarySnapshot = {
+      generation: 2,
+      packs: [shared],
+      bindings: [],
+      diagnostics: [{ id: "repo-index", source: "repo:app/.rookery/capabilities.json", severity: "error", message: "invalid sibling pack" }],
+    };
+    render(<CapabilityLibraryTab api={api({ loadLibrary: async () => sharedLibrary })} generation={0} pickDirectory={async () => null} />);
+
+    const card = await screen.findByTestId("capability-pack-shared-pack");
+    expect(within(card).getByText("레포 공유 · repo-1")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "삭제" })).toBeNull();
+    expect(screen.getByTestId("capability-library-diagnostics")).toHaveTextContent("invalid sibling pack");
   });
 });

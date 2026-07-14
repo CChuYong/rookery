@@ -6,6 +6,7 @@ import type {
   CapabilityBindingInput,
   CapabilityOrigin,
   CapabilityPackSourceKind,
+  CapabilityScopeRef,
   CapabilityScopeKind,
 } from "../core/capabilities/types.js";
 
@@ -66,6 +67,9 @@ export interface RepoRow {
   created_at: string;
   updated_at: string;
 }
+export type RepoChange =
+  | { kind: "created" | "updated"; repo: RepoRow }
+  | { kind: "removed"; repo: RepoRow; affected: CapabilityScopeRef[] };
 export interface WorkerEventRow {
   id: number;
   worker_id: string;
@@ -186,11 +190,23 @@ function audiencesOverlap(a: CapabilityAudience, b: CapabilityAudience): boolean
 
 export class Repositories {
   private readonly warnedCorrupt = new Set<string>();
+  private readonly repoChangeListeners = new Set<(change: RepoChange) => void>();
 
   constructor(
     private readonly db: DB,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
+
+  onRepoChanged(listener: (change: RepoChange) => void): () => void {
+    this.repoChangeListeners.add(listener);
+    return () => this.repoChangeListeners.delete(listener);
+  }
+
+  private emitRepoChanged(change: RepoChange): void {
+    for (const listener of this.repoChangeListeners) {
+      try { listener(change); } catch { /* repository mutations remain authoritative if an observer fails */ }
+    }
+  }
 
   createCapabilityPack(input: CapabilityPackRowInput): CapabilityPackRow {
     const ts = this.now();
@@ -634,7 +650,9 @@ export class Repositories {
     this.db
       .prepare("INSERT INTO repos(id, name, path, description, base, remote_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .run(input.id, input.name, input.path, input.description, input.base ?? null, input.remoteUrl ?? null, ts, ts);
-    return this.getRepoByName(input.name)!;
+    const repo = this.getRepoByName(input.name)!;
+    this.emitRepoChanged({ kind: "created", repo });
+    return repo;
   }
 
   getRepoByName(name: string): RepoRow | undefined {
@@ -657,11 +675,25 @@ export class Repositories {
     this.db
       .prepare("UPDATE repos SET description = ?, base = ?, updated_at = ? WHERE name = ?")
       .run(patch.description ?? cur.description, base, this.now(), name);
+    this.emitRepoChanged({ kind: "updated", repo: this.getRepoByName(name)! });
   }
 
   removeRepo(name: string): void {
     const repo = this.getRepoByName(name);
     if (!repo) return;
+    const affectedMap = new Map<string, CapabilityScopeRef>();
+    const remember = (scope: CapabilityScopeRef) => affectedMap.set(`${scope.scopeKind}\0${scope.scopeRef}`, scope);
+    for (const binding of this.listCapabilityBindings()) {
+      if ((binding.scopeKind === "repo-local" || binding.scopeKind === "repo-shared") && binding.scopeRef === repo.id) {
+        remember({ scopeKind: binding.scopeKind, scopeRef: binding.scopeRef });
+      }
+    }
+    const ownedBeforeDelete = this.listCapabilityPacks().filter((pack) => pack.owner_repo_id === repo.id);
+    for (const pack of ownedBeforeDelete) {
+      for (const binding of this.listCapabilityBindings(pack.instance_id)) {
+        remember({ scopeKind: binding.scopeKind, scopeRef: binding.scopeRef });
+      }
+    }
     this.db.transaction(() => {
       this.db.prepare(
         "DELETE FROM capability_bindings WHERE scope_kind IN ('repo-local', 'repo-shared') AND scope_ref = ?",
@@ -671,6 +703,7 @@ export class Repositories {
       for (const pack of owned) this.deleteCapabilityPackRows(pack.instance_id);
       this.db.prepare("DELETE FROM repos WHERE id = ?").run(repo.id);
     })();
+    this.emitRepoChanged({ kind: "removed", repo, affected: [...affectedMap.values()] });
   }
 
   // Terminal status write-once (single chokepoint): both writers (Worker.transition / FleetOrchestrator.setStatus)
