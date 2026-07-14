@@ -68,6 +68,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `capabilities.secret.set` | ✓ | `instanceId`, `key`, `value` | set a declared write-only pack secret | `capabilities.secret.result` |
 | `capabilities.secret.delete` | ✓ | `instanceId`, `key` | clear a declared pack secret | `capabilities.secret.result` |
 | `capabilities.refresh` | ✓ | `instanceId?` | revalidate one pack or the whole library | `capabilities.refresh.result` |
+| `capabilities.worker.reload` | ✓ | `workerId`, `whenIdle?` | replace a worker provider stream now, schedule at idle, or record next-start for a detached worker | `capabilities.worker.reload.result` |
 | `usage.get` | ✓ | — | usage snapshot | `usage.result` |
 | `models.list` | ✓ | — | available models (live or static) | `models.result` |
 | `settings.get` | ✓ | — | read settings | `settings.result` |
@@ -84,6 +85,8 @@ Notes:
 - **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, repository, origin, home session, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins, provider inventory, and managed entries. `desiredRevision` is deterministic and `desiredBlocked` reports fail-closed required state. Claude and Codex snapshots expose `appliedRevision` (`null` before confirmation) and remap launchable managed entries to `applied`, `pending-next-turn`, `pending-reload`, or `error`; blocked/unavailable/suppressed entries retain their more precise resolver state. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list.
 - **Binding shape:** `binding` is `{packInstanceId, scopeKind, scopeRef, audience:{agents,origins}, enabled}`. `scopeKind` is `rookery|repo-local|repo-shared|session|worker`; Rookery uses an empty `scopeRef`, while every other scope uses the authoritative repo/session/worker id. Audience agents are `master|worker|side` and origins are `ui|slack|automation|external`.
 - **Capability secret boundary:** `value` exists only on `capabilities.secret.set`. Library and mutation replies expose only `{key, configured}`; pack documents contain secret references, never expanded values. The daemon rejects undeclared keys.
+- **Worker capability reload:** `whenIdle:false` rejects a busy worker. `whenIdle:true` acknowledges with `mode:"scheduled"` and begins only after the active turn settles. An idle live worker returns `mode:"reloading"` after replacement completes; a detached resumable worker returns `mode:"next-start"` without materializing it. Only the short replacement phase rejects `worker.send`.
+- **Repo-shared authority:** registered repos may declare schema 1 `packs[]` in `.rookery/capabilities.json`, with each `{path, disabled?}` contained below `.rookery/capabilities/`. Discovery never creates bindings or trust. `CapabilityLibrarySnapshot.diagnostics[]` isolates index/pack failures, and exact-digest trust automatically stops matching after content changes.
 - **`settings.set` `settings` object:** `masterName`, `masterModel`, `workerModel`, `masterEffort`, `workerEffort`, `slackCwd`, `slackAllowedUsers`, `slackAllowAll`, `slackRefuseReply`, `slackRefusalMessage`, `slackLocale`, `usageRefreshMs`, `hasAcceptedDataNotice` (echoed back), and write-only secrets **not echoed**: `linearApiKey`, `anthropicApiKey`, `slackBotToken`, `slackAppToken`. `null`/empty string clears a key (reverts to config default). `effort` fields are membership-validated against `low\|medium\|high\|xhigh\|max`. Changing a Slack token triggers `slack.reconcile()`.
 - **`automation` / `patch` (`automationInputSchema`):** `name`, `enabled?`, `trigger` (discriminated on `kind`: `cron`{`cron`,`timezone`} validated by `isValidCron` in `superRefine`, or `slack`{`channels?`,`keyword?`,`fromUsers?`}), `action` (`master`{`prompt`,`cwd`,`sessionMode:reuse\|fresh`} or `worker`{`repo`,`task`,`base?`}), `model?`, `effort?`, `permissionMode?`, `maxTurns?`.
 - **`automation.run` `vars`:** partial `{message, channel, user, ts, threadTs, team}`.
@@ -113,11 +116,12 @@ Notes:
 | `models.result` | `reqId`, `models[]` (`id,displayName`) | model picker list |
 | `commands.result` | `reqId`, `commands: SlashCommandInfo[]` | slash-command candidates |
 | `capabilities.snapshot.result` | `reqId`, `snapshot: CapabilitySnapshot` | authoritative target metadata, effective entries, and per-source diagnostics |
-| `capabilities.library.result` | `reqId`, `library: CapabilityLibrarySnapshot` | sanitized pack and binding inventory |
+| `capabilities.library.result` | `reqId`, `library: CapabilityLibrarySnapshot` | sanitized pack, binding, repo-discovery diagnostic, and generation inventory |
 | `capabilities.pack.result` | `reqId`, `pack: CapabilityLibraryEntry\|null` | pack mutation result |
 | `capabilities.binding.result` | `reqId`, `binding: CapabilityBinding\|null` | binding mutation result |
 | `capabilities.secret.result` | `reqId`, `instanceId`, `secret:{key,configured}` | write-only secret mutation status |
 | `capabilities.refresh.result` | `reqId`, `library: CapabilityLibrarySnapshot` | sanitized post-refresh inventory |
+| `capabilities.worker.reload.result` | `reqId`, `workerId`, `mode: reloading\|scheduled\|next-start` | worker reload disposition |
 | `settings.result` | `reqId`, `settings: SettingsValues` | settings (secrets omitted) |
 | `slack.ack` | `reqId?`, `status: SlackStatus` | Slack toggle result |
 | `automation.list.result` | `reqId`, `automations: Automation[]` | automation list |

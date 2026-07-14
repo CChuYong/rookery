@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CapabilityRuntime } from "../../src/daemon/capability-runtime.js";
+import { CapabilityRuntime, gcCapabilityRuntime } from "../../src/daemon/capability-runtime.js";
 import { validateCapabilityPack } from "../../src/core/capabilities/manifest.js";
 import type { ResolvedAgentCapabilities } from "../../src/core/capabilities/types.js";
 
@@ -208,5 +208,64 @@ describe("CapabilityRuntime", () => {
     expect(runtime.materializeCodex({
       revision: "empty", blocked: false, instructions: [], skills: [], mcpServers: [],
     })).toEqual({ revision: "empty", skills: [], mcpServers: [], env: {}, diagnostics: [] });
+  });
+});
+
+describe("gcCapabilityRuntime", () => {
+  it("keeps only live schema-2 revisions and removes owned stale, invalid, and staging entries", () => {
+    const home = temp("rk-cap-gc-");
+    const parent = path.join(home, "capability-runtime");
+    fs.mkdirSync(parent);
+    const live = "a".repeat(64);
+    const dead = "b".repeat(64);
+    const invalidLive = "c".repeat(64);
+    const mismatch = "d".repeat(64);
+    for (const revision of [live, dead, invalidLive, mismatch]) fs.mkdirSync(path.join(parent, revision));
+    fs.writeFileSync(path.join(parent, live, ".complete.json"), JSON.stringify({ schemaVersion: 2, revision: live }));
+    fs.writeFileSync(path.join(parent, dead, ".complete.json"), JSON.stringify({ schemaVersion: 2, revision: dead }));
+    fs.writeFileSync(path.join(parent, invalidLive, ".complete.json"), JSON.stringify({ schemaVersion: 1, revision: invalidLive }));
+    fs.writeFileSync(path.join(parent, mismatch, ".complete.json"), JSON.stringify({ schemaVersion: 2, revision: live }));
+    fs.mkdirSync(path.join(parent, ".tmp-interrupted"));
+    fs.writeFileSync(path.join(parent, "keep-not-owned"), "user data");
+    fs.writeFileSync(path.join(parent, "e".repeat(64)), "not a directory");
+
+    const result = gcCapabilityRuntime(home, new Set([live, invalidLive, mismatch]));
+
+    expect(result).toEqual({ removed: [".tmp-interrupted", dead, invalidLive, mismatch], kept: [live], failed: [] });
+    expect(fs.existsSync(path.join(parent, live))).toBe(true);
+    expect(fs.existsSync(path.join(parent, "keep-not-owned"))).toBe(true);
+    expect(fs.existsSync(path.join(parent, "e".repeat(64)))).toBe(true);
+  });
+
+  it("never follows runtime or marker symlinks while cleaning owned names", () => {
+    const home = temp("rk-cap-gc-");
+    const parent = path.join(home, "capability-runtime");
+    const outside = temp("rk-cap-gc-outside-");
+    fs.mkdirSync(parent);
+    const linkedRevision = "a".repeat(64);
+    fs.writeFileSync(path.join(outside, "preserved"), "outside");
+    fs.symlinkSync(outside, path.join(parent, linkedRevision));
+    fs.symlinkSync(outside, path.join(parent, ".tmp-linked"));
+    const markerLinkedRevision = "b".repeat(64);
+    fs.mkdirSync(path.join(parent, markerLinkedRevision));
+    const outsideMarker = path.join(outside, "marker.json");
+    fs.writeFileSync(outsideMarker, JSON.stringify({ schemaVersion: 2, revision: markerLinkedRevision }));
+    fs.symlinkSync(outsideMarker, path.join(parent, markerLinkedRevision, ".complete.json"));
+
+    const result = gcCapabilityRuntime(home, new Set([linkedRevision, markerLinkedRevision]));
+
+    expect(result.removed).toEqual([".tmp-linked", markerLinkedRevision]);
+    expect(fs.lstatSync(path.join(parent, linkedRevision)).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(outside, "preserved"), "utf8")).toBe("outside");
+    expect(fs.existsSync(outsideMarker)).toBe(true);
+  });
+
+  it("is a no-op when the runtime parent is absent or itself a symlink", () => {
+    const home = temp("rk-cap-gc-");
+    expect(gcCapabilityRuntime(home, new Set())).toEqual({ removed: [], kept: [], failed: [] });
+    const outside = temp("rk-cap-gc-outside-");
+    fs.mkdirSync(path.join(outside, "capability-runtime"));
+    fs.symlinkSync(path.join(outside, "capability-runtime"), path.join(home, "capability-runtime"));
+    expect(gcCapabilityRuntime(home, new Set())).toEqual({ removed: [], kept: [], failed: [] });
   });
 });

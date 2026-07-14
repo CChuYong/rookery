@@ -36,7 +36,7 @@ import { CapabilityService } from "../core/capabilities/service.js";
 import { CapabilityRegistry } from "../core/capabilities/registry.js";
 import { CapabilityResolver } from "../core/capabilities/resolver.js";
 import { CapabilityRuntimeState } from "../core/capabilities/runtime-state.js";
-import { CapabilityRuntime } from "./capability-runtime.js";
+import { CapabilityRuntime, gcCapabilityRuntime } from "./capability-runtime.js";
 import { CapabilityRepoWatcher } from "./capability-repo-watcher.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
@@ -516,6 +516,16 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   });
   const capabilityRepoWatcher = new CapabilityRepoWatcher(repos, capabilityRegistry);
   capabilityRepoWatcher.start();
+  const liveCapabilityRevisions = new Set<string>();
+  for (const session of repos.listSessions()) {
+    try { liveCapabilityRevisions.add(capabilityService.resolveManaged({ kind: "session", id: session.id }).revision); }
+    catch { /* a corrupt target must not prevent cleanup of independently valid revisions */ }
+  }
+  for (const worker of repos.listAllWorkers()) {
+    try { liveCapabilityRevisions.add(capabilityService.resolveManaged({ kind: "worker", id: worker.id }).revision); }
+    catch { /* a corrupt target must not prevent cleanup of independently valid revisions */ }
+  }
+  gcCapabilityRuntime(config.home, liveCapabilityRevisions);
 
   // External MCP server (rookery-as-MCP): a SECOND McpBridge mounted at /mcp-ext, gating fleet control for
   // external MCP clients (Claude Code/Cursor/Codex). Off by default (fail-closed) via the mcpExposure setting;
