@@ -124,7 +124,19 @@ export function commandCandidates(snapshot: CapabilitySnapshot): CommandCandidat
     action: definition.action,
   }));
   const occupied = new Set(candidates.map((candidate) => normalizeName(candidate.name)));
-  const promptEntries = sortCapabilityEntries(snapshot.entries)
+  for (const candidate of promptCommandCandidates(snapshot.entries)) {
+    const key = normalizeName(candidate.name);
+    if (occupied.has(key)) continue;
+    occupied.add(key);
+    candidates.push(candidate);
+  }
+  return candidates.sort((a, b) => normalizeName(a.name).localeCompare(normalizeName(b.name)) || a.id.localeCompare(b.id));
+}
+
+export function promptCommandCandidates(entries: CapabilityEntry[]): CommandCandidate[] {
+  const candidates: CommandCandidate[] = [];
+  const occupied = new Set<string>();
+  const promptEntries = sortCapabilityEntries(entries)
     .filter((entry) => !ROOKERY_COMMANDS.some((definition) => definition.id === entry.id))
     .map((entry) => ({ entry, candidate: entryCandidate(entry) }))
     .filter((item): item is { entry: CapabilityEntry; candidate: CommandCandidate } => item.candidate !== null);
