@@ -58,7 +58,13 @@ export function gcCapabilityRuntime(home: string, liveRevisions: ReadonlySet<str
   catch { return result; }
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) return result;
 
-  for (const name of fs.readdirSync(runtimeParent).sort()) {
+  let names: string[];
+  try { names = fs.readdirSync(runtimeParent).sort(); }
+  catch {
+    result.failed.push("<runtime-parent>");
+    return result;
+  }
+  for (const name of names) {
     const entryPath = path.join(runtimeParent, name);
     try {
       const stat = fs.lstatSync(entryPath);
