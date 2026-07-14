@@ -987,6 +987,88 @@ describe("FleetOrchestrator", () => {
     expect(plainRow.maxTurns).toBeNull();
   });
 
+  it("gates sends during an immediate capability reload and clears the gate after completion", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    let completeReload!: () => void;
+    const reloadCompletion = new Promise<void>((resolve) => { completeReload = resolve; });
+    const sends: string[] = [];
+    const factory = (): WorkerLike => {
+      let state = "idle";
+      return {
+        start: () => { state = "idle"; },
+        resume: () => { state = "idle"; },
+        send: (message) => sends.push(message),
+        stop: async () => { state = "stopped"; },
+        status: () => state,
+        waitUntilSettled: () => new Promise<void>(() => {}),
+        requestCapabilityReload: ({ onBegin }) => {
+          onBegin();
+          return { mode: "reloading" as const, completion: reloadCompletion };
+        },
+      };
+    };
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "main" }), factory, worktreesDir: "/wt", idgen: () => "reload-1" });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/repo", label: "reload", task: undefined });
+
+    const reloading = fleet.reloadCapabilities("reload-1", false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(() => fleet.send("reload-1", "race")).toThrow(/reload in progress.*retry/i);
+    completeReload();
+    await expect(reloading).resolves.toEqual({ workerId: "reload-1", mode: "reloading" });
+    expect(() => fleet.send("reload-1", "after")).not.toThrow();
+    expect(sends).toEqual(["after"]);
+    await fleet.stop("reload-1");
+  });
+
+  it("schedules a busy capability reload, allows sends while waiting, and rejects duplicates", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    let begin!: () => void;
+    let complete!: () => void;
+    const completion = new Promise<void>((resolve) => { complete = resolve; });
+    const sends: string[] = [];
+    const factory = (): WorkerLike => ({
+      start: () => {}, resume: () => {}, send: (message) => sends.push(message), stop: async () => {},
+      status: () => "running", waitUntilSettled: () => new Promise<void>(() => {}),
+      requestCapabilityReload: ({ whenIdle, onBegin }) => {
+        if (!whenIdle) throw new Error("busy; retry with whenIdle");
+        begin = onBegin;
+        return { mode: "scheduled" as const, completion };
+      },
+    });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps({ headValue: "main" }), factory, worktreesDir: "/wt", idgen: () => "reload-2" });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/repo", label: "reload", task: "work" });
+
+    await expect(fleet.reloadCapabilities("reload-2", false)).rejects.toThrow(/busy.*whenIdle/i);
+    await expect(fleet.reloadCapabilities("reload-2", true)).resolves.toEqual({ workerId: "reload-2", mode: "scheduled" });
+    expect(() => fleet.send("reload-2", "while waiting")).not.toThrow();
+    await expect(fleet.reloadCapabilities("reload-2", true)).rejects.toThrow(/already pending/i);
+    begin();
+    expect(() => fleet.send("reload-2", "during replacement")).toThrow(/reload in progress.*retry/i);
+    complete();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(() => fleet.send("reload-2", "after replacement")).not.toThrow();
+    expect(sends).toEqual(["while waiting", "after replacement"]);
+  });
+
+  it("leaves a detached resumable worker lazy and applies capabilities on its next start", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    repos.createWorker({ id: "lazy", sessionId: "sA", repoPath: "/repo", label: "lazy", worktreePath: "/wt/lazy", branch: "rookery/lazy" });
+    repos.setWorkerSdkSessionId("lazy", "native-lazy");
+    repos.setWorkerStatus("lazy", "idle", true);
+    const factory = vi.fn<() => WorkerLike>(() => ({
+      start: () => {}, resume: () => {}, send: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: () => new Promise<void>(() => {}),
+    }));
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt", exists: () => true });
+    fleet.rehydrate();
+
+    await expect(fleet.reloadCapabilities("lazy", false)).resolves.toEqual({ workerId: "lazy", mode: "next-start" });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("FleetOrchestrator rehydrate (restart recovery)", () => {

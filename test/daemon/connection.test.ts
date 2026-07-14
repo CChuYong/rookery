@@ -225,6 +225,26 @@ describe("Connection", () => {
     });
   });
 
+  it("routes worker capability reloads and preserves the scheduling result", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const capabilities = { snapshot: vi.fn() };
+    const reload = vi.spyOn(fleet, "reloadCapabilities").mockResolvedValue({ workerId: "worker-1", mode: "scheduled" });
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({
+      type: "capabilities.worker.reload", reqId: "cap-reload", workerId: "worker-1", whenIdle: true,
+    }));
+
+    expect(reload).toHaveBeenCalledWith("worker-1", true);
+    expect(parsed(sent).at(-1)).toEqual({
+      type: "capabilities.worker.reload.result", reqId: "cap-reload", workerId: "worker-1", mode: "scheduled",
+    });
+  });
+
   it("starts Side only after replying with its id, routes lifecycle commands, and cleans owned Side threads on dispose", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();

@@ -34,6 +34,8 @@ describe("protocol v2 client messages", () => {
       { type: "capabilities.secret.delete", reqId: "q8", instanceId: "pack-1", key: "token" },
       { type: "capabilities.refresh", reqId: "q9", instanceId: "pack-1" },
       { type: "capabilities.refresh", reqId: "q10" },
+      { type: "capabilities.worker.reload", reqId: "q11", workerId: "worker-1" },
+      { type: "capabilities.worker.reload", reqId: "q12", workerId: "worker-1", whenIdle: true },
     ];
     for (const message of valid) expect(() => parseClientMessage(JSON.stringify(message))).not.toThrow();
 
@@ -46,6 +48,8 @@ describe("protocol v2 client messages", () => {
       { type: "capabilities.binding.set", reqId: "q", id: "b", binding: { ...binding, scopeKind: "worker", scopeRef: "" } },
       { type: "capabilities.trust.set", reqId: "q", instanceId: "pack-1", digest: "short", trusted: true },
       { type: "capabilities.secret.set", reqId: "q", instanceId: "pack-1", key: "token", value: "   " },
+      { type: "capabilities.worker.reload", reqId: "q", workerId: "" },
+      { type: "capabilities.worker.reload", reqId: "q", workerId: "worker-1", whenIdle: "yes" },
     ];
     for (const message of invalid) expect(() => parseClientMessage(JSON.stringify(message))).toThrow();
   });

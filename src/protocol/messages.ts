@@ -168,6 +168,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("capabilities.secret.delete"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema, key: capabilityIdSchema }),
   z.object({ type: z.literal("capabilities.refresh"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema.optional() }),
+  z.object({ type: z.literal("capabilities.worker.reload"), reqId: capabilityIdSchema, workerId: capabilityIdSchema, whenIdle: z.boolean().optional() }),
   z.object({ type: z.literal("usage.get"), reqId: z.string() }),
   z.object({ type: z.literal("models.list"), reqId: z.string() }),
   z.object({ type: z.literal("codex.models.list"), reqId: z.string() }),
@@ -309,6 +310,7 @@ export type ServerMessage =
   | { type: "capabilities.binding.result"; reqId: string; binding: CapabilityBinding | null }
   | { type: "capabilities.secret.result"; reqId: string; instanceId: string; secret: CapabilitySecretStatus }
   | { type: "capabilities.refresh.result"; reqId: string; library: CapabilityLibrarySnapshot }
+  | { type: "capabilities.worker.reload.result"; reqId: string; workerId: string; mode: "reloading" | "scheduled" | "next-start" }
   | { type: "settings.result"; reqId: string; settings: SettingsValues }
   | { type: "mcp.status.result"; reqId: string; scope: "off" | "readonly" | "full"; url: string | null }
   | { type: "slack.ack"; reqId?: string; status: SlackStatus }
@@ -377,6 +379,7 @@ export interface RequestResultMap {
   "capabilities.secret.set": Extract<ServerMessage, { type: "capabilities.secret.result" }>;
   "capabilities.secret.delete": Extract<ServerMessage, { type: "capabilities.secret.result" }>;
   "capabilities.refresh": Extract<ServerMessage, { type: "capabilities.refresh.result" }>;
+  "capabilities.worker.reload": Extract<ServerMessage, { type: "capabilities.worker.reload.result" }>;
   "settings.get": Extract<ServerMessage, { type: "settings.result" }>;
   "settings.set": Extract<ServerMessage, { type: "settings.result" }>;
   "mcp.status": Extract<ServerMessage, { type: "mcp.status.result" }>;
