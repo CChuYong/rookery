@@ -92,6 +92,13 @@ export function claudeCommandCapabilities(
       scope,
       state: "applied",
       evidence: "runtime",
+      invocation: { type: "prompt", name: `/${normalized}` },
+      ...(command.argumentHint?.trim() || command.aliases?.length ? {
+        command: {
+          ...(command.argumentHint?.trim() ? { argumentHint: command.argumentHint.trim() } : {}),
+          ...(command.aliases?.length ? { aliases: command.aliases } : {}),
+        },
+      } : {}),
     }];
   });
 

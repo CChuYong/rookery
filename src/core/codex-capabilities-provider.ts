@@ -92,6 +92,7 @@ export function mapSkillsResponse(value: unknown): CapabilityContribution {
       const name = stringValue(skill?.name);
       const path = stringValue(skill?.path);
       if (!skill || !name || !path) continue;
+      const enabled = booleanValue(skill.enabled);
       entries.push({
         id: `codex.skill.${name.toLowerCase()}.${path}`,
         kind: "skill",
@@ -101,8 +102,9 @@ export function mapSkillsResponse(value: unknown): CapabilityContribution {
         provider: "codex",
         source,
         scope: capabilityScope(skill.scope, "user"),
-        state: booleanValue(skill.enabled) ? "applied" : "unavailable",
+        state: enabled ? "applied" : "unavailable",
         evidence: "runtime",
+        ...(enabled ? { invocation: { type: "prompt" as const, name: `$${name}` } } : {}),
       });
     }
     for (const rawError of arrayValue(group.errors) ?? []) {

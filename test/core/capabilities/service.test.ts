@@ -223,9 +223,9 @@ describe("CapabilityService", () => {
       blocked: false,
       runtime,
       entries: [{
-        id: "managed:pack:instruction:rules",
-        kind: "instruction" as const,
-        name: "rules",
+        id: "managed:pack:skill:release",
+        kind: "skill" as const,
+        name: "release",
         provider: "rookery" as const,
         source: "Team Pack",
         scope: "session" as const,
@@ -245,12 +245,14 @@ describe("CapabilityService", () => {
     const pending = await capabilities.snapshot({ kind: "session", id: "s1" });
     expect(pending.appliedRevision).toBeNull();
     expect(pending.entries.find((entry) => entry.id.startsWith("managed:"))?.state).toBe("pending-next-turn");
+    expect(pending.entries.find((entry) => entry.id.startsWith("managed:"))?.invocation).toEqual({ type: "prompt", name: "/release" });
 
     runtimeState.setDesired(target, runtime.revision, false);
     runtimeState.setApplied(target, runtime.revision);
     const applied = await capabilities.snapshot({ kind: "session", id: "s1" });
     expect(applied.appliedRevision).toBe(runtime.revision);
     expect(applied.entries.find((entry) => entry.id.startsWith("managed:"))?.state).toBe("applied");
+    expect(applied.entries.find((entry) => entry.id.startsWith("managed:"))?.invocation).toEqual({ type: "prompt", name: "/release" });
   });
 
   it("projects Codex worker drift as pending reload and keeps blocked/unavailable/suppressed states intact", async () => {
@@ -282,6 +284,15 @@ describe("CapabilityService", () => {
       desired: "pending-reload",
       suppressed: "suppressed",
       unavailable: "unavailable",
+    });
+    expect(snapshot.entries.filter((entry) => ["desired", "unavailable", "suppressed"].includes(entry.id)).every((entry) => entry.invocation === undefined)).toBe(true);
+
+    runtimeState.setDesired(target, "revision-new", false);
+    runtimeState.setApplied(target, "revision-new");
+    const applied = await capabilities.snapshot({ kind: "worker", id: "w1" });
+    expect(applied.entries.find((entry) => entry.id === "desired")).toMatchObject({
+      state: "applied",
+      invocation: { type: "prompt", name: "$desired" },
     });
   });
 

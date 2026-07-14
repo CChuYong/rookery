@@ -63,6 +63,8 @@ describe("claudeCommandCapabilities", () => {
         scope: "session",
         state: "applied",
         evidence: "runtime",
+        invocation: { type: "prompt", name: "/review" },
+        command: { argumentHint: "[path]", aliases: ["rv"] },
       },
     ]);
     expect(result.diagnostics).toEqual([]);
