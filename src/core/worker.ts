@@ -76,8 +76,10 @@ function truncate(s: string, n: number): string {
 }
 
 export class Worker {
-  private readonly queue = new MessageQueue();
-  private readonly abort = new AbortController();
+  // A worker lifetime can now span multiple provider stream cycles. Capability reload closes only
+  // the current cycle and replaces these two objects; terminal stop still ends the whole lifetime.
+  private queue = new MessageQueue();
+  private abort = new AbortController();
   private seq = 0;
   // instructions that arrived while running (not yet echoed) — flushed one at a time in FIFO order at the next result boundary (parity with the master's turnChain deferral).
   private readonly deferred: Array<{ text: string; clientMsgId?: string }> = [];
@@ -91,6 +93,16 @@ export class Worker {
   private idleGraceTimer?: ReturnType<typeof setTimeout>; // settle-grace hold (see WorkerDeps.settleGraceMs)
   private loop: Promise<void> = Promise.resolve();
   private stream?: AgentStream;
+  private resolveLifetime!: () => void;
+  private readonly lifetime = new Promise<void>((resolve) => { this.resolveLifetime = resolve; });
+  private lifetimeSettled = false;
+  private pendingCapabilityReload?: {
+    onBegin(): void;
+    resolve(): void;
+    reject(error: unknown): void;
+  };
+  private reloadingCapabilities = false;
+  private capabilityReloadFailure: string | null = null;
   private sdkSessionId: string | null;
   // Cross-provider handoff seed (one-shot): prepended to the FIRST turn's backend text, then cleared so later turns are unaffected.
   private handoffSeed: string | undefined;
@@ -169,14 +181,14 @@ export class Worker {
       // task-less spawn: wait idle until the first send() arrives (mirrors resume()'s no-task path — but fresh, so no sdkSessionId/seq restore).
       this.turnActive = false;
       this.reconcile();
-      this.loop = this.consume();
+      this.loop = this.consume(this.queue, this.abort);
       return;
     }
     this.turnActive = true; // state already defaults to "running" — no transition emit needed here (orchestrator reconciles the DB after start)
     this.opts.deps.onTurnStart?.(); // checkpoint before the first turn (handled by the orchestrator)
     this.queue.push(this.withHandoffSeed(task)); // handoff: seed the backend text; the recorded transcript below stays clean
     this.record({ kind: "message", role: "user", content: task }); // record the first instruction in the transcript (UI/history display)
-    this.loop = this.consume();
+    this.loop = this.consume(this.queue, this.abort);
   }
 
   // called after restart: resume the saved SDK session without a new task and wait in the idle state. When send() arrives, continue working.
@@ -200,7 +212,7 @@ export class Worker {
     // starts quiescent with an empty task set (rehydrate maps old "background" rows the same as "idle").
     this.turnActive = false;
     this.reconcile();
-    this.loop = this.consume();
+    this.loop = this.consume(this.queue, this.abort);
   }
 
   // hot-swap the model while running: applied from the next turn via the SDK live control (query.setModel). best-effort.
@@ -226,6 +238,8 @@ export class Worker {
   }
 
   send(text: string, clientMsgId?: string): void {
+    if (this.reloadingCapabilities) throw new Error(`Worker ${this.opts.id} capability reload in progress; retry`);
+    if (this.capabilityReloadFailure) throw new Error(`Worker ${this.opts.id} capability reload failed; retry reload first`);
     // additional instructions are allowed while running (turn in progress), background (bg tasks running), or idle (waiting). Not for a terminated agent.
     if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
     if (!this.turnActive) {
@@ -295,13 +309,103 @@ export class Worker {
   }
 
   async waitUntilSettled(): Promise<void> {
-    await this.loop;
+    await this.lifetime;
+  }
+
+  requestCapabilityReload(input: {
+    whenIdle: boolean;
+    onBegin(): void;
+  }): { mode: "reloading" | "scheduled"; completion: Promise<void> } {
+    if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
+    if (this.pendingCapabilityReload || this.reloadingCapabilities) {
+      throw new Error(`Worker ${this.opts.id} capability reload is already pending`);
+    }
+    if ((this.state === "running" || this.state === "background") && !input.whenIdle) {
+      throw new Error(`Worker ${this.opts.id} is busy; retry with whenIdle`);
+    }
+    const completion = new Promise<void>((resolve, reject) => {
+      this.pendingCapabilityReload = { onBegin: input.onBegin, resolve, reject };
+    });
+    if (this.state === "idle") this.beginPendingCapabilityReload();
+    return { mode: this.reloadingCapabilities ? "reloading" : "scheduled", completion };
+  }
+
+  private beginPendingCapabilityReload(): void {
+    const pending = this.pendingCapabilityReload;
+    if (!pending || this.reloadingCapabilities || this.isTerminalState()) return;
+    this.reloadingCapabilities = true;
+    pending.onBegin();
+    void this.replaceCapabilityCycle(pending);
+  }
+
+  private async replaceCapabilityCycle(pending: NonNullable<Worker["pendingCapabilityReload"]>): Promise<void> {
+    const oldQueue = this.queue;
+    const oldAbort = this.abort;
+    const oldStream = this.stream;
+    const oldLoop = this.loop;
+    oldQueue.close();
+    oldAbort.abort();
+    try {
+      await oldStream?.interrupt();
+    } catch {
+      /* best-effort: abort+queue close still own teardown */
+    }
+    await oldLoop;
+
+    if (this.isTerminalState()) {
+      const error = new Error(`Worker ${this.opts.id} stopped before capability reload`);
+      pending.reject(error);
+      if (this.pendingCapabilityReload === pending) this.pendingCapabilityReload = undefined;
+      this.reloadingCapabilities = false;
+      return;
+    }
+
+    this.queue = new MessageQueue();
+    this.abort = new AbortController();
+    this.stream = undefined;
+    this.bgTasks.clear();
+    this.bgLevel = false;
+    this.clearIdleGrace();
+    this.turnActive = false;
+
+    let openedResolve!: () => void;
+    let openedReject!: (error: unknown) => void;
+    const opened = new Promise<void>((resolve, reject) => {
+      openedResolve = resolve;
+      openedReject = reject;
+    });
+    this.loop = this.consume(this.queue, this.abort, {
+      reloadAttempt: true,
+      opened: { resolve: openedResolve, reject: openedReject },
+    });
+    try {
+      await opened;
+      this.capabilityReloadFailure = null;
+      pending.resolve();
+    } catch (error) {
+      pending.reject(error);
+    } finally {
+      if (this.pendingCapabilityReload === pending) this.pendingCapabilityReload = undefined;
+      this.reloadingCapabilities = false;
+    }
   }
 
   private transition(status: WorkerStatus): void {
     if (status === "stopped" || status === "done" || status === "error") this.clearIdleGrace(); // terminal: no late grace-expiry reconcile
     this.state = status;
     this.opts.deps.repos.setWorkerStatus(this.opts.id, status);
+    // Arm the replacement synchronously before publishing idle. A re-entrant client reacting to the
+    // status event therefore observes the reload gate instead of enqueueing into the closing cycle.
+    if (status === "idle") this.beginPendingCapabilityReload();
+    if ((status === "stopped" || status === "done" || status === "error") && !this.lifetimeSettled) {
+      this.lifetimeSettled = true;
+      this.resolveLifetime();
+      const pending = this.pendingCapabilityReload;
+      if (pending && !this.reloadingCapabilities) {
+        this.pendingCapabilityReload = undefined;
+        pending.reject(new Error(`Worker ${this.opts.id} stopped before capability reload`));
+      }
+    }
     this.opts.deps.bus.emit({
       type: "worker.status",
       sessionId: this.opts.sessionId,
@@ -352,7 +456,14 @@ export class Worker {
     this.opts.deps.bus.emit({ type: "worker.nested", sessionId: this.opts.sessionId, workerId: this.opts.id, parentToolUseId, data });
   }
 
-  private async consume(): Promise<void> {
+  private async consume(
+    queue: MessageQueue,
+    abort: AbortController,
+    cycle: {
+      reloadAttempt?: boolean;
+      opened?: { resolve(): void; reject(error: unknown): void };
+    } = {},
+  ): Promise<void> {
     const runtimeTarget: CapabilityRuntimeTarget = {
       targetKind: "worker",
       targetId: this.opts.id,
@@ -366,17 +477,19 @@ export class Worker {
         this.opts.deps.capabilityRuntime?.setDesired(runtimeTarget, managed.revision, managed.blocked);
         if (managed.blocked) throw new Error("managed capabilities are blocked");
       }
-      this.stream = this.opts.deps.backend.openSession(this.queue, {
+      const stream = this.opts.deps.backend.openSession(queue, {
         cwd: this.opts.repoPath,
         model: this.currentModel,
         effort: this.opts.deps.effort,
         permissionMode: this.currentPermissionMode,
         systemPromptAppend: WORKER_FENCE_INSTRUCTION,
         resume: this.sdkSessionId,
-        abortController: this.abort,
+        abortController: abort,
         ...(managed ? { runtimeKey: this.opts.id, capabilities: managed } : {}),
       });
-      for await (const ev of this.stream) {
+      this.stream = stream;
+      cycle.opened?.resolve();
+      for await (const ev of stream) {
         // Stream construction proves provider setup was accepted; the first provider frame confirms
         // the child is alive with that immutable projection. Never re-resolve inside this loop.
         if (managed && !managedApplied) {
@@ -518,9 +631,9 @@ export class Worker {
           const cap = this.opts.deps.maxTurns;
           if (cap != null && ev.numTurns >= cap) {
             this.record({ kind: "notice", text: `Turn cap reached (maxTurns=${cap}, num_turns=${ev.numTurns}) — stopping worker.` });
-            void this.stream?.interrupt(); // void: NOT await — would deadlock inside the consume loop
-            this.queue.close();
-            this.abort.abort();
+            void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop
+            queue.close();
+            abort.abort();
             this.transition("stopped");
             this.deferred.splice(0); // clear deferred — cap notice already recorded; worker is terminating, no ghost turns
             return;
@@ -530,9 +643,9 @@ export class Worker {
           const budget = this.opts.deps.costBudgetUsd;
           if (budget != null && this.cumCostUsd >= budget) {
             this.record({ kind: "notice", text: `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
-            void this.stream?.interrupt(); // void: NOT await — would deadlock inside the consume loop
-            this.queue.close();
-            this.abort.abort();
+            void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop
+            queue.close();
+            abort.abort();
             this.transition("stopped");
             this.deferred.splice(0); // clear deferred — cap notice already recorded; worker is terminating, no ghost turns
             return;
@@ -542,7 +655,7 @@ export class Worker {
           const next = this.deferred.shift();
           if (next) {
             this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
-            this.queue.push(next.text); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
+            queue.push(next.text); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
             this.record({ kind: "message", role: "user", content: next.text }, next.clientMsgId);
             // turnActive stays true — the flushed instruction's turn starts immediately.
           } else {
@@ -554,6 +667,21 @@ export class Worker {
         }
       }
       this.flushThinking(); // persist the trailing thinking summary before the loop terminates naturally
+      // Capability replacement intentionally closes the old queue and aborts its controller. That cycle
+      // ending is not the worker lifetime ending, so it must bypass the natural-stream terminal path.
+      if (abort.signal.aborted) return;
+      if (cycle.reloadAttempt && managed && !managedApplied) {
+        this.opts.deps.capabilityRuntime?.setError(
+          runtimeTarget,
+          managed.revision,
+          "Capability runtime application failed.",
+        );
+        this.capabilityReloadFailure = "provider stream ended before capability application";
+        this.record({ kind: "notice", text: "Capability reload failed; the worker remains idle and can retry." });
+        this.turnActive = false;
+        this.reconcile();
+        return;
+      }
       // Natural generator end: "done" is retired (2026-07-11 design) — a live streaming backend only ends via
       // stop (queue close), so an end that reaches here un-stopped is an end-of-stream (finite fakes, or a
       // provider stream dying quietly, e.g. a codex child exiting mid-idle). Semantically that's a stop —
@@ -570,8 +698,16 @@ export class Worker {
           "Capability runtime application failed.",
         );
       }
-      // an abort caused by stop/discard is not an error — don't leave "Operation aborted" in the transcript.
-      if (this.abort.signal.aborted) return;
+      cycle.opened?.reject(err);
+      // an abort caused by stop/discard/reload is not an error — don't leave "Operation aborted" in the transcript.
+      if (abort.signal.aborted) return;
+      if (cycle.reloadAttempt && !managedApplied) {
+        this.capabilityReloadFailure = String(err);
+        this.record({ kind: "notice", text: "Capability reload failed; the worker remains idle and can retry." });
+        this.turnActive = false;
+        this.reconcile();
+        return;
+      }
       this.flushThinking(); // also persist the thinking summary up to right before the error (so it shows on restore)
       this.record({ kind: "error", message: String(err) });
       // A non-abort throw can arrive while the worker is running, background, OR idle (turn ended, stream then
