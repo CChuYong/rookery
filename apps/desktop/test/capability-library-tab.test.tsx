@@ -47,6 +47,7 @@ function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi 
     setSecret: async (_id, key) => ({ key, configured: true }),
     deleteSecret: async (_id, key) => ({ key, configured: false }),
     refresh: async () => library,
+    reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
     setBinding: async () => { throw new Error("unused"); },
     deleteBinding: async () => {},
     ...overrides,

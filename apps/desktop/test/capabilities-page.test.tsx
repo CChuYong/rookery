@@ -32,6 +32,7 @@ function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilityS
     setSecret: async (_instanceId, key) => ({ key, configured: true }),
     deleteSecret: async (_instanceId, key) => ({ key, configured: false }),
     refresh: async () => ({ generation: 0, packs: [], bindings: [] }),
+    reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
     setBinding: async () => { throw new Error("unused"); },
     deleteBinding: async () => {},
   };
@@ -177,5 +178,43 @@ describe("CapabilitiesPage", () => {
     expect(screen.getByText(/적용된 리비전 001122334455/)).toBeInTheDocument();
     expect(screen.getAllByText("다음 턴에 적용").length).toBeGreaterThan(0);
     expect(screen.getAllByText("재시작 필요").length).toBeGreaterThan(0);
+  });
+
+  it("offers immediate and when-idle reloads only for workers with managed runtime drift", async () => {
+    const workerTarget: CapabilityTarget = { kind: "worker", id: "w1" };
+    const workerSnapshot: CapabilitySnapshot = {
+      ...snapshot,
+      target: { ...workerTarget, label: "Worker 1", provider: "claude", cwd: "/repo/.wt/w1" },
+      entries: [{ ...snapshot.entries[4]!, state: "pending-reload" }],
+      diagnostics: [],
+    };
+    const api = makeApi(async () => workerSnapshot);
+    api.reloadWorker = vi.fn(async (workerId, whenIdle) => ({ workerId, mode: whenIdle ? "scheduled" as const : "reloading" as const }));
+    render(<CapabilitiesPage target={workerTarget} {...pageProps(api)} />);
+
+    await screen.findByTestId("capability-worker-reload");
+    fireEvent.click(screen.getByRole("button", { name: "대기 상태일 때" }));
+    await waitFor(() => expect(api.reloadWorker).toHaveBeenCalledWith("w1", true));
+    expect(await screen.findByText(/대기 상태가 되면/)).toBeInTheDocument();
+  });
+
+  it("shows worker reload failures and does not offer reload controls for a master session", async () => {
+    const workerTarget: CapabilityTarget = { kind: "worker", id: "w1" };
+    const workerSnapshot: CapabilitySnapshot = {
+      ...snapshot,
+      target: { ...workerTarget, label: "Worker 1", provider: "claude", cwd: "/repo/.wt/w1" },
+      entries: [{ ...snapshot.entries[4]!, state: "error" }],
+      diagnostics: [],
+    };
+    const api = makeApi(async () => workerSnapshot);
+    api.reloadWorker = vi.fn(async () => { throw new Error("runtime replacement failed"); });
+    const { rerender } = render(<CapabilitiesPage target={workerTarget} {...pageProps(api)} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "지금 다시 불러오기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("runtime replacement failed");
+
+    rerender(<CapabilitiesPage target={target} {...pageProps(makeApi(async () => ({ ...workerSnapshot, target: snapshot.target })))} />);
+    await screen.findByText("Main");
+    expect(screen.queryByTestId("capability-worker-reload")).toBeNull();
   });
 });

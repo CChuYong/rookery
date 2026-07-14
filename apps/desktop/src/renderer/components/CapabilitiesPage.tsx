@@ -151,10 +151,16 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
   const [category, setCategory] = useState<Category>("all");
   const [refresh, setRefresh] = useState(0);
   const [tab, setTab] = useState<CenterTab>("effective");
+  const [reloadBusy, setReloadBusy] = useState<"now" | "idle" | null>(null);
+  const [reloadMessage, setReloadMessage] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   const targetKey = target ? `${target.kind}:${target.id}` : "none";
 
   useEffect(() => {
     setCategory("all");
+    setReloadBusy(null);
+    setReloadMessage(null);
+    setReloadError(null);
   }, [targetKey]);
 
   useEffect(() => {
@@ -195,6 +201,26 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
     for (const entry of snapshot?.entries ?? []) initial[entry.state]++;
     return initial;
   }, [snapshot]);
+
+  const workerNeedsReload = target?.kind === "worker" && snapshot?.entries.some((entry) =>
+    Boolean(entry.managed) && (entry.state === "pending-reload" || entry.state === "error"),
+  );
+
+  const reloadWorker = async (whenIdle: boolean): Promise<void> => {
+    if (target?.kind !== "worker" || reloadBusy) return;
+    setReloadBusy(whenIdle ? "idle" : "now");
+    setReloadMessage(null);
+    setReloadError(null);
+    try {
+      const result = await api.reloadWorker(target.id, whenIdle);
+      setReloadMessage(t(`capabilities.reloadResult.${result.mode}`));
+      setRefresh((value) => value + 1);
+    } catch (cause) {
+      setReloadError(errorMessage(cause));
+    } finally {
+      setReloadBusy(null);
+    }
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -268,6 +294,27 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
                   </div>
                 ))}
               </section>
+
+              {workerNeedsReload && (
+                <section data-testid="capability-worker-reload" className="rounded-[var(--radius)] border border-run/30 bg-run/5 px-3.5 py-3">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-[12px] font-medium text-run"><RefreshCw size={14} /> {t("capabilities.reloadTitle")}</div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-fg-dim">{t("capabilities.reloadDescription")}</p>
+                      {reloadMessage && <p role="status" className="mt-2 text-[11px] text-pr">{reloadMessage}</p>}
+                      {reloadError && <p role="alert" className="mt-2 break-words font-mono text-[10.5px] text-fail">{reloadError}</p>}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button variant="outline" size="sm" disabled={reloadBusy !== null} onClick={() => void reloadWorker(true)}>
+                        {reloadBusy === "idle" && <Loader2 size={13} className="mr-1.5 animate-spin" />}{t("capabilities.reloadWhenIdle")}
+                      </Button>
+                      <Button size="sm" disabled={reloadBusy !== null} onClick={() => void reloadWorker(false)}>
+                        {reloadBusy === "now" && <Loader2 size={13} className="mr-1.5 animate-spin" />}{t("capabilities.reloadNow")}
+                      </Button>
+                    </div>
+                  </div>
+                </section>
+              )}
 
               {snapshot.diagnostics.length > 0 && (
                 <section className="rounded-[var(--radius)] border border-run/30 bg-run/5 px-3.5 py-3">

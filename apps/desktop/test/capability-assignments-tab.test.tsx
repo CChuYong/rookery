@@ -24,7 +24,8 @@ function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi 
     loadSnapshot: async () => { throw new Error("unused"); }, loadLibrary: async () => snapshot(),
     addPack: async () => pack, removePack: async () => {}, setTrust: async () => pack,
     setSecret: async (_id, key) => ({ key, configured: true }), deleteSecret: async (_id, key) => ({ key, configured: false }),
-    refresh: async () => snapshot(), setBinding: async (id, input) => ({ id, ...input, createdAt: "t", updatedAt: "t" }), deleteBinding: async () => {},
+    refresh: async () => snapshot(), reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
+    setBinding: async (id, input) => ({ id, ...input, createdAt: "t", updatedAt: "t" }), deleteBinding: async () => {},
     ...overrides,
   };
 }
