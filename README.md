@@ -67,6 +67,13 @@ while idle or schedule a reload for the current turn boundary. Reload preserves 
 row, worktree, transcript, provider-native conversation, model, effort, permission mode,
 and lifetime budgets.
 
+In an active master or worker chat, slash autocomplete is resolved from that exact
+conversation's capability snapshot. `/capabilities`, `/skills`, `/hooks`, and `/mcp` open
+the matching Capability Center view, while `/btw` and `/side` use the same action registry
+to open a Side question. Managed skills are inserted with provider-native syntax
+(`/name` for Claude and `$name` for Codex) only when the selected target can invoke them;
+inventory-only provider commands are not offered as dead prompts.
+
 Registered repositories may check in an opt-in shared index at
 `.rookery/capabilities.json`; its pack paths are contained under
 `.rookery/capabilities/`. Rookery discovers and watches those packs, but never trusts or

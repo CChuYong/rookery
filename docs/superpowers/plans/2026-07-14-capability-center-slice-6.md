@@ -229,7 +229,8 @@ git commit -m "feat: execute command actions in chat"
 - Modify: `apps/desktop/src/renderer/i18n/locales/ko/composer.ts`
 - Modify: `apps/desktop/src/renderer/i18n/locales/en/composer.ts`
 - Modify: `apps/desktop/test/capabilities-page.test.tsx`
-- Modify: `apps/desktop/test/app.test.tsx`
+- Create: `apps/desktop/src/renderer/lib/command-actions.ts`
+- Create: `apps/desktop/test/command-actions.test.ts`
 - Modify: `README.md`
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/specs/2026-07-13-capability-center-design.md`
@@ -240,11 +241,11 @@ git commit -m "feat: execute command actions in chat"
 
 - [ ] **Step 1: Write failing deep-link tests.**
 
-Assert `/capabilities` opens Effective/all, `/skills` opens Effective with only `kind:"skill"`, `/hooks` only hooks, and `/mcp` only MCP entries. Assert changing the target clears an ordinary manual filter but preserves a newly supplied deep-link route. Add App-level proof that the command callback navigates to the overlay and passes the route.
+Assert `/capabilities` opens Effective/all, `/skills` opens Effective with only `kind:"skill"`, `/hooks` only hooks, and `/mcp` only MCP entries. Assert changing the target clears an ordinary manual filter but preserves a newly supplied deep-link route. Add pure routing proof that a command action maps to the exact overlay route and non-Center actions do not.
 
 - [ ] **Step 2: Run focused desktop tests and verify initial route props are absent.**
 
-Run: `npm -w apps/desktop test -- --run test/capabilities-page.test.tsx test/app.test.tsx`
+Run: `npm -w apps/desktop test -- --run test/capabilities-page.test.tsx test/command-actions.test.ts`
 
 Expected: FAIL because Capability Center has no initial tab/kind route.
 
@@ -277,7 +278,7 @@ Inspect the final protocol response and tests to prove every candidate has an ac
 - [ ] **Step 7: Commit docs and verification changes.**
 
 ```bash
-git add apps/desktop/src/renderer/App.tsx apps/desktop/src/renderer/components/CapabilitiesPage.tsx apps/desktop/src/renderer/i18n/locales/ko/composer.ts apps/desktop/src/renderer/i18n/locales/en/composer.ts apps/desktop/test/capabilities-page.test.tsx apps/desktop/test/app.test.tsx README.md AGENTS.md docs/superpowers/specs/2026-07-13-capability-center-design.md
+git add apps/desktop/src/renderer/App.tsx apps/desktop/src/renderer/components/CapabilitiesPage.tsx apps/desktop/src/renderer/lib/command-actions.ts apps/desktop/src/renderer/i18n/locales/ko/composer.ts apps/desktop/src/renderer/i18n/locales/en/composer.ts apps/desktop/test/capabilities-page.test.tsx apps/desktop/test/command-actions.test.ts README.md AGENTS.md docs/superpowers/specs/2026-07-13-capability-center-design.md
 git commit -m "docs: finish capability command actions"
 ```
 
