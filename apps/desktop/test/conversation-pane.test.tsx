@@ -9,6 +9,11 @@ function reset(): void {
   useStore.setState({ logsBySession: {}, workerLogs: {}, fleet: {}, running: {}, pendingBySession: {}, pendingByWorker: {}, sideConversations: {}, historyLoaded: {}, historyLoadFailed: {} } as never);
 }
 
+const SIDE_COMMANDS = [
+  { id: "btw", name: "btw", description: "side", argumentHint: "<질문>", action: { type: "open-panel" as const, panel: "btw" as const } },
+  { id: "side", name: "side", description: "side", argumentHint: "<질문>", action: { type: "open-panel" as const, panel: "side" as const } },
+];
+
 describe("ConversationPane Side drawer", () => {
   beforeEach(reset);
 
@@ -48,8 +53,11 @@ describe("ConversationPane Side drawer", () => {
     expect(onSideSend).toHaveBeenCalledWith("side-w", "which file?");
   });
 
-  it("prepends /btw and /side to slash autocomplete alongside existing commands", () => {
-    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[{ name: "review", description: "review code" }]} />);
+  it("uses registry-provided /btw and /side actions alongside prompt commands", () => {
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[
+      ...SIDE_COMMANDS,
+      { id: "review", name: "review", description: "review code", action: { type: "insert-prompt", text: "/review" } },
+    ]} />);
     const editor = screen.getByRole("textbox");
     editor.textContent = "/";
     fireEvent.input(editor);
@@ -58,8 +66,11 @@ describe("ConversationPane Side drawer", () => {
     expect(screen.getByText("/review")).toBeInTheDocument();
   });
 
-  it("removes local Side commands from autocomplete while its drawer is already open", async () => {
-    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[{ name: "review", description: "review code" }]} />);
+  it("removes registry Side actions from autocomplete while its drawer is already open", async () => {
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[
+      ...SIDE_COMMANDS,
+      { id: "review", name: "review", description: "review code", action: { type: "insert-prompt", text: "/review" } },
+    ]} />);
     const editor = screen.getByRole("textbox");
     editor.textContent = "open side";
     fireEvent.input(editor);

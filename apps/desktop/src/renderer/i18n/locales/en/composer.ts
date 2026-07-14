@@ -15,4 +15,8 @@ export default {
   "composer.attachFile": "Attach file",
   "composer.stop": "Stop",
   "composer.sideQuestion": "Ask separately",
+  "composer.commandCapabilitiesDescription": "Open Capability Center for this conversation.",
+  "composer.commandSkillsDescription": "Open this conversation's skills in Capability Center.",
+  "composer.commandHooksDescription": "Open this conversation's hooks in Capability Center.",
+  "composer.commandMcpDescription": "Open this conversation's MCP integrations in Capability Center.",
 } satisfies Catalog;

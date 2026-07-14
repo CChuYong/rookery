@@ -15,4 +15,8 @@ export default {
   "composer.attachFile": "파일 첨부",
   "composer.stop": "중단",
   "composer.sideQuestion": "별도로 질문하기",
+  "composer.commandCapabilitiesDescription": "이 대화의 Capability Center를 엽니다.",
+  "composer.commandSkillsDescription": "이 대화의 스킬을 Capability Center에서 엽니다.",
+  "composer.commandHooksDescription": "이 대화의 훅을 Capability Center에서 엽니다.",
+  "composer.commandMcpDescription": "이 대화의 MCP 연동을 Capability Center에서 엽니다.",
 } satisfies Catalog;

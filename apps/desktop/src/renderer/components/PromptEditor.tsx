@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
+import type { CommandAction, CommandCandidate } from "@daemon/core/capabilities/commands.js";
 import { serializeEditor, setEditorText, insertNodesAtCaret, applyMarkdownShortcuts } from "../lib/mention-editor.js";
 import { useFileMention } from "../lib/use-file-mention.js";
 import type { BrowseResult } from "../types/rookery.js";
@@ -7,7 +8,7 @@ import { FileMentionPopup } from "./FileMentionPopup.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 
-export interface SlashCommand { name: string; description: string; argumentHint?: string; aliases?: string[] }
+export type SlashCommand = CommandCandidate;
 
 const MAX_MATCHES = 50;
 // Only a slash query when the last token at the caret starts with "/". Something like "a/b" doesn't trigger it.
@@ -43,11 +44,12 @@ export interface PromptEditorProps {
   ariaLabel?: string;
   onSubmit?: () => void;
   onEscape?: () => void;
+  onCommandAction?: (action: CommandAction) => void;
 }
 
 export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor(p, ref) {
   const t = useT();
-  const { commands = [], browseDir, disabled = false, onChange, onSubmit, onEscape } = p;
+  const { commands = [], browseDir, disabled = false, onChange, onSubmit, onEscape, onCommandAction } = p;
   const [text, setText] = useState(p.initialText ?? "");
   const [sel, setSel] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -61,7 +63,8 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
   }, []);
 
   const slashQuery = slashQueryOf(text);
-  const matches = slashQuery !== null ? matchCommands(commands, slashQuery) : [];
+  const executableCommands = onCommandAction ? commands : commands.filter((command) => command.action.type === "insert-prompt");
+  const matches = slashQuery !== null ? matchCommands(executableCommands, slashQuery) : [];
   const popupOpen = slashQuery !== null && matches.length > 0 && !dismissed && !disabled;
 
   const syncText = () => {
@@ -75,10 +78,16 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
 
   const pickCommand = (c: SlashCommand) => {
     const ed = edRef.current; if (!ed) return;
-    const replaced = text.replace(/(^|\s)\/\S*$/, (_m, pre: string) => `${pre}/${c.name} `);
+    const replacement = c.action.type === "insert-prompt"
+      ? `${c.action.text} `
+      : c.argumentHint
+        ? `/${c.name} `
+        : "";
+    const replaced = text.replace(/(^|\s)\/\S*$/, (_m, pre: string) => `${pre}${replacement}`);
     setEditorText(ed, replaced);
     setText(replaced); onChange?.(replaced);
     setDismissed(true);
+    if (c.action.type !== "insert-prompt" && !c.argumentHint) onCommandAction?.(c.action);
     requestAnimationFrame(() => ed.focus());
   };
   const newline = () => {
@@ -138,7 +147,7 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
               type="button"
               className={`flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left ${i === sel ? "bg-accent/15" : "hover:bg-line/40"}`}
               onMouseEnter={() => setSel(i)}
-              onMouseDown={(e) => { e.preventDefault(); pickCommand(c); }}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => pickCommand(c)}
             >
               <span className="font-mono text-[12px] text-fg">

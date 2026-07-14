@@ -4,6 +4,7 @@ import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import type { CapabilityTarget } from "@daemon/core/capabilities/types.js";
+import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { useStore } from "./store/store.js";
 import { baseName } from "./lib/path.js";
 import { resolveMasterControls } from "./lib/master-controls.js";
@@ -19,6 +20,8 @@ import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, shouldCompactDock
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
+import { capabilityCenterRoute, localizeCommandCandidates } from "./lib/command-actions.js";
+import type { CapabilityCenterRoute } from "./lib/command-actions.js";
 import { useT } from "./i18n/provider.js";
 import { RepoTree } from "./views/RepoTree.js";
 import { RepoModal } from "./components/RepoModal.js";
@@ -237,6 +240,22 @@ export function App(): JSX.Element {
     : s.slack === "off" ? t("settings.slackOff")
     : t("settings.slackNoToken");
   const closeOverlay = () => navigate({ overlay: null });
+  const [capabilityRoute, setCapabilityRoute] = useState<CapabilityCenterRoute>({ tab: "effective" });
+  const displayCommands = useMemo(() => localizeCommandCandidates(s.commands, t), [s.commands, t]);
+  const handleCommandAction = useCallback((action: CommandAction) => {
+    const route = capabilityCenterRoute(action);
+    if (!route) return;
+    setCapabilityRoute(route);
+    navigate({ overlay: "capabilities" });
+  }, [navigate]);
+  const toggleCapabilityCenter = useCallback(() => {
+    if (overlay === "capabilities") {
+      navigate({ overlay: null });
+      return;
+    }
+    setCapabilityRoute({ tab: "effective" });
+    navigate({ overlay: "capabilities" });
+  }, [navigate, overlay]);
   const [repoModal, setRepoModal] = useState(false);
   const [spawnRepo, setSpawnRepo] = useState<string | null>(null);
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
@@ -397,24 +416,18 @@ export function App(): JSX.Element {
   useEffect(() => {
     const c = client;
     if (s.daemon !== "up" || !c) return;
-    // Thread provider so the daemon skips the Claude-SDK cwd probe for codex sessions/workers (finding [6]):
-    // codex has no slash-command catalog, so a probe there is a dead, misleading affordance (and a wasted
-    // Claude query). The active worker/session provider is authoritative on the client side.
-    let msg: { type: "commands.list"; workerId?: string; cwd?: string; provider?: "claude" | "codex" } | null = null;
+    let msg: { type: "commands.list"; sessionId?: string; workerId?: string } | null = null;
     if (s.activeWorkerId) {
-      const provider = s.fleet[s.activeWorkerId]?.provider as "claude" | "codex" | undefined;
-      msg = { type: "commands.list", workerId: s.activeWorkerId, ...(provider ? { provider } : {}) };
+      msg = { type: "commands.list", workerId: s.activeWorkerId };
     } else if (s.activeSessionId) {
-      const sess = s.sessions.find((x) => x.id === s.activeSessionId);
-      const provider = sess?.provider as "claude" | "codex" | undefined;
-      if (sess?.cwd) msg = { type: "commands.list", cwd: sess.cwd, ...(provider ? { provider } : {}) };
+      msg = { type: "commands.list", sessionId: s.activeSessionId };
     }
     if (!msg) { useStore.getState().setCommands([]); return; }
     let live = true; // prevent a late commands response from the previous context from overwriting when switching conversation panes
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     void c.request(msg).then((r) => { if (live) useStore.getState().setCommands(r.commands ?? []); }).catch(() => {});
     return () => { live = false; };
-  }, [s.activeSessionId, s.activeWorkerId, s.daemon]);
+  }, [s.activeSessionId, s.activeWorkerId, s.capabilityGeneration, s.daemon]);
 
   // On page switch / renderer reload, sync that page with main's actual terminal list → restore live PTY tabs.
   // If there's no PTY after a restart, spawn new shells matching the saved layout (once per page).
@@ -477,6 +490,18 @@ export function App(): JSX.Element {
           });
         }
         useStore.getState().applyEvent(e);
+        if (e.type === "commands.changed") {
+          const state = useStore.getState();
+          const request = e.scopeId === state.activeWorkerId
+            ? { type: "commands.list" as const, workerId: e.scopeId }
+            : e.scopeId === state.activeSessionId
+              ? { type: "commands.list" as const, sessionId: e.scopeId }
+              : null;
+          if (request) void c.request(request).then((response) => {
+            const current = useStore.getState();
+            if (e.scopeId === current.activeWorkerId || e.scopeId === current.activeSessionId) current.setCommands(response.commands ?? []);
+          }).catch(() => {});
+        }
         if (e.type === "automation.changed") { void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => {}); }
         if (e.type === "worker.deletion" && e.phase === "failed") {
           void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {});
@@ -827,7 +852,7 @@ export function App(): JSX.Element {
   const onAttachFile = useCallback(() => window.rookery.pickFile(), []);
   const onDropFiles = useCallback((files: File[]) => files.map((f) => window.rookery.getPathForFile(f)).filter(Boolean), []);
   // @ path autocomplete: list directories relative to the active page's work root (worker worktree > session cwd > home).
-  // Isomorphic to the commands.list context injection — subId for a worker page, cwd for a master session.
+  // The file browser is scoped independently from commands.list: subId for a worker page, cwd for a master session.
   const browseDir = useCallback(
     (dir: string) => window.rookery.fs.browse(showRepos ? { dir, subId: s.activeWorkerId ?? undefined } : { dir, cwd: wsSessionCwd }),
     [showRepos, s.activeWorkerId, wsSessionCwd],
@@ -936,11 +961,12 @@ export function App(): JSX.Element {
             onSideSend={sendSide}
             onSideStop={stopSide}
             onSideClose={closeSide}
+            onCommandAction={handleCommandAction}
             onOpenFile={openFileInPage}
             onAttachFile={onAttachFile}
             onDropFiles={onDropFiles}
             browseDir={browseDir}
-            commands={s.commands}
+            commands={displayCommands}
             controls={{
               provider: activeSub.provider,
               model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
@@ -989,11 +1015,12 @@ export function App(): JSX.Element {
             onSideSend={sendSide}
             onSideStop={stopSide}
             onSideClose={closeSide}
+            onCommandAction={handleCommandAction}
             placeholder={sessionReadOnly ? t("app.slackReadOnly") : t("app.composerPlaceholder")}
             onAttachFile={onAttachFile}
             onDropFiles={onDropFiles}
             browseDir={browseDir}
-            commands={s.commands}
+            commands={displayCommands}
             controls={masterControls}
           />
         ),
@@ -1098,7 +1125,7 @@ export function App(): JSX.Element {
                 entry as the expanded footer, not just restart/Settings. */}
             <AttentionBell onNavigate={onAttentionNav} />
             <Tooltip label={t("app.capabilityCenter")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "capabilities" ? null : "capabilities" }); }} aria-label={t("app.capabilityCenter")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+              <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                 <Blocks size={16} />
               </button>
             </Tooltip>
@@ -1170,7 +1197,7 @@ export function App(): JSX.Element {
                 {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
                     shouldn't require switching to the Sessions tab first. */}
                 <Tooltip label={t("app.capabilityCenter")} side="top">
-                  <button onClick={() => { navigate({ overlay: overlay === "capabilities" ? null : "capabilities" }); }} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                  <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
                     <Blocks size={14} />
                   </button>
                 </Tooltip>
@@ -1213,6 +1240,8 @@ export function App(): JSX.Element {
             api={capabilityApi}
             targets={capabilityTargetOptions}
             generation={s.capabilityGeneration}
+            initialTab={capabilityRoute.tab}
+            initialKind={capabilityRoute.kind}
             pickDirectory={() => window.rookery.pickDirectory()}
             onClose={closeOverlay}
           />
@@ -1267,7 +1296,7 @@ export function App(): JSX.Element {
             <AutomationForm
               job={editJob}
               repos={s.repos}
-              commands={s.commands}
+              commands={displayCommands.filter((command) => command.action.type === "insert-prompt")}
               browseDir={newSessionBrowse}
               onClose={() => setEditJob(null)}
               onSubmit={async (input) => {
@@ -1361,11 +1390,12 @@ export function App(): JSX.Element {
                       onSideSend={sendSide}
                       onSideStop={stopSide}
                       onSideClose={closeSide}
+                      onCommandAction={handleCommandAction}
                       onOpenFile={openFileInPage}
                       onAttachFile={onAttachFile}
                       onDropFiles={onDropFiles}
                       browseDir={browseDir}
-                      commands={s.commands}
+                      commands={displayCommands}
                       controls={{
                         // while running, the model + permission mode can be changed live (query.setModel / query.setPermissionMode). effort can't → omitted.
                         provider: activeSub.provider,
@@ -1456,11 +1486,12 @@ export function App(): JSX.Element {
                 onSideSend={sendSide}
                 onSideStop={stopSide}
                 onSideClose={closeSide}
+                onCommandAction={handleCommandAction}
                 placeholder={sessionReadOnly ? t("app.slackReadOnly") : t("app.composerPlaceholder")}
                 onAttachFile={onAttachFile}
                 onDropFiles={onDropFiles}
                 browseDir={browseDir}
-                commands={s.commands}
+                commands={displayCommands}
                 controls={masterControls}
               />
             ) : (

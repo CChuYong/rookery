@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
+import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { Send, Paperclip, Square, Loader2, MessageCircleQuestion } from "lucide-react";
 import { baseName as basename } from "../lib/path.js";
 import { makeChip } from "../lib/mention-editor.js";
@@ -41,10 +42,17 @@ export function permLabel(mode: string, t: (k: string) => string): string {
 
 export type { SlashCommand };
 
-export function parseSideCommand(text: string): { command: "btw" | "side"; question: string } | null {
-  const match = /^\/(btw|side)(?:\s+([\s\S]*))?$/.exec(text.trim());
+export function matchCommandAction(text: string, commands: SlashCommand[]): { candidate: SlashCommand; argument?: string } | null {
+  const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
   if (!match) return null;
-  return { command: match[1] as "btw" | "side", question: (match[2] ?? "").trim() };
+  const name = match[1]!.toLowerCase();
+  const candidate = commands.find((command) => {
+    const names = [command.name, ...(command.aliases ?? [])].map((value) => value.replace(/^\/+/, "").toLowerCase());
+    return names.includes(name);
+  });
+  if (!candidate) return null;
+  const argument = match[2]?.trim();
+  return { candidate, ...(argument ? { argument } : {}) };
 }
 
 // Chat input composer (shared by master/worker conversations + new session). Bundles markdown shortcuts, @file-mention and /skill popups,
@@ -60,6 +68,7 @@ export interface ComposerProps {
   onDropFiles?: (files: File[]) => string[]; // dropped Files → array of absolute paths (attachment)
   browseDir?: (dir: string) => Promise<BrowseResult>; // @ path autocomplete: list a directory (if absent, the @ popup is disabled)
   commands?: SlashCommand[];
+  onCommandAction?: (action: CommandAction, argument?: string) => void;
   busy?: boolean; // turn in progress → the send button becomes a stop button
   onStop?: () => void;
   leftSlot?: ReactNode; // per-page widget to insert at the left of the controls row (e.g. the new session's folder picker)
@@ -82,6 +91,7 @@ export function Composer({
   onDropFiles,
   browseDir,
   commands = [],
+  onCommandAction,
   busy = false,
   onStop,
   leftSlot,
@@ -132,10 +142,10 @@ export function Composer({
     if (disabled) return;
     const msg = (promptRef.current?.getText() ?? "").trim();
     if (!msg && !allowEmpty) return;
-    const sideCommand = onSideSend ? parseSideCommand(msg) : null;
-    if (sideCommand) {
-      if (!sideCommand.question) return;
-      onSideSend?.(sideCommand.question);
+    const command = onCommandAction ? matchCommandAction(msg, commands) : null;
+    if (command && command.candidate.action.type !== "insert-prompt") {
+      if (command.candidate.action.type === "open-panel" && !command.argument) return;
+      onCommandAction?.(command.candidate.action, command.argument);
       promptRef.current?.clear();
       return;
     }
@@ -210,6 +220,7 @@ export function Composer({
         autoFocus={autoFocus}
         onSubmit={submit}
         onEscape={onEscape}
+        onCommandAction={(action) => onCommandAction?.(action)}
       />
       {/* flex-wrap so the controls reflow onto a second line in a very narrow pane instead of overflowing (the outer <main>
           now clips, so without wrap the send button could be cut off). */}

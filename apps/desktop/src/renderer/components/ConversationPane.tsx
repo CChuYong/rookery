@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Clock } from "lucide-react";
+import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { useStore } from "../store/store.js";
 import type { LogItem } from "../store/reduce.js";
 import { useDraftStore } from "../store/drafts.js";
 import { Conversation } from "../views/Conversation.js";
-import type { ConversationProps, SlashCommand } from "../views/Conversation.js";
+import type { ConversationProps } from "../views/Conversation.js";
 import { useT } from "../i18n/provider.js";
 import { SideConversationDrawer } from "./SideConversationDrawer.js";
 
@@ -24,6 +25,7 @@ export function ConversationPane({
   onSideSend,
   onSideStop,
   onSideClose,
+  onCommandAction,
   commands = [],
   ...rest
 }: {
@@ -51,14 +53,6 @@ export function ConversationPane({
   const initialText = useMemo(() => useDraftStore.getState().byPage[id] ?? "", [id]);
   const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(id, text), [id]);
   const [side, setSide] = useState<{ id: string | null; question: string } | null>(null);
-  const localSideCommands = useMemo<SlashCommand[]>(() => [
-    { name: "btw", description: t("sideConversation.commandDescription"), argumentHint: t("sideConversation.commandArgumentHint") },
-    { name: "side", description: t("sideConversation.commandDescription"), argumentHint: t("sideConversation.commandArgumentHint") },
-  ], [t]);
-  const composerCommands = useMemo(() => {
-    if (!onSideStart || side) return commands;
-    return [...localSideCommands, ...commands.filter((command) => command.name.toLowerCase() !== "btw" && command.name.toLowerCase() !== "side")];
-  }, [commands, localSideCommands, onSideStart, side]);
   const sideGeneration = useRef(0);
   const askSide = useCallback((text: string) => {
     if (!onSideStart) return;
@@ -71,6 +65,15 @@ export function ConversationPane({
       else onSideClose?.(sideId); // closed while the provider fork was opening
     }).catch(() => { if (sideGeneration.current === generation) setSide(null); });
   }, [onSideStart, onSideSend, onSideClose, side]);
+  const composerCommands = useMemo(() => commands.filter((command) =>
+    command.action.type !== "open-panel" || Boolean(onSideStart && !side)), [commands, onSideStart, side]);
+  const handleCommandAction = useCallback((action: CommandAction, argument?: string) => {
+    if (action.type === "open-panel") {
+      if (argument) askSide(argument);
+      return;
+    }
+    onCommandAction?.(action, argument);
+  }, [askSide, onCommandAction]);
   const closeSide = useCallback(() => {
     sideGeneration.current++;
     if (side?.id) onSideClose?.(side.id);
@@ -79,7 +82,7 @@ export function ConversationPane({
   return (
     <div className="relative flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} commands={composerCommands} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} />
+        <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} commands={composerCommands} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
         {pending.length > 0 && (
           <div className="flex flex-col gap-1 px-4 pb-2">
             {pending.map((p) => (

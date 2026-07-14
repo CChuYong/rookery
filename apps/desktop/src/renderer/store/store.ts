@@ -5,6 +5,7 @@ import type { SettingsValues } from "@daemon/core/settings.js";
 import type { IntegrationsStatus, WorkerRow, CodexModelInfo, CodexAuthStatus } from "@daemon/protocol/messages.js";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
+import type { CommandCandidate } from "@daemon/core/capabilities/commands.js";
 import { emptyState, reduceEvent, applySubEvent, seedSessionLog } from "./reduce.js";
 import type { AppState, FleetRow, LogItem } from "./reduce.js";
 import { navigate as navGo, back as navBackFn, forward as navFwdFn, reset as navReset } from "./navigation.js";
@@ -74,7 +75,7 @@ interface Store extends AppState {
   overrides: Record<string, { model?: string; effort?: string; permissionMode?: string }>;
   setOverride: (sid: string, patch: { model?: string; effort?: string; permissionMode?: string }) => void;
   // Slash command/skill candidates for the currently active conversation pane (refreshed when the context changes).
-  commands: Array<{ name: string; description: string; argumentHint?: string; aliases?: string[] }>;
+  commands: CommandCandidate[];
   setCommands: (commands: Store["commands"]) => void;
   // Workers that settled (idle/done/error/failed) while the user wasn't looking = unread. Cleared when opened (select) or when running again.
   attention: Record<string, boolean>;
@@ -228,7 +229,7 @@ export const useStore = create<Store>((set, get) => ({
       }
       // The SDK pushes a change to the command/skill list → if it's the context currently being viewed, swap the / candidates.
       if (e.type === "commands.changed") {
-        return e.scopeId === s.activeWorkerId || e.scopeId === s.activeSessionId ? { commands: e.commands } : {};
+        return {};
       }
       // Slack status update.
       if (e.type === "slack.status") {
