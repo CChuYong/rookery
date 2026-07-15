@@ -3,7 +3,7 @@ import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, B
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
-import type { CapabilityTarget } from "@daemon/core/capabilities/types.js";
+import type { CapabilityPreviewTarget, CapabilityTarget } from "@daemon/core/capabilities/types.js";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { useStore } from "./store/store.js";
 import { baseName } from "./lib/path.js";
@@ -244,10 +244,12 @@ export function App(): JSX.Element {
     : t("settings.slackNoToken");
   const closeOverlay = () => navigate({ overlay: null });
   const [capabilityRoute, setCapabilityRoute] = useState<CapabilityCenterRoute>({ tab: "effective" });
+  const [capabilityPreviewTarget, setCapabilityPreviewTarget] = useState<CapabilityPreviewTarget | null>(null);
   const displayCommands = useMemo(() => localizeCommandCandidates(s.commands, t), [s.commands, t]);
   const handleCommandAction = useCallback((action: CommandAction) => {
     const route = capabilityCenterRoute(action);
     if (!route) return;
+    setCapabilityPreviewTarget(null);
     setCapabilityRoute(route);
     navigate({ overlay: "capabilities" });
   }, [navigate]);
@@ -256,15 +258,28 @@ export function App(): JSX.Element {
       navigate({ overlay: null });
       return;
     }
+    setCapabilityPreviewTarget(null);
     setCapabilityRoute({ tab: "effective" });
     navigate({ overlay: "capabilities" });
   }, [navigate, overlay]);
   const openCapabilityCatalog = useCallback(() => {
+    setCapabilityPreviewTarget(null);
     setCapabilityRoute({ tab: "library" });
     navigate({ overlay: "capabilities" });
   }, [navigate]);
   const openAdvancedCapabilityAssignments = useCallback(() => {
+    setCapabilityPreviewTarget(null);
     setCapabilityRoute({ tab: "assignments" });
+    navigate({ overlay: "capabilities" });
+  }, [navigate]);
+  const openRookeryCapabilityPreview = useCallback(() => {
+    setCapabilityPreviewTarget({ kind: "rookery", provider: "claude", agent: "master" });
+    setCapabilityRoute({ tab: "effective" });
+    navigate({ overlay: "capabilities" });
+  }, [navigate]);
+  const openRepoCapabilityPreview = useCallback((repoId: string) => {
+    setCapabilityPreviewTarget({ kind: "repo", id: repoId, provider: "claude", agent: "master" });
+    setCapabilityRoute({ tab: "effective" });
     navigate({ overlay: "capabilities" });
   }, [navigate]);
   const [repoModal, setRepoModal] = useState(false);
@@ -1264,12 +1279,13 @@ export function App(): JSX.Element {
             onClose={closeOverlay}
             onOpenCatalog={openCapabilityCatalog}
             onOpenAdvancedAssignments={openAdvancedCapabilityAssignments}
+            onPreviewEffective={() => openRepoCapabilityPreview(repoSettingsRepo.id)}
           />
         ) : overlay === "repoSettings" ? (
           <div className="flex flex-1 items-center justify-center gap-2 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
         ) : overlay === "capabilities" ? (
           <CapabilitiesPage
-            target={capabilityTarget}
+            target={capabilityPreviewTarget ?? capabilityTarget}
             api={capabilityApi}
             targets={capabilityTargetOptions}
             generation={s.capabilityGeneration}
@@ -1285,6 +1301,11 @@ export function App(): JSX.Element {
             onClose={closeOverlay}
             slack={s.slack}
             onSlackToggle={(enabled) => { void client?.request({ type: "slack.set", enabled }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }}
+            capabilityApi={capabilityApi}
+            capabilityGeneration={s.capabilityGeneration}
+            onOpenCapabilityCatalog={openCapabilityCatalog}
+            onOpenCapabilityAssignments={openAdvancedCapabilityAssignments}
+            onPreviewCapabilities={openRookeryCapabilityPreview}
             integrations={s.integrations}
             authStatus={s.authStatus}
             onSaveLinearKey={(key) => {

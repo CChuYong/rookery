@@ -21,7 +21,11 @@ const snapshot: CapabilitySnapshot = {
   diagnostics: [{ id: "apps", source: "Codex app/list", severity: "warning", message: "method not found" }],
 };
 
-const targets = { repos: [], sessions: [], workers: [] };
+const targets = {
+  repos: [{ id: "repo-1", label: "Repo One" }],
+  sessions: [{ id: "s1", label: "Main" }],
+  workers: [{ id: "w2", label: "Worker 2" }],
+};
 function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilitySnapshot>): CapabilityCenterApi {
   return {
     loadSnapshot,
@@ -118,11 +122,13 @@ describe("CapabilitiesPage", () => {
     expect(screen.queryByText("notion")).toBeNull();
   });
 
-  it("shows an explicit no-target state without making a request", () => {
-    const loadSnapshot = vi.fn(async () => snapshot);
+  it("defaults to a Rookery Claude Master preview without an active conversation", async () => {
+    const rookeryTarget = { kind: "rookery", provider: "claude", agent: "master" } as const;
+    const loadSnapshot = vi.fn(async () => ({ ...snapshot, target: { ...rookeryTarget, label: "Rookery defaults", cwd: null }, appliedRevision: undefined }));
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
-    expect(screen.getByText("먼저 세션이나 워커를 선택하세요.")).toBeInTheDocument();
-    expect(loadSnapshot).not.toHaveBeenCalled();
+    expect(await screen.findByText("Rookery defaults")).toBeInTheDocument();
+    expect(loadSnapshot).toHaveBeenCalledWith(rookeryTarget);
+    expect(screen.getByText((content) => content.includes("범위 설정만 보여줍니다"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "유효 상태" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "카탈로그" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "할당" })).toBeInTheDocument();
@@ -158,7 +164,7 @@ describe("CapabilitiesPage", () => {
       entries: [{ ...snapshot.entries[0]!, id: "worker-skill", name: "worker-only", provider: "claude" }],
       diagnostics: [],
     };
-    const loadSnapshot = vi.fn((next: CapabilityTarget) => next.id === "s1" ? first.promise : second.promise);
+    const loadSnapshot = vi.fn((next: CapabilityTarget) => next.kind === "session" && next.id === "s1" ? first.promise : second.promise);
     const api = makeApi(loadSnapshot);
     const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api)} />);
 
@@ -168,7 +174,29 @@ describe("CapabilitiesPage", () => {
     first.resolve(snapshot);
     await Promise.resolve();
     expect(screen.queryByText("release")).toBeNull();
-    expect(screen.getByText("Worker 2")).toBeInTheDocument();
+    expect(screen.getAllByText("Worker 2").length).toBeGreaterThan(0);
+  });
+
+  it("switches among preview and live targets and changes preview provider and agent", async () => {
+    const loadSnapshot = vi.fn(async (next: CapabilityTarget): Promise<CapabilitySnapshot> => {
+      if (next.kind === "repo") return { ...snapshot, target: { ...next, label: "Repo One", cwd: "/repo-one" }, appliedRevision: undefined };
+      if (next.kind === "rookery") return { ...snapshot, target: { ...next, label: "Rookery defaults", cwd: null }, appliedRevision: undefined };
+      return snapshot;
+    });
+    render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
+    await screen.findByText("Rookery defaults");
+
+    const targetSelect = screen.getByLabelText("Effective 대상");
+    expect(within(targetSelect).getByRole("option", { name: "Rookery 기본값" })).toBeInTheDocument();
+    expect(within(targetSelect).getByRole("option", { name: "Repo One" })).toBeInTheDocument();
+    expect(within(targetSelect).getByRole("option", { name: "Main" })).toBeInTheDocument();
+    expect(within(targetSelect).getByRole("option", { name: "Worker 2" })).toBeInTheDocument();
+    fireEvent.change(targetSelect, { target: { value: "repo:repo-1" } });
+    await waitFor(() => expect(loadSnapshot).toHaveBeenLastCalledWith({ kind: "repo", id: "repo-1", provider: "claude", agent: "master" }));
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "worker" } });
+    await waitFor(() => expect(loadSnapshot).toHaveBeenLastCalledWith({ kind: "repo", id: "repo-1", provider: "codex", agent: "worker" }));
+    expect(screen.queryByTestId("capability-worker-reload")).toBeNull();
   });
 
   it("shows an explicit filtered-empty state and exposes no mutation controls", async () => {

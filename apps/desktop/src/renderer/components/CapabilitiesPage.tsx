@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Blocks,
-  Bot,
   Box,
   Braces,
   Cable,
@@ -29,9 +28,11 @@ import type {
 import { useT } from "../i18n/provider.js";
 import { cn } from "../lib/cn.js";
 import { Button } from "../ui/button.js";
+import { Select } from "../ui/input.js";
 import { CapabilityAssignmentsTab } from "./capabilities/CapabilityAssignmentsTab.js";
 import { CapabilityLibraryTab } from "./capabilities/CapabilityLibraryTab.js";
 import type { CapabilityCenterApi, CapabilityTargetOptions } from "./capabilities/types.js";
+import { capabilityTargetChoice, capabilityTargetKey, defaultCapabilityPreview } from "./capabilities/capability-target.js";
 
 type Category = "all" | "instructions" | "skills" | "tools" | "hooks" | "plugins";
 export type CenterTab = "effective" | "library" | "assignments";
@@ -157,7 +158,14 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
   const [reloadBusy, setReloadBusy] = useState<"now" | "idle" | null>(null);
   const [reloadMessage, setReloadMessage] = useState<string | null>(null);
   const [reloadError, setReloadError] = useState<string | null>(null);
-  const targetKey = target ? `${target.kind}:${target.id}` : "none";
+  const [selectedTarget, setSelectedTarget] = useState<CapabilityTarget>(() => target ?? defaultCapabilityPreview());
+  const externalTargetKey = target ? capabilityTargetKey(target) : "none";
+  const targetKey = capabilityTargetKey(selectedTarget);
+  const preview = selectedTarget.kind === "rookery" || selectedTarget.kind === "repo";
+
+  useEffect(() => {
+    setSelectedTarget(target ?? defaultCapabilityPreview());
+  }, [externalTargetKey]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -174,17 +182,11 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
 
   useEffect(() => {
     if (tab !== "effective") return;
-    if (!target) {
-      setSnapshot(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
     let current = true;
     setLoading(true);
     setError(null);
     setSnapshot(null);
-    void api.loadSnapshot(target).then(
+    void api.loadSnapshot(selectedTarget).then(
       (next) => { if (current) { setSnapshot(next); setLoading(false); } },
       (cause) => { if (current) { setError(errorMessage(cause)); setLoading(false); } },
     );
@@ -216,17 +218,17 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
     return initial;
   }, [snapshot]);
 
-  const workerNeedsReload = target?.kind === "worker" && snapshot?.entries.some((entry) =>
+  const workerNeedsReload = selectedTarget.kind === "worker" && snapshot?.entries.some((entry) =>
     Boolean(entry.managed) && (entry.state === "pending-reload" || entry.state === "error"),
   );
 
   const reloadWorker = async (whenIdle: boolean): Promise<void> => {
-    if (target?.kind !== "worker" || reloadBusy) return;
+    if (selectedTarget.kind !== "worker" || reloadBusy) return;
     setReloadBusy(whenIdle ? "idle" : "now");
     setReloadMessage(null);
     setReloadError(null);
     try {
-      const result = await api.reloadWorker(target.id, whenIdle);
+      const result = await api.reloadWorker(selectedTarget.id, whenIdle);
       setReloadMessage(t(`capabilities.reloadResult.${result.mode}`));
       setRefresh((value) => value + 1);
     } catch (cause) {
@@ -248,7 +250,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
         </nav>
         <div className="no-drag ml-auto flex items-center gap-1">
           {tab === "effective" && (
-            <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={!target || loading} onClick={() => setRefresh((value) => value + 1)}>
+              <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={loading} onClick={() => setRefresh((value) => value + 1)}>
               <RefreshCw size={14} className={cn(loading && "animate-spin")} />
             </Button>
           )}
@@ -258,15 +260,52 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-6">
+          {tab === "effective" && (
+            <section className="rounded-[var(--radius)] border border-line bg-surface/35 p-3">
+              <div className="grid gap-3 md:grid-cols-[minmax(240px,1fr)_150px_150px]">
+                <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
+                  {t("capabilities.targetLabel")}
+                  <Select aria-label={t("capabilities.targetLabel")} value={capabilityTargetChoice(selectedTarget)} onChange={(event) => {
+                    const value = event.target.value;
+                    const currentPreview = selectedTarget.kind === "rookery" || selectedTarget.kind === "repo"
+                      ? selectedTarget
+                      : defaultCapabilityPreview();
+                    if (value === "rookery") setSelectedTarget({ kind: "rookery", provider: currentPreview.provider, agent: currentPreview.agent });
+                    else if (value.startsWith("repo:")) setSelectedTarget({ kind: "repo", id: value.slice(5), provider: currentPreview.provider, agent: currentPreview.agent });
+                    else if (value.startsWith("session:")) setSelectedTarget({ kind: "session", id: value.slice(8) });
+                    else if (value.startsWith("worker:")) setSelectedTarget({ kind: "worker", id: value.slice(7) });
+                  }}>
+                    <optgroup label={t("capabilities.targetGroupPreview")}>
+                      <option value="rookery">{t("capabilities.targetRookery")}</option>
+                      {targets.repos.map((repo) => <option key={repo.id} value={`repo:${repo.id}`}>{repo.label}</option>)}
+                    </optgroup>
+                    {targets.sessions.length > 0 && <optgroup label={t("capabilities.targetGroupSessions")}>{targets.sessions.map((session) => <option key={session.id} value={`session:${session.id}`}>{session.label}</option>)}</optgroup>}
+                    {targets.workers.length > 0 && <optgroup label={t("capabilities.targetGroupWorkers")}>{targets.workers.map((worker) => <option key={worker.id} value={`worker:${worker.id}`}>{worker.label}</option>)}</optgroup>}
+                  </Select>
+                </label>
+                {preview && (
+                  <>
+                    <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
+                      {t("capabilities.providerLabel")}
+                      <Select aria-label={t("capabilities.providerLabel")} value={selectedTarget.provider} onChange={(event) => setSelectedTarget({ ...selectedTarget, provider: event.target.value as "claude" | "codex" })}>
+                        <option value="claude">Claude</option><option value="codex">Codex</option>
+                      </Select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
+                      {t("capabilities.agentLabel")}
+                      <Select aria-label={t("capabilities.agentLabel")} value={selectedTarget.agent} onChange={(event) => setSelectedTarget({ ...selectedTarget, agent: event.target.value as "master" | "worker" })}>
+                        <option value="master">{t("capabilities.agent.master")}</option><option value="worker">{t("capabilities.agent.worker")}</option>
+                      </Select>
+                    </label>
+                  </>
+                )}
+              </div>
+            </section>
+          )}
           {tab === "library" ? (
             <CapabilityLibraryTab api={api} generation={generation} repos={targets.repos} pickDirectory={pickDirectory} />
           ) : tab === "assignments" ? (
             <CapabilityAssignmentsTab api={api} generation={generation} targets={targets} />
-          ) : !target ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center text-muted">
-              <Bot size={32} className="opacity-40" />
-              <p className="text-[12.5px]">{t("capabilities.noTarget")}</p>
-            </div>
           ) : loading ? (
             <div className="flex items-center justify-center gap-2 py-24 text-[12.5px] text-muted"><Loader2 size={15} className="animate-spin" /> {t("common.loading")}</div>
           ) : error ? (
@@ -283,22 +322,30 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-[15px] font-semibold text-fg">{snapshot.target.label}</h2>
-                      <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : t("capabilities.targetWorker")}</span>
+                      <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : snapshot.target.kind === "worker" ? t("capabilities.targetWorker") : snapshot.target.kind === "repo" ? t("capabilities.targetRepo") : t("capabilities.targetRookery")}</span>
+                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("capabilities.preview")}</span>}
                       <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-fg-dim">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
+                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{t(`capabilities.agent.${snapshot.target.agent}`)}</span>}
                     </div>
-                    <p className="mt-1 truncate font-mono text-[11px] text-muted" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>
+                    {snapshot.target.cwd && <p className="mt-1 truncate font-mono text-[11px] text-muted" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>}
                     {snapshot.desiredRevision && (
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-muted">
                         <span>{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</span>
-                        <span>{snapshot.appliedRevision
+                        {(snapshot.target.kind === "session" || snapshot.target.kind === "worker") && <span>{snapshot.appliedRevision
                           ? t("capabilities.appliedRevision", { revision: snapshot.appliedRevision.slice(0, 12) })
-                          : t("capabilities.appliedRevisionNone")}</span>
+                          : t("capabilities.appliedRevisionNone")}</span>}
                       </div>
                     )}
                   </div>
                   <p className="font-mono text-[10px] text-muted">{t("capabilities.generatedAt", { time: new Date(snapshot.generatedAt).toLocaleString() })}</p>
                 </div>
               </section>
+
+              {snapshot.target.kind === "rookery" && (
+                <section className="rounded-[var(--radius)] border border-accent/25 bg-accent/5 px-3.5 py-3 text-[11px] leading-relaxed text-fg-dim">
+                  {t("capabilities.rookeryScopeOnly")}
+                </section>
+              )}
 
               <section data-testid="capability-summary" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(Object.keys(counts) as CapabilityState[]).map((state) => (
