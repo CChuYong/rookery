@@ -66,6 +66,19 @@ describe("EventBus @fleet mirror", () => {
     expect(all).toEqual(["master.message", "worker.status"]);
     expect(fleet).toEqual(["worker.status"]);
   });
+
+  it("delivers capability generation changes once on the global channel", () => {
+    const bus = new EventBus();
+    const received: CoreEvent[] = [];
+    bus.subscribe("@all", (event) => received.push(event));
+    bus.emit({
+      type: "capabilities.changed",
+      sessionId: "@all",
+      generation: 3,
+      affected: [{ scopeKind: "repo-local", scopeRef: "repo-1" }],
+    });
+    expect(received).toEqual([expect.objectContaining({ type: "capabilities.changed", generation: 3 })]);
+  });
 });
 
 describe("EventBus listener error isolation", () => {

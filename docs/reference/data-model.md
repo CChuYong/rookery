@@ -182,6 +182,74 @@ Worker-completion notification queue (per session). Enqueued when an armed (`not
 
 Index: `idx_pending_notifications_session (session_id)`.
 
+### `capability_packs`
+
+One registered local capability-pack instance. `manifest_json` is the registry's sanitized
+validated document (manifest, file metadata, change list, validation status, and errors),
+not expanded instructions or secret values.
+
+| Column | Type | Null/Default | Meaning |
+|---|---|---|---|
+| `instance_id` | TEXT | PK | Stable registry identity; distinct from the manifest's logical id |
+| `logical_id` | TEXT | NOT NULL | Current `capability.json` pack id |
+| `source_kind` | TEXT | NOT NULL | `rookery-generated` \| `local-directory` \| `repo-shared` |
+| `owner_repo_id` | TEXT | nullable, FK → `repos(id)` | Owning repo for a shared pack only |
+| `source_path` | TEXT | NOT NULL | Canonical local pack directory |
+| `manifest_json` | TEXT | NOT NULL | Sanitized registry document |
+| `digest` | TEXT | NOT NULL | SHA-256 trust identity for the whole validated pack |
+| `created_at` | TEXT | NOT NULL | ISO timestamp |
+| `updated_at` | TEXT | NOT NULL | ISO timestamp |
+
+Unique: `(source_kind, source_path)`.
+
+### `capability_bindings`
+
+Assigns one pack to a scope and audience. `enabled=0` is an explicit higher-precedence
+tombstone, not the absence of a binding.
+
+| Column | Type | Null/Default | Meaning |
+|---|---|---|---|
+| `id` | TEXT | PK | Client-selected binding id |
+| `pack_instance_id` | TEXT | NOT NULL, FK → `capability_packs(instance_id)` | Assigned pack |
+| `scope_kind` | TEXT | NOT NULL | `rookery` \| `repo-local` \| `repo-shared` \| `session` \| `worker` |
+| `scope_ref` | TEXT | NOT NULL, default `''` | Empty for Rookery; authoritative repo/session/worker id otherwise |
+| `audience_json` | TEXT | NOT NULL | Agent (`master|worker|side`) and origin (`ui|slack|automation|external`) filters |
+| `enabled` | INTEGER | NOT NULL | `0` tombstone or `1` enabled |
+| `created_at` | TEXT | NOT NULL | ISO timestamp |
+| `updated_at` | TEXT | NOT NULL | ISO timestamp |
+
+Index: `idx_capability_bindings_scope (pack_instance_id, scope_kind, scope_ref)`.
+
+### `capability_trust`
+
+Trust is exact-digest approval. Editing any included file changes the current digest and
+therefore makes the pack untrusted until that new digest is reviewed.
+
+| Column | Type | Null/Default | Meaning |
+|---|---|---|---|
+| `pack_instance_id` | TEXT | PK part, FK → `capability_packs(instance_id)` | Pack instance |
+| `digest` | TEXT | PK part | Reviewed whole-pack digest |
+| `trusted_at` | TEXT | NOT NULL | ISO timestamp |
+
+### `capability_secrets`
+
+Local write-only values for declared `rookery-secret` references. Only key, configured
+state, and monotonically increasing version leave the repository facade; `secret_value`
+is read only by the internal resolver/runtime boundary.
+
+| Column | Type | Null/Default | Meaning |
+|---|---|---|---|
+| `pack_instance_id` | TEXT | PK part, FK → `capability_packs(instance_id)` | Pack instance |
+| `secret_key` | TEXT | PK part | Declared secret key |
+| `secret_value` | TEXT | NOT NULL | Local value; never serialized to protocol or events |
+| `secret_version` | INTEGER | NOT NULL | Revision input changed on every set |
+| `updated_at` | TEXT | NOT NULL | ISO timestamp |
+
+Capability-pack removal explicitly deletes its bindings, trust rows, and secrets before
+deleting the pack. Session, worker, and repository deletion likewise removes bindings for
+that authoritative scope; repository deletion also removes packs it owns and all of their
+dependent state. These cleanup paths do not depend on SQLite cascade behavior.
+
 ## Access patterns
 
 All DB access goes through **`Repositories`** (`src/persistence/repositories.ts`) — exposing typed row interfaces (`SessionRow`, `MessageRow`, `WorkerRow`, `RepoRow`, `WorkerEventRow`, `MemoryRow`, …) and an injected clock (`now?`) for deterministic timestamps in tests.

@@ -47,6 +47,43 @@ Sessions and the live fleet at a glance: streaming conversations with plan cards
 
 Spawn workers from chat in natural language, from the spawn dialog, or **straight from a GitHub issue or Linear ticket** — the task is pre-filled from the ticket body.
 
+### Capability Center
+
+Register a local capability pack once, review its complete file digest, and assign it to
+all of Rookery or to a repository, session, or worker. Audience filters target master,
+worker, or Side agents and UI, Slack, automation, or external origins. More specific
+assignments override broader ones, including disabled assignments used as tombstones.
+
+The **Library** tab handles validation, trust, refresh, removal, and write-only secrets;
+**Assignments** manages scope and audience; **Effective** shows native inventory plus the
+deterministic desired and applied revisions for the selected master or worker. Trusted
+packs apply to both **Claude and Codex** without changing the user's `~/.claude`,
+`~/.codex/config.toml`, or repository provider files. Instructions append to the turn
+prompt. Claude loads skills and MCP through generated local plugins; Codex loads them from
+Rookery-owned, target-specific `CODEX_HOME` directories. Masters pick up changes on their
+next turn; newly started or lazily resumed workers apply once when their provider stream
+opens. An already-live worker reports **Reload required** until explicit hot reload ships.
+
+Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
+
+1. Open Capability Center → Library and add the example directory.
+2. Review the files and public MCP configuration, then trust the displayed digest.
+3. Save the declared secret if needed; secret values are never returned to the UI.
+4. Create an assignment, run the next Claude or Codex turn (or start/resume a matching
+   worker), and inspect the matching desired/applied revision in Effective.
+
+Rookery copies trusted bytes into an immutable
+`~/.rookery/capability-runtime/<revision>/` directory at launch. Generated files contain
+only environment aliases; write-only secret values are passed only in the selected provider
+child environment and are never returned to the UI or written into plugin/TOML
+configuration. Codex masters and workers each receive a separate generated home, config,
+rollout tree, and secret alias overlay. For a stdio MCP with a pack-relative `cwd`, Rookery
+generates a small Node launcher inside the immutable runtime so the declared working
+directory is honored without invoking a shell.
+For secret-bearing Codex launches, Rookery also disables Codex shell snapshots and removes
+managed aliases from model-invoked shell environments using fixed public overrides; no
+secret name or value is placed in argv.
+
 ### The fleet
 
 The master routes tasks across your registered repos, spawns workers, watches them, steers them mid-flight (send follow-ups / interrupt), and gets woken when they finish. Follow-up instructions continue the same worker session with full context. After a daemon restart, workers rehydrate from disk — diffs, stop, and resume keep working.

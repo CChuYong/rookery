@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
@@ -9,7 +9,8 @@ import { FakeGitOps } from "../../src/core/git-ops.js";
 import { MasterAgent, buildWorkerNotice } from "../../src/core/master-agent.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { InteractionRegistry } from "../../src/core/interaction-registry.js";
-import type { AgentStream, MasterTurnOptions } from "../../src/core/agent-backend.js";
+import type { AgentBackend, AgentStream, MasterTurnOptions } from "../../src/core/agent-backend.js";
+import type { ResolvedAgentCapabilities } from "../../src/core/capabilities/types.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 
 function deps(queryFn: ReturnType<typeof fakeQuery>) {
@@ -1022,5 +1023,123 @@ describe("MasterAgent — codex turn-lifecycle parity", () => {
     const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: { ...base, backend: backend as never, canUseTool: registry.canUseToolFor("s1") as never } });
     await master.runTurn("go");
     expect(record).toEqual(["pause", "answer", "resume"]);
+  });
+});
+
+describe("MasterAgent managed capability runtime", () => {
+  const managed = (revision: string, blocked = false): ResolvedAgentCapabilities => ({
+    revision,
+    blocked,
+    instructions: [],
+    skills: [],
+    mcpServers: [],
+  });
+
+  it("resolves the latest revision for every serialized turn and reports it applied after stream creation", async () => {
+    const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk" }]));
+    const inner = new ClaudeBackend(base.queryFn, (capabilities) => ({
+      revision: capabilities.revision,
+      plugins: [],
+      env: {},
+      diagnostics: [],
+    }));
+    const starts: MasterTurnOptions[] = [];
+    const backend: AgentBackend = {
+      openSession: (input, options) => inner.openSession(input, options),
+      startTurn: (prompt, options) => {
+        starts.push(options);
+        return inner.startTurn(prompt, options);
+      },
+    };
+    let revision = "revision-a";
+    const reporter = {
+      setDesired: vi.fn(),
+      setApplied: vi.fn(),
+      setError: vi.fn(),
+    };
+    const master = new MasterAgent({
+      sessionId: "s1",
+      cwd: "/x",
+      sdkSessionId: null,
+      deps: {
+        ...base,
+        backend,
+        managedCapabilities: () => managed(revision),
+        capabilityRuntime: reporter,
+      },
+    });
+
+    await master.runTurn("first");
+    revision = "revision-b";
+    await master.runTurn("second");
+
+    expect(starts.map((options) => [options.runtimeKey, options.capabilities?.revision])).toEqual([
+      ["s1", "revision-a"],
+      ["s1", "revision-b"],
+    ]);
+    const target = { targetKind: "master", targetId: "s1", sessionId: "s1" };
+    expect(reporter.setDesired.mock.calls).toEqual([
+      [target, "revision-a", false],
+      [target, "revision-b", false],
+    ]);
+    expect(reporter.setApplied.mock.calls).toEqual([
+      [target, "revision-a"],
+      [target, "revision-b"],
+    ]);
+    expect(reporter.setError).not.toHaveBeenCalled();
+  });
+
+  it("fails a blocked revision before provider stream creation and preserves blocked runtime state", async () => {
+    const base = deps(fakeQuery([]));
+    const startTurn = vi.fn(base.backend.startTurn.bind(base.backend));
+    const reporter = { setDesired: vi.fn(), setApplied: vi.fn(), setError: vi.fn() };
+    const master = new MasterAgent({
+      sessionId: "s1",
+      cwd: "/x",
+      sdkSessionId: null,
+      deps: {
+        ...base,
+        backend: { openSession: base.backend.openSession.bind(base.backend), startTurn },
+        managedCapabilities: () => managed("blocked-revision", true),
+        capabilityRuntime: reporter,
+      },
+    });
+
+    await expect(master.runTurn("blocked")).rejects.toThrow("managed capabilities are blocked");
+    expect(startTurn).not.toHaveBeenCalled();
+    expect(reporter.setDesired).toHaveBeenCalledWith(
+      { targetKind: "master", targetId: "s1", sessionId: "s1" },
+      "blocked-revision",
+      true,
+    );
+    expect(reporter.setApplied).not.toHaveBeenCalled();
+    expect(reporter.setError).not.toHaveBeenCalled();
+  });
+
+  it("reports a sanitized runtime error when provider setup fails", async () => {
+    const base = deps(fakeQuery([]));
+    const reporter = { setDesired: vi.fn(), setApplied: vi.fn(), setError: vi.fn() };
+    const backend: AgentBackend = {
+      openSession: base.backend.openSession.bind(base.backend),
+      startTurn: () => { throw new Error("private provider failure details"); },
+    };
+    const master = new MasterAgent({
+      sessionId: "s1",
+      cwd: "/x",
+      sdkSessionId: null,
+      deps: {
+        ...base,
+        backend,
+        managedCapabilities: () => managed("revision-a"),
+        capabilityRuntime: reporter,
+      },
+    });
+
+    await expect(master.runTurn("go")).rejects.toThrow("private provider failure details");
+    expect(reporter.setError).toHaveBeenCalledWith(
+      { targetKind: "master", targetId: "s1", sessionId: "s1" },
+      "revision-a",
+      "Capability runtime application failed.",
+    );
   });
 });

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "rookery-example",
+  "displayName": "Rookery Example Pack",
+  "version": "1.0.0",
+  "description": "A safe example with shared guidance, a review skill, and an optional HTTP MCP server.",
+  "instructions": [
+    {
+      "id": "team-conventions",
+      "path": "instructions/team.md"
+    }
+  ],
+  "skills": [
+    {
+      "id": "review-pr",
+      "path": "skills/review-pr"
+    }
+  ],
+  "mcpServers": [
+    {
+      "id": "knowledge",
+      "transport": "streamable-http",
+      "url": "https://example.invalid/mcp",
+      "auth": {
+        "bearerToken": {
+          "source": "rookery-secret",
+          "key": "knowledge-token"
+        }
+      },
+      "enabledTools": [
+        "search"
+      ],
+      "required": false
+    }
+  ]
+}

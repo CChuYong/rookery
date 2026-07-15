@@ -62,6 +62,165 @@ describe("startDaemon (integration)", () => {
     }
   });
 
+  it("registers a capability pack and broadcasts its generation through the live daemon", async () => {
+    const home = "/tmp/rookery-server-capabilities";
+    const packRoot = "/tmp/rookery-server-capabilities-pack";
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(packRoot, { recursive: true, force: true });
+    fs.mkdirSync(packRoot, { recursive: true });
+    fs.writeFileSync(path.join(packRoot, "capability.json"), JSON.stringify({
+      schemaVersion: 1,
+      id: "daemon-smoke",
+      displayName: "Daemon Smoke",
+      version: "1.0.0",
+      description: "Composition-root registry test",
+    }));
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) });
+    try {
+      const ws = await connect(daemon.port, daemon.token);
+      ws.send(JSON.stringify({ type: "events.subscribe" }));
+      const received: Record<string, unknown>[] = [];
+      const done = new Promise<void>((resolve) => {
+        ws.on("message", (data) => {
+          const message = JSON.parse(data.toString()) as Record<string, unknown>;
+          received.push(message);
+          const hasResult = received.some((item) => item.type === "capabilities.pack.result" && item.reqId === "pack-add");
+          const hasEvent = received.some((item) => item.type === "event"
+            && (item.event as { type?: string } | undefined)?.type === "capabilities.changed");
+          if (hasResult && hasEvent) resolve();
+        });
+      });
+      ws.send(JSON.stringify({ type: "capabilities.pack.add", reqId: "pack-add", path: packRoot }));
+      await done;
+
+      const result = received.find((item) => item.type === "capabilities.pack.result")!;
+      expect(result).toMatchObject({ reqId: "pack-add", pack: { status: "untrusted", manifest: { id: "daemon-smoke" } } });
+      const event = received.find((item) => item.type === "event"
+        && (item.event as { type?: string } | undefined)?.type === "capabilities.changed")?.event;
+      expect(event).toMatchObject({ type: "capabilities.changed", generation: 1, affected: [] });
+
+      ws.send(JSON.stringify({ type: "capabilities.library", reqId: "library" }));
+      let library: Record<string, unknown>;
+      do library = await nextMessage(ws); while (library.reqId !== "library");
+      expect(library).toMatchObject({ type: "capabilities.library.result", library: { generation: 1 } });
+      ws.close();
+    } finally {
+      await daemon.close();
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(packRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies a trusted Claude pack to the next master turn and exposes matching runtime revisions", { timeout: 10000 }, async () => {
+    const home = "/tmp/rookery-server-capability-runtime";
+    const packRoot = "/tmp/rookery-server-capability-runtime-pack";
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(packRoot, { recursive: true, force: true });
+    fs.mkdirSync(path.join(packRoot, "skills", "release"), { recursive: true });
+    fs.writeFileSync(path.join(packRoot, "rules.md"), "Always mention CAPABILITY_RUNTIME_OK.");
+    fs.writeFileSync(path.join(packRoot, "skills", "release", "SKILL.md"), "---\nname: release\ndescription: Release safely\n---\nShip safely.\n");
+    fs.writeFileSync(path.join(packRoot, "capability.json"), JSON.stringify({
+      schemaVersion: 1,
+      id: "runtime-smoke",
+      displayName: "Runtime Smoke",
+      version: "1.0.0",
+      description: "Composition-root runtime test",
+      instructions: [{ id: "rules", path: "rules.md" }],
+      skills: [{ id: "release", path: "skills/release" }],
+    }));
+    const calls: Array<{ prompt?: unknown; options?: Record<string, unknown> }> = [];
+    const scripted = fakeQuery([
+      { type: "assistant", text: "ok" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-runtime" },
+    ]);
+    const queryFn = ((input: { prompt?: unknown; options?: Record<string, unknown> }) => {
+      calls.push(input);
+      return scripted(input as never);
+    }) as never;
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn });
+    try {
+      const ws = await connect(daemon.port, daemon.token);
+      const received: Record<string, unknown>[] = [];
+      ws.on("message", (data) => received.push(JSON.parse(data.toString()) as Record<string, unknown>));
+      const request = (message: Record<string, unknown>): Promise<Record<string, unknown>> => new Promise((resolve) => {
+        const reqId = message.reqId;
+        const onMessage = (data: Buffer): void => {
+          const response = JSON.parse(data.toString()) as Record<string, unknown>;
+          if (response.reqId === reqId) {
+            ws.off("message", onMessage);
+            resolve(response);
+          }
+        };
+        ws.on("message", onMessage);
+        ws.send(JSON.stringify(message));
+      });
+      ws.send(JSON.stringify({ type: "events.subscribe" }));
+
+      const added = await request({ type: "capabilities.pack.add", reqId: "add", path: packRoot });
+      const pack = added.pack as { instanceId: string; digest: string };
+      await request({
+        type: "capabilities.trust.set",
+        reqId: "trust",
+        instanceId: pack.instanceId,
+        digest: pack.digest,
+        trusted: true,
+      });
+      await request({
+        type: "capabilities.binding.set",
+        reqId: "bind",
+        id: "binding-runtime-smoke",
+        binding: {
+          packInstanceId: pack.instanceId,
+          scopeKind: "rookery",
+          scopeRef: "",
+          audience: { agents: ["master"], origins: ["ui"] },
+          enabled: true,
+        },
+      });
+      const created = await request({ type: "session.create", reqId: "create", cwd: "/tmp" });
+      const sessionId = created.sessionId as string;
+      const turnDone = new Promise<void>((resolve) => {
+        const poll = (): void => {
+          const found = received.some((message) => message.type === "event"
+            && (message.event as { type?: string; sessionId?: string } | undefined)?.type === "master.result"
+            && (message.event as { sessionId?: string } | undefined)?.sessionId === sessionId);
+          if (found) resolve(); else setTimeout(poll, 5);
+        };
+        poll();
+      });
+      ws.send(JSON.stringify({ type: "session.send", sessionId, text: "hello runtime" }));
+      await turnDone;
+
+      const turnCall = calls.find((call) => call.prompt === "hello runtime")!;
+      const systemPrompt = turnCall.options?.systemPrompt as { append?: string };
+      const plugins = turnCall.options?.plugins as Array<{ type: string; path: string }>;
+      expect(systemPrompt.append).toContain("CAPABILITY_RUNTIME_OK");
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0]).toMatchObject({ type: "local", path: expect.stringContaining(path.join(home, "capability-runtime")) });
+      expect(fs.existsSync(path.join(plugins[0]!.path, "skills", "release", "SKILL.md"))).toBe(true);
+
+      const runtimeEvent = received.find((message) => message.type === "event"
+        && (message.event as { type?: string; state?: string } | undefined)?.type === "capabilities.runtime"
+        && (message.event as { state?: string } | undefined)?.state === "current")?.event as { desiredRevision: string; appliedRevision: string };
+      expect(runtimeEvent.appliedRevision).toBe(runtimeEvent.desiredRevision);
+      const snapshotResult = await request({ type: "capabilities.snapshot", reqId: "snapshot", target: { kind: "session", id: sessionId } });
+      expect(snapshotResult).toMatchObject({
+        snapshot: {
+          desiredRevision: runtimeEvent.desiredRevision,
+          appliedRevision: runtimeEvent.desiredRevision,
+          entries: expect.arrayContaining([expect.objectContaining({ name: "rules", state: "applied" })]),
+        },
+      });
+      ws.close();
+    } finally {
+      await daemon.close();
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(packRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects on port bind failure and releases the PID lock (no zombie)", { timeout: 10000 }, async () => {
     // Occupy a port first.
     const blocker = http.createServer(() => {});

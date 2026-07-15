@@ -342,6 +342,37 @@ describe("SessionManager", () => {
     expect(repos.getSession(orig.id)!.sdk_session_id).toBe("thread-1"); // original untouched
   });
 
+  it("reclaims provider-owned target state when a native fork succeeds but session persistence fails", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const fleet = new FleetOrchestrator({
+      repos,
+      bus,
+      git: new FakeGitOps(),
+      factory: () => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "idle", waitUntilSettled: async () => {} }),
+      worktreesDir: "/wt",
+    });
+    const cleaned: string[] = [];
+    let n = 0;
+    const sm = new SessionManager({
+      repos,
+      bus,
+      backends: { codex: fakeBackend([]) },
+      masterModel: "mm",
+      fleet,
+      forkSession: async () => ({ sessionId: "forked-thread" }),
+      onSessionDelete: (id) => cleaned.push(id),
+    }, () => `s${n++}`);
+    const source = sm.create("/repo", { provider: "codex" });
+    repos.setSdkSessionId(source.id, "source-thread");
+    vi.spyOn(repos, "createSession").mockImplementationOnce(() => { throw new Error("db boom"); });
+
+    await expect(sm.fork(source.id)).rejects.toThrow("db boom");
+
+    expect(cleaned).toEqual(["s1"]);
+    expect(repos.getSession("s1")).toBeUndefined();
+  });
+
   it("fork() throws when the source session never ran a turn (no sdk_session_id)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
@@ -483,6 +514,30 @@ describe("SessionManager", () => {
     const sm = new SessionManager({ repos, bus, backends: { claude: fakeBackend([]) }, masterModel: "m", fleet });
     sm.getOrCreateByKey(AUTOMATION_FLEET_SESSION_KEY, "/x");
     expect(sm.list().some((s) => s.cwd === "/x")).toBe(false);
+  });
+
+  it("injects managed capability resolution into Claude and Codex masters", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    const bus = new EventBus();
+    const factory = (): WorkerLike => ({ start: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    const makeManagedCapabilities = vi.fn(() => () => ({ revision: "r", blocked: false, instructions: [], skills: [], mcpServers: [] }));
+    let n = 0;
+    const sm = new SessionManager({
+      repos,
+      bus,
+      backends: { claude: fakeBackend([]), codex: fakeBackend([]) },
+      masterModel: "m",
+      fleet,
+      makeManagedCapabilities,
+    }, () => `s${n++}`);
+
+    sm.create("/claude", { provider: "claude" });
+    sm.create("/codex", { provider: "codex" });
+
+    expect(makeManagedCapabilities).toHaveBeenCalledTimes(2);
+    expect(makeManagedCapabilities).toHaveBeenNthCalledWith(1, "s0");
+    expect(makeManagedCapabilities).toHaveBeenNthCalledWith(2, "s1");
   });
 
 });

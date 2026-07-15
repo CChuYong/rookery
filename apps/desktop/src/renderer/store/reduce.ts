@@ -17,6 +17,7 @@ export type LogItem =
 export interface FleetRow extends WorkerRow { archived?: boolean; permissionMode: string }
 
 export interface AppState {
+  capabilityGeneration: number;
   logsBySession: Record<string, LogItem[]>;
   workerLogs: Record<string, LogItem[]>;
   fleet: Record<string, FleetRow>;
@@ -35,7 +36,7 @@ export interface AppState {
 }
 
 export function emptyState(): AppState {
-  return { logsBySession: {}, workerLogs: {}, fleet: {}, deletingWorkers: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {} };
+  return { capabilityGeneration: 0, logsBySession: {}, workerLogs: {}, fleet: {}, deletingWorkers: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {} };
 }
 
 function finalizeSideItems(items: LogItem[]): LogItem[] {
@@ -181,6 +182,12 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
 // Optional — if omitted, no ts timestamp (pure reduce tests / existing call sites unaffected).
 export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppState {
   switch (e.type) {
+    case "capabilities.changed":
+      return { ...state, capabilityGeneration: e.generation };
+    case "capabilities.runtime":
+      // Runtime events have no registry generation. Increment the same invalidation clock so an open
+      // Effective tab refetches desired/applied state while preserving stale-response protection.
+      return { ...state, capabilityGeneration: state.capabilityGeneration + 1 };
     case "side.event": {
       const prev = state.sideConversations[e.sideId] ?? { sourceKind: e.sourceKind, sourceId: e.sourceId, status: "running" as const, items: [] };
       const next = { ...prev, sourceKind: e.sourceKind, sourceId: e.sourceId, items: applySubEvent(prev.items, e.data, now) };

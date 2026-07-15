@@ -37,7 +37,7 @@ function setup() {
   const sent: string[] = [];
   const socket: ClientSocket = { send: (d) => sent.push(d) };
   const conn = new Connection(socket, sm, bus, fleet, repos);
-  return { conn, sent, repos };
+  return { conn, sent, repos, bus, fleet, sm, socket };
 }
 
 type FleetOverride = {
@@ -109,6 +109,122 @@ function parsed(sent: string[]): Array<Record<string, unknown>> {
 }
 
 describe("Connection", () => {
+  it("routes capabilities.snapshot to the injected provider and preserves reqId", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const snapshot = {
+      target: { kind: "session" as const, id: "s1", label: "Main", provider: "claude" as const, cwd: "/repo" },
+      generatedAt: "2026-07-13T12:00:00.000Z",
+      entries: [],
+      diagnostics: [],
+    };
+    const capabilities = { snapshot: vi.fn(async () => snapshot) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.snapshot", reqId: "cap-1", target: { kind: "session", id: "s1" } }));
+
+    expect(capabilities.snapshot).toHaveBeenCalledWith({ kind: "session", id: "s1" });
+    expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.snapshot.result", reqId: "cap-1", snapshot });
+  });
+
+  it("returns a correlated error when capability snapshot resolution fails", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const capabilities = { snapshot: vi.fn(async () => { throw new Error("unknown capability target: worker:missing"); }) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.snapshot", reqId: "cap-2", target: { kind: "worker", id: "missing" } }));
+
+    expect(parsed(sent).at(-1)).toMatchObject({ type: "error", reqId: "cap-2", message: expect.stringContaining("unknown capability target: worker:missing") });
+  });
+
+  it("routes every capability registry mutation with sanitized correlated results", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const library = { generation: 4, packs: [], bindings: [] };
+    const pack = { instanceId: "pack-1", status: "trusted" };
+    const binding = {
+      id: "binding-1",
+      packInstanceId: "pack-1",
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] },
+      enabled: true,
+      createdAt: "t",
+      updatedAt: "t",
+    };
+    const capabilities = {
+      snapshot: vi.fn(),
+      library: vi.fn(() => library),
+      addPack: vi.fn(() => pack),
+      removePack: vi.fn(),
+      setBinding: vi.fn(() => binding),
+      deleteBinding: vi.fn(),
+      setTrust: vi.fn(() => pack),
+      setSecret: vi.fn(() => ({ key: "token", configured: true })),
+      deleteSecret: vi.fn(() => ({ key: "token", configured: false })),
+      refresh: vi.fn(() => library),
+    };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never,
+    );
+    const bindingInput = {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] }, enabled: true,
+    };
+    const requests = [
+      { type: "capabilities.library", reqId: "cap-lib" },
+      { type: "capabilities.pack.add", reqId: "cap-add", path: "/pack" },
+      { type: "capabilities.binding.set", reqId: "cap-bind", id: "binding-1", binding: bindingInput },
+      { type: "capabilities.trust.set", reqId: "cap-trust", instanceId: "pack-1", digest: "a".repeat(64), trusted: true },
+      { type: "capabilities.secret.set", reqId: "cap-secret", instanceId: "pack-1", key: "token", value: "actual-secret-value" },
+      { type: "capabilities.secret.delete", reqId: "cap-secret-delete", instanceId: "pack-1", key: "token" },
+      { type: "capabilities.refresh", reqId: "cap-refresh", instanceId: "pack-1" },
+      { type: "capabilities.binding.delete", reqId: "cap-bind-delete", id: "binding-1" },
+      { type: "capabilities.pack.remove", reqId: "cap-remove", instanceId: "pack-1" },
+    ];
+    for (const request of requests) await conn.handleRaw(JSON.stringify(request));
+
+    const replies = parsed(sent).slice(-requests.length);
+    expect(replies.map((reply) => [reply.type, reply.reqId])).toEqual([
+      ["capabilities.library.result", "cap-lib"],
+      ["capabilities.pack.result", "cap-add"],
+      ["capabilities.binding.result", "cap-bind"],
+      ["capabilities.pack.result", "cap-trust"],
+      ["capabilities.secret.result", "cap-secret"],
+      ["capabilities.secret.result", "cap-secret-delete"],
+      ["capabilities.refresh.result", "cap-refresh"],
+      ["capabilities.binding.result", "cap-bind-delete"],
+      ["capabilities.pack.result", "cap-remove"],
+    ]);
+    expect(JSON.stringify(replies)).not.toContain("actual-secret-value");
+    expect(capabilities.setSecret).toHaveBeenCalledWith("pack-1", "token", "actual-secret-value");
+    expect(replies.at(-1)).toMatchObject({ pack: null });
+  });
+
+  it("returns correlated capability mutation errors", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const capabilities = {
+      snapshot: vi.fn(), library: vi.fn(), addPack: vi.fn(() => { throw new Error("invalid capability pack"); }),
+    };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never,
+    );
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.pack.add", reqId: "cap-bad", path: "/bad" }));
+    expect(parsed(sent).at(-1)).toMatchObject({
+      type: "error", reqId: "cap-bad", message: expect.stringContaining("invalid capability pack"),
+    });
+  });
+
   it("starts Side only after replying with its id, routes lifecycle commands, and cleans owned Side threads on dispose", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
@@ -474,7 +590,7 @@ describe("Connection v2 routes", () => {
     const conn = makeConn(sent, {}); // repos is a real Repositories(:memory:)
     await conn.handleRaw(JSON.stringify({ type: "repos.register", reqId: "r5", name: "app", path: "/p", description: "결제" }));
     await conn.handleRaw(JSON.stringify({ type: "repos.list", reqId: "r6" }));
-    expect(sent.at(-1)).toMatchObject({ type: "repos.list.result", reqId: "r6", repos: [{ name: "app", description: "결제" }] });
+    expect(sent.at(-1)).toMatchObject({ type: "repos.list.result", reqId: "r6", repos: [{ id: expect.any(String), name: "app", description: "결제" }] });
   });
 
   it("session.history returns persisted transcript events", async () => {

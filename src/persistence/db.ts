@@ -184,6 +184,53 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
     db.exec("ALTER TABLE sessions ADD COLUMN handoff_from_provider TEXT");
     db.exec("ALTER TABLE workers ADD COLUMN handoff_from_provider TEXT");
   },
+  (db) => {
+    // Capability Center Slice 2: provider-neutral desired state. Secret values remain local in
+    // capability_secrets and are never projected through protocol/library row serializers.
+    db.exec(`
+      CREATE TABLE capability_packs (
+        instance_id    TEXT PRIMARY KEY,
+        logical_id     TEXT NOT NULL,
+        source_kind    TEXT NOT NULL CHECK(source_kind IN ('rookery-generated', 'local-directory', 'repo-shared')),
+        owner_repo_id  TEXT REFERENCES repos(id),
+        source_path    TEXT NOT NULL,
+        manifest_json  TEXT NOT NULL,
+        digest         TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        UNIQUE(source_kind, source_path)
+      ) STRICT;
+
+      CREATE TABLE capability_bindings (
+        id               TEXT PRIMARY KEY,
+        pack_instance_id TEXT NOT NULL REFERENCES capability_packs(instance_id),
+        scope_kind       TEXT NOT NULL CHECK(scope_kind IN ('rookery', 'repo-local', 'repo-shared', 'session', 'worker')),
+        scope_ref        TEXT NOT NULL DEFAULT '',
+        audience_json    TEXT NOT NULL,
+        enabled          INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX idx_capability_bindings_scope
+        ON capability_bindings(pack_instance_id, scope_kind, scope_ref);
+
+      CREATE TABLE capability_trust (
+        pack_instance_id TEXT NOT NULL REFERENCES capability_packs(instance_id),
+        digest           TEXT NOT NULL,
+        trusted_at       TEXT NOT NULL,
+        PRIMARY KEY(pack_instance_id, digest)
+      ) STRICT;
+
+      CREATE TABLE capability_secrets (
+        pack_instance_id TEXT NOT NULL REFERENCES capability_packs(instance_id),
+        secret_key       TEXT NOT NULL,
+        secret_value     TEXT NOT NULL,
+        secret_version   INTEGER NOT NULL,
+        updated_at       TEXT NOT NULL,
+        PRIMARY KEY(pack_instance_id, secret_key)
+      ) STRICT;
+    `);
+  },
 ];
 
 export function currentVersion(db: DB): number {

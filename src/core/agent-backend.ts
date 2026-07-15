@@ -1,4 +1,5 @@
 import type { SystemPush } from "./system-push.js";
+import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 
 // Provider-neutral agent backend port (P0 seam — docs/2026-07-05-codex-backend-parity.md).
 // Both stream loops (Worker/MasterAgent) consume only this vocabulary; adapters (claude-backend.ts,
@@ -86,6 +87,10 @@ export interface AgentSessionOptions {
   systemPromptAppend?: string; // appended to the provider's base agent prompt (claude_code preset on Claude)
   resume?: string | null; // provider session id to resume (null/undefined → fresh session)
   abortController: AbortController;
+  // Stable Rookery target identity. Required whenever managed capabilities are supplied.
+  runtimeKey?: string;
+  // Secret-free desired projection. Provider adapters lower it using daemon-injected runtime ports.
+  capabilities?: ResolvedAgentCapabilities;
 }
 
 // Master-turn extras: provider-specific tool wiring, passed through opaquely (P2 will neutralize these).

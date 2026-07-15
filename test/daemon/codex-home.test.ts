@@ -2,7 +2,59 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource, gcOrphanCodexHomes } from "../../src/daemon/codex-home.js";
+import {
+  gcOrphanCodexHomes,
+  materializeCodexHome,
+  removeCodexHome,
+  removeCodexWorkerHome,
+  seedCodexHomeFromSource,
+  seedCodexWorkerHomeFromLegacy,
+  seedCodexWorkerHomeFromSource,
+} from "../../src/daemon/codex-home.js";
+import type { CodexRuntimeLaunchOptions } from "../../src/daemon/capability-runtime.js";
+
+function managedRuntime(): CodexRuntimeLaunchOptions {
+  return {
+    revision: "a".repeat(64),
+    skills: [{ id: "review-pr", path: "/immutable/runtime/skills/review-pr/SKILL.md" }],
+    mcpServers: [
+      {
+        generatedName: "rookery__team_pack__local",
+        config: {
+          transport: "stdio",
+          command: "/usr/bin/node",
+          args: ["/immutable/runtime/launcher.mjs", "/immutable/runtime/local.json"],
+          env: { PUBLIC_MODE: "read-only" },
+          envVars: ["ROOKERY_CAP_SECRET_LOCAL"],
+          enabled: true,
+          required: true,
+          startupTimeoutSec: 4,
+          toolTimeoutSec: 7,
+          enabledTools: ["read", "search"],
+          disabledTools: ["delete"],
+        },
+      },
+      {
+        generatedName: "rookery__team_pack__remote",
+        config: {
+          transport: "streamable-http",
+          url: "https://example.test/mcp",
+          httpHeaders: { "X-Public": "yes" },
+          envHttpHeaders: { "X-Key": "ROOKERY_CAP_SECRET_HEADER" },
+          bearerTokenEnvVar: "ROOKERY_CAP_SECRET_BEARER",
+          enabled: true,
+        },
+      },
+    ],
+    env: {
+      ROOKERY_CAP_SECRET_LOCAL: "actual-secret-local",
+      ROOKERY_CAP_SECRET_HEADER: "actual-secret-header",
+      ROOKERY_CAP_SECRET_BEARER: "actual-secret-bearer",
+    },
+    systemPromptAppend: "managed instructions",
+    diagnostics: [],
+  };
+}
 
 describe("materializeCodexHome", () => {
   const dirs: string[] = [];
@@ -175,6 +227,79 @@ describe("materializeCodexHome", () => {
     const authLinkPath = path.join(dir, "auth.json");
     expect(fs.lstatSync(authLinkPath).isSymbolicLink()).toBe(true);
   });
+
+  it("renders managed Codex skills and MCP fields with aliases but never secret values", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    fs.writeFileSync(path.join(realCodexHome, "config.toml"), 'model = "gpt-test"\n');
+    const dir = materializeCodexHome(rookeryHome, "sess-managed", "http://bridge/mcp/token", {
+      apiKeySet: false,
+      realCodexHome,
+      managed: managedRuntime(),
+    });
+    const content = fs.readFileSync(path.join(dir, "config.toml"), "utf8");
+
+    expect(content).toContain('model = "gpt-test"');
+    expect(content).toContain('[[skills.config]]\npath = "/immutable/runtime/skills/review-pr/SKILL.md"\nenabled = true');
+    expect(content).toContain("[mcp_servers.rookery__team_pack__local]");
+    expect(content).toContain('command = "/usr/bin/node"');
+    expect(content).toContain('env_vars = ["ROOKERY_CAP_SECRET_LOCAL"]');
+    expect(content).toContain("startup_timeout_sec = 4");
+    expect(content).toContain("tool_timeout_sec = 7");
+    expect(content).toContain('enabled_tools = ["read","search"]');
+    expect(content).toContain("[mcp_servers.rookery__team_pack__remote]");
+    expect(content).toContain('bearer_token_env_var = "ROOKERY_CAP_SECRET_BEARER"');
+    expect(content).toContain('env_http_headers = { X-Key = "ROOKERY_CAP_SECRET_HEADER" }');
+    expect(content).not.toContain("actual-secret-");
+    expect(content.split("[mcp_servers.rookery]")).toHaveLength(2);
+  });
+
+  it("materializes isolated worker homes without the master bridge", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    fs.writeFileSync(path.join(realCodexHome, "auth.json"), '{"token":"real"}');
+    const first = materializeCodexHome(rookeryHome, "worker-a", undefined, {
+      kind: "worker",
+      apiKeySet: false,
+      realCodexHome,
+      managed: managedRuntime(),
+    });
+    const otherRuntime = managedRuntime();
+    otherRuntime.mcpServers = [];
+    otherRuntime.skills = [{ id: "other", path: "/immutable/other/SKILL.md" }];
+    const second = materializeCodexHome(rookeryHome, "worker-b", undefined, {
+      kind: "worker",
+      apiKeySet: false,
+      realCodexHome,
+      managed: otherRuntime,
+    });
+
+    expect(first).toBe(path.join(rookeryHome, "codex-homes", "worker-worker-a"));
+    expect(second).toBe(path.join(rookeryHome, "codex-homes", "worker-worker-b"));
+    expect(first).not.toBe(second);
+    const firstConfig = fs.readFileSync(path.join(first, "config.toml"), "utf8");
+    const secondConfig = fs.readFileSync(path.join(second, "config.toml"), "utf8");
+    expect(firstConfig).toContain("rookery__team_pack__local");
+    expect(firstConfig).not.toContain("/immutable/other/SKILL.md");
+    expect(secondConfig).toContain("/immutable/other/SKILL.md");
+    expect(secondConfig).not.toContain("rookery__team_pack__local");
+    expect(firstConfig).not.toContain("[mcp_servers.rookery]");
+    expect(secondConfig).not.toContain("[mcp_servers.rookery]");
+    expect(fs.lstatSync(path.join(first, "auth.json")).isSymbolicLink()).toBe(true);
+    expect(fs.lstatSync(path.join(second, "auth.json")).isSymbolicLink()).toBe(true);
+  });
+
+  it("blocks a managed MCP name that collides with preserved native config", () => {
+    const rookeryHome = tmp("rookery-home-");
+    const realCodexHome = tmp("real-codex-home-");
+    fs.writeFileSync(path.join(realCodexHome, "config.toml"), '[mcp_servers.rookery__team_pack__local]\ncommand = "native"\n');
+    expect(() => materializeCodexHome(rookeryHome, "sess-1", "http://bridge", {
+      apiKeySet: false,
+      realCodexHome,
+      managed: managedRuntime(),
+    })).toThrow("collides");
+    expect(fs.existsSync(path.join(rookeryHome, "codex-homes", "sess-1", "config.toml"))).toBe(false);
+  });
 });
 
 describe("seedCodexHomeFromSource", () => {
@@ -192,6 +317,69 @@ describe("seedCodexHomeFromSource", () => {
       expect(fs.readFileSync(dst, "utf8")).toBe('{"type":"parent"}\n');
     } finally {
       fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("copies a Codex worker rollout tree between worker-specific homes", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const srcSessions = path.join(rookeryHome, "codex-homes", "worker-src", "sessions", "2026", "07");
+      fs.mkdirSync(srcSessions, { recursive: true });
+      fs.writeFileSync(path.join(srcSessions, "rollout.jsonl"), '{"type":"worker"}\n');
+
+      seedCodexWorkerHomeFromSource(rookeryHome, "src", "new");
+
+      const dst = path.join(rookeryHome, "codex-homes", "worker-new", "sessions", "2026", "07", "rollout.jsonl");
+      expect(fs.readFileSync(dst, "utf8")).toBe('{"type":"worker"}\n');
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("copies only the selected fork rollout and its ancestors between worker homes", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const srcSessions = path.join(rookeryHome, "codex-homes", "worker-src", "sessions", "2026", "07");
+      fs.mkdirSync(srcSessions, { recursive: true });
+      const writeRollout = (name: string, id: string, forkedFrom?: string): void => {
+        fs.writeFileSync(path.join(srcSessions, name), `${JSON.stringify({
+          type: "session_meta",
+          payload: { id, ...(forkedFrom ? { forked_from_id: forkedFrom } : {}) },
+        })}\n{"type":"event_msg"}\n`);
+      };
+      writeRollout("parent.jsonl", "parent-thread");
+      writeRollout("fork.jsonl", "fork-thread", "parent-thread");
+      writeRollout("unrelated.jsonl", "unrelated-thread");
+
+      seedCodexWorkerHomeFromSource(rookeryHome, "src", "new", "fork-thread");
+
+      const dst = path.join(rookeryHome, "codex-homes", "worker-new", "sessions", "2026", "07");
+      expect(fs.existsSync(path.join(dst, "parent.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(dst, "fork.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(dst, "unrelated.jsonl"))).toBe(false);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates one legacy worker thread without copying unrelated user rollouts", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    const legacyHome = fs.mkdtempSync(path.join(os.tmpdir(), "legacy-codex-home-"));
+    try {
+      const legacySessions = path.join(legacyHome, "sessions", "2026", "07");
+      fs.mkdirSync(legacySessions, { recursive: true });
+      fs.writeFileSync(path.join(legacySessions, "worker.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "worker-thread" } })}\n`);
+      fs.writeFileSync(path.join(legacySessions, "personal.jsonl"), `${JSON.stringify({ type: "session_meta", payload: { id: "personal-thread" } })}\n`);
+
+      expect(seedCodexWorkerHomeFromLegacy(rookeryHome, "worker-1", "worker-thread", legacyHome)).toBe(true);
+
+      const dst = path.join(rookeryHome, "codex-homes", "worker-worker-1", "sessions", "2026", "07");
+      expect(fs.existsSync(path.join(dst, "worker.jsonl"))).toBe(true);
+      expect(fs.existsSync(path.join(dst, "personal.jsonl"))).toBe(false);
+      expect(seedCodexWorkerHomeFromLegacy(rookeryHome, "worker-1", "worker-thread", legacyHome)).toBe(false);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+      fs.rmSync(legacyHome, { recursive: true, force: true });
     }
   });
 
@@ -248,6 +436,24 @@ describe("removeCodexHome", () => {
       fs.rmSync(rookeryHome, { recursive: true, force: true });
     }
   });
+
+  it("removes only the selected worker home", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const realCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), "real-codex-home-"));
+      try {
+        const first = materializeCodexHome(rookeryHome, "one", undefined, { kind: "worker", apiKeySet: false, realCodexHome });
+        const second = materializeCodexHome(rookeryHome, "two", undefined, { kind: "worker", apiKeySet: false, realCodexHome });
+        removeCodexWorkerHome(rookeryHome, "one");
+        expect(fs.existsSync(first)).toBe(false);
+        expect(fs.existsSync(second)).toBe(true);
+      } finally {
+        fs.rmSync(realCodexHome, { recursive: true, force: true });
+      }
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("gcOrphanCodexHomes", () => {
@@ -263,6 +469,23 @@ describe("gcOrphanCodexHomes", () => {
       expect(fs.existsSync(path.join(base, "a"))).toBe(true);
       expect(fs.existsSync(path.join(base, "b"))).toBe(false); // orphan — not live → removed
       expect(fs.existsSync(path.join(base, "c"))).toBe(true);
+    } finally {
+      fs.rmSync(rookeryHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps live master and worker homes while collecting both orphan kinds", () => {
+    const rookeryHome = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-home-"));
+    try {
+      const base = path.join(rookeryHome, "codex-homes");
+      for (const name of ["session-live", "session-gone", "worker-live", "worker-gone"]) {
+        fs.mkdirSync(path.join(base, name), { recursive: true });
+      }
+      gcOrphanCodexHomes(rookeryHome, new Set(["session-live"]), new Set(["live"]));
+      expect(fs.existsSync(path.join(base, "session-live"))).toBe(true);
+      expect(fs.existsSync(path.join(base, "session-gone"))).toBe(false);
+      expect(fs.existsSync(path.join(base, "worker-live"))).toBe(true);
+      expect(fs.existsSync(path.join(base, "worker-gone"))).toBe(false);
     } finally {
       fs.rmSync(rookeryHome, { recursive: true, force: true });
     }

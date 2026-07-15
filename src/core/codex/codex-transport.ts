@@ -1,6 +1,25 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
+const MANAGED_SECRET_PREFIX = "ROOKERY_CAP_SECRET_";
+export const CODEX_MANAGED_SECRET_SAFETY_ARGS = [
+  "-c",
+  "features.shell_snapshot=false",
+  "-c",
+  `shell_environment_policy.exclude=["${MANAGED_SECRET_PREFIX}*"]`,
+] as const;
+
+// Codex 0.144.x shell snapshots serialize the app-server's inherited environment directly into
+// CODEX_HOME/shell_snapshots, before shell_environment_policy is applied. Managed MCP aliases must
+// remain in the app-server environment so Codex can forward them, therefore secret-bearing launches
+// disable snapshots and explicitly remove those aliases from model-invoked shell environments. The
+// override values are fixed public policy strings; secret names/values never enter argv.
+export function codexManagedSecretSafetyArgs(env: NodeJS.ProcessEnv | undefined): string[] | undefined {
+  return env && Object.keys(env).some((name) => name.startsWith(MANAGED_SECRET_PREFIX))
+    ? [...CODEX_MANAGED_SECRET_SAFETY_ARGS]
+    : undefined;
+}
+
 // Byte-transport port under the Codex JSON-RPC client. Real impl spawns `codex app-server`;
 // tests inject a scripted fake (test/helpers/fake-codex.ts).
 export interface CodexTransport {
@@ -13,7 +32,9 @@ export interface CodexTransport {
 // `args` are extra `codex app-server` CLI args appended after the subcommand. P2 used this for the
 // per-turn master child's `-c mcp_servers.rookery.url="..."` bridge config; P2.5 Track A moved that
 // value into a per-session CODEX_HOME config.toml instead (docs/2026-07-06-p25-codex-hardening.md), so
-// no caller populates `args` anymore — kept in the type for future extra-CLI-arg needs.
+// managed-secret launches use fixed public `-c` safety overrides to disable shell snapshots and
+// exclude aliases from model-invoked shell environments; bridge URLs and secret names/values never
+// enter this array.
 export type CodexSpawn = (opts: { env?: NodeJS.ProcessEnv; args?: string[] }) => CodexTransport;
 
 // Real transport: one `codex app-server` child per session, newline-delimited JSON-RPC on stdio.

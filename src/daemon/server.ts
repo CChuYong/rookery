@@ -31,6 +31,12 @@ import { makeModelsProvider } from "../core/models-provider.js";
 import { makeCodexModelsProvider } from "../core/codex-models-provider.js";
 import { makeCodexUsageProvider } from "../core/codex-usage-provider.js";
 import { makeCodexAuthProvider } from "../core/codex-auth-provider.js";
+import { makeCodexCapabilitiesProvider } from "../core/codex-capabilities-provider.js";
+import { CapabilityService } from "../core/capabilities/service.js";
+import { CapabilityRegistry } from "../core/capabilities/registry.js";
+import { CapabilityResolver } from "../core/capabilities/resolver.js";
+import { CapabilityRuntimeState } from "../core/capabilities/runtime-state.js";
+import { CapabilityRuntime } from "./capability-runtime.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -39,7 +45,16 @@ import { Connection } from "./connection.js";
 import { McpBridge } from "./mcp-bridge.js";
 import { ExternalMcpController } from "./external-mcp-controller.js";
 import { externalToolDefs } from "../tools/external-tools.js";
-import { materializeCodexHome, removeCodexHome, seedCodexHomeFromSource, gcOrphanCodexHomes } from "./codex-home.js";
+import {
+  codexHomeDirFor,
+  materializeCodexHome,
+  removeCodexHome,
+  removeCodexWorkerHome,
+  seedCodexHomeFromSource,
+  seedCodexWorkerHomeFromLegacy,
+  seedCodexWorkerHomeFromSource,
+  gcOrphanCodexHomes,
+} from "./codex-home.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -81,9 +96,6 @@ export interface StartDaemonOptions {
 export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandle> {
   const { config } = opts;
   const queryFn: QueryFn = opts.queryFn ?? sdkQuery;
-  // Provider-neutral backend over the injected queryFn (P0 seam). CommandCatalog/makeLabeler stay on the raw
-  // queryFn deliberately — Claude-specific aux paths, gated per provider in P1.
-  const backend = new ClaudeBackend(queryFn);
   // Non-loopback binds send the token in plaintext over ws:// → fail-closed reject unless explicitly opted in (G-ORIGIN-AUTH).
   // Check before touching lock/DB so we fail fast without side effects.
   const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(config.host);
@@ -118,6 +130,24 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const git = new RealGitOps();
   const settings = new Settings(repos, config);
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
+  // Capability runtime composition precedes every agent factory. Registry/resolver projections remain
+  // secret-free; the materializer is the sole reader of values and returns them only as a child env overlay.
+  const capabilityRegistry = new CapabilityRegistry(repos, {
+    onChanged: ({ generation, affected }) => {
+      bus.emit({ type: "capabilities.changed", sessionId: ALL_CHANNEL, generation, affected });
+    },
+  });
+  const capabilityResolver = new CapabilityResolver(capabilityRegistry);
+  const capabilityRuntimeState = new CapabilityRuntimeState(bus);
+  const capabilityRuntime = new CapabilityRuntime(config.home, {
+    getSecretValue: (packInstanceId, key) => capabilityRegistry.getSecretValueForRuntime(packInstanceId, key),
+  });
+  // Provider-neutral backend over the injected queryFn (P0 seam). CommandCatalog/makeLabeler stay on the raw
+  // queryFn deliberately — Claude-specific aux paths, gated per provider in P1.
+  const backend = new ClaudeBackend(queryFn, (capabilities) => capabilityRuntime.materializeClaude(capabilities));
+  // Agent factories close over this target resolver. They are invoked only after composition finishes
+  // (rehydrate creates detached metadata; lazy materialize happens on a later user action).
+  let capabilityService!: CapabilityService;
   // Daemon-hosted MCP bridge (P2 — docs/2026-07-06-p2-codex-master.md): mounted on THIS http server (see
   // below, before existing routing) so a codex master turn's per-turn ephemeral child can reach rookery's
   // in-process tool servers (memory/repos/fleet/schedule) the way the Claude Agent SDK reaches them in-process.
@@ -131,6 +161,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P1.5: an in-app codexApiKey (settings) redirects the child to a rookery-managed CODEX_HOME and
   // provisions auth.json via RPC (see codex-backend.ts pump()), leaving the user's ~/.codex untouched.
   const codexHomeDir = path.join(config.home, "codex-home");
+  const realCodexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   // Shared codex auth resolvers — used by BOTH the turn children (CodexBackend below) and the model/list
   // catalog child (makeCodexModelsProvider) so the catalog authenticates under the SAME account the turns
   // run under (findings [25]/[26]). When an in-app codexApiKey is set the child is redirected to the
@@ -140,6 +171,29 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     if (!settings.codexApiKey()) return undefined;
     fs.mkdirSync(codexHomeDir, { recursive: true });
     return { CODEX_HOME: codexHomeDir };
+  };
+  const prepareCodexWorker = (key: string, capabilities: import("../core/capabilities/types.js").ResolvedAgentCapabilities) => {
+    const row = repos.getWorker(key);
+    if (row?.sdk_session_id) {
+      // Slice 4 migration: older workers wrote rollouts to either the API-key shared home or the
+      // user's real home. Copy only this thread (plus ancestors) before the first isolated resume.
+      const legacyHomes = [...new Set([codexHomeDir, realCodexHome])];
+      for (const legacyHome of legacyHomes) {
+        if (seedCodexWorkerHomeFromLegacy(config.home, key, row.sdk_session_id, legacyHome)) break;
+      }
+    }
+    const managed = capabilityRuntime.materializeCodex(capabilities);
+    const codexHome = materializeCodexHome(config.home, key, undefined, {
+      kind: "worker",
+      apiKeySet: !!settings.codexApiKey(),
+      realCodexHome,
+      managed,
+    });
+    return {
+      codexHome,
+      env: managed.env,
+      ...(managed.systemPromptAppend ? { systemPromptAppend: managed.systemPromptAppend } : {}),
+    };
   };
   const codexBackend = new CodexBackend({
     spawn: realCodexSpawn(() => settings.codexBin()),
@@ -155,6 +209,23 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // turn/start's response).
     handshakeTimeoutMs: () => settings.codexHandshakeTimeoutMs(),
     env: codexEnv,
+    runtime: {
+      prepareWorker: prepareCodexWorker,
+      prepareMaster: (key, defs, capabilities) => {
+        const managed = capabilityRuntime.materializeCodex(capabilities);
+        const { url } = bridge.ensureSession(key, defs);
+        const codexHome = materializeCodexHome(config.home, key, url(config.host, boundPort), {
+          apiKeySet: !!settings.codexApiKey(),
+          realCodexHome,
+          managed,
+        });
+        return {
+          codexHome,
+          env: managed.env,
+          ...(managed.systemPromptAppend ? { systemPromptAppend: managed.systemPromptAppend } : {}),
+        };
+      },
+    },
     // P2.5 Track A (docs/2026-07-06-p25-codex-hardening.md): the closure materializes the per-session
     // CODEX_HOME (config.toml with the bridge url + auth.json passthrough, see codex-home.ts) and hands
     // the backend back just the directory path — core must not import daemon code, see codex-backend.ts's
@@ -164,7 +235,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         const { url } = bridge.ensureSession(key, defs);
         const codexHome = materializeCodexHome(config.home, key, url(config.host, boundPort), {
           apiKeySet: !!settings.codexApiKey(),
-          realCodexHome: process.env.CODEX_HOME || path.join(os.homedir(), ".codex"),
+          realCodexHome,
         });
         return { codexHome };
       },
@@ -199,6 +270,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns,
         // explicit spawn override wins; else the settings default; else unlimited (null/0/negative/malformed → null via the getter).
         costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
+        managedCapabilities: () => capabilityService.resolveManaged({ kind: "worker", id: o.id }),
+        capabilityRuntime: capabilityRuntimeState,
       },
       sdkSessionId: o.sdkSessionId ?? null,
       handoffSeed: o.handoffSeed, // cross-provider fork: seed the first turn's backend text
@@ -208,8 +281,24 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const summarizeLabel = makeLabeler(queryFn);
   const fleet = new FleetOrchestrator({
     repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel,
-    // Fork routing by provider: codex forks via an ephemeral app-server child (CodexBackend.forkSession); claude keeps the SDK's own forkSession.
-    forkSession: (provider, id, opts) => (provider === "codex" ? codexBackend.forkSession(id) : sdkForkSession(id, opts)),
+    // Codex native forks must run in the SOURCE worker's isolated home. The new fork rollout and
+    // its ancestors are then copied into the target home; target bindings compile lazily on resume.
+    forkSession: async (provider, id, opts) => {
+      if (provider !== "codex") return sdkForkSession(id, opts);
+      const sourceWorkerId = opts?.sourceWorkerId;
+      const newWorkerId = opts?.newWorkerId;
+      if (!sourceWorkerId || !newWorkerId) throw new Error("cannot fork codex worker: missing source/new worker id");
+      const capabilities = capabilityService.resolveManaged({ kind: "worker", id: sourceWorkerId });
+      const source = prepareCodexWorker(sourceWorkerId, capabilities);
+      const result = await codexBackend.forkSession(id, {
+        env: { ...process.env, ...source.env, CODEX_HOME: source.codexHome },
+      });
+      seedCodexWorkerHomeFromSource(config.home, sourceWorkerId, newWorkerId, result.sessionId);
+      return result;
+    },
+    onWorkerDiscard: (id, provider) => {
+      if ((provider ?? repos.getWorker(id)?.provider ?? "claude") === "codex") removeCodexWorkerHome(config.home, id);
+    },
   });
   // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
   // clean up running/idle zombies to orphaned. (Live conversations can't be revived — the SDK session dies with the process.)
@@ -221,7 +310,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P3-remaining Track B #7 (docs/2026-07-06-p3r-codex-hardening-finish.md): sweep orphaned per-session
   // CODEX_HOME dirs (no backing session row — left behind by a crash mid-delete or mid-fork). Boot-only:
   // no in-flight fork/create can race it this early (before any WS connection is accepted).
-  gcOrphanCodexHomes(config.home, new Set(repos.listSessions().map((s) => s.id)));
+  gcOrphanCodexHomes(
+    config.home,
+    new Set(repos.listSessions().map((s) => s.id)),
+    new Set(repos.listAllWorkers().map((worker) => worker.id)),
+  );
   // Slack holders (bridge / thread reader / reporter-ensure) — installed by startSlack on connect, released
   // owner-scoped on stop (clearIf) so a stale connection's late stop can't clobber the live one's holders.
   const bridgeHolder = makeHolder<SlackInteractionBridge>();
@@ -231,20 +324,26 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
   const interactionRegistry = new InteractionRegistry(bus);
   // P3 Track A (docs/2026-07-06-p3-codex-fork-automation.md): forks a codex MASTER session. Unlike
-  // fleet's codex fork (workers share one CODEX_HOME, so a plain forkSession(threadId) suffices),
-  // a codex master's rollouts live in a per-session CODEX_HOME — the fork child must run there
+  // fleet's Codex fork (which runs in the source worker's isolated home), a Codex master's rollouts
+  // live in a per-session CODEX_HOME — the fork child must run there
   // (thread/fork looks up threadId in the CWD it's spawned with), and the NEW session's home must be
   // pre-seeded with the source's sessions/ tree (parent + forked rollout) so context survives (the
   // forked rollout is a delta referencing the parent — see codex-home.ts seedCodexHomeFromSource).
-  // Only reachable via SessionManager's forkSession router below — the fleet/worker one is unchanged.
+  // Only reachable via SessionManager's forkSession router below.
   const forkCodexMaster = async (sourceThreadId: string, opts?: { sourceSessionId?: string; newSessionId?: string }): Promise<{ sessionId: string }> => {
     const sourceSessionId = opts?.sourceSessionId;
     const newSessionId = opts?.newSessionId;
     if (!sourceSessionId || !newSessionId) throw new Error("cannot fork codex session: missing sourceSessionId/newSessionId");
     const sourceHome = path.join(config.home, "codex-homes", sourceSessionId);
     if (!fs.existsSync(sourceHome)) throw new Error("cannot fork codex session: source CODEX_HOME missing (run a turn first)");
-    const { sessionId: forkedUuid } = await codexBackend.forkSession(sourceThreadId, { env: { ...process.env, CODEX_HOME: sourceHome } });
-    seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId);
+    // initialize loads the source home's managed MCP config even though thread/fork itself does not
+    // call those tools. Supply the same alias values as a turn so required servers can initialize;
+    // CodexBackend applies the fixed shell-snapshot/shell-env safety overrides automatically.
+    const managed = capabilityRuntime.materializeCodex(capabilityService.resolveManaged({ kind: "session", id: sourceSessionId }));
+    const { sessionId: forkedUuid } = await codexBackend.forkSession(sourceThreadId, {
+      env: { ...process.env, ...managed.env, CODEX_HOME: sourceHome },
+    });
+    seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId, forkedUuid);
     return { sessionId: forkedUuid };
   };
   const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,
@@ -252,6 +351,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // relocation, see above); claude keeps the SDK's own (eager) forkSession.
     forkSession: (provider, id, opts) => (provider === "codex" ? forkCodexMaster(id, opts) : sdkForkSession(id, opts)),
     makeCanUseTool: (externalKey, sessionId) => makeSlackCanUseTool(externalKey, () => bridgeHolder.get()) ?? interactionRegistry.canUseToolFor(sessionId),
+    makeManagedCapabilities: (sessionId) => () => capabilityService.resolveManaged({ kind: "session", id: sessionId }),
+    capabilityRuntime: capabilityRuntimeState,
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
     // additionally compose the read_thread tool/hint into slack thread sessions.
     // Schedule travels the toolDefs channel (not mcpServers): codex ignores opts.mcpServers (it has no
@@ -360,6 +461,58 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // Codex auth-readiness probe (for the desktop Settings Codex sub-tab): spawns a short-lived app-server
   // child and reads its account state. NOT cached (auth changes at runtime) — see codex-auth-provider.ts.
   const codexAuthProvider = makeCodexAuthProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
+  // Read-only provider-neutral inventory for Capability Center. Codex structured probes share the
+  // same binary/auth environment as turns; master targets override CODEX_HOME with their materialized
+  // per-session home when one exists so the snapshot observes the same config/MCP/skills as the turn.
+  const codexCapabilitiesProvider = makeCodexCapabilitiesProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
+  capabilityService = new CapabilityService({
+    getSession: (id) => {
+      const row = repos.getSession(id);
+      return row ? {
+        id: row.id,
+        cwd: row.cwd,
+        label: row.label,
+        provider: row.provider,
+        origin: row.origin,
+        externalKey: row.external_key,
+      } : undefined;
+    },
+    getWorker: (id) => {
+      const row = repos.getWorker(id);
+      return row ? {
+        id: row.id,
+        worktreePath: row.worktree_path,
+        repoPath: row.repo_path,
+        label: row.label,
+        provider: row.provider,
+        homeSessionId: row.session_id,
+      } : undefined;
+    },
+    listRepos: () => repos.listRepos().map((repo) => ({ id: repo.id, path: repo.path })),
+    listClaudeCommands: async ({ target, cwd }) => {
+      if (target.kind === "worker") {
+        const live = await fleet.listCommands(target.id);
+        if (live.length > 0) return { commands: live };
+      }
+      return commandCatalog.inspect(cwd);
+    },
+    listCodexCapabilities: ({ cwd, env }) => codexCapabilitiesProvider.list({ cwd, ...(env ? { env } : {}) }),
+    codexEnvForTarget: (target) => {
+      const targetHome = codexHomeDirFor(config.home, target.id, target.kind === "worker" ? "worker" : "master");
+      if (!fs.existsSync(targetHome)) return undefined;
+      // Probe with the current desired aliases when available. The target home itself is never
+      // rewritten from this read path, so applied-vs-desired drift remains truthful.
+      try {
+        const managed = capabilityRuntime.materializeCodex(capabilityService.resolveManaged(target));
+        return { ...managed.env, CODEX_HOME: targetHome };
+      } catch {
+        return { CODEX_HOME: targetHome };
+      }
+    },
+    registry: capabilityRegistry,
+    resolver: capabilityResolver,
+    runtimeState: capabilityRuntimeState,
+  });
 
   // External MCP server (rookery-as-MCP): a SECOND McpBridge mounted at /mcp-ext, gating fleet control for
   // external MCP clients (Claude Code/Cursor/Codex). Off by default (fail-closed) via the mcpExposure setting;
@@ -506,7 +659,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides, capabilityService);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });

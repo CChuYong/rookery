@@ -3,6 +3,53 @@ import { parseClientMessage, serializeServerMessage, clientMessageSchema } from 
 import type { ServerMessage } from "../../src/protocol/messages.js";
 
 describe("protocol v2 client messages", () => {
+  it("parses capability snapshots for session and worker targets and rejects invalid targets", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" },
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" },
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c3", target: { kind: "repo", id: "r1" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c4", target: { kind: "session", id: "" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", target: { kind: "session", id: "s1" } }))).toThrow();
+  });
+
+  it("parses capability library mutations and rejects unsafe shapes", () => {
+    const binding = {
+      packInstanceId: "pack-1",
+      scopeKind: "repo-local",
+      scopeRef: "repo-1",
+      audience: { agents: ["master", "worker"], origins: ["ui"] },
+      enabled: true,
+    };
+    const valid = [
+      { type: "capabilities.library", reqId: "q1" },
+      { type: "capabilities.pack.add", reqId: "q2", path: "/packs/team" },
+      { type: "capabilities.pack.remove", reqId: "q3", instanceId: "pack-1" },
+      { type: "capabilities.binding.set", reqId: "q4", id: "binding-1", binding },
+      { type: "capabilities.binding.delete", reqId: "q5", id: "binding-1" },
+      { type: "capabilities.trust.set", reqId: "q6", instanceId: "pack-1", digest: "a".repeat(64), trusted: true },
+      { type: "capabilities.secret.set", reqId: "q7", instanceId: "pack-1", key: "token", value: "secret" },
+      { type: "capabilities.secret.delete", reqId: "q8", instanceId: "pack-1", key: "token" },
+      { type: "capabilities.refresh", reqId: "q9", instanceId: "pack-1" },
+      { type: "capabilities.refresh", reqId: "q10" },
+    ];
+    for (const message of valid) expect(() => parseClientMessage(JSON.stringify(message))).not.toThrow();
+
+    const invalid = [
+      { type: "capabilities.pack.add", reqId: "q", path: "" },
+      { type: "capabilities.pack.remove", reqId: "q", instanceId: "" },
+      { type: "capabilities.binding.set", reqId: "q", id: "b", binding: { ...binding, scopeKind: "future" } },
+      { type: "capabilities.binding.set", reqId: "q", id: "b", binding: { ...binding, audience: { agents: [], origins: ["ui"] } } },
+      { type: "capabilities.binding.set", reqId: "q", id: "b", binding: { ...binding, scopeKind: "rookery", scopeRef: "repo-1" } },
+      { type: "capabilities.binding.set", reqId: "q", id: "b", binding: { ...binding, scopeKind: "worker", scopeRef: "" } },
+      { type: "capabilities.trust.set", reqId: "q", instanceId: "pack-1", digest: "short", trusted: true },
+      { type: "capabilities.secret.set", reqId: "q", instanceId: "pack-1", key: "token", value: "   " },
+    ];
+    for (const message of invalid) expect(() => parseClientMessage(JSON.stringify(message))).toThrow();
+  });
+
   it("settings.set: accepts null (reset-to-default) and validates effort against the enum", () => {
     // null → reset to default (only reachable if the schema is nullable)
     expect(() => parseClientMessage(JSON.stringify({ type: "settings.set", reqId: "q", settings: { masterModel: null } }))).not.toThrow();

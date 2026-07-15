@@ -5,11 +5,14 @@ import { extractText, extractToolUses, extractToolResults } from "./sdk-extract.
 import { classifySystemPush } from "./system-push.js";
 import { turnContext } from "./result-telemetry.js";
 import { effortApplies, coerceEffort } from "./effort.js";
+import type { ClaudeRuntimeLaunchOptions } from "./claude-capabilities.js";
+import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 
 // The Claude Agent SDK query() signature — the adapter's own contract (canonical home; formerly worker.ts).
 // Injected at the composition root (real sdkQuery in the daemon, fakeQuery in tests). Claude-specific
 // aux paths that bypass the port (labeler, CommandCatalog probe) consume this type directly.
 export type QueryFn = typeof sdkQuery;
+export type LoadClaudeCapabilities = (capabilities: ResolvedAgentCapabilities) => ClaudeRuntimeLaunchOptions;
 type QueryInput = Parameters<QueryFn>[0];
 type QueryOptions = NonNullable<QueryInput["options"]>;
 
@@ -168,18 +171,31 @@ class ClaudeStream implements AgentStream {
 }
 
 export class ClaudeBackend implements AgentBackend {
-  constructor(private readonly queryFn: QueryFn) {}
+  constructor(
+    private readonly queryFn: QueryFn,
+    private readonly loadCapabilities?: LoadClaudeCapabilities,
+  ) {}
 
   // Shared option assembly: effort gating (Haiku rejects effort — API 400), adaptive thinking display,
   // claude_code preset + append, token-level partial deltas, resume, abort.
   private baseOptions(opts: AgentSessionOptions): QueryOptions {
+    if (opts.capabilities && !opts.runtimeKey) throw new Error("managed capabilities require a runtimeKey");
+    const managed = opts.capabilities
+      ? this.loadCapabilities?.(opts.capabilities)
+      : undefined;
+    if (opts.capabilities && !managed) throw new Error("Claude capability runtime is unavailable");
+    const systemPromptAppend = [opts.systemPromptAppend, managed?.systemPromptAppend]
+      .filter((value): value is string => Boolean(value))
+      .join("\n\n");
     return {
       cwd: opts.cwd,
       model: opts.model,
       ...(effortApplies(opts.model) && coerceEffort(opts.effort) ? { effort: coerceEffort(opts.effort) } : {}),
       ...(effortApplies(opts.model) ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),
       permissionMode: opts.permissionMode as QueryOptions["permissionMode"],
-      systemPrompt: { type: "preset", preset: "claude_code", ...(opts.systemPromptAppend ? { append: opts.systemPromptAppend } : {}) },
+      systemPrompt: { type: "preset", preset: "claude_code", ...(systemPromptAppend ? { append: systemPromptAppend } : {}) },
+      ...(managed?.plugins.length ? { plugins: managed.plugins } : {}),
+      ...(managed && Object.keys(managed.env).length > 0 ? { env: { ...process.env, ...managed.env } } : {}),
       includePartialMessages: true,
       ...(opts.resume ? { resume: opts.resume } : {}),
       abortController: opts.abortController,

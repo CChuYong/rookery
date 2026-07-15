@@ -35,7 +35,7 @@ interface Store extends AppState {
   fleetLoadFailed: boolean;
   setSessionsLoadFailed: (v: boolean) => void;
   setFleetLoadFailed: (v: boolean) => void;
-  repos: Array<{ name: string; path: string; description: string; base: string | null }>;
+  repos: Array<{ id: string; name: string; path: string; description: string; base: string | null }>;
   daemon: "up" | "down" | "starting";
   daemonNote: string | null; // Specific cause of daemon down (e.g. Node ABI mismatch) — shown in the banner when present
   slack: SlackStatus;

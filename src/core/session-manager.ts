@@ -6,6 +6,8 @@ import { MasterAgent } from "./master-agent.js";
 import type { TurnCapabilities } from "./master-agent.js";
 import type { FleetOrchestrator } from "./fleet-orchestrator.js";
 import { parseNotification, type WorkerNotification } from "./worker-notifier.js";
+import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
+import type { CapabilityRuntimeReporter } from "./capabilities/runtime-state.js";
 
 // Home session (container) for workers spawned directly by the UI. Not exposed in the Sessions list.
 export const UI_FLEET_SESSION_KEY = "ui:fleet";
@@ -48,6 +50,10 @@ export interface SessionManagerDeps {
   makeCanUseTool?: (externalKey: string | null, sessionId: string) => ProviderPermissionCallback | undefined;
   // Builds a per-source dynamic capability resolver from the session's externalKey (slack: etc.) (assembled by the daemon). base only if not injected/undefined.
   makeCapabilities?: (externalKey: string | null, sessionId: string) => (() => TurnCapabilities) | undefined;
+  // Provider runtime resolver. It is invoked by MasterAgent per turn, not while the Session object
+  // is cached, so both Claude and Codex masters observe binding changes on the next turn.
+  makeManagedCapabilities?: (sessionId: string) => (() => ResolvedAgentCapabilities) | undefined;
+  capabilityRuntime?: CapabilityRuntimeReporter;
   // Forks a session's SDK conversation into a new branch (default = SDK forkSession). Absent → fork() is unavailable.
   forkSession?: ForkFn;
   // P3-remaining Track B #3 (docs/2026-07-06-p3r-codex-hardening-finish.md): best-effort per-session
@@ -80,7 +86,7 @@ export class SessionManager {
   }
 
   private build(id: string, cwd: string, sdkSessionId: string | null, externalKey: string | null): Session {
-    const { repos, bus, backends, masterModel, masterModelByProvider, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities } = this.deps;
+    const { repos, bus, backends, masterModel, masterModelByProvider, masterEffort, masterName, fleet, summarizeLabel, makeCanUseTool, makeCapabilities, makeManagedCapabilities, capabilityRuntime } = this.deps;
     // Single row read (was two separate getSession(id) calls) — same DB row backs both provider routing and origin below.
     const row = repos.getSession(id);
     // Provider routing (P2, mirrors FleetOrchestrator's worker provider routing): pick the backend + the
@@ -98,11 +104,12 @@ export class SessionManager {
     const origin = row?.origin || deriveOrigin(externalKey).origin;
     const canUseTool = origin === "automation" ? undefined : makeCanUseTool?.(externalKey, id); // session-bound approval/question callback (slack thread etc.). auto-allow if absent.
     const capabilities = makeCapabilities?.(externalKey, id); // session-bound per-source capability resolver (slack thread tools etc.). base only if absent.
+    const managedCapabilities = makeManagedCapabilities?.(id);
     const master = new MasterAgent({
       sessionId: id,
       cwd,
       sdkSessionId,
-      deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities },
+      deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities, managedCapabilities, capabilityRuntime },
     });
     const session: Session = { id, cwd, master };
     this.sessions.set(id, session);
@@ -177,13 +184,21 @@ export class SessionManager {
       sourceSessionId: sessionId,
       newSessionId: id,
     });
-    // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
-    this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
-    this.deps.repos.setSdkSessionId(id, forkedUuid);
-    this.deps.repos.copySessionEvents(sessionId, id);
-    this.deps.repos.setSessionLabel(id, forkLabel);
-    this.deps.bus.emit({ type: "session.label", sessionId: id, label: forkLabel }); // live UI label
-    return this.build(id, row.cwd, forkedUuid, null);
+    try {
+      // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
+      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
+      this.deps.repos.setSdkSessionId(id, forkedUuid);
+      this.deps.repos.copySessionEvents(sessionId, id);
+      this.deps.repos.setSessionLabel(id, forkLabel);
+      this.deps.bus.emit({ type: "session.label", sessionId: id, label: forkLabel }); // live UI label
+      return this.build(id, row.cwd, forkedUuid, null);
+    } catch (error) {
+      // Codex's native fork router seeds the new target home before this DB row exists. If persistence
+      // fails, no normal session.delete can discover that home, so roll back both ownership records.
+      try { if (this.deps.repos.getSession(id)) this.deps.repos.deleteSession(id); } catch { /* best-effort */ }
+      try { this.deps.onSessionDelete?.(id); } catch { /* best-effort */ }
+      throw error;
+    }
   }
 
   get(id: string): Session | undefined {

@@ -59,4 +59,14 @@ describe("navigation model", () => {
     expect(sameLoc(L({ sessionId: "s1" }), L({ sessionId: "s2" }))).toBe(false);
     expect(sameLoc(L({ overlay: "settings" }), L())).toBe(false);
   });
+
+  it("Capability Center preserves its selected session or worker through back/forward", () => {
+    let st = navigate(initialNav, { showRepos: true, subId: "w1" });
+    st = navigate(st, { overlay: "capabilities" });
+    expect(st.loc).toEqual(L({ overlay: "capabilities", showRepos: true, subId: "w1" }));
+    st = back(st);
+    expect(st.loc).toEqual(L({ showRepos: true, subId: "w1" }));
+    st = forward(st);
+    expect(st.loc).toEqual(L({ overlay: "capabilities", showRepos: true, subId: "w1" }));
+  });
 });

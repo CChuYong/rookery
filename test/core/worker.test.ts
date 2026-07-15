@@ -8,6 +8,8 @@ import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend } from "../helpers/fake-query.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
+import type { AgentBackend, AgentSessionOptions } from "../../src/core/agent-backend.js";
+import type { ResolvedAgentCapabilities } from "../../src/core/capabilities/types.js";
 
 // Poll until the condition becomes true (throw on timeout) — for reproducing mid-turn timing.
 async function until(cond: () => boolean, ms = 1000): Promise<void> {
@@ -1501,5 +1503,66 @@ describe("Worker settle-grace", () => {
     await until(() => x.agent.status() === "idle", 2000);
     expect(x.statuses).toEqual(["background", "running", "idle"]);
     await x.agent.stop();
+  });
+});
+
+describe("Worker managed capability runtime", () => {
+  const managed = (revision: string): ResolvedAgentCapabilities => ({
+    revision,
+    blocked: false,
+    instructions: [],
+    skills: [],
+    mcpServers: [],
+  });
+
+  it("resolves once before opening the stream and confirms the same revision on its first provider event", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/repo", label: "task" });
+    const innerQuery = fakeQuery([
+      { type: "system", subtype: "init", session_id: "sdk-1" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const inner = new ClaudeBackend(innerQuery, (capabilities) => ({
+      revision: capabilities.revision,
+      plugins: [],
+      env: {},
+      diagnostics: [],
+    }));
+    let opened: AgentSessionOptions | undefined;
+    const backend: AgentBackend = {
+      openSession: (input, options) => {
+        opened = options;
+        return inner.openSession(input, options);
+      },
+      startTurn: inner.startTurn.bind(inner),
+    };
+    const resolve = vi.fn(() => managed("worker-revision"));
+    const reporter = { setDesired: vi.fn(), setApplied: vi.fn(), setError: vi.fn() };
+    const worker = new Worker({
+      id: "a1",
+      sessionId: "s1",
+      repoPath: "/repo",
+      label: "task",
+      deps: {
+        repos,
+        bus: new EventBus(),
+        backend,
+        model: "m",
+        managedCapabilities: resolve,
+        capabilityRuntime: reporter,
+      },
+    });
+
+    worker.start("go");
+    await worker.waitUntilSettled();
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(opened).toMatchObject({ runtimeKey: "a1", capabilities: { revision: "worker-revision" } });
+    const target = { targetKind: "worker", targetId: "a1", sessionId: "s1" };
+    expect(reporter.setDesired).toHaveBeenCalledWith(target, "worker-revision", false);
+    expect(reporter.setApplied).toHaveBeenCalledTimes(1);
+    expect(reporter.setApplied).toHaveBeenCalledWith(target, "worker-revision");
+    expect(reporter.setError).not.toHaveBeenCalled();
   });
 });

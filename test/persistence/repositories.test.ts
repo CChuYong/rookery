@@ -14,6 +14,195 @@ describe("Repositories", () => {
     repos = makeRepos();
   });
 
+  function createCapabilityPack(input: {
+    instanceId?: string;
+    logicalId?: string;
+    sourceKind?: "local-directory" | "repo-shared";
+    sourcePath?: string;
+    ownerRepoId?: string | null;
+  } = {}) {
+    return repos.createCapabilityPack({
+      instanceId: input.instanceId ?? "pack-1",
+      logicalId: input.logicalId ?? "team-engineering",
+      sourceKind: input.sourceKind ?? "local-directory",
+      ownerRepoId: input.ownerRepoId ?? null,
+      sourcePath: input.sourcePath ?? "/packs/team-engineering",
+      manifestJson: JSON.stringify({ manifest: { id: input.logicalId ?? "team-engineering" }, files: [], changes: [], errors: [] }),
+      digest: "a".repeat(64),
+    });
+  }
+
+  it("CRUDs capability packs with deterministic ordering and unique source paths", () => {
+    const first = createCapabilityPack();
+    expect(first).toMatchObject({
+      instance_id: "pack-1",
+      logical_id: "team-engineering",
+      source_kind: "local-directory",
+      owner_repo_id: null,
+      source_path: "/packs/team-engineering",
+      digest: "a".repeat(64),
+    });
+    createCapabilityPack({ instanceId: "pack-2", logicalId: "alpha", sourcePath: "/packs/alpha" });
+    expect(repos.listCapabilityPacks().map((pack) => pack.instance_id)).toEqual(["pack-2", "pack-1"]);
+    expect(repos.getCapabilityPack("pack-1")).toEqual(first);
+
+    const updated = repos.updateCapabilityPack("pack-1", {
+      logicalId: "team-engineering-v2",
+      manifestJson: JSON.stringify({ manifest: { id: "team-engineering-v2" } }),
+      digest: "b".repeat(64),
+    });
+    expect(updated).toMatchObject({ logical_id: "team-engineering-v2", digest: "b".repeat(64) });
+    expect(updated.updated_at).not.toBe(first.updated_at);
+
+    expect(() => createCapabilityPack({ instanceId: "duplicate", sourcePath: "/packs/team-engineering" })).toThrow();
+    repos.deleteCapabilityPack("pack-1");
+    expect(repos.getCapabilityPack("pack-1")).toBeUndefined();
+  });
+
+  it("tracks trust by exact pack digest", () => {
+    createCapabilityPack();
+    expect(repos.isCapabilityDigestTrusted("pack-1", "a".repeat(64))).toBe(false);
+    repos.setCapabilityTrust("pack-1", "a".repeat(64), true);
+    expect(repos.isCapabilityDigestTrusted("pack-1", "a".repeat(64))).toBe(true);
+    expect(repos.isCapabilityDigestTrusted("pack-1", "b".repeat(64))).toBe(false);
+    repos.setCapabilityTrust("pack-1", "a".repeat(64), false);
+    expect(repos.isCapabilityDigestTrusted("pack-1", "a".repeat(64))).toBe(false);
+  });
+
+  it("increments secret versions and exposes value-free metadata", () => {
+    createCapabilityPack();
+    expect(repos.setCapabilitySecret("pack-1", "sentry-token", "first")).toEqual({
+      key: "sentry-token", configured: true, version: 1,
+    });
+    expect(repos.setCapabilitySecret("pack-1", "sentry-token", "second")).toEqual({
+      key: "sentry-token", configured: true, version: 2,
+    });
+    repos.setCapabilitySecret("pack-1", "another", "third");
+    const metadata = repos.listCapabilitySecretMetadata("pack-1");
+    expect(metadata).toEqual([
+      { key: "another", configured: true, version: 1 },
+      { key: "sentry-token", configured: true, version: 2 },
+    ]);
+    expect(JSON.stringify(metadata)).not.toContain("first");
+    expect(JSON.stringify(metadata)).not.toContain("second");
+    expect(repos.getCapabilitySecretValue("pack-1", "sentry-token")).toBe("second");
+    repos.deleteCapabilitySecret("pack-1", "sentry-token");
+    expect(repos.listCapabilitySecretMetadata("pack-1")).toEqual([{ key: "another", configured: true, version: 1 }]);
+  });
+
+  it("normalizes binding audiences and rejects overlapping equal-scope audience products", () => {
+    createCapabilityPack();
+    const first = repos.setCapabilityBinding("binding-1", {
+      packInstanceId: "pack-1",
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["worker", "master", "worker"], origins: ["ui", "ui"] },
+      enabled: true,
+    });
+    expect(first.audience).toEqual({ agents: ["master", "worker"], origins: ["ui"] });
+
+    const disjoint = repos.setCapabilityBinding("binding-2", {
+      packInstanceId: "pack-1",
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["master"], origins: ["slack"] },
+      enabled: false,
+    });
+    expect(disjoint.enabled).toBe(false);
+
+    expect(() => repos.setCapabilityBinding("binding-3", {
+      packInstanceId: "pack-1",
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["worker"], origins: ["ui"] },
+      enabled: true,
+    })).toThrow(/overlap/i);
+
+    expect(() => repos.setCapabilityBinding("binding-2", {
+      id: "binding-2",
+      packInstanceId: "pack-1",
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] },
+      enabled: true,
+    })).toThrow(/overlap/i);
+
+    expect(repos.listCapabilityBindings().map((binding) => binding.id)).toEqual(["binding-1", "binding-2"]);
+    expect(repos.getCapabilityBinding("binding-1")).toEqual(first);
+    repos.deleteCapabilityBinding("binding-2");
+    expect(repos.getCapabilityBinding("binding-2")).toBeUndefined();
+  });
+
+  it("rejects capability children for unknown packs", () => {
+    expect(() => repos.setCapabilityBinding("binding-1", {
+      packInstanceId: "missing",
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] },
+      enabled: true,
+    })).toThrow();
+    expect(() => repos.setCapabilityTrust("missing", "a".repeat(64), true)).toThrow();
+    expect(() => repos.setCapabilitySecret("missing", "key", "value")).toThrow();
+  });
+
+  it("deleting a pack removes its bindings, trust, and secrets", () => {
+    createCapabilityPack();
+    repos.setCapabilityBinding("binding-1", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] }, enabled: true,
+    });
+    repos.setCapabilityTrust("pack-1", "a".repeat(64), true);
+    repos.setCapabilitySecret("pack-1", "key", "value");
+    repos.deleteCapabilityPack("pack-1");
+
+    expect(repos.listCapabilityBindings()).toEqual([]);
+    expect(repos.listCapabilitySecretMetadata("pack-1")).toEqual([]);
+    expect(repos.isCapabilityDigestTrusted("pack-1", "a".repeat(64))).toBe(false);
+  });
+
+  it("cleans only bindings owned by deleted sessions and workers", () => {
+    createCapabilityPack();
+    repos.createSession({ id: "session-1", cwd: "/repo" });
+    repos.createSession({ id: "session-2", cwd: "/repo" });
+    repos.createWorker({ id: "worker-1", sessionId: "session-1", repoPath: "/repo", label: "one" });
+    const audience = { agents: ["master" as const], origins: ["ui" as const] };
+    repos.setCapabilityBinding("session-binding-1", { packInstanceId: "pack-1", scopeKind: "session", scopeRef: "session-1", audience, enabled: true });
+    repos.setCapabilityBinding("session-binding-2", { packInstanceId: "pack-1", scopeKind: "session", scopeRef: "session-2", audience, enabled: true });
+    repos.setCapabilityBinding("worker-binding", { packInstanceId: "pack-1", scopeKind: "worker", scopeRef: "worker-1", audience: { agents: ["worker"], origins: ["ui"] }, enabled: true });
+
+    repos.deleteWorker("worker-1");
+    expect(repos.getCapabilityBinding("worker-binding")).toBeUndefined();
+    expect(repos.getCapabilityBinding("session-binding-1")).toBeDefined();
+    repos.deleteSession("session-1");
+    expect(repos.getCapabilityBinding("session-binding-1")).toBeUndefined();
+    expect(repos.getCapabilityBinding("session-binding-2")).toBeDefined();
+    expect(repos.getCapabilityPack("pack-1")).toBeDefined();
+  });
+
+  it("repo removal deletes repo-local bindings and owned repo-shared packs but preserves local Library packs", () => {
+    repos.createRepo({ id: "repo-1", name: "app", path: "/repo", description: "" });
+    createCapabilityPack();
+    createCapabilityPack({
+      instanceId: "shared-pack",
+      logicalId: "shared",
+      sourceKind: "repo-shared",
+      sourcePath: "/repo/.rookery/capabilities/shared",
+      ownerRepoId: "repo-1",
+    });
+    const audience = { agents: ["master" as const], origins: ["ui" as const] };
+    repos.setCapabilityBinding("local-repo-binding", { packInstanceId: "pack-1", scopeKind: "repo-local", scopeRef: "repo-1", audience, enabled: true });
+    repos.setCapabilityBinding("local-global-binding", { packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", audience, enabled: true });
+    repos.setCapabilityBinding("shared-binding", { packInstanceId: "shared-pack", scopeKind: "repo-shared", scopeRef: "repo-1", audience, enabled: true });
+
+    repos.removeRepo("app");
+
+    expect(repos.getCapabilityPack("shared-pack")).toBeUndefined();
+    expect(repos.getCapabilityBinding("shared-binding")).toBeUndefined();
+    expect(repos.getCapabilityBinding("local-repo-binding")).toBeUndefined();
+    expect(repos.getCapabilityBinding("local-global-binding")).toBeDefined();
+    expect(repos.getCapabilityPack("pack-1")).toBeDefined();
+  });
+
   it("sets and clears a session's handoff_from_provider marker (cross-provider fork)", () => {
     repos.createSession({ id: "s1", cwd: "/x" });
     expect(repos.getSession("s1")!.handoff_from_provider).toBeNull();

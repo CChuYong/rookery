@@ -15,19 +15,24 @@ type Probeable = AsyncIterable<unknown> & {
   interrupt(): Promise<void>;
 };
 
-function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return new Promise<T>((resolve) => {
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     let done = false;
-    const timer = setTimeout(() => { if (!done) { done = true; resolve(fallback); } }, ms);
-    void p.then((v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } }, () => { if (!done) { done = true; clearTimeout(timer); resolve(fallback); } });
+    const timer = setTimeout(() => { if (!done) { done = true; reject(new Error("Claude command discovery timed out")); } }, ms);
+    void p.then((v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } }, (error) => { if (!done) { done = true; clearTimeout(timer); reject(error); } });
   });
+}
+
+export interface CommandDiscovery {
+  commands: SlashCommandInfo[];
+  error?: string;
 }
 
 // Probes the slash-command list per cwd once via the SDK and caches it. The probe spins up a
 // one-shot query, calls only supportedCommands(), and closes it (no turn is sent). Best-effort — returns [] on failure/timeout.
 export class CommandCatalog {
-  private readonly cache = new Map<string, { commands: SlashCommandInfo[]; at: number }>();
-  private readonly inflight = new Map<string, Promise<SlashCommandInfo[]>>();
+  private readonly cache = new Map<string, { discovery: CommandDiscovery; at: number }>();
+  private readonly inflight = new Map<string, Promise<CommandDiscovery>>();
   private readonly ttlMs: number;
   private readonly now: () => number;
 
@@ -40,8 +45,14 @@ export class CommandCatalog {
   }
 
   async forCwd(cwd: string): Promise<SlashCommandInfo[]> {
+    return (await this.inspect(cwd)).commands;
+  }
+
+  // Same discovery as forCwd(), but preserves the distinction between a successful empty catalog and
+  // a failed/timed-out probe so Capability Center can report a truthful partial snapshot.
+  async inspect(cwd: string): Promise<CommandDiscovery> {
     const hit = this.cache.get(cwd);
-    if (hit && this.now() - hit.at < this.ttlMs) return hit.commands;
+    if (hit && this.now() - hit.at < this.ttlMs) return hit.discovery;
     const existing = this.inflight.get(cwd);
     if (existing) return existing; // coalesce concurrent requests
     const p = this.probe(cwd).finally(() => this.inflight.delete(cwd));
@@ -49,7 +60,7 @@ export class CommandCatalog {
     return p;
   }
 
-  private async probe(cwd: string): Promise<SlashCommandInfo[]> {
+  private async probe(cwd: string): Promise<CommandDiscovery> {
     const model = typeof this.opts.model === "function" ? this.opts.model() : this.opts.model;
     const queue = new MessageQueue();
     const abort = new AbortController();
@@ -61,18 +72,19 @@ export class CommandCatalog {
       // Background pump: the generator must be consumed for control responses (supportedCommands) to flow. Messages are discarded.
       const pump = (async () => { try { for await (const _m of q) { void _m; } } catch { /* aborted */ } })();
       try {
-        const cmds = await withTimeout(q.supportedCommands(), PROBE_TIMEOUT_MS, [] as SlashCommandInfo[]);
+        const cmds = await withTimeout(q.supportedCommands(), PROBE_TIMEOUT_MS);
         const mapped = cmds.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint, aliases: c.aliases }));
-        this.cache.set(cwd, { commands: mapped, at: this.now() });
-        return mapped;
+        const discovery = { commands: mapped };
+        this.cache.set(cwd, { discovery, at: this.now() });
+        return discovery;
       } finally {
         queue.close();
         abort.abort();
         try { await q.interrupt(); } catch { /* ignore */ }
         await pump.catch(() => {});
       }
-    } catch {
-      return []; // probe itself failed → no candidates
+    } catch (error) {
+      return { commands: [], error: error instanceof Error ? error.message : String(error) };
     }
   }
 }

@@ -1,14 +1,30 @@
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
-import type { CodexSpawn } from "./codex-transport.js";
+import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex-transport.js";
 import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
 import { turnCostUsd, isRatedModel } from "./codex-pricing.js";
+import type { ResolvedAgentCapabilities } from "../capabilities/types.js";
 
 // Models billed at $0 because they have no pricing entry — warned once per process so the daemon log
 // surfaces the cost/budget blind spot (finding [18]) without spamming a line every turn.
 const warnedUnratedModels = new Set<string>();
+
+export interface CodexRuntimeProjection {
+  codexHome: string;
+  env: Record<string, string>;
+  systemPromptAppend?: string;
+}
+
+export interface CodexRuntimePort {
+  prepareWorker(key: string, capabilities: ResolvedAgentCapabilities): CodexRuntimeProjection;
+  prepareMaster(
+    key: string,
+    defs: () => ProviderToolDef[],
+    capabilities: ResolvedAgentCapabilities,
+  ): CodexRuntimeProjection;
+}
 
 export interface CodexBackendDeps {
   spawn: CodexSpawn;
@@ -23,6 +39,10 @@ export interface CodexBackendDeps {
   // config.toml/auth.json under `<rookery home>/codex-homes/<sessionKey>/`) and hands back just the
   // path (see docs/2026-07-06-p2-codex-master.md for the original bridge wiring).
   bridge?: { ensureSession(key: string, defs: () => ProviderToolDef[]): { codexHome: string } };
+  // Slice 4 managed-capability runtime. The daemon owns all filesystem/secret work and returns only
+  // the target-specific home, secret-bearing process environment, and instruction append text.
+  // Materialization is synchronous so a blocked/colliding runtime fails before any provider child.
+  runtime?: CodexRuntimePort;
   // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
   // ONCE per turn (server.ts passes `() => settings.codexTurnIdleTimeoutMs()`), matching the
   // model/effort resolver convention (re-evaluated per turn, not snapshotted). A turn armed with this
@@ -72,6 +92,12 @@ export function serializeMcpResult(result: unknown, fallback: string): string {
     }
   }
   return fallback;
+}
+
+function appendDeveloperInstructions(base: string | undefined, managed: string | undefined): string | undefined {
+  if (!base) return managed;
+  if (!managed) return base;
+  return `${base}\n\n${managed}`;
 }
 
 // Duck-typed shape of a `item/started`/`item/completed` notification's `item` field — shared by
@@ -262,8 +288,8 @@ abstract class CodexSessionBase implements AgentStream {
   // Spawns the child, wires the client's close/notification/server-request handlers, completes the
   // initialize handshake, and provisions the in-app API key if configured. `envOverride` carries the
   // master turn's per-session CODEX_HOME (`{CODEX_HOME: <bridge-materialized dir>}` — P2.5 Track A;
-  // absent for workers and tool-less master turns, which fall back to `deps.env` alone). No `-c` arg
-  // is ever passed anymore — the bridge URL lives only in that dir's config.toml (mode 0600).
+  // absent for tool-less master turns, which fall back to `deps.env` alone). Bridge/runtime values
+  // never enter argv; managed-secret launches add only fixed public safety overrides.
   protected async openClient(envOverride?: NodeJS.ProcessEnv): Promise<CodexClient> {
     const abort = this.opts.abortController;
     // envOverride (when present) wins over the base env — a per-turn per-session CODEX_HOME must
@@ -272,7 +298,7 @@ abstract class CodexSessionBase implements AgentStream {
     // object is harmless either way, but `undefined` reads as "nothing to add" and matches prior behavior.
     const baseEnv = this.deps.env?.();
     const env = envOverride ? { ...(baseEnv ?? {}), ...envOverride } : baseEnv;
-    const transport = this.deps.spawn({ env, args: undefined });
+    const transport = this.deps.spawn({ env, args: codexManagedSecretSafetyArgs(env) });
     const client = new CodexClient(transport);
     this.client = client;
     this.clientClosedP = new Promise((resolve) => { this.resolveClientClosed = resolve; });
@@ -740,6 +766,7 @@ class CodexWorkerStream extends CodexSessionBase {
     deps: CodexBackendDeps,
     private readonly input: AsyncIterable<string>,
     opts: AgentSessionOptions,
+    private readonly envOverride: NodeJS.ProcessEnv | undefined,
     totalsByThread: Map<string, CodexTokenUsageBreakdown>,
   ) {
     super(deps, opts, totalsByThread);
@@ -749,7 +776,7 @@ class CodexWorkerStream extends CodexSessionBase {
     const abort = this.opts.abortController;
     try {
       const mode = mapPermissionMode(this.opts.permissionMode);
-      const { client, threadId } = await this.openHandshake(mode, this.opts.systemPromptAppend);
+      const { client, threadId } = await this.openHandshake(mode, this.opts.systemPromptAppend, this.envOverride);
 
       const inputIt = this.input[Symbol.asyncIterator]();
       while (true) {
@@ -816,7 +843,19 @@ export class CodexBackend implements AgentBackend {
   constructor(private readonly deps: CodexBackendDeps) {}
 
   openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
-    return new CodexWorkerStream(this.deps, input, opts, this.totalsByThread);
+    let streamOpts = opts;
+    let envOverride: NodeJS.ProcessEnv | undefined;
+    if (opts.capabilities) {
+      if (!opts.runtimeKey) throw new Error("managed Codex worker capabilities require runtimeKey");
+      if (!this.deps.runtime) throw new Error("managed Codex worker capabilities require a runtime materializer");
+      const launch = this.deps.runtime.prepareWorker(opts.runtimeKey, opts.capabilities);
+      envOverride = { ...launch.env, CODEX_HOME: launch.codexHome };
+      streamOpts = {
+        ...opts,
+        systemPromptAppend: appendDeveloperInstructions(opts.systemPromptAppend, launch.systemPromptAppend),
+      };
+    }
+    return new CodexWorkerStream(this.deps, input, streamOpts, envOverride, this.totalsByThread);
   }
 
   // Per-turn ephemeral child (P2 — docs/2026-07-06-p2-codex-master.md). Rejects SYNCHRONOUSLY for
@@ -827,7 +866,11 @@ export class CodexBackend implements AgentBackend {
     if (mode.sandbox !== "danger-full-access" && !opts.readOnly) {
       throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");
     }
-    if (opts.readOnly && (Object.values(opts.toolDefs ?? {}).some((defs) => defs.length > 0) || Object.keys(opts.mcpServers ?? {}).length > 0)) {
+    if (opts.readOnly && (
+      Object.values(opts.toolDefs ?? {}).some((defs) => defs.length > 0)
+      || Object.keys(opts.mcpServers ?? {}).length > 0
+      || (opts.capabilities?.mcpServers.length ?? 0) > 0
+    )) {
       throw new Error("read-only codex Side conversations cannot expose MCP tools");
     }
     // Fail loudly instead of silently no-oping (finding [20]): CodexBackend reaches tools ONLY via the
@@ -838,13 +881,24 @@ export class CodexBackend implements AgentBackend {
     if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
       console.warn(`[codex] ignoring ${Object.keys(opts.mcpServers).length} opts.mcpServers entr${Object.keys(opts.mcpServers).length === 1 ? "y" : "ies"} — codex masters reach tools via the toolDefs bridge only; expose tools as toolDefs instead`);
     }
+    let streamOpts = opts;
     let envOverride: NodeJS.ProcessEnv | undefined;
-    if (opts.sessionKey && opts.toolDefs && this.deps.bridge) {
+    if (opts.capabilities) {
+      if (!opts.runtimeKey) throw new Error("managed Codex master capabilities require runtimeKey");
+      if (!this.deps.runtime) throw new Error("managed Codex master capabilities require a runtime materializer");
+      const flattened = Object.values(opts.toolDefs ?? {}).flat();
+      const launch = this.deps.runtime.prepareMaster(opts.runtimeKey, () => flattened, opts.capabilities);
+      envOverride = { ...launch.env, CODEX_HOME: launch.codexHome };
+      streamOpts = {
+        ...opts,
+        systemPromptAppend: appendDeveloperInstructions(opts.systemPromptAppend, launch.systemPromptAppend),
+      };
+    } else if (opts.sessionKey && opts.toolDefs && this.deps.bridge) {
       const flattened = Object.values(opts.toolDefs).flat();
       const { codexHome } = this.deps.bridge.ensureSession(opts.sessionKey, () => flattened);
       envOverride = { CODEX_HOME: codexHome };
     }
-    return new CodexTurnStream(this.deps, prompt, opts, envOverride, this.totalsByThread);
+    return new CodexTurnStream(this.deps, prompt, streamOpts, envOverride, this.totalsByThread);
   }
 
   private static readonly FORK_TIMEOUT_MS = 15_000;
@@ -855,7 +909,8 @@ export class CodexBackend implements AgentBackend {
   // fork child runs in the SOURCE session's per-session home (where thread/fork can find the thread);
   // worker/claude callers pass no opts, so `deps.env?.()` (the shared home) is unchanged.
   async forkSession(threadId: string, opts?: { env?: NodeJS.ProcessEnv }): Promise<{ sessionId: string }> {
-    const transport = this.deps.spawn({ env: opts?.env ?? this.deps.env?.() });
+    const env = opts?.env ?? this.deps.env?.();
+    const transport = this.deps.spawn({ env, args: codexManagedSecretSafetyArgs(env) });
     const client = new CodexClient(transport);
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Fork honors codexHandshakeTimeoutMs for coherence with the rest of the codex handshake phase

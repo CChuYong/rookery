@@ -5,6 +5,8 @@ import type { EventBus, WorkerEventData } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { truncateBytes } from "./truncate.js";
 import type { SlashCommandInfo } from "./agent-backend.js";
+import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
+import type { CapabilityRuntimeReporter, CapabilityRuntimeTarget } from "./capabilities/runtime-state.js";
 
 // Instruction injected into every worker turn so it treats fenced <untrusted-...> content as data, not instructions.
 export const WORKER_FENCE_INSTRUCTION =
@@ -44,6 +46,10 @@ export interface WorkerDeps {
   // beat early). The wake cancels the grace (→ running, no idle ever emitted); expiry means no wake came
   // (→ idle, truthful). Injectable for deterministic tests.
   settleGraceMs?: number;
+  // Resolved once for this provider stream. A live worker deliberately keeps its original revision;
+  // later desired changes are surfaced as pending-reload until Slice 5 adds an explicit reload path.
+  managedCapabilities?: () => ResolvedAgentCapabilities;
+  capabilityRuntime?: CapabilityRuntimeReporter;
 }
 
 interface WorkerOpts {
@@ -347,7 +353,19 @@ export class Worker {
   }
 
   private async consume(): Promise<void> {
+    const runtimeTarget: CapabilityRuntimeTarget = {
+      targetKind: "worker",
+      targetId: this.opts.id,
+      sessionId: this.opts.sessionId,
+    };
+    let managed: ResolvedAgentCapabilities | undefined;
+    let managedApplied = false;
     try {
+      managed = this.opts.deps.managedCapabilities?.();
+      if (managed) {
+        this.opts.deps.capabilityRuntime?.setDesired(runtimeTarget, managed.revision, managed.blocked);
+        if (managed.blocked) throw new Error("managed capabilities are blocked");
+      }
       this.stream = this.opts.deps.backend.openSession(this.queue, {
         cwd: this.opts.repoPath,
         model: this.currentModel,
@@ -356,8 +374,15 @@ export class Worker {
         systemPromptAppend: WORKER_FENCE_INSTRUCTION,
         resume: this.sdkSessionId,
         abortController: this.abort,
+        ...(managed ? { runtimeKey: this.opts.id, capabilities: managed } : {}),
       });
       for await (const ev of this.stream) {
+        // Stream construction proves provider setup was accepted; the first provider frame confirms
+        // the child is alive with that immutable projection. Never re-resolve inside this loop.
+        if (managed && !managedApplied) {
+          this.opts.deps.capabilityRuntime?.setApplied(runtimeTarget, managed.revision);
+          managedApplied = true;
+        }
         // Spontaneous wake (live-verified 2026-07-11, probe-turn-lifecycle.mjs): after a background task
         // settles, the SDK starts a non-human turn with NO send() — including after an interrupt. Any model
         // activity while no turn is tracked means a turn began; without this the wake turn would stream
@@ -538,6 +563,13 @@ export class Worker {
         this.transition("stopped");
       }
     } catch (err) {
+      if (managed && !managed.blocked && !managedApplied) {
+        this.opts.deps.capabilityRuntime?.setError(
+          runtimeTarget,
+          managed.revision,
+          "Capability runtime application failed.",
+        );
+      }
       // an abort caused by stop/discard is not an error — don't leave "Operation aborted" in the transcript.
       if (this.abort.signal.aborted) return;
       this.flushThinking(); // also persist the thinking summary up to right before the error (so it shows on restore)
