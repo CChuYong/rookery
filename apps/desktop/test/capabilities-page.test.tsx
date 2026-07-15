@@ -124,7 +124,7 @@ describe("CapabilitiesPage", () => {
     expect(screen.getByText("먼저 세션이나 워커를 선택하세요.")).toBeInTheDocument();
     expect(loadSnapshot).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "유효 상태" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "라이브러리" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "카탈로그" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "할당" })).toBeInTheDocument();
   });
 
