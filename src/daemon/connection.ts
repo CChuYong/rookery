@@ -32,6 +32,8 @@ import type {
   CapabilityBindingInput,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpPackCreateInput,
+  CapabilityMcpPackCreateResult,
   CapabilitySecretStatus,
   CapabilitySnapshot,
   CapabilityTarget,
@@ -74,6 +76,7 @@ export interface CapabilitySnapshotProvider {
 
 export interface CapabilityProvider extends CapabilitySnapshotProvider {
   library(): CapabilityLibrarySnapshot;
+  createMcpPack(input: CapabilityMcpPackCreateInput): CapabilityMcpPackCreateResult;
   addPack(sourcePath: string): CapabilityLibraryEntry;
   removePack(instanceId: string): void;
   setBinding(id: string, input: CapabilityBindingInput): CapabilityBinding;
@@ -122,6 +125,13 @@ export interface SideConversationController {
   send(id: string, text: string): void;
   stop(id: string): Promise<void>;
   close(id: string): Promise<void>;
+}
+
+function redactWriteOnlyValues(error: unknown, values: Record<string, string> | undefined): string {
+  let message = String(error);
+  const secrets = [...new Set(Object.values(values ?? {}))].sort((a, b) => b.length - a.length);
+  for (const secret of secrets) message = message.replaceAll(secret, "[redacted]");
+  return message;
 }
 
 export class Connection {
@@ -541,6 +551,20 @@ export class Connection {
       case "capabilities.library": {
         if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
         this.reply({ type: "capabilities.library.result", reqId: msg.reqId, library: this.capabilities.library() });
+        return;
+      }
+      case "capabilities.mcpPack.create": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        try {
+          const result = this.capabilities.createMcpPack(msg.input);
+          this.reply({ type: "capabilities.mcpPack.result", reqId: msg.reqId, ...result });
+        } catch (error) {
+          this.reply({
+            type: "error",
+            reqId: msg.reqId,
+            message: redactWriteOnlyValues(error, msg.input.secretValues),
+          });
+        }
         return;
       }
       case "capabilities.pack.add": {

@@ -225,6 +225,96 @@ describe("Connection", () => {
     });
   });
 
+  it("creates an MCP pack through the provider without exposing write-only secrets", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const input = {
+      id: "repo-tools",
+      displayName: "Repo Tools",
+      version: "1.0.0",
+      description: "Repository MCP servers",
+      repoId: "repo-1",
+      agents: ["master", "worker"],
+      mcpServers: [{
+        id: "docs",
+        transport: "streamable-http",
+        url: "https://example.test/mcp",
+        auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+      }],
+      secretValues: { "docs-token": "uniquely-sensitive-mcp-secret" },
+    };
+    const result = {
+      pack: {
+        instanceId: "pack-1",
+        sourceKind: "rookery-generated",
+        status: "untrusted",
+        manifest: { id: "repo-tools" },
+        secrets: [{ key: "docs-token", configured: true }],
+      },
+      binding: {
+        id: "binding-1",
+        packInstanceId: "pack-1",
+        scopeKind: "repo-local",
+        scopeRef: "repo-1",
+        audience: { agents: ["master", "worker"], origins: ["ui"] },
+        enabled: true,
+        createdAt: "t",
+        updatedAt: "t",
+      },
+    };
+    const capabilities = { snapshot: vi.fn(), createMcpPack: vi.fn(() => result) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.mcpPack.create", reqId: "cap-create", input }));
+
+    expect(capabilities.createMcpPack).toHaveBeenCalledWith(input);
+    expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.mcpPack.result", reqId: "cap-create", ...result });
+    expect(sent.join("\n")).not.toContain("uniquely-sensitive-mcp-secret");
+  });
+
+  it("redacts MCP write-only values from correlated creation errors", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const capabilities = {
+      snapshot: vi.fn(),
+      createMcpPack: vi.fn(() => { throw new Error("rejected uniquely-sensitive-mcp-secret by store"); }),
+    };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never,
+    );
+
+    await conn.handleRaw(JSON.stringify({
+      type: "capabilities.mcpPack.create",
+      reqId: "cap-create-error",
+      input: {
+        id: "repo-tools",
+        displayName: "Repo Tools",
+        version: "1.0.0",
+        description: "Repository MCP servers",
+        repoId: "repo-1",
+        agents: ["master"],
+        mcpServers: [{
+          id: "docs",
+          transport: "streamable-http",
+          url: "https://example.test/mcp",
+          auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+        }],
+        secretValues: { "docs-token": "uniquely-sensitive-mcp-secret" },
+      },
+    }));
+
+    expect(parsed(sent).at(-1)).toMatchObject({
+      type: "error",
+      reqId: "cap-create-error",
+      message: expect.stringContaining("[redacted]"),
+    });
+    expect(sent.join("\n")).not.toContain("uniquely-sensitive-mcp-secret");
+  });
+
   it("routes worker capability reloads and preserves the scheduling result", async () => {
     const { sent, repos, bus, fleet, sm, socket } = setup();
     const capabilities = { snapshot: vi.fn() };
