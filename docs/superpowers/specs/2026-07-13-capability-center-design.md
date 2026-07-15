@@ -828,6 +828,7 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 
 ```ts
 { type: "capabilities.library", reqId }
+{ type: "capabilities.mcpPack.create", reqId, input: CapabilityMcpPackCreateInput }
 { type: "capabilities.pack.add", reqId, path: string }
 { type: "capabilities.pack.remove", reqId, instanceId: string }
 { type: "capabilities.binding.set", reqId, id: string, binding: CapabilityBindingInput }
@@ -839,11 +840,16 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 { type: "capabilities.worker.reload", reqId, workerId: string, whenIdle?: boolean }
 ```
 
-Through Slice 6, every request above is shipped. Library projections include file paths, modes,
+Every request above is shipped. Library projections include file paths, modes,
 hashes, public MCP configuration, validation/change metadata, and secret configured
 booleans; they never include instruction bodies, skill bodies, or secret values.
 
-Secret responses contain only `{ key, configured: boolean }`. The value is write-only.
+`capabilities.mcpPack.create` accepts multiple provider-neutral stdio/Streamable HTTP
+servers, a registered repository id, a master/worker audience, and an optional write-only
+secret-value map. It creates a private public-only manifest below
+`<ROOKERY_HOME>/capability-packs`, an enabled repo-local/UI binding, and an untrusted
+Library row. Its reply is `{pack,binding}` with configured booleans only. Secret responses
+contain only `{ key, configured: boolean }`; values are write-only.
 Mutation replies return the affected sanitized Library entry or binding so the desktop can
 update without a full reload.
 
@@ -1194,6 +1200,44 @@ Verification evidence:
 - Desktop tests cover generic selection/submission, Side actions, unknown slash text,
   structured refresh, exact-kind Center routing, and localized built-in candidates.
 
+### Slice 7 — MCP pack builder
+
+- Multi-server stdio and Streamable HTTP draft editor in Library.
+- Rookery-owned generated pack filesystem with atomic staging and contained cleanup.
+- Write-only secret submission, automatic repo-local/UI binding, and rollback.
+- Post-create review/trust handoff.
+
+Implemented on 2026-07-15. Library can create one provider-neutral pack containing any
+number of MCP servers without requiring a hand-written `capability.json`. The draft
+compiler preserves stdio argument boundaries, separates public env/headers from secret
+references and values, validates collisions, and emits one strict protocol request. The
+daemon writes only references into a private generated manifest, stores values through the
+existing secret boundary, and automatically binds the pack to the selected registered
+repository for the chosen Master/Worker audience and UI origin.
+
+Creation remains fail-closed: generated packs are untrusted, highlighted for inspection,
+and cannot run until the user expands the card and trusts the exact digest. Creation
+failures remove both partial registry state and owned files. Deletion removes only
+Rookery-generated direct children; operator-managed and repo-shared sources remain in
+place. Editing a generated pack is outside this slice; users delete and recreate it.
+
+Exit: A user can configure several repo-scoped MCP servers and their secrets entirely in
+the desktop UI, then explicitly review and trust the generated result.
+
+Verification evidence:
+
+- Protocol tests cover strict transports, ids, URLs, agents, declared secret keys, and
+  secret-safe correlated results/errors.
+- Store/service tests cover permissions, validation-before-rename, containment, symlink
+  replacement, rollback, automatic binding, configured-only secret projections, and
+  generated-only cleanup.
+- Desktop tests cover draft compilation, multiple transports, password fields,
+  validation/retry, repository authority, zero-repository guidance, and the highlighted
+  review handoff in Korean and English.
+- A live isolated daemon smoke creates two servers with sentinel secrets, verifies the
+  generated manifest and every response omit values, trusts the digest, and removes the
+  owned directory.
+
 ## Testing strategy
 
 ### Pure/core
@@ -1237,6 +1281,7 @@ Verification evidence:
 - All mutation validation and correlated replies.
 - `capabilities.changed` affected-scope calculation.
 - Write-only secret request/response behavior.
+- Generated MCP pack transaction rollback, file containment, and secret-safe lifecycle.
 - Busy worker reload rejection and `whenIdle` scheduling.
 
 ### Desktop
@@ -1245,6 +1290,7 @@ Verification evidence:
 - Effective/Assignments/Library loading, empty, partial-error, and retry states.
 - Inheritance and tombstone visualization.
 - Trust review and secret fields never repopulate values.
+- Multi-server MCP builder, repo requirement, create failure preservation, and review handoff.
 - Provider compatibility and pending reload confirmation.
 - Slash deep links and invocable-only filtering.
 - Korean/English catalog parity and used-key checks.
