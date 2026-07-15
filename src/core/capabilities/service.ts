@@ -13,16 +13,19 @@ import type {
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
+  CapabilityCatalogCreateResult,
   CapabilityContribution,
   CapabilityDiagnostic,
   CapabilityEntry,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpCreateInput,
   CapabilityMcpPackCreateInput,
   CapabilityMcpPackCreateResult,
   CapabilityOrigin,
   CapabilityPackManifest,
   CapabilitySecretStatus,
+  CapabilitySkillCreateInput,
   CapabilitySnapshot,
   CapabilityTarget,
 } from "./types.js";
@@ -58,6 +61,7 @@ export interface ClaudeCommandDiscovery {
 
 export interface GeneratedCapabilityPackPort {
   create(manifest: CapabilityPackManifest): string;
+  createSkill(manifest: CapabilityPackManifest, sourcePath: string): string;
   remove(sourcePath: string): void;
 }
 
@@ -227,6 +231,63 @@ export class CapabilityService {
       }
       throw error;
     }
+  }
+
+  private createCatalogPack(
+    manifest: CapabilityPackManifest,
+    create: (generatedPacks: GeneratedCapabilityPackPort) => string,
+    secretValues: Record<string, string> = {},
+  ): CapabilityCatalogCreateResult {
+    const registry = this.deps.registry;
+    const generatedPacks = this.deps.generatedPacks;
+    if (!registry) throw new Error("capability registry unavailable");
+    if (!generatedPacks) throw new Error("generated capability pack store unavailable");
+
+    let sourcePath: string | undefined;
+    let instanceId: string | undefined;
+    try {
+      sourcePath = create(generatedPacks);
+      const added = registry.add(sourcePath, { sourceKind: "rookery-generated" });
+      instanceId = added.instanceId;
+      for (const [key, value] of Object.entries(secretValues).sort(([a], [b]) => a.localeCompare(b))) {
+        registry.setSecret(instanceId, key, value);
+      }
+      const pack = registry.get(instanceId);
+      if (!pack) throw new Error(`generated capability pack disappeared after creation: ${instanceId}`);
+      return { pack };
+    } catch (error) {
+      if (instanceId) {
+        try { registry.remove(instanceId); } catch { /* preserve the original create failure */ }
+      }
+      if (sourcePath) {
+        try { generatedPacks.remove(sourcePath); } catch { /* preserve the original create failure */ }
+      }
+      throw error;
+    }
+  }
+
+  createMcp(input: CapabilityMcpCreateInput): CapabilityCatalogCreateResult {
+    const manifest: CapabilityPackManifest = {
+      schemaVersion: 1,
+      id: input.id,
+      displayName: input.displayName,
+      version: "1.0.0",
+      description: input.description,
+      mcpServers: [input.mcpServer],
+    };
+    return this.createCatalogPack(manifest, (store) => store.create(manifest), input.secretValues);
+  }
+
+  createSkill(input: CapabilitySkillCreateInput): CapabilityCatalogCreateResult {
+    const manifest: CapabilityPackManifest = {
+      schemaVersion: 1,
+      id: input.id,
+      displayName: input.displayName,
+      version: "1.0.0",
+      description: input.description,
+      skills: [{ id: input.id, path: "skill" }],
+    };
+    return this.createCatalogPack(manifest, (store) => store.createSkill(manifest, input.sourcePath));
   }
 
   removePack(instanceId: string): void {

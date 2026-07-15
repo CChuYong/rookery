@@ -172,6 +172,25 @@ export interface CapabilityMcpPackCreateResult {
   binding: CapabilityBinding;
 }
 
+export interface CapabilityMcpCreateInput {
+  id: string;
+  displayName: string;
+  description: string;
+  mcpServer: McpServerSpec;
+  secretValues?: Record<string, string>;
+}
+
+export interface CapabilitySkillCreateInput {
+  id: string;
+  displayName: string;
+  description: string;
+  sourcePath: string;
+}
+
+export interface CapabilityCatalogCreateResult {
+  pack: CapabilityLibraryEntry;
+}
+
 export interface ResolvedCapabilitySource {
   packInstanceId: string;
   packId: string;

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { CapabilityService } from "../../../src/core/capabilities/service.js";
 import type {
+  CapabilityMcpCreateInput,
   CapabilityContribution,
   CapabilityLibraryEntry,
   CapabilityMcpPackCreateInput,
+  CapabilitySkillCreateInput,
 } from "../../../src/core/capabilities/types.js";
 import { CapabilityRuntimeState } from "../../../src/core/capabilities/runtime-state.js";
 import { EventBus } from "../../../src/core/events.js";
@@ -79,6 +81,21 @@ const createInput: CapabilityMcpPackCreateInput = {
     auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
   }],
   secretValues: { "docs-token": "actual-secret-value" },
+};
+
+const singleMcpInput: CapabilityMcpCreateInput = {
+  id: "docs",
+  displayName: "Docs MCP",
+  description: "Repository documentation tools",
+  mcpServer: createInput.mcpServers[0]!,
+  secretValues: { "docs-token": "actual-secret-value" },
+};
+
+const skillInput: CapabilitySkillCreateInput = {
+  id: "review",
+  displayName: "Review Skill",
+  description: "Review repository changes",
+  sourcePath: "/skills/review",
 };
 
 describe("CapabilityService", () => {
@@ -440,6 +457,118 @@ describe("CapabilityService", () => {
       binding: { scopeKind: "repo-local", scopeRef: "repo-1" },
     });
     expect(JSON.stringify(result)).not.toContain("actual-secret-value");
+  });
+
+  it("registers a lightweight MCP as an unbound untrusted singleton pack", () => {
+    let configured = false;
+    const registry = {
+      add: vi.fn(() => generatedPack({
+        manifest: {
+          schemaVersion: 1,
+          id: "docs",
+          displayName: "Docs MCP",
+          version: "1.0.0",
+          description: "Repository documentation tools",
+          mcpServers: [singleMcpInput.mcpServer],
+        },
+      })),
+      setSecret: vi.fn(() => {
+        configured = true;
+        return { key: "docs-token", configured: true };
+      }),
+      get: vi.fn(() => generatedPack({
+        manifest: {
+          schemaVersion: 1,
+          id: "docs",
+          displayName: "Docs MCP",
+          version: "1.0.0",
+          description: "Repository documentation tools",
+          mcpServers: [singleMcpInput.mcpServer],
+        },
+        secrets: [{ key: "docs-token", configured }],
+      })),
+      remove: vi.fn(),
+      setBinding: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(() => "/generated/docs-one"),
+      createSkill: vi.fn(),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    const result = capabilities.createMcp(singleMcpInput);
+
+    expect(generatedPacks.create).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      id: "docs",
+      displayName: "Docs MCP",
+      version: "1.0.0",
+      description: "Repository documentation tools",
+      mcpServers: [singleMcpInput.mcpServer],
+    });
+    expect(registry.setSecret).toHaveBeenCalledWith("pack-1", "docs-token", "actual-secret-value");
+    expect(registry.setBinding).not.toHaveBeenCalled();
+    expect(result.pack).toMatchObject({ status: "untrusted", secrets: [{ key: "docs-token", configured: true }] });
+    expect(JSON.stringify(result)).not.toContain("actual-secret-value");
+  });
+
+  it("imports a lightweight Skill as an unbound untrusted singleton pack", () => {
+    const pack = generatedPack({
+      manifest: {
+        schemaVersion: 1,
+        id: "review",
+        displayName: "Review Skill",
+        version: "1.0.0",
+        description: "Review repository changes",
+        skills: [{ id: "review", path: "skill" }],
+      },
+      sourcePath: "/generated/review-one",
+      secrets: [],
+    });
+    const registry = {
+      add: vi.fn(() => pack),
+      get: vi.fn(() => pack),
+      remove: vi.fn(),
+      setBinding: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(),
+      createSkill: vi.fn(() => "/generated/review-one"),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    const result = capabilities.createSkill(skillInput);
+
+    expect(generatedPacks.createSkill).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      id: "review",
+      displayName: "Review Skill",
+      version: "1.0.0",
+      description: "Review repository changes",
+      skills: [{ id: "review", path: "skill" }],
+    }, "/skills/review");
+    expect(registry.add).toHaveBeenCalledWith("/generated/review-one", { sourceKind: "rookery-generated" });
+    expect(registry.setBinding).not.toHaveBeenCalled();
+    expect(result).toEqual({ pack });
+  });
+
+  it.each(["mcp", "skill"] as const)("rolls back a failed lightweight %s registration", (kind) => {
+    const registry = {
+      add: vi.fn(() => { throw new Error("registration failed"); }),
+      remove: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(() => "/generated/docs-one"),
+      createSkill: vi.fn(() => "/generated/review-one"),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    expect(() => kind === "mcp" ? capabilities.createMcp(singleMcpInput) : capabilities.createSkill(skillInput)).toThrow("registration failed");
+    expect(generatedPacks.remove).toHaveBeenCalledWith(kind === "mcp" ? "/generated/docs-one" : "/generated/review-one");
+    expect(registry.remove).not.toHaveBeenCalled();
   });
 
   it.each([
