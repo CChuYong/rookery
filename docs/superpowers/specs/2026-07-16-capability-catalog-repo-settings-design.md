@@ -1,6 +1,6 @@
 # Capability Catalog and Repository Settings Design
 
-Status: accepted for Slice 8 implementation
+Status: implemented on 2026-07-16
 
 ## Goal
 
@@ -181,4 +181,3 @@ Settings must not alter the active session or worker selection.
 7. Navigation, Korean/English catalogs, protocol correlation, generated directory
    containment, and existing pack/runtime behavior remain covered by automated tests.
 8. Root and desktop typechecks, test suites, builds, and an Electron/daemon live smoke pass.
-

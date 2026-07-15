@@ -202,6 +202,11 @@ not expanded instructions or secret values.
 
 Unique: `(source_kind, source_path)`.
 
+Lightweight Catalog MCP and Skill entries use this same table and trust model; each is a
+`rookery-generated` singleton pack under `<ROOKERY_HOME>/capability-packs/`. Skill sources
+are copied into the generated directory before validation. Slice 8 adds no migration or
+new table.
+
 For `source_kind = repo-shared`, `owner_repo_id` is the authoritative registered repo id
 and `source_path` is contained under `<repo>/.rookery/capabilities/`. The checked-in schema-1
 index at `<repo>/.rookery/capabilities.json` owns discovery and removal; it stores no trust,
@@ -227,6 +232,12 @@ tombstone, not the absence of a binding.
 | `updated_at` | TEXT | NOT NULL | ISO timestamp |
 
 Index: `idx_capability_bindings_scope (pack_instance_id, scope_kind, scope_ref)`.
+
+Repository Settings' quick assignment replaces the simple `repo-local`/UI-only
+Master/Worker rows for one pack and scope in a single repository transaction. `inherit`
+deletes those rows, while `enabled` and `disabled` insert one canonical row. Bindings with
+mixed origins or Side overlap are treated as custom and make the quick operation fail
+without mutation.
 
 ### `capability_trust`
 

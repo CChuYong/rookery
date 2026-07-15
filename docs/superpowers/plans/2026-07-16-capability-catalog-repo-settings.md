@@ -1,6 +1,6 @@
 # Capability Catalog and Repository Settings Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use task-list syntax for tracking.
 
 **Goal:** Ship Slice 8: lightweight single-MCP and Skill registration, a capability-first Catalog, and an extensible full-page Repository Settings surface for repo-local bindings.
 
@@ -33,19 +33,19 @@
 - Consumes: existing `McpServerSpec`, `CapabilityPackManifest`, `CapabilityRegistry`, and `GeneratedCapabilityPackStore.create/remove`.
 - Produces: `CapabilityMcpCreateInput`, `CapabilitySkillCreateInput`, `CapabilityCatalogCreateResult`, `GeneratedCapabilityPackPort.createSkill()`, `CapabilityService.createMcp()` and `CapabilityService.createSkill()`.
 
-- [ ] **Step 1: Add failing generated Skill store tests**
+- [x] **Step 1: Add failing generated Skill store tests**
 
 Add cases that create a temporary Skill directory with valid frontmatter, verify the final
 generated pack contains `capability.json` plus `skill/SKILL.md`, verify modes are private,
 and assert an escaping symlink or invalid Skill leaves neither staging nor final output.
 
-- [ ] **Step 2: Run the focused store test and confirm failure**
+- [x] **Step 2: Run the focused store test and confirm failure**
 
 Run: `npx vitest run test/daemon/generated-capability-pack-store.test.ts`
 
 Expected: FAIL because `createSkill` does not exist.
 
-- [ ] **Step 3: Implement singleton types and safe Skill staging**
+- [x] **Step 3: Implement singleton types and safe Skill staging**
 
 Add these public inputs:
 
@@ -80,13 +80,13 @@ Copy into staging with `dereference: false`, validate the staged pack through
 `validateCapabilityPack`, apply the same `0700` directory and `0600` manifest policy as
 MCP generation, then atomically rename.
 
-- [ ] **Step 4: Add failing service lifecycle tests**
+- [x] **Step 4: Add failing service lifecycle tests**
 
 Cover MCP and Skill creation without a binding, write-only secret configuration,
 untrusted result projection, generated-store rollback, registry rollback, and source-path
 validation failures.
 
-- [ ] **Step 5: Implement service creation and rollback**
+- [x] **Step 5: Implement service creation and rollback**
 
 Implement:
 
@@ -99,7 +99,7 @@ Both methods create schema-version-1 singleton manifests at version `1.0.0`, reg
 `rookery-generated`, store only declared secret values, create no binding, and remove both
 registry state and owned files on any failure.
 
-- [ ] **Step 6: Run focused root tests**
+- [x] **Step 6: Run focused root tests**
 
 Run:
 
@@ -110,7 +110,7 @@ npx vitest run test/core/capabilities/service.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the service slice**
+- [x] **Step 7: Commit the service slice**
 
 ```bash
 git add src/core/capabilities/types.ts src/daemon/generated-capability-pack-store.ts test/daemon/generated-capability-pack-store.test.ts src/core/capabilities/service.ts test/core/capabilities/service.test.ts
@@ -136,19 +136,19 @@ git commit -m "feat: add lightweight capability registration"
 - Consumes: existing binding scope authority and audience-overlap rules.
 - Produces: `CapabilityQuickBindingInput`, `CapabilityQuickBindingMode`, `Repositories.replaceCapabilityUiBinding()`, `CapabilityRegistry.quickSetBinding()`, and three correlated protocol requests.
 
-- [ ] **Step 1: Write failing repository transaction tests**
+- [x] **Step 1: Write failing repository transaction tests**
 
 Cover canonical replacement of multiple UI-only master/worker bindings, inherit deletion,
 enabled/disabled creation, preservation of Slack-only peers, and rejection of a mixed
 UI+Slack or Side binding without changing any rows.
 
-- [ ] **Step 2: Run repository tests and confirm failure**
+- [x] **Step 2: Run repository tests and confirm failure**
 
 Run: `npx vitest run test/persistence/repositories.test.ts -t "quick capability binding"`
 
 Expected: FAIL because `replaceCapabilityUiBinding` does not exist.
 
-- [ ] **Step 3: Implement the transactional repository primitive**
+- [x] **Step 3: Implement the transactional repository primitive**
 
 Add:
 
@@ -168,18 +168,18 @@ export interface CapabilityQuickBindingInput {
 `this.db.transaction()` to delete simple peers and optionally insert a canonical
 `origins:["ui"]` binding.
 
-- [ ] **Step 4: Add registry/service authority tests**
+- [x] **Step 4: Add registry/service authority tests**
 
 Verify unknown packs/repos are rejected, Rookery requires an empty ref, repo-local requires
 an authoritative repo id, no event is emitted on custom conflict, and successful changes
 emit the exact affected scope.
 
-- [ ] **Step 5: Implement registry and service quick binding**
+- [x] **Step 5: Implement registry and service quick binding**
 
 Use the registry id generator for the replacement id and return `CapabilityBinding | null`.
 Do not expose persistence directly to the connection.
 
-- [ ] **Step 6: Add protocol and connection tests**
+- [x] **Step 6: Add protocol and connection tests**
 
 Add strict schemas and correlated secret-safe responses for:
 
@@ -191,13 +191,13 @@ Add strict schemas and correlated secret-safe responses for:
 
 Expected results carry only sanitized `pack` and `binding` projections.
 
-- [ ] **Step 7: Implement protocol routing**
+- [x] **Step 7: Implement protocol routing**
 
 Decode all three inputs strictly, call the service, and reply with
 `capabilities.catalog.create.result` or `capabilities.binding.quickSet.result` using the
 original `reqId`.
 
-- [ ] **Step 8: Run focused protocol/core tests**
+- [x] **Step 8: Run focused protocol/core tests**
 
 Run:
 
@@ -207,7 +207,7 @@ npx vitest run test/persistence/repositories.test.ts test/core/capabilities/regi
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit protocol and assignment**
+- [x] **Step 9: Commit protocol and assignment**
 
 ```bash
 git add src/core/capabilities/types.ts src/persistence/repositories.ts src/core/capabilities/registry.ts src/core/capabilities/service.ts src/protocol/messages.ts src/daemon/connection.ts test/persistence/repositories.test.ts test/core/capabilities/registry.test.ts test/core/capabilities/service.test.ts test/protocol/messages.test.ts test/daemon/connection.test.ts
@@ -234,12 +234,12 @@ git commit -m "feat: add repository capability quick assignments"
 - Consumes: Task 1/2 protocol methods through `CapabilityCenterApi`.
 - Produces: `catalogKind(pack)`, single-MCP and Skill dialogs, and a capability-first Catalog list while preserving pack review controls.
 
-- [ ] **Step 1: Write failing catalog projection tests**
+- [x] **Step 1: Write failing catalog projection tests**
 
 Assert one-MCP manifests map to `mcp`, one-Skill manifests map to `skill`, and instruction,
 empty, or multi-item manifests map to `bundle`, with deterministic search text.
 
-- [ ] **Step 2: Implement catalog projection helpers**
+- [x] **Step 2: Implement catalog projection helpers**
 
 Export:
 
@@ -249,26 +249,26 @@ export function catalogKind(pack: CapabilityLibraryEntry): CapabilityCatalogKind
 export function catalogSearchText(pack: CapabilityLibraryEntry): string;
 ```
 
-- [ ] **Step 3: Write failing dialog and Catalog component tests**
+- [x] **Step 3: Write failing dialog and Catalog component tests**
 
 Cover strict stdio/HTTP draft compilation, password fields never repopulating, MCP create
 without repos, Skill directory selection/import, cancel/retry preservation, kind filters,
 and the highlighted review-before-trust handoff.
 
-- [ ] **Step 4: Implement lightweight dialogs and API adapters**
+- [x] **Step 4: Implement lightweight dialogs and API adapters**
 
 `McpCapabilityDialog` reuses the existing MCP draft compiler for exactly one server and
 submits `CapabilityMcpCreateInput`. `SkillImportDialog` obtains a directory through
 `pickDirectory`, validates non-empty id/name/path fields client-side, and submits
 `CapabilitySkillCreateInput`.
 
-- [ ] **Step 5: Refactor Library into Catalog presentation**
+- [x] **Step 5: Refactor Library into Catalog presentation**
 
 Relabel the tab and heading as Catalog, add MCP/Skill/Bundle filter controls and search,
 render kind badges, keep `PackCard` review/trust/secret/source controls, and retain
 Build MCP Pack plus Import Pack as advanced actions.
 
-- [ ] **Step 6: Run focused desktop tests**
+- [x] **Step 6: Run focused desktop tests**
 
 Run:
 
@@ -278,7 +278,7 @@ npm -w apps/desktop test -- capability-catalog.test.ts capability-library-tab.te
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the Catalog UI**
+- [x] **Step 7: Commit the Catalog UI**
 
 ```bash
 git add apps/desktop/src/renderer/components/capabilities apps/desktop/src/renderer/App.tsx apps/desktop/src/renderer/i18n/locales apps/desktop/test/capability-catalog.test.ts apps/desktop/test/capability-library-tab.test.tsx
@@ -305,12 +305,12 @@ git commit -m "feat: add capability catalog registration flows"
 - Consumes: authoritative `Store.repos` rows.
 - Produces: `Overlay:"repoSettings"`, `Location.repoId`, `onRepoSettings(repoId)`, and an extensible full-page section registry.
 
-- [ ] **Step 1: Write failing navigation tests**
+- [x] **Step 1: Write failing navigation tests**
 
 Cover repository id in equality, navigate/back/forward/reset, opening without changing the
 active session/worker axes, and rejection of a stale restored repo id.
 
-- [ ] **Step 2: Implement repository-keyed location state**
+- [x] **Step 2: Implement repository-keyed location state**
 
 Extend the location shape:
 
@@ -329,23 +329,23 @@ export interface Location {
 Update all location constructors, restore validation, and App navigation calls so unrelated
 navigation clears stale `repoId` while back/forward restores it.
 
-- [ ] **Step 3: Write failing RepoTree affordance tests**
+- [x] **Step 3: Write failing RepoTree affordance tests**
 
 Assert each registered repo header exposes one localized settings button, clicking passes
 the authoritative repo id, the click does not fold the group or spawn a worker, and orphan
 groups have no settings affordance.
 
-- [ ] **Step 4: Implement RepoTree settings entry**
+- [x] **Step 4: Implement RepoTree settings entry**
 
 Add `onRepoSettings(id: string)` and render a `Settings2` button beside the existing spawn
 and remove actions. Change the local Repo type to carry `id` separately from `name`.
 
-- [ ] **Step 5: Write and implement the full-page shell tests**
+- [x] **Step 5: Write and implement the full-page shell tests**
 
 Verify the repository name/path header, Capabilities section registry, selected-section
 styling, close callback, and absence of dead Worktrees/Hooks/Branches entries.
 
-- [ ] **Step 6: Implement the page and section registry**
+- [x] **Step 6: Implement the page and section registry**
 
 Define:
 
@@ -357,7 +357,7 @@ export const repositorySettingsSections: readonly RepositorySettingsSection[];
 The page uses a full-height two-column layout: fixed settings navigation and a scrollable
 section body.
 
-- [ ] **Step 7: Run navigation/shell tests**
+- [x] **Step 7: Run navigation/shell tests**
 
 Run:
 
@@ -367,7 +367,7 @@ npm -w apps/desktop test -- navigation.test.ts repo-tree.test.tsx repository-set
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the Repository Settings shell**
+- [x] **Step 8: Commit the Repository Settings shell**
 
 ```bash
 git add apps/desktop/src/renderer/store apps/desktop/src/renderer/lib/view-state.ts apps/desktop/src/renderer/views/RepoTree.tsx apps/desktop/src/renderer/components/repository-settings apps/desktop/src/renderer/i18n/locales apps/desktop/src/renderer/App.tsx apps/desktop/test/navigation.test.ts apps/desktop/test/repo-tree.test.tsx apps/desktop/test/repository-settings-page.test.tsx
@@ -391,13 +391,13 @@ git commit -m "feat: add full-page repository settings"
 - Consumes: sanitized Library snapshot, `catalogKind`, and `CapabilityCenterApi.quickSetBinding`.
 - Produces: deterministic direct/custom assignment projection and the full repository catalog binding UI.
 
-- [ ] **Step 1: Write failing assignment projection tests**
+- [x] **Step 1: Write failing assignment projection tests**
 
 Cover no direct override (`inherit`), one/multiple simple enabled bindings, disabled
 tombstones, mixed enabled state (`custom`), mixed-origin/Side custom overlap, unrelated
 repo/global binding exclusion, and master/worker audience union.
 
-- [ ] **Step 2: Implement pure assignment projection**
+- [x] **Step 2: Implement pure assignment projection**
 
 Export:
 
@@ -411,13 +411,13 @@ export interface RepoCapabilityAssignmentState {
 export function repoCapabilityState(bindings: CapabilityBinding[], packInstanceId: string, repoId: string): RepoCapabilityAssignmentState;
 ```
 
-- [ ] **Step 3: Write failing section interaction tests**
+- [x] **Step 3: Write failing section interaction tests**
 
 Cover load/empty/error/retry, searchable MCP/Skill/Bundle rows, trust and secret status,
 inherit/enabled/disabled mode changes, master/worker selection, per-row pending/error,
 custom state lockout, and advanced Assignments navigation.
 
-- [ ] **Step 4: Implement the Repository Capabilities section**
+- [x] **Step 4: Implement the Repository Capabilities section**
 
 Load on mount and capability generation changes. Submit exact quick inputs:
 
@@ -434,13 +434,13 @@ Load on mount and capability generation changes. Submit exact quick inputs:
 Refresh from the correlated result/event, keep secret values out of component state, and
 show that running workers adopt changes through the existing pending-reload flow.
 
-- [ ] **Step 5: Wire Repository Settings and advanced deep link**
+- [x] **Step 5: Wire Repository Settings and advanced deep link**
 
 Pass the same memoized `CapabilityCenterApi` used by Capability Center. The advanced link
 sets the Capability Center route to Assignments before navigating away from Repository
 Settings.
 
-- [ ] **Step 6: Run focused section tests**
+- [x] **Step 6: Run focused section tests**
 
 Run:
 
@@ -450,7 +450,7 @@ npm -w apps/desktop test -- repo-capability-state.test.ts repository-capabilitie
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit repo capability binding UI**
+- [x] **Step 7: Commit repo capability binding UI**
 
 ```bash
 git add apps/desktop/src/renderer/components/repository-settings apps/desktop/src/renderer/components/capabilities/types.ts apps/desktop/src/renderer/App.tsx apps/desktop/src/renderer/i18n/locales apps/desktop/test/repo-capability-state.test.ts apps/desktop/test/repository-capabilities-section.test.tsx apps/desktop/test/repository-settings-page.test.tsx
@@ -471,13 +471,13 @@ git commit -m "feat: bind catalog capabilities in repository settings"
 - Consumes: all Slice 8 behavior.
 - Produces: current architecture documentation and completion evidence.
 
-- [ ] **Step 1: Update evergreen and slice documentation**
+- [x] **Step 1: Update evergreen and slice documentation**
 
 Mark Slice 8 implemented only after verification. Document singleton generated packs,
 quick-binding custom-conflict rules, new protocol messages, no schema migration, and the
 Repository Settings extension point.
 
-- [ ] **Step 2: Run root gates under Node 22**
+- [x] **Step 2: Run root gates under Node 22**
 
 Run:
 
@@ -489,7 +489,7 @@ npm run build
 
 Expected: typecheck PASS, all root test files/tests PASS, build exits 0.
 
-- [ ] **Step 3: Run desktop gates**
+- [x] **Step 3: Run desktop gates**
 
 Run:
 
@@ -501,7 +501,7 @@ npm -w apps/desktop run build
 
 Expected: typecheck PASS, all desktop test files/tests PASS, Electron Vite build exits 0.
 
-- [ ] **Step 4: Run a daemon lifecycle smoke**
+- [x] **Step 4: Run a daemon lifecycle smoke**
 
 Use an isolated `ROOKERY_HOME` and temp Skill fixture. Create one MCP and one Skill through
 the WebSocket protocol, assert neither has a binding, trust them, quick-enable both for a
@@ -510,23 +510,41 @@ file/log for sentinel secret values.
 
 Expected: all lifecycle assertions PASS and the isolated home is removed.
 
-- [ ] **Step 5: Run an Electron visual smoke**
+- [x] **Step 5: Run an Electron visual smoke**
 
 Launch the branch app, verify Catalog registration controls, repo header settings button,
 full-page Repository Settings shell, capability rows, all three modes, Korean/English
 layout, close/back navigation, and no renderer/daemon error.
 
-- [ ] **Step 6: Self-review plan/spec coverage and mark checkboxes**
+- [x] **Step 6: Self-review plan/spec coverage and mark checkboxes**
 
 Compare all eight acceptance criteria in
 `docs/superpowers/specs/2026-07-16-capability-catalog-repo-settings-design.md` against source,
 tests, and live outputs. Mark every completed plan checkbox and leave none checked without
 authoritative evidence.
 
-- [ ] **Step 7: Commit docs and verification record**
+- [x] **Step 7: Commit docs and verification record**
 
 ```bash
 git add AGENTS.md README.md docs
 git commit -m "docs: document capability catalog and repository settings"
 ```
 
+## Verification record
+
+Completed on 2026-07-16 with Node 22:
+
+- root typecheck and build passed;
+- root suite passed: 101 files, 1,202 tests;
+- desktop typecheck and Electron Vite build passed;
+- desktop suite passed: 139 files, 1,056 tests;
+- `npm run smoke:capabilities:slice8` passed against an isolated production daemon and
+  WebSocket, including MCP/Skill creation, initial unbound/untrusted state, trust,
+  enable/disable/inherit transitions, cleanup, and sentinel-secret scanning;
+- isolated Electron dev smoke passed for English and Korean Catalog/Repository Settings
+  layouts, repository settings entry and close navigation, singleton MCP/Skill rows,
+  all three assignment modes, Master/Worker controls, and clean renderer/daemon logs.
+
+All eight Slice 8 acceptance criteria in the design specification were compared against
+the implementation, focused coverage, full suites, and live outputs before this plan was
+marked complete.

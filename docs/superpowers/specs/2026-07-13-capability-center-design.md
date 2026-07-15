@@ -1,7 +1,7 @@
 # Capability Center and Managed Capabilities — Design
 
 Date: 2026-07-13
-Status: accepted; Slices 1–7 implemented
+Status: accepted; Slices 1–8 implemented
 Branch: `feat/capability-center-spec`
 
 Implementation status (2026-07-15): Slices 1–7 ship Effective inventory, the persisted
@@ -1343,6 +1343,23 @@ The managed-capability milestone is complete when all of the following are true:
 - `docs/architecture/master-worker-turn.md`: resolution/application points.
 - `README.md`: concise Capability Center and repo/Rookery scope usage.
 - Example pack under `docs/examples/capability-pack/` after Slice 2, validated by tests.
+
+## Implemented Slice 8: Catalog and Repository Settings
+
+Implemented on 2026-07-16. Capability Center's Library is now the capability-first
+Catalog. Users can register one MCP server or copy one Skill snapshot as an untrusted,
+unbound singleton generated pack, while the multi-server pack builder remains the
+advanced bundle flow. Each registered repository exposes a full-page settings route whose
+section registry currently contains Capabilities and can later grow Worktrees, Hooks, or
+branch policy without replacing the shell.
+
+Repository capability rows manage only repo-local/UI Master and Worker assignments with
+explicit `inherit`, `enabled`, and `disabled` semantics. The daemon canonicalizes the
+simple rows in one SQLite transaction and rejects mixed-origin or Side overlaps so the
+advanced Assignments editor remains lossless. No schema migration was required. Protocol,
+generated-pack containment, Catalog/Repository Settings UI, navigation, Korean/English
+catalogs, and an isolated production-daemon WebSocket lifecycle are covered by automated
+verification.
 
 ## Source notes
 
