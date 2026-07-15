@@ -872,6 +872,8 @@ export function App(): JSX.Element {
     return {
       loadSnapshot: (target) => connected().request({ type: "capabilities.snapshot", target }).then((response) => response.snapshot),
       loadLibrary: () => connected().request({ type: "capabilities.library" }).then((response) => response.library),
+      createMcp: (input) => connected().request({ type: "capabilities.mcp.create", input }).then((response) => ({ pack: response.pack })),
+      createSkill: (input) => connected().request({ type: "capabilities.skill.create", input }).then((response) => ({ pack: response.pack })),
       createMcpPack: (input) => connected().request({ type: "capabilities.mcpPack.create", input }).then((response) => ({
         pack: response.pack,
         binding: response.binding,
@@ -896,6 +898,7 @@ export function App(): JSX.Element {
         if (!response.binding) throw new Error("capability binding update returned no binding");
         return response.binding;
       }),
+      quickSetBinding: (input) => connected().request({ type: "capabilities.binding.quickSet", input }).then((response) => response.binding),
       deleteBinding: (id) => connected().request({ type: "capabilities.binding.delete", id }).then(() => undefined),
     };
   }, []);

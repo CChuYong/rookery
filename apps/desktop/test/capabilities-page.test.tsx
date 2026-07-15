@@ -26,6 +26,8 @@ function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilityS
   return {
     loadSnapshot,
     loadLibrary: async () => ({ generation: 0, packs: [], bindings: [], diagnostics: [] }),
+    createMcp: async () => { throw new Error("unused"); },
+    createSkill: async () => { throw new Error("unused"); },
     createMcpPack: async () => { throw new Error("unused"); },
     addPack: async () => { throw new Error("unused"); },
     removePack: async () => {},
@@ -35,6 +37,7 @@ function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilityS
     refresh: async () => ({ generation: 0, packs: [], bindings: [], diagnostics: [] }),
     reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
     setBinding: async () => { throw new Error("unused"); },
+    quickSetBinding: async () => { throw new Error("unused"); },
     deleteBinding: async () => {},
   };
 }
