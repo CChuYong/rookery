@@ -129,6 +129,101 @@ describe("startDaemon (integration)", () => {
     }
   });
 
+  it("creates, reviews, trusts, and removes a secret-safe generated MCP pack through the live daemon", async () => {
+    const home = "/tmp/rookery-server-generated-mcp-smoke";
+    const repoPath = "/tmp/rookery-server-generated-mcp-repo";
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repoPath, { recursive: true, force: true });
+    fs.mkdirSync(repoPath, { recursive: true });
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) });
+    const responses: Record<string, unknown>[] = [];
+    try {
+      const ws = await connect(daemon.port, daemon.token);
+      ws.send(JSON.stringify({ type: "repos.register", reqId: "repo", name: "smoke", path: repoPath, description: "" }));
+      responses.push(await nextMessage(ws));
+      ws.send(JSON.stringify({ type: "repos.list", reqId: "repos" }));
+      const repoList = await nextMessage(ws);
+      responses.push(repoList);
+      const repoId = (repoList.repos as Array<{ id: string }>)[0]!.id;
+
+      ws.send(JSON.stringify({
+        type: "capabilities.mcpPack.create",
+        reqId: "create",
+        input: {
+          id: "smoke-tools",
+          displayName: "Smoke Tools",
+          version: "1.0.0",
+          description: "Generated MCP smoke",
+          repoId,
+          agents: ["master", "worker"],
+          mcpServers: [
+            {
+              id: "local",
+              transport: "stdio",
+              command: "node",
+              args: ["server.mjs", "--safe boundary"],
+              secretEnv: { TOKEN: { source: "rookery-secret", key: "shared-token" } },
+            },
+            {
+              id: "docs",
+              transport: "streamable-http",
+              url: "https://example.test/mcp",
+              auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+            },
+          ],
+          secretValues: {
+            "shared-token": "generated-smoke-sensitive-one",
+            "docs-token": "generated-smoke-sensitive-two",
+          },
+        },
+      }));
+      const created = await nextMessage(ws);
+      responses.push(created);
+      if (created.type === "error") throw new Error(JSON.stringify(created));
+      expect(created).toMatchObject({
+        type: "capabilities.mcpPack.result",
+        reqId: "create",
+        pack: {
+          sourceKind: "rookery-generated",
+          status: "untrusted",
+          secrets: [
+            { key: "docs-token", configured: true },
+            { key: "shared-token", configured: true },
+          ],
+        },
+        binding: {
+          scopeKind: "repo-local",
+          scopeRef: repoId,
+          audience: { agents: ["master", "worker"], origins: ["ui"] },
+          enabled: true,
+        },
+      });
+      const pack = created.pack as { instanceId: string; sourcePath: string; digest: string };
+      const generatedManifest = fs.readFileSync(path.join(pack.sourcePath, "capability.json"), "utf8");
+      expect(generatedManifest).toContain('"--safe boundary"');
+      expect(generatedManifest).toContain('"rookery-secret"');
+      expect(generatedManifest).not.toContain("generated-smoke-sensitive-one");
+      expect(generatedManifest).not.toContain("generated-smoke-sensitive-two");
+
+      ws.send(JSON.stringify({ type: "capabilities.trust.set", reqId: "trust", instanceId: pack.instanceId, digest: pack.digest, trusted: true }));
+      responses.push(await nextMessage(ws));
+      expect(responses.at(-1)).toMatchObject({ type: "capabilities.pack.result", pack: { status: "trusted" } });
+
+      ws.send(JSON.stringify({ type: "capabilities.pack.remove", reqId: "remove", instanceId: pack.instanceId }));
+      responses.push(await nextMessage(ws));
+      expect(responses.at(-1)).toMatchObject({ type: "capabilities.pack.result", pack: null });
+      expect(fs.existsSync(pack.sourcePath)).toBe(false);
+      expect(JSON.stringify(responses)).not.toContain("generated-smoke-sensitive-one");
+      expect(JSON.stringify(responses)).not.toContain("generated-smoke-sensitive-two");
+      ws.close();
+    } finally {
+      await daemon.close();
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(repoPath, { recursive: true, force: true });
+    }
+  });
+
   it("garbage-collects stale capability runtime revisions during boot", async () => {
     const home = "/tmp/rookery-server-capability-gc";
     fs.rmSync(home, { recursive: true, force: true });
