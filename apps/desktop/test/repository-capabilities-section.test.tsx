@@ -27,6 +27,10 @@ const custom: CapabilityBinding = {
   id: "custom", packInstanceId: "skill-1", scopeKind: "repo-local", scopeRef: "repo-1",
   audience: { agents: ["master"], origins: ["ui", "slack"] }, enabled: true, createdAt: "t", updatedAt: "t",
 };
+const rookeryDefault: CapabilityBinding = {
+  id: "rookery-default", packInstanceId: "bundle-1", scopeKind: "rookery", scopeRef: "",
+  audience: { agents: ["worker"], origins: ["ui"] }, enabled: false, createdAt: "t", updatedAt: "t",
+};
 
 function snapshot(bindings: CapabilityBinding[] = [direct, custom]): CapabilityLibrarySnapshot {
   return { generation: 1, packs: [mcp, skill, bundle], bindings, diagnostics: [] };
@@ -90,5 +94,19 @@ describe("RepositoryCapabilitiesSection", () => {
     expect(await screen.findByText("offline")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(await screen.findByText("Docs MCP")).toBeInTheDocument();
+  });
+
+  it("explains direct overrides and inherited Rookery defaults", async () => {
+    render(<RepositoryCapabilitiesSection repoId="repo-1" api={api({ loadLibrary: async () => snapshot([direct, custom, rookeryDefault]) })} generation={0} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={() => {}} />);
+    expect(await screen.findByTestId("repository-capability-mcp-1")).toHaveTextContent("Rookery 기본값을 덮어씁니다");
+    expect(screen.getByTestId("repository-capability-bundle-1")).toHaveTextContent("Rookery 기본값: 비활성 · 워커");
+  });
+
+  it("opens the effective repository preview", async () => {
+    const onPreviewEffective = vi.fn();
+    render(<RepositoryCapabilitiesSection repoId="repo-1" api={api()} generation={0} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={onPreviewEffective} />);
+    await screen.findByText("Docs MCP");
+    fireEvent.click(screen.getByRole("button", { name: "Effective 미리보기" }));
+    expect(onPreviewEffective).toHaveBeenCalledOnce();
   });
 });

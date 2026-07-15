@@ -9,6 +9,7 @@ export default {
   "repositorySettings.empty": "카탈로그가 비어 있어요. MCP, 스킬 또는 pack을 먼저 등록하세요.",
   "repositorySettings.openCatalog": "Capability Center 열기",
   "repositorySettings.openAdvanced": "고급 할당",
+  "repositorySettings.previewEffective": "Effective 미리보기",
   "repositorySettings.search": "레포 capability 검색",
   "repositorySettings.noMatches": "검색 조건에 맞는 capability가 없어요.",
   "repositorySettings.mode": "할당",
@@ -20,4 +21,8 @@ export default {
   "repositorySettings.agentRequired": "명시적으로 할당하려면 마스터 또는 워커를 선택하세요.",
   "repositorySettings.missingSecrets": "필수 secret {count}개가 설정되지 않았어요",
   "repositorySettings.customAssignment": "겹치는 사용자 지정 할당이 있어요. 대상 규칙을 잃지 않도록 고급 할당에서 편집하세요.",
+  "repositorySettings.directOverride": "이 레포에서 Rookery 기본값을 덮어씁니다.",
+  "repositorySettings.inheritedDefault": "Rookery 기본값: {mode} · {agents}",
+  "repositorySettings.noRookeryDefault": "설정된 Rookery 기본값이 없어요.",
+  "repositorySettings.inheritedCustom": "Rookery 기본값이 사용자 지정 상태예요. 고급 할당에서 확인하세요.",
 } satisfies Catalog;

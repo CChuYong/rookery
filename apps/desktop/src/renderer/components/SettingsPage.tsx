@@ -17,6 +17,8 @@ import type { LocalePref } from "../i18n/types.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { CapabilityScopeBindings } from "./capabilities/CapabilityScopeBindings.js";
+import type { CapabilityCenterApi } from "./capabilities/types.js";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: JSX.Element }): JSX.Element {
   return (
@@ -28,11 +30,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-type Tab = "general" | "slack" | "models" | "integration";
+type Tab = "general" | "slack" | "models" | "capabilities" | "integration";
 type ModelsProvider = "claude" | "codex";
 
 // Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Claude | Codex | Integration tabs.
-export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void }): JSX.Element {
+export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void; capabilityApi?: CapabilityCenterApi; capabilityGeneration?: number; onOpenCapabilityCatalog?: () => void; onOpenCapabilityAssignments?: () => void; onPreviewCapabilities?: () => void }): JSX.Element {
   const t = useT();
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
@@ -99,6 +101,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     { value: "general", label: t("settings.tabGeneral") },
     { value: "slack", label: "Slack" },
     { value: "models", label: t("settings.tabModels") },
+    ...(p.capabilityApi ? [{ value: "capabilities" as const, label: t("settings.tabCapabilities") }] : []),
     { value: "integration", label: t("settings.integrations") },
   ];
   // Sub-toggle items for the Models tab (pill grammar — an in-form selection, distinct from the nav-tier underline tabs).
@@ -116,7 +119,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-6 py-6">
+        <div className={cn("mx-auto px-6 py-6", tab === "capabilities" ? "max-w-5xl" : "max-w-2xl")}>
           {/* tab bar */}
           <Segment
             items={tabs}
@@ -369,6 +372,18 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
               </section>
             )}
 
+            {tab === "capabilities" && p.capabilityApi && (
+              <CapabilityScopeBindings
+                scopeKind="rookery"
+                scopeRef=""
+                api={p.capabilityApi}
+                generation={p.capabilityGeneration ?? 0}
+                onOpenCatalog={p.onOpenCapabilityCatalog ?? (() => {})}
+                onOpenAdvancedAssignments={p.onOpenCapabilityAssignments ?? (() => {})}
+                onPreviewEffective={p.onPreviewCapabilities ?? (() => {})}
+              />
+            )}
+
             {tab === "models" && (
               <>
                 {/* pill sub-toggle (in-form selection) — visually distinct from the nav-tier underline tabs above */}
@@ -546,7 +561,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
           {/* Save the General/Slack/Models form settings (tokens/Linear/toggles have their own buttons). Hidden only
               on the Integration tab, which has no f-backed fields. (Models is now f-backed: Claude worker model/effort
               + all codex fields; the Anthropic/Codex API keys keep their own save buttons.) */}
-          {tab !== "integration" && (
+          {tab !== "integration" && tab !== "capabilities" && (
             <div className="mt-7 flex items-center justify-end gap-2 border-t border-line pt-4">
               <Button variant="primary" disabled={!dirty} onClick={() => p.onSave(f)}>{dirty ? t("common.save") : t("common.saved")}</Button>
             </div>

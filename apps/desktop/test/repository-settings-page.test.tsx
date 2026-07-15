@@ -45,4 +45,11 @@ describe("RepositorySettingsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Capability Center 열기" }));
     expect(onOpenCatalog).toHaveBeenCalledOnce();
   });
+
+  it("opens the repository Effective preview", async () => {
+    const onPreviewEffective = vi.fn();
+    render(<RepositorySettingsPage repo={{ id: "repo-1", name: "Rookery", path: "/code/rookery" }} api={api()} generation={0} onClose={() => {}} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={onPreviewEffective} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Effective 미리보기" }));
+    expect(onPreviewEffective).toHaveBeenCalledOnce();
+  });
 });

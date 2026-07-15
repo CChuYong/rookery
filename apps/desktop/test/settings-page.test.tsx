@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { SettingsPage } from "../src/renderer/components/SettingsPage.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
+import type { CapabilityCenterApi } from "../src/renderer/components/capabilities/types.js";
+import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot } from "@daemon/core/capabilities/types.js";
 
 const base = {
   settings: { masterName: "rookery", masterModel: "m", workerModel: "w", masterEffort: "high", workerEffort: "high", slackCwd: "/work", slackAllowedUsers: "", slackAllowAll: "0", slackRefuseReply: "1", slackRefusalMessage: "x", slackLocale: "ko", usageRefreshMs: "120000", hasAcceptedDataNotice: "0", onboardingDone: "0", defaultSessionCwd: "", workerSlackRelayEnabled: "0", workerSlackRelayChannel: "", codexWorkerModel: "gpt-5.5", codexMasterModel: "gpt-5.5", codexBin: "codex", codexTurnIdleTimeoutMs: "0", codexHandshakeTimeoutMs: "30000", slackProvider: "claude", workerCostBudgetUsd: "", mcpExposure: "off" },
@@ -11,6 +13,24 @@ const base = {
   slack: "off" as const,
   onSlackToggle: () => {},
 };
+
+const defaultPack: CapabilityLibraryEntry = {
+  instanceId: "pack-1", sourceKind: "rookery-generated", sourcePath: "/generated/review", ownerRepoId: null,
+  manifest: { schemaVersion: 1, id: "review", displayName: "Review Skill", version: "1.0.0", description: "Review changes", skills: [{ id: "review", path: "skill" }] },
+  digest: "a".repeat(64), status: "trusted", errors: [], files: [], changes: [], secrets: [], createdAt: "t", updatedAt: "t",
+};
+const defaultLibrary: CapabilityLibrarySnapshot = { generation: 1, packs: [defaultPack], bindings: [], diagnostics: [] };
+function capabilityApi(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi {
+  return {
+    loadSnapshot: async () => { throw new Error("unused"); }, loadLibrary: async () => defaultLibrary,
+    createMcp: async () => { throw new Error("unused"); }, createSkill: async () => { throw new Error("unused"); }, createMcpPack: async () => { throw new Error("unused"); },
+    addPack: async () => defaultPack, removePack: async () => {}, setTrust: async () => defaultPack,
+    setSecret: async (_id, key) => ({ key, configured: true }), deleteSecret: async (_id, key) => ({ key, configured: false }),
+    refresh: async () => defaultLibrary, reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
+    setBinding: async () => { throw new Error("unused"); }, quickSetBinding: async () => null, deleteBinding: async () => {},
+    ...overrides,
+  };
+}
 
 describe("SettingsPage Anthropic API key input", () => {
   it("renders the API key input as a masked (password) field in the Claude tab", () => {
@@ -61,6 +81,25 @@ describe("SettingsPage Anthropic API key input", () => {
     const saveButtons = screen.getAllByText("저장");
     // Should not throw when prop is absent
     expect(() => fireEvent.click(saveButtons[saveButtons.length - 1]!)).not.toThrow();
+  });
+});
+
+describe("SettingsPage Rookery capability defaults", () => {
+  it("quick-sets a Rookery UI default and opens its Effective preview", async () => {
+    const quickSetBinding = vi.fn(async () => null);
+    const onPreviewCapabilities = vi.fn();
+    render(<SettingsPage {...base} capabilityApi={capabilityApi({ quickSetBinding })} capabilityGeneration={1} onOpenCapabilityCatalog={() => {}} onOpenCapabilityAssignments={() => {}} onPreviewCapabilities={onPreviewCapabilities} />);
+
+    fireEvent.click(screen.getByText("Capabilities"));
+    const row = await screen.findByTestId("rookery-capability-pack-1");
+    fireEvent.change(within(row).getByLabelText("Review Skill 할당"), { target: { value: "enabled" } });
+    fireEvent.click(within(row).getByRole("button", { name: "저장" }));
+    await waitFor(() => expect(quickSetBinding).toHaveBeenCalledWith({
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master", "worker"],
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Effective 미리보기" }));
+    expect(onPreviewCapabilities).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "저장됨" })).toBeNull();
   });
 });
 

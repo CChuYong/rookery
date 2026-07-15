@@ -14,9 +14,10 @@ export interface RepositorySettingsPageProps {
   onClose(): void;
   onOpenCatalog(): void;
   onOpenAdvancedAssignments(): void;
+  onPreviewEffective?(): void;
 }
 
-export function RepositorySettingsPage({ repo, api, generation, onClose, onOpenCatalog, onOpenAdvancedAssignments }: RepositorySettingsPageProps): JSX.Element {
+export function RepositorySettingsPage({ repo, api, generation, onClose, onOpenCatalog, onOpenAdvancedAssignments, onPreviewEffective = () => {} }: RepositorySettingsPageProps): JSX.Element {
   const t = useT();
   const [section, setSection] = useState<RepositorySettingsSectionId>("capabilities");
   return (
@@ -30,7 +31,7 @@ export function RepositorySettingsPage({ repo, api, generation, onClose, onOpenC
         <nav aria-label={t("repositorySettings.navigation")} className="w-56 shrink-0 border-r border-line bg-surface/35 p-3">
           {repositorySettingsSections.map((item) => <button key={item.id} onClick={() => setSection(item.id)} className={cn("flex w-full items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors", section === item.id ? "bg-accent/12 text-fg" : "text-fg-dim hover:bg-raised")}><Blocks size={14} className={cn("mt-0.5 shrink-0", section === item.id ? "text-accent" : "text-muted")} /><span><span className="block text-[12.5px] font-medium">{t(item.labelKey)}</span><span className="mt-0.5 block text-[10px] leading-relaxed text-muted">{t(item.descriptionKey)}</span></span></button>)}
         </nav>
-        <main className="min-w-0 flex-1 overflow-y-auto"><div className="mx-auto max-w-5xl px-7 py-7">{section === "capabilities" && <RepositoryCapabilitiesSection repoId={repo.id} api={api} generation={generation} onOpenCatalog={onOpenCatalog} onOpenAdvancedAssignments={onOpenAdvancedAssignments} />}</div></main>
+        <main className="min-w-0 flex-1 overflow-y-auto"><div className="mx-auto max-w-5xl px-7 py-7">{section === "capabilities" && <RepositoryCapabilitiesSection repoId={repo.id} api={api} generation={generation} onOpenCatalog={onOpenCatalog} onOpenAdvancedAssignments={onOpenAdvancedAssignments} onPreviewEffective={onPreviewEffective} />}</div></main>
       </div>
     </div>
   );

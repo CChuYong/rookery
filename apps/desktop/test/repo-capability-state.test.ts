@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityBinding } from "@daemon/core/capabilities/types.js";
 import { repositoryCapabilityState } from "../src/renderer/components/repository-settings/repo-capability-state.js";
+import { capabilityScopeState, repositoryCapabilityInheritance } from "../src/renderer/components/capabilities/capability-scope-state.js";
 
 function binding(overrides: Partial<CapabilityBinding> = {}): CapabilityBinding {
   return {
@@ -17,6 +18,12 @@ function binding(overrides: Partial<CapabilityBinding> = {}): CapabilityBinding 
 }
 
 describe("repositoryCapabilityState", () => {
+  it("projects Rookery defaults through the same simple binding model", () => {
+    const rookery = binding({ scopeKind: "rookery", scopeRef: "", audience: { agents: ["worker"], origins: ["ui"] } });
+    expect(capabilityScopeState([rookery], "rookery", "", "pack-1")).toEqual({ mode: "enabled", agents: ["worker"], custom: false });
+    expect(repositoryCapabilityInheritance([rookery], "pack-1")).toEqual({ mode: "enabled", agents: ["worker"], custom: false });
+  });
+
   it("defaults an unassigned capability to inherit with both quick agents", () => {
     expect(repositoryCapabilityState([], "repo-1", "pack-1")).toEqual({ mode: "inherit", agents: ["master", "worker"], custom: false });
   });

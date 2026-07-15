@@ -9,6 +9,7 @@ export default {
   "repositorySettings.empty": "The Catalog is empty. Register an MCP server, skill, or pack first.",
   "repositorySettings.openCatalog": "Open Capability Center",
   "repositorySettings.openAdvanced": "Advanced assignments",
+  "repositorySettings.previewEffective": "Preview Effective",
   "repositorySettings.search": "Search repository capabilities",
   "repositorySettings.noMatches": "No capabilities match this search.",
   "repositorySettings.mode": "Assignment",
@@ -20,4 +21,8 @@ export default {
   "repositorySettings.agentRequired": "Select Master or Worker for an explicit assignment.",
   "repositorySettings.missingSecrets": "{count} required secrets are missing",
   "repositorySettings.customAssignment": "This capability has a custom overlapping assignment. Edit it in advanced Assignments to avoid losing audience rules.",
+  "repositorySettings.directOverride": "Overrides the Rookery default for this repository.",
+  "repositorySettings.inheritedDefault": "Rookery default: {mode} · {agents}",
+  "repositorySettings.noRookeryDefault": "No Rookery default is set.",
+  "repositorySettings.inheritedCustom": "The Rookery default is custom; inspect it in advanced Assignments.",
 } satisfies Catalog;
