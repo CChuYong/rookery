@@ -13,15 +13,23 @@ describe("protocol v2 client messages", () => {
     expect(() => parseClientMessage(JSON.stringify({ type: "commands.list", reqId: "c3", sessionId: "s1", workerId: "w1" }))).toThrow();
   });
 
-  it("parses capability snapshots for session and worker targets and rejects invalid targets", () => {
+  it("parses live and preview capability targets and rejects injected preview authority", () => {
     expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" } }))).toEqual({
       type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" },
     });
     expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" } }))).toEqual({
       type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" },
     });
-    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c3", target: { kind: "repo", id: "r1" } }))).toThrow();
-    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c4", target: { kind: "session", id: "" } }))).toThrow();
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c3", target: { kind: "rookery", provider: "claude", agent: "master" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c3", target: { kind: "rookery", provider: "claude", agent: "master" },
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c4", target: { kind: "repo", id: "r1", provider: "codex", agent: "worker" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c4", target: { kind: "repo", id: "r1", provider: "codex", agent: "worker" },
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c5", target: { kind: "repo", id: "r1" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c6", target: { kind: "repo", id: "r1", provider: "claude", agent: "master", cwd: "/tmp/injected" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c7", target: { kind: "rookery", provider: "codex", agent: "worker", origin: "slack" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c8", target: { kind: "session", id: "" } }))).toThrow();
     expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", target: { kind: "session", id: "s1" } }))).toThrow();
   });
 

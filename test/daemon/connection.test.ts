@@ -130,6 +130,28 @@ describe("Connection", () => {
     expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.snapshot.result", reqId: "cap-1", snapshot });
   });
 
+  it("routes a capability repository preview without adding client authority", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const target = { kind: "repo" as const, id: "repo-1", provider: "claude" as const, agent: "master" as const };
+    const snapshot = {
+      target: { ...target, label: "Repo One", cwd: "/repo" },
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      entries: [],
+      diagnostics: [],
+    };
+    const capabilities = { snapshot: vi.fn(async () => snapshot) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.snapshot", reqId: "preview-1", target }));
+
+    expect(capabilities.snapshot).toHaveBeenCalledWith(target);
+    expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.snapshot.result", reqId: "preview-1", snapshot });
+  });
+
   it("returns a correlated error when capability snapshot resolution fails", async () => {
     const { sent, repos, bus, fleet, sm, socket } = setup();
     const capabilities = { snapshot: vi.fn(async () => { throw new Error("unknown capability target: worker:missing"); }) };

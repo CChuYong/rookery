@@ -316,8 +316,19 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
     type: z.literal("capabilities.snapshot"),
     reqId: z.string(),
     target: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("session"), id: z.string().min(1) }),
-      z.object({ kind: z.literal("worker"), id: z.string().min(1) }),
+      z.object({ kind: z.literal("session"), id: capabilityIdSchema }).strict(),
+      z.object({ kind: z.literal("worker"), id: capabilityIdSchema }).strict(),
+      z.object({
+        kind: z.literal("rookery"),
+        provider: z.enum(["claude", "codex"]),
+        agent: z.enum(["master", "worker"]),
+      }).strict(),
+      z.object({
+        kind: z.literal("repo"),
+        id: capabilityIdSchema,
+        provider: z.enum(["claude", "codex"]),
+        agent: z.enum(["master", "worker"]),
+      }).strict(),
     ]),
   }),
   z.object({ type: z.literal("capabilities.library"), reqId: capabilityIdSchema }),
