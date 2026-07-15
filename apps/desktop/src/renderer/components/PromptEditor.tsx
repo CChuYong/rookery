@@ -55,6 +55,11 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
   const [dismissed, setDismissed] = useState(false);
   const edRef = useRef<HTMLDivElement>(null);
   const pendingCompositionNewline = useRef(false);
+  // Chromium only records edits made through its editing pipeline in the native undo buffer. During paste,
+  // execCommand("insertText") emits input synchronously; remember that event so we neither sync twice nor run
+  // the ordinary typing-only markdown shortcuts (the old Range-based paste deliberately did neither).
+  const pasteInProgress = useRef(false);
+  const pasteInputHandled = useRef(false);
 
   useEffect(() => { if (p.autoFocus) edRef.current?.focus(); }, [p.autoFocus]);
   useEffect(() => {
@@ -108,7 +113,26 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
   const onPaste = (e: ClipboardEvent) => {
     e.preventDefault();
     const txt = e.clipboardData.getData("text/plain");
-    if (txt && edRef.current) { insertNodesAtCaret(edRef.current, [document.createTextNode(txt)]); syncText(); }
+    const ed = edRef.current;
+    if (!txt || !ed) return;
+
+    pasteInProgress.current = true;
+    pasteInputHandled.current = false;
+    let inserted = false;
+    try {
+      // Unlike direct Range mutation, Chromium's editing command preserves the native undo/redo buffer.
+      // It is still the only browser editing API with that property for a rich contenteditable host.
+      inserted = document.execCommand("insertText", false, txt);
+    } catch {
+      // Unsupported/disabled editing commands fall back to the previous caret-preserving Range insertion.
+    } finally {
+      pasteInProgress.current = false;
+    }
+
+    // A handled synchronous input event means the native edit landed even if an implementation returned false.
+    if (pasteInputHandled.current) return;
+    if (!inserted) insertNodesAtCaret(ed, [document.createTextNode(txt)]);
+    syncText();
   };
 
   const onCompositionEnd = () => {
@@ -176,7 +200,16 @@ export const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(fu
           p.className,
         )}
         onInput={(e) => {
-          if (edRef.current && !(e.nativeEvent as InputEvent).isComposing) applyMarkdownShortcuts(edRef.current);
+          if (pasteInProgress.current) {
+            pasteInputHandled.current = true;
+            syncText();
+            return;
+          }
+          const nativeInput = e.nativeEvent as InputEvent;
+          // Undo/redo must restore the exact DOM snapshot Chromium recorded; applying a fresh Range transform here
+          // would mutate that restored state outside the native history transaction and can corrupt the redo chain.
+          const isHistory = nativeInput.inputType === "historyUndo" || nativeInput.inputType === "historyRedo";
+          if (edRef.current && !nativeInput.isComposing && !isHistory) applyMarkdownShortcuts(edRef.current);
           syncText(); setSel(0); setDismissed(false); fm.refresh();
         }}
         onPaste={onPaste}

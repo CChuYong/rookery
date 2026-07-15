@@ -1,13 +1,37 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { PromptEditor, slashQueryOf, matchCommands } from "../src/renderer/components/PromptEditor.js";
 import type { PromptEditorHandle } from "../src/renderer/components/PromptEditor.js";
+import { insertNodesAtCaret } from "../src/renderer/lib/mention-editor.js";
 
 const CMDS = [
   { id: "review", name: "review", description: "review code", action: { type: "insert-prompt" as const, text: "$review" } },
   { id: "remember", name: "remember", description: "save memory", action: { type: "insert-prompt" as const, text: "/remember" } },
 ];
+
+const originalExecCommand = document.execCommand;
+
+function installExecCommand(impl: (command: string, showDefaultUI?: boolean, value?: string) => boolean): ReturnType<typeof vi.fn> {
+  const mock = vi.fn(impl);
+  Object.defineProperty(document, "execCommand", { configurable: true, writable: true, value: mock });
+  return mock;
+}
+
+function placeCaretAtTextEnd(root: HTMLElement): void {
+  const text = root.lastChild;
+  if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("expected a trailing text node");
+  const range = document.createRange();
+  range.setStart(text, text.textContent?.length ?? 0);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+afterEach(() => {
+  Object.defineProperty(document, "execCommand", { configurable: true, writable: true, value: originalExecCommand });
+});
 
 describe("slashQueryOf / matchCommands", () => {
   it("extracts slash query at caret token only", () => {
@@ -35,6 +59,70 @@ describe("PromptEditor", () => {
     ed.textContent = "typed";
     fireEvent.input(ed);
     expect(onChange).toHaveBeenLastCalledWith("typed");
+  });
+  it("pastes plain text through the native editing command without applying markdown shortcuts", () => {
+    const onChange = vi.fn();
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} onChange={onChange} />);
+    const ed = getByRole("textbox");
+    ed.textContent = "before ";
+    fireEvent.input(ed);
+    placeCaretAtTextEnd(ed);
+
+    const execCommand = installExecCommand((_command, _showDefaultUI, value) => {
+      insertNodesAtCaret(ed, [document.createTextNode(value ?? "")]);
+      placeCaretAtTextEnd(ed);
+      fireEvent.input(ed, { inputType: "insertText", data: value });
+      return true;
+    });
+    const getData = vi.fn((type: string) => type === "text/plain" ? "**pasted**" : "<strong>pasted</strong>");
+
+    fireEvent.paste(ed, { clipboardData: { getData } });
+
+    expect(getData).toHaveBeenCalledWith("text/plain");
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "**pasted**");
+    expect(ref.current!.getText()).toBe("before **pasted**");
+    expect(ed.querySelector("strong")).toBeNull();
+    expect(onChange).toHaveBeenLastCalledWith("before **pasted**");
+  });
+  it("falls back to Range insertion when the native editing command is unavailable", () => {
+    const onChange = vi.fn();
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} onChange={onChange} />);
+    const ed = getByRole("textbox");
+    ed.textContent = "before ";
+    fireEvent.input(ed);
+    placeCaretAtTextEnd(ed);
+    const execCommand = installExecCommand(() => false);
+
+    fireEvent.paste(ed, { clipboardData: { getData: () => "pasted" } });
+
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "pasted");
+    expect(ref.current!.getText()).toBe("before pasted");
+    expect(onChange).toHaveBeenLastCalledWith("before pasted");
+  });
+  it("falls back to Range insertion when the native editing command throws", () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    const ed = getByRole("textbox");
+    const execCommand = installExecCommand(() => { throw new Error("unsupported"); });
+
+    fireEvent.paste(ed, { clipboardData: { getData: () => "pasted" } });
+
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "pasted");
+    expect(ref.current!.getText()).toBe("pasted");
+  });
+  it.each(["historyUndo", "historyRedo"])("syncs %s without applying markdown shortcuts", (inputType) => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    const ed = getByRole("textbox");
+    ed.textContent = "**restored**";
+    placeCaretAtTextEnd(ed);
+
+    fireEvent.input(ed, { inputType });
+
+    expect(ref.current!.getText()).toBe("**restored**");
+    expect(ed.querySelector("strong")).toBeNull();
   });
   it("opens /skill popup and pick replaces the token", () => {
     const ref = createRef<PromptEditorHandle>();
