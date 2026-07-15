@@ -24,6 +24,7 @@ import type {
   CapabilityMcpPackCreateResult,
   CapabilityOrigin,
   CapabilityPackManifest,
+  CapabilityQuickBindingInput,
   CapabilitySecretStatus,
   CapabilitySkillCreateInput,
   CapabilitySnapshot,
@@ -303,6 +304,11 @@ export class CapabilityService {
   setBinding(id: string, input: CapabilityBindingInput): CapabilityBinding {
     if (!this.deps.registry) throw new Error("capability registry unavailable");
     return this.deps.registry.setBinding(id, input);
+  }
+
+  quickSetBinding(input: CapabilityQuickBindingInput): CapabilityBinding | null {
+    if (!this.deps.registry) throw new Error("capability registry unavailable");
+    return this.deps.registry.quickSetBinding(input);
   }
 
   deleteBinding(id: string): void {

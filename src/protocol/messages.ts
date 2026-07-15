@@ -7,6 +7,7 @@ import type { SourceItem } from "../core/source-intake.js";
 import type { AuthStatus } from "../core/auth-status.js";
 import type {
   CapabilityBinding,
+  CapabilityCatalogCreateResult,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
   CapabilityMcpPackCreateResult,
@@ -115,6 +116,24 @@ const capabilityMcpServerSchema = z.discriminatedUnion("transport", [
   capabilityStdioMcpSchema,
   capabilityHttpMcpSchema,
 ]);
+const capabilitySecretValuesSchema = z.record(
+  capabilitySecretKeySchema,
+  z.string().max(1_048_576).refine((value) => value.trim().length > 0, "secret value must not be empty"),
+);
+
+function declaredMcpSecretKeys(server: z.infer<typeof capabilityMcpServerSchema>): Set<string> {
+  const keys = new Set<string>();
+  const collect = (ref: z.infer<typeof capabilitySecretRefSchema>) => {
+    if (ref.source === "rookery-secret") keys.add(ref.key);
+  };
+  if (server.transport === "stdio") Object.values(server.secretEnv ?? {}).forEach(collect);
+  else {
+    Object.values(server.secretHeaders ?? {}).forEach(collect);
+    if (server.auth) collect(server.auth.bearerToken);
+  }
+  return keys;
+}
+
 const capabilityMcpPackCreateInputSchema = z.object({
   id: capabilityMcpIdSchema,
   displayName: z.string().trim().min(1).max(80),
@@ -123,10 +142,7 @@ const capabilityMcpPackCreateInputSchema = z.object({
   repoId: capabilityIdSchema,
   agents: z.array(z.enum(["master", "worker"])).min(1).max(2),
   mcpServers: z.array(capabilityMcpServerSchema).min(1).max(1_000),
-  secretValues: z.record(
-    capabilitySecretKeySchema,
-    z.string().max(1_048_576).refine((value) => value.trim().length > 0, "secret value must not be empty"),
-  ).optional(),
+  secretValues: capabilitySecretValuesSchema.optional(),
 }).strict().superRefine((input, context) => {
   const normalizedIds = new Map<string, string>();
   const declaredSecretKeys = new Set<string>();
@@ -163,6 +179,50 @@ const capabilityMcpPackCreateInputSchema = z.object({
         message: "secret value must have a declared rookery-secret reference",
       });
     }
+  }
+});
+
+const capabilityMcpCreateInputSchema = z.object({
+  id: capabilityMcpIdSchema,
+  displayName: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(500),
+  mcpServer: capabilityMcpServerSchema,
+  secretValues: capabilitySecretValuesSchema.optional(),
+}).strict().superRefine((input, context) => {
+  const declared = declaredMcpSecretKeys(input.mcpServer);
+  for (const secretKey of Object.keys(input.secretValues ?? {})) {
+    if (!declared.has(secretKey)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["secretValues", secretKey],
+        message: "secret value must have a declared rookery-secret reference",
+      });
+    }
+  }
+});
+
+const capabilitySkillCreateInputSchema = z.object({
+  id: capabilityMcpIdSchema,
+  displayName: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(500),
+  sourcePath: z.string().trim().min(1).max(16_384),
+}).strict();
+
+const capabilityQuickBindingInputSchema = z.object({
+  packInstanceId: capabilityIdSchema,
+  scopeKind: z.enum(["rookery", "repo-local"]),
+  scopeRef: z.string(),
+  mode: z.enum(["inherit", "enabled", "disabled"]),
+  agents: z.array(z.enum(["master", "worker"])).max(2),
+}).strict().superRefine((input, context) => {
+  if (input.scopeKind === "rookery" && input.scopeRef !== "") {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["scopeRef"], message: "rookery scopeRef must be empty" });
+  }
+  if (input.scopeKind === "repo-local" && !input.scopeRef.trim()) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["scopeRef"], message: "repo-local scopeRef must not be empty" });
+  }
+  if (input.mode !== "inherit" && input.agents.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["agents"], message: "explicit quick binding requires an agent" });
   }
 });
 
@@ -266,9 +326,12 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
     reqId: capabilityIdSchema,
     input: capabilityMcpPackCreateInputSchema,
   }).strict(),
+  z.object({ type: z.literal("capabilities.mcp.create"), reqId: capabilityIdSchema, input: capabilityMcpCreateInputSchema }).strict(),
+  z.object({ type: z.literal("capabilities.skill.create"), reqId: capabilityIdSchema, input: capabilitySkillCreateInputSchema }).strict(),
   z.object({ type: z.literal("capabilities.pack.add"), reqId: capabilityIdSchema, path: z.string().trim().min(1) }),
   z.object({ type: z.literal("capabilities.pack.remove"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema }),
   z.object({ type: z.literal("capabilities.binding.set"), reqId: capabilityIdSchema, id: capabilityIdSchema, binding: capabilityBindingInputSchema }),
+  z.object({ type: z.literal("capabilities.binding.quickSet"), reqId: capabilityIdSchema, input: capabilityQuickBindingInputSchema }).strict(),
   z.object({ type: z.literal("capabilities.binding.delete"), reqId: capabilityIdSchema, id: capabilityIdSchema }),
   z.object({
     type: z.literal("capabilities.trust.set"),
@@ -435,8 +498,10 @@ export type ServerMessage =
   | { type: "capabilities.snapshot.result"; reqId: string; snapshot: CapabilitySnapshot }
   | { type: "capabilities.library.result"; reqId: string; library: CapabilityLibrarySnapshot }
   | ({ type: "capabilities.mcpPack.result"; reqId: string } & CapabilityMcpPackCreateResult)
+  | ({ type: "capabilities.catalog.create.result"; reqId: string } & CapabilityCatalogCreateResult)
   | { type: "capabilities.pack.result"; reqId: string; pack: CapabilityLibraryEntry | null }
   | { type: "capabilities.binding.result"; reqId: string; binding: CapabilityBinding | null }
+  | { type: "capabilities.binding.quickSet.result"; reqId: string; binding: CapabilityBinding | null }
   | { type: "capabilities.secret.result"; reqId: string; instanceId: string; secret: CapabilitySecretStatus }
   | { type: "capabilities.refresh.result"; reqId: string; library: CapabilityLibrarySnapshot }
   | { type: "capabilities.worker.reload.result"; reqId: string; workerId: string; mode: "reloading" | "scheduled" | "next-start" }
@@ -501,9 +566,12 @@ export interface RequestResultMap {
   "capabilities.snapshot": Extract<ServerMessage, { type: "capabilities.snapshot.result" }>;
   "capabilities.library": Extract<ServerMessage, { type: "capabilities.library.result" }>;
   "capabilities.mcpPack.create": Extract<ServerMessage, { type: "capabilities.mcpPack.result" }>;
+  "capabilities.mcp.create": Extract<ServerMessage, { type: "capabilities.catalog.create.result" }>;
+  "capabilities.skill.create": Extract<ServerMessage, { type: "capabilities.catalog.create.result" }>;
   "capabilities.pack.add": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
   "capabilities.pack.remove": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
   "capabilities.binding.set": Extract<ServerMessage, { type: "capabilities.binding.result" }>;
+  "capabilities.binding.quickSet": Extract<ServerMessage, { type: "capabilities.binding.quickSet.result" }>;
   "capabilities.binding.delete": Extract<ServerMessage, { type: "capabilities.binding.result" }>;
   "capabilities.trust.set": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
   "capabilities.secret.set": Extract<ServerMessage, { type: "capabilities.secret.result" }>;

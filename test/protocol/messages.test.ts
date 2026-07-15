@@ -135,6 +135,57 @@ describe("protocol v2 client messages", () => {
     }
   });
 
+  it("parses lightweight MCP, Skill, and quick binding requests strictly", () => {
+    const mcp = {
+      type: "capabilities.mcp.create",
+      reqId: "mcp-1",
+      input: {
+        id: "docs",
+        displayName: "Docs MCP",
+        description: "Documentation tools",
+        mcpServer: {
+          id: "docs",
+          transport: "streamable-http",
+          url: "https://example.test/mcp",
+          auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+        },
+        secretValues: { "docs-token": "secret" },
+      },
+    };
+    const skill = {
+      type: "capabilities.skill.create",
+      reqId: "skill-1",
+      input: {
+        id: "review",
+        displayName: "Review Skill",
+        description: "Review changes",
+        sourcePath: "/skills/review",
+      },
+    };
+    const quick = {
+      type: "capabilities.binding.quickSet",
+      reqId: "quick-1",
+      input: {
+        packInstanceId: "pack-1",
+        scopeKind: "repo-local",
+        scopeRef: "repo-1",
+        mode: "disabled",
+        agents: ["master", "worker"],
+      },
+    };
+
+    expect(clientMessageSchema.parse(mcp)).toEqual(mcp);
+    expect(clientMessageSchema.parse(skill)).toEqual(skill);
+    expect(clientMessageSchema.parse(quick)).toEqual(quick);
+    expect(clientMessageSchema.safeParse({ ...mcp, input: { ...mcp.input, secretValues: { undeclared: "secret" } } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...skill, input: { ...skill.input, sourcePath: "" } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...skill, input: { ...skill.input, unexpected: true } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, scopeKind: "session" } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, scopeKind: "rookery", scopeRef: "repo-1" } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, mode: "enabled", agents: [] } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, mode: "inherit", agents: [] } }).success).toBe(true);
+  });
+
   it("settings.set: accepts null (reset-to-default) and validates effort against the enum", () => {
     // null → reset to default (only reachable if the schema is nullable)
     expect(() => parseClientMessage(JSON.stringify({ type: "settings.set", reqId: "q", settings: { masterModel: null } }))).not.toThrow();

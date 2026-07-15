@@ -191,6 +191,16 @@ export interface CapabilityCatalogCreateResult {
   pack: CapabilityLibraryEntry;
 }
 
+export type CapabilityQuickBindingMode = "inherit" | "enabled" | "disabled";
+
+export interface CapabilityQuickBindingInput {
+  packInstanceId: string;
+  scopeKind: "rookery" | "repo-local";
+  scopeRef: string;
+  mode: CapabilityQuickBindingMode;
+  agents: Array<"master" | "worker">;
+}
+
 export interface ResolvedCapabilitySource {
   packInstanceId: string;
   packId: string;

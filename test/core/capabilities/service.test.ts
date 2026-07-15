@@ -636,6 +636,7 @@ describe("CapabilityService", () => {
       get: vi.fn(() => ({ instanceId: "pack-1", sourceKind: "local-directory" })),
       remove: vi.fn(),
       setBinding: vi.fn(() => ({ id: "binding-1" })),
+      quickSetBinding: vi.fn(() => ({ id: "quick-binding" })),
       deleteBinding: vi.fn(),
       setTrust: vi.fn(() => ({ instanceId: "pack-1", status: "trusted" })),
       setSecret: vi.fn(() => ({ key: "token", configured: true })),
@@ -652,6 +653,7 @@ describe("CapabilityService", () => {
     capabilities.addPack("/pack");
     capabilities.removePack("pack-1");
     capabilities.setBinding("binding-1", binding);
+    capabilities.quickSetBinding({ packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master"] });
     capabilities.deleteBinding("binding-1");
     capabilities.setTrust("pack-1", "a".repeat(64), true);
     expect(capabilities.setSecret("pack-1", "token", "actual-secret-value")).toEqual({ key: "token", configured: true });
@@ -659,6 +661,7 @@ describe("CapabilityService", () => {
     capabilities.refresh("pack-1");
 
     expect(registry.setSecret).toHaveBeenCalledWith("pack-1", "token", "actual-secret-value");
+    expect(registry.quickSetBinding).toHaveBeenCalledWith({ packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master"] });
     expect(JSON.stringify(capabilities.library())).not.toContain("actual-secret-value");
   });
 });
