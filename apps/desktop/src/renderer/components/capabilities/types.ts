@@ -3,6 +3,8 @@ import type {
   CapabilityBindingInput,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpPackCreateInput,
+  CapabilityMcpPackCreateResult,
   CapabilitySecretStatus,
   CapabilitySnapshot,
   CapabilityTarget,
@@ -11,6 +13,7 @@ import type {
 export interface CapabilityCenterApi {
   loadSnapshot(target: CapabilityTarget): Promise<CapabilitySnapshot>;
   loadLibrary(): Promise<CapabilityLibrarySnapshot>;
+  createMcpPack(input: CapabilityMcpPackCreateInput): Promise<CapabilityMcpPackCreateResult>;
   addPack(sourcePath: string): Promise<CapabilityLibraryEntry>;
   removePack(instanceId: string): Promise<void>;
   setTrust(instanceId: string, digest: string, trusted: boolean): Promise<CapabilityLibraryEntry>;

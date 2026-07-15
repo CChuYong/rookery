@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SlashCommandInfo } from "../agent-backend.js";
 import { canonicalPath, longestContainingRepo } from "../repo-path.js";
 import { claudeCommandCapabilities, rookeryCapabilities } from "./builtins.js";
@@ -17,7 +18,10 @@ import type {
   CapabilityEntry,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpPackCreateInput,
+  CapabilityMcpPackCreateResult,
   CapabilityOrigin,
+  CapabilityPackManifest,
   CapabilitySecretStatus,
   CapabilitySnapshot,
   CapabilityTarget,
@@ -52,6 +56,11 @@ export interface ClaudeCommandDiscovery {
   error?: string;
 }
 
+export interface GeneratedCapabilityPackPort {
+  create(manifest: CapabilityPackManifest): string;
+  remove(sourcePath: string): void;
+}
+
 export interface CapabilityServiceDeps {
   getSession(id: string): CapabilitySessionRecord | undefined;
   getWorker(id: string): CapabilityWorkerRecord | undefined;
@@ -60,6 +69,7 @@ export interface CapabilityServiceDeps {
   listCodexCapabilities(input: { target: CapabilityTarget; cwd: string; env?: NodeJS.ProcessEnv }): Promise<CapabilityContribution>;
   codexEnvForTarget?(target: CapabilityTarget): NodeJS.ProcessEnv | undefined;
   registry?: CapabilityRegistry;
+  generatedPacks?: GeneratedCapabilityPackPort;
   resolver?: CapabilityResolver;
   runtimeState?: CapabilityRuntimeInspector;
   now?: () => Date;
@@ -175,9 +185,58 @@ export class CapabilityService {
     return this.deps.registry.add(sourcePath);
   }
 
+  createMcpPack(input: CapabilityMcpPackCreateInput): CapabilityMcpPackCreateResult {
+    const registry = this.deps.registry;
+    const generatedPacks = this.deps.generatedPacks;
+    if (!registry) throw new Error("capability registry unavailable");
+    if (!generatedPacks) throw new Error("generated capability pack store unavailable");
+
+    const manifest: CapabilityPackManifest = {
+      schemaVersion: 1,
+      id: input.id,
+      displayName: input.displayName,
+      version: input.version,
+      description: input.description,
+      mcpServers: input.mcpServers,
+    };
+    let sourcePath: string | undefined;
+    let instanceId: string | undefined;
+    try {
+      sourcePath = generatedPacks.create(manifest);
+      const added = registry.add(sourcePath, { sourceKind: "rookery-generated" });
+      instanceId = added.instanceId;
+      for (const [key, value] of Object.entries(input.secretValues ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+        registry.setSecret(instanceId, key, value);
+      }
+      const binding = registry.setBinding(randomUUID(), {
+        packInstanceId: instanceId,
+        scopeKind: "repo-local",
+        scopeRef: input.repoId,
+        audience: { agents: input.agents, origins: ["ui"] },
+        enabled: true,
+      });
+      const pack = registry.get(instanceId);
+      if (!pack) throw new Error(`generated capability pack disappeared after creation: ${instanceId}`);
+      return { pack, binding };
+    } catch (error) {
+      if (instanceId) {
+        try { registry.remove(instanceId); } catch { /* preserve the original create failure */ }
+      }
+      if (sourcePath) {
+        try { generatedPacks.remove(sourcePath); } catch { /* preserve the original create failure */ }
+      }
+      throw error;
+    }
+  }
+
   removePack(instanceId: string): void {
     if (!this.deps.registry) throw new Error("capability registry unavailable");
+    const pack = this.deps.registry.get(instanceId);
     this.deps.registry.remove(instanceId);
+    if (pack?.sourceKind === "rookery-generated") {
+      if (!this.deps.generatedPacks) throw new Error("generated capability pack store unavailable");
+      this.deps.generatedPacks.remove(pack.sourcePath);
+    }
   }
 
   setBinding(id: string, input: CapabilityBindingInput): CapabilityBinding {

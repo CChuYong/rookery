@@ -67,6 +67,16 @@ while idle or schedule a reload for the current turn boundary. Reload preserves 
 row, worktree, transcript, provider-native conversation, model, effort, permission mode,
 and lifetime budgets.
 
+To add MCP servers without hand-writing a manifest, use **Library → Create MCP pack**.
+Choose a registered repository and add any number of stdio or Streamable HTTP servers,
+including argument boundaries, public env/header values, write-only secret env/header
+values, bearer auth, tool allow/deny lists, and required-server behavior. Rookery writes a
+private public-only manifest under `~/.rookery/capability-packs/`, stores secret values
+separately, and creates an enabled repo-local UI binding for the selected Master/Worker
+audience. The new pack remains untrusted until you expand its highlighted Library card,
+review it, and trust the exact digest. This flow creates and deletes generated packs; edit
+an existing generated pack by deleting and recreating it in this first UI version.
+
 In an active master or worker chat, slash autocomplete is resolved from that exact
 conversation's capability snapshot. `/capabilities`, `/skills`, `/hooks`, and `/mcp` open
 the matching Capability Center view, while `/btw` and `/side` use the same action registry

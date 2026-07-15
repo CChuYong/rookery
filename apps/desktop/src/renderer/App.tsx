@@ -872,6 +872,10 @@ export function App(): JSX.Element {
     return {
       loadSnapshot: (target) => connected().request({ type: "capabilities.snapshot", target }).then((response) => response.snapshot),
       loadLibrary: () => connected().request({ type: "capabilities.library" }).then((response) => response.library),
+      createMcpPack: (input) => connected().request({ type: "capabilities.mcpPack.create", input }).then((response) => ({
+        pack: response.pack,
+        binding: response.binding,
+      })),
       addPack: (sourcePath) => connected().request({ type: "capabilities.pack.add", path: sourcePath }).then((response) => {
         if (!response.pack) throw new Error("capability pack add returned no pack");
         return response.pack;

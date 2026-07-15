@@ -38,6 +38,7 @@ import { CapabilityResolver } from "../core/capabilities/resolver.js";
 import { CapabilityRuntimeState } from "../core/capabilities/runtime-state.js";
 import { CapabilityRuntime, gcCapabilityRuntime } from "./capability-runtime.js";
 import { CapabilityRepoWatcher } from "./capability-repo-watcher.js";
+import { GeneratedCapabilityPackStore } from "./generated-capability-pack-store.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -138,6 +139,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       bus.emit({ type: "capabilities.changed", sessionId: ALL_CHANNEL, generation, affected });
     },
   });
+  const generatedCapabilityPacks = new GeneratedCapabilityPackStore(path.join(config.home, "capability-packs"));
   const capabilityResolver = new CapabilityResolver(capabilityRegistry);
   const capabilityRuntimeState = new CapabilityRuntimeState(bus);
   const capabilityRuntime = new CapabilityRuntime(config.home, {
@@ -511,6 +513,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       }
     },
     registry: capabilityRegistry,
+    generatedPacks: generatedCapabilityPacks,
     resolver: capabilityResolver,
     runtimeState: capabilityRuntimeState,
   });

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { CapabilityService } from "../../../src/core/capabilities/service.js";
-import type { CapabilityContribution } from "../../../src/core/capabilities/types.js";
+import type {
+  CapabilityContribution,
+  CapabilityLibraryEntry,
+  CapabilityMcpPackCreateInput,
+} from "../../../src/core/capabilities/types.js";
 import { CapabilityRuntimeState } from "../../../src/core/capabilities/runtime-state.js";
 import { EventBus } from "../../../src/core/events.js";
 
@@ -29,6 +33,53 @@ function service(overrides: Partial<ConstructorParameters<typeof CapabilityServi
   };
   return new CapabilityService(deps);
 }
+
+function generatedPack(overrides: Partial<CapabilityLibraryEntry> = {}): CapabilityLibraryEntry {
+  return {
+    instanceId: "pack-1",
+    sourceKind: "rookery-generated",
+    sourcePath: "/generated/repo-tools-one",
+    ownerRepoId: null,
+    manifest: {
+      schemaVersion: 1,
+      id: "repo-tools",
+      displayName: "Repo Tools",
+      version: "1.0.0",
+      description: "Repository MCP servers",
+      mcpServers: [{
+        id: "docs",
+        transport: "streamable-http",
+        url: "https://example.test/mcp",
+        auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+      }],
+    },
+    digest: "a".repeat(64),
+    status: "untrusted",
+    errors: [],
+    files: [],
+    changes: [],
+    secrets: [{ key: "docs-token", configured: false }],
+    createdAt: "2026-07-15T00:00:00.000Z",
+    updatedAt: "2026-07-15T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+const createInput: CapabilityMcpPackCreateInput = {
+  id: "repo-tools",
+  displayName: "Repo Tools",
+  version: "1.0.0",
+  description: "Repository MCP servers",
+  repoId: "repo-1",
+  agents: ["master", "worker"],
+  mcpServers: [{
+    id: "docs",
+    transport: "streamable-http",
+    url: "https://example.test/mcp",
+    auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+  }],
+  secretValues: { "docs-token": "actual-secret-value" },
+};
 
 describe("CapabilityService", () => {
   it("resolves a Claude session from the authoritative row and merges Rookery commands/tools", async () => {
@@ -339,11 +390,121 @@ describe("CapabilityService", () => {
     }));
   });
 
+  it("creates an untrusted generated MCP pack, stores secrets, and binds it to the repo", () => {
+    let configured = false;
+    const initial = generatedPack();
+    const registry = {
+      add: vi.fn(() => initial),
+      setSecret: vi.fn((_instanceId: string, _key: string, _value: string) => {
+        configured = true;
+        return { key: "docs-token", configured: true };
+      }),
+      setBinding: vi.fn((id: string, input: object) => ({
+        id,
+        ...input,
+        createdAt: "2026-07-15T00:00:00.000Z",
+        updatedAt: "2026-07-15T00:00:00.000Z",
+      })),
+      get: vi.fn(() => generatedPack({
+        secrets: [{ key: "docs-token", configured }],
+      })),
+      remove: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(() => "/generated/repo-tools-one"),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    const result = capabilities.createMcpPack(createInput);
+
+    expect(generatedPacks.create).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      id: "repo-tools",
+      displayName: "Repo Tools",
+      version: "1.0.0",
+      description: "Repository MCP servers",
+      mcpServers: createInput.mcpServers,
+    });
+    expect(registry.add).toHaveBeenCalledWith("/generated/repo-tools-one", { sourceKind: "rookery-generated" });
+    expect(registry.setSecret).toHaveBeenCalledWith("pack-1", "docs-token", "actual-secret-value");
+    expect(registry.setBinding).toHaveBeenCalledWith(expect.any(String), {
+      packInstanceId: "pack-1",
+      scopeKind: "repo-local",
+      scopeRef: "repo-1",
+      audience: { agents: ["master", "worker"], origins: ["ui"] },
+      enabled: true,
+    });
+    expect(result).toMatchObject({
+      pack: { sourceKind: "rookery-generated", status: "untrusted", secrets: [{ key: "docs-token", configured: true }] },
+      binding: { scopeKind: "repo-local", scopeRef: "repo-1" },
+    });
+    expect(JSON.stringify(result)).not.toContain("actual-secret-value");
+  });
+
+  it.each([
+    ["registration", "add"],
+    ["secret storage", "setSecret"],
+    ["binding authority", "setBinding"],
+  ] as const)("rolls back generated files and registry state after %s failure", (_label, failingStep) => {
+    const pack = generatedPack();
+    const registry = {
+      add: vi.fn(() => {
+        if (failingStep === "add") throw new Error("registration failed");
+        return pack;
+      }),
+      setSecret: vi.fn(() => {
+        if (failingStep === "setSecret") throw new Error("secret rejected");
+        return { key: "docs-token", configured: true };
+      }),
+      setBinding: vi.fn(() => {
+        if (failingStep === "setBinding") throw new Error("unknown repo capability scope");
+        throw new Error("unexpected success");
+      }),
+      get: vi.fn(() => pack),
+      remove: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(() => "/generated/repo-tools-one"),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    expect(() => capabilities.createMcpPack(createInput)).toThrow();
+
+    if (failingStep === "add") expect(registry.remove).not.toHaveBeenCalled();
+    else expect(registry.remove).toHaveBeenCalledWith("pack-1");
+    expect(generatedPacks.remove).toHaveBeenCalledWith("/generated/repo-tools-one");
+  });
+
+  it("removes owned generated sources but preserves external pack directories", () => {
+    const entries = [
+      generatedPack(),
+      generatedPack({ instanceId: "pack-2", sourceKind: "local-directory", sourcePath: "/operator/pack" }),
+      generatedPack({ instanceId: "pack-3", sourceKind: "repo-shared", sourcePath: "/repo/.rookery/pack" }),
+    ];
+    const registry = {
+      get: vi.fn((instanceId: string) => entries.find((entry) => entry.instanceId === instanceId)),
+      remove: vi.fn(),
+    };
+    const generatedPacks = { create: vi.fn(), remove: vi.fn() };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    capabilities.removePack("pack-1");
+    capabilities.removePack("pack-2");
+    capabilities.removePack("pack-3");
+
+    expect(registry.remove).toHaveBeenCalledTimes(3);
+    expect(generatedPacks.remove).toHaveBeenCalledTimes(1);
+    expect(generatedPacks.remove).toHaveBeenCalledWith("/generated/repo-tools-one");
+  });
+
   it("delegates sanitized registry mutations through the service facade", () => {
     const library = { generation: 1, packs: [], bindings: [], diagnostics: [] };
     const registry = {
       list: vi.fn(() => library),
       add: vi.fn(() => ({ instanceId: "pack-1" })),
+      get: vi.fn(() => ({ instanceId: "pack-1", sourceKind: "local-directory" })),
       remove: vi.fn(),
       setBinding: vi.fn(() => ({ id: "binding-1" })),
       deleteBinding: vi.fn(),
