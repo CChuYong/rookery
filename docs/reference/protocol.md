@@ -57,7 +57,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `source.search` | ✓ | `provider` (`github\|linear`), `query`, `repo?` | search a source provider | `source.search.result` |
 | `integrations.status` | ✓ | — | gh/linear connection status | `integrations.status.result` |
 | `auth.status` | ✓ | — | active Claude auth (api-key vs OAuth) | `auth.status.result` |
-| `commands.list` | ✓ | `cwd?`, `workerId?` | slash-command/skill candidates | `commands.result` |
+| `commands.list` | ✓ | `sessionId?`, `workerId?`, `cwd?`, `provider?` | executable slash actions/skills for one context (`sessionId` and `workerId` are mutually exclusive) | `commands.result` |
 | `capabilities.snapshot` | ✓ | `target: {kind:"session"\|"worker", id}` | read the selected target's effective capability inventory | `capabilities.snapshot.result` |
 | `capabilities.library` | ✓ | — | list sanitized packs, bindings, secret metadata, and generation | `capabilities.library.result` |
 | `capabilities.pack.add` | ✓ | `path` | validate and register a local pack directory | `capabilities.pack.result` |
@@ -82,6 +82,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `automation.run` | ✓ | `id`, `vars?` | fire once now | `fleet.ack` (`run`) |
 
 Notes:
+- **`commands.list` target authority:** an existing conversation sends exactly one of `sessionId` or `workerId`; the daemon ignores any accompanying cwd/provider hint, snapshots the persisted target, and returns only entries with an executable invocation plus Rookery client actions. A cold new-session preview has no target, so it may use `cwd`/`provider`; Claude supported commands become `insert-prompt` actions and Codex returns no guessed cold commands. Provider inventory without an SDK/app-server invocation never appears in this response.
 - **`capabilities.snapshot` target authority:** the client sends only target kind/id. The daemon resolves provider, label, cwd, repository, origin, home session, and worker worktree from persisted rows; it never trusts client-supplied runtime metadata. The reply merges Rookery built-ins, provider inventory, and managed entries. `desiredRevision` is deterministic and `desiredBlocked` reports fail-closed required state. Claude and Codex snapshots expose `appliedRevision` (`null` before confirmation) and remap launchable managed entries to `applied`, `pending-next-turn`, `pending-reload`, or `error`; blocked/unavailable/suppressed entries retain their more precise resolver state. Independent provider probe failures remain in `diagnostics[]` while successful entries stay visible; unknown is not encoded as an empty successful list.
 - **Binding shape:** `binding` is `{packInstanceId, scopeKind, scopeRef, audience:{agents,origins}, enabled}`. `scopeKind` is `rookery|repo-local|repo-shared|session|worker`; Rookery uses an empty `scopeRef`, while every other scope uses the authoritative repo/session/worker id. Audience agents are `master|worker|side` and origins are `ui|slack|automation|external`.
 - **Capability secret boundary:** `value` exists only on `capabilities.secret.set`. Library and mutation replies expose only `{key, configured}`; pack documents contain secret references, never expanded values. The daemon rejects undeclared keys.
@@ -114,7 +115,7 @@ Notes:
 | `worker.checkpoints.result` | `reqId`, `id`, `checkpoints[]` (`seq,sha,createdAt`) | worktree checkpoints |
 | `usage.result` | `reqId`, `usage: UsageSnapshot` | usage snapshot |
 | `models.result` | `reqId`, `models[]` (`id,displayName`) | model picker list |
-| `commands.result` | `reqId`, `commands: SlashCommandInfo[]` | slash-command candidates |
+| `commands.result` | `reqId`, `commands: CommandCandidate[]` | executable candidates; every item carries a structured `CommandAction` |
 | `capabilities.snapshot.result` | `reqId`, `snapshot: CapabilitySnapshot` | authoritative target metadata, effective entries, and per-source diagnostics |
 | `capabilities.library.result` | `reqId`, `library: CapabilityLibrarySnapshot` | sanitized pack, binding, repo-discovery diagnostic, and generation inventory |
 | `capabilities.pack.result` | `reqId`, `pack: CapabilityLibraryEntry\|null` | pack mutation result |

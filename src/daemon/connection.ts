@@ -16,6 +16,8 @@ import { emptyUsage } from "../core/usage.js";
 import type { SettingsValues, SettingsPatch } from "../core/settings.js";
 import { applyApiKeyToEnv } from "../core/settings.js";
 import type { SlashCommandInfo } from "../core/commands.js";
+import { claudeCommandCapabilities } from "../core/capabilities/builtins.js";
+import { commandCandidates, promptCommandCandidates } from "../core/capabilities/commands.js";
 import type { SourceItem, SourceProviderId } from "../core/source-intake.js";
 import type { IntegrationsStatus } from "../protocol/messages.js";
 import type { SlackController } from "../slack/controller.js";
@@ -509,22 +511,25 @@ export class Connection {
         return;
       }
       case "commands.list": {
-        // If there's an active worker, use its live session (including runtime-discovered skills); otherwise probe by cwd (cached).
-        let commands: SlashCommandInfo[] = [];
-        if (msg.workerId) commands = await this.fleet.listCommands(msg.workerId);
-        // Codex has no Claude slash-command catalog (its supportedCommands() is always []), so the cwd
-        // fallback below — a raw Claude SDK probe — must not run for a codex session/worker (finding [6]):
-        // it would spawn a Claude query codex can't use (and fails silently without Anthropic auth) and
-        // feed the composer dead commands. Provider comes from the worker's DB row, or the client's hint
-        // for a master session (the message carries no sessionId).
-        const provider = msg.provider ?? (msg.workerId ? this.repos.getWorker(msg.workerId)?.provider : undefined);
-        if (commands.length === 0 && provider !== "codex") {
-          // cwd unspecified + not a worker (new session, no repo selected) → fall back to the daemon's default cwd. Since session.create
-          // builds the session with process.cwd() when cwd is absent, show the same skills that session will actually have in the / autocomplete.
-          const cwd = msg.cwd ?? (msg.workerId ? this.repos.getWorker(msg.workerId)?.worktree_path ?? undefined : (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()));
-          if (cwd && this.commands) commands = await this.commands.forCwd(cwd);
+        if (msg.sessionId || msg.workerId) {
+          if (!this.capabilities) throw new Error("capability snapshots unavailable");
+          const target: CapabilityTarget = msg.workerId
+            ? { kind: "worker", id: msg.workerId }
+            : { kind: "session", id: msg.sessionId! };
+          const snapshot = await this.capabilities.snapshot(target);
+          this.reply({ type: "commands.result", reqId: msg.reqId, commands: commandCandidates(snapshot) });
+          return;
         }
-        this.reply({ type: "commands.result", reqId: msg.reqId, commands });
+        // A not-yet-created session has no authoritative capability target. Preserve the best-effort
+        // Claude cwd probe, but emit prompt actions only; Codex has no cold app-server command session.
+        if (msg.provider === "codex" || !this.commands) {
+          this.reply({ type: "commands.result", reqId: msg.reqId, commands: [] });
+          return;
+        }
+        const cwd = msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd());
+        const discovered = await this.commands.forCwd(cwd);
+        const contribution = claudeCommandCapabilities(discovered);
+        this.reply({ type: "commands.result", reqId: msg.reqId, commands: promptCommandCandidates(contribution.entries) });
         return;
       }
       case "capabilities.snapshot": {

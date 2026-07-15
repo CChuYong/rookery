@@ -5,8 +5,8 @@ import { PromptEditor, slashQueryOf, matchCommands } from "../src/renderer/compo
 import type { PromptEditorHandle } from "../src/renderer/components/PromptEditor.js";
 
 const CMDS = [
-  { name: "review", description: "review code" },
-  { name: "remember", description: "save memory" },
+  { id: "review", name: "review", description: "review code", action: { type: "insert-prompt" as const, text: "$review" } },
+  { id: "remember", name: "remember", description: "save memory", action: { type: "insert-prompt" as const, text: "/remember" } },
 ];
 
 describe("slashQueryOf / matchCommands", () => {
@@ -43,7 +43,24 @@ describe("PromptEditor", () => {
     ed.textContent = "/rev";
     fireEvent.input(ed);
     fireEvent.click(getByText("/review"));
-    expect(ref.current!.getText()).toContain("/review ");
+    expect(ref.current!.getText()).toContain("$review ");
+  });
+  it("executes a zero-argument client action on pick instead of inserting or submitting it", () => {
+    const ref = createRef<PromptEditorHandle>();
+    const onCommandAction = vi.fn();
+    const commands = [{
+      id: "skills",
+      name: "skills",
+      description: "open skills",
+      action: { type: "open-capability-center" as const, tab: "effective" as const, kind: "skill" as const },
+    }];
+    const { getByRole, getByText } = render(<PromptEditor ref={ref} commands={commands} onCommandAction={onCommandAction} />);
+    const ed = getByRole("textbox");
+    ed.textContent = "/ski";
+    fireEvent.input(ed);
+    fireEvent.click(getByText("/skills"));
+    expect(onCommandAction).toHaveBeenCalledWith(commands[0]!.action);
+    expect(ref.current!.getText()).toBe("");
   });
   it("WITHOUT onSubmit, Enter does NOT submit (inserts newline)", () => {
     const { getByRole } = render(<PromptEditor />);

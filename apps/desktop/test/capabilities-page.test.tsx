@@ -89,6 +89,31 @@ describe("CapabilitiesPage", () => {
     expect(screen.getByText("/btw")).toBeInTheDocument();
   });
 
+  it("honors exact-kind deep links and lets category selection broaden the view", async () => {
+    const routedSnapshot: CapabilitySnapshot = {
+      ...snapshot,
+      entries: [
+        ...snapshot.entries,
+        { id: "tool", kind: "tool", name: "shell", provider: "codex", source: "Codex tools/list", scope: "session", state: "applied", evidence: "runtime" },
+      ],
+    };
+    const props = pageProps(makeApi(async () => routedSnapshot));
+    const { rerender } = render(<CapabilitiesPage target={target} initialKind="mcp" {...props} />);
+
+    await screen.findByText("notion");
+    expect(screen.getByText("side-search")).toBeInTheDocument();
+    expect(screen.queryByText("shell")).toBeNull();
+    expect(screen.queryByText("release")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "도구 & MCP" }));
+    expect(screen.getByText("shell")).toBeInTheDocument();
+
+    rerender(<CapabilitiesPage target={target} initialKind="skill" {...props} />);
+    expect(await screen.findByText("release")).toBeInTheDocument();
+    expect(screen.queryByText("/btw")).toBeNull();
+    expect(screen.queryByText("notion")).toBeNull();
+  });
+
   it("shows an explicit no-target state without making a request", () => {
     const loadSnapshot = vi.fn(async () => snapshot);
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);

@@ -139,7 +139,7 @@ export class CapabilityService {
     const runtime = desired && this.deps.runtimeState
       ? this.deps.runtimeState.inspect(runtimeTarget, desired.revision, desired.blocked)
       : undefined;
-    const desiredEntries = this.projectRuntimeEntries(desired?.entries ?? [], runtime);
+    const desiredEntries = this.projectRuntimeEntries(desired?.entries ?? [], runtime, resolved.desired);
     const runtimeDiagnostics: CapabilityDiagnostic[] = runtime?.state === "error" && runtime.error
       ? [{
           id: `capabilities.runtime.${runtimeTarget.targetKind}.${runtimeTarget.targetId}`,
@@ -220,18 +220,31 @@ export class CapabilityService {
   private projectRuntimeEntries(
     entries: CapabilityEntry[],
     runtime: CapabilityRuntimeView | undefined,
+    target: ResolvedCapabilityTarget,
   ): CapabilityEntry[] {
     if (!runtime) return entries;
     return entries.map((entry) => {
       // Resolver-specific blocking/unavailability/suppression is more precise than revision drift and
       // must survive projection. Runtime state only replaces entries that were launchable (`desired`).
-      if (!entry.managed || entry.state !== "desired") return entry;
-      if (runtime.state === "current") return { ...entry, state: "applied", evidence: "runtime" };
-      if (runtime.state === "pending-next-turn" || runtime.state === "pending-reload") {
-        return { ...entry, state: runtime.state };
+      let projected = entry;
+      if (entry.managed && entry.state === "desired") {
+        if (runtime.state === "current") projected = { ...entry, state: "applied", evidence: "runtime" };
+        else if (runtime.state === "pending-next-turn" || runtime.state === "pending-reload") {
+          projected = { ...entry, state: runtime.state };
+        } else if (runtime.state === "blocked" || runtime.state === "error") {
+          projected = { ...entry, state: runtime.state };
+        }
       }
-      if (runtime.state === "blocked" || runtime.state === "error") return { ...entry, state: runtime.state };
-      return entry;
+      const invocableManagedSkill = Boolean(projected.managed)
+        && projected.kind === "skill"
+        && (projected.state === "applied" || (target.kind === "master" && projected.state === "pending-next-turn"));
+      if (invocableManagedSkill) {
+        const prefix = target.provider === "codex" ? "$" : "/";
+        return { ...projected, invocation: { type: "prompt", name: `${prefix}${projected.name}` } };
+      }
+      if (!projected.invocation) return projected;
+      const { invocation: _invocation, ...withoutInvocation } = projected;
+      return withoutInvocation;
     });
   }
 

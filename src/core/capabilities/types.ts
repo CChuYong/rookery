@@ -195,6 +195,14 @@ export interface CapabilityEntry {
   scope: CapabilityScope;
   state: CapabilityState;
   evidence: CapabilityEvidence;
+  invocation?: {
+    type: "prompt" | "client-action" | "daemon-action" | "provider-action" | "tool";
+    name?: string;
+  };
+  command?: {
+    argumentHint?: string;
+    aliases?: string[];
+  };
   managed?: {
     packInstanceId: string;
     packId: string;

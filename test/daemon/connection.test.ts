@@ -860,56 +860,95 @@ describe("Connection settings", () => {
     expect(reconciles).toBe(1);
   });
 
-  it("commands.list uses the live sub when workerId given, else the cwd catalog", async () => {
+  it("commands.list projects authoritative session and worker snapshots into structured actions", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
-    const fleet = {
-      listCommands: async (id: string) => (id === "a1" ? [{ name: "live-cmd", description: "from live" }] : []),
-    } as unknown as FleetOrchestrator;
-    const catalog = { forCwd: async (cwd: string) => [{ name: "cwd-cmd", description: `for ${cwd}` }] };
+    const fleet = {} as FleetOrchestrator;
+    const catalog = { forCwd: vi.fn(async () => [{ name: "dead-cwd", description: "must not run" }]) };
+    const snapshot = (target: { kind: "session" | "worker"; id: string }) => ({
+      target: { ...target, label: target.id, provider: "codex" as const, cwd: "/authoritative" },
+      generatedAt: "2026-07-14T00:00:00.000Z",
+      entries: [
+        {
+          id: `managed:${target.id}:skill:release`, kind: "skill" as const, name: "release", description: "Ship",
+          provider: "rookery" as const, source: "Pack", scope: target.kind, state: "applied" as const, evidence: "runtime" as const,
+          invocation: { type: "prompt" as const, name: "$release" },
+          managed: { packInstanceId: "pack", packId: "team", bindingId: "binding", scopeKind: target.kind, enabled: true },
+        },
+        {
+          id: "codex.command.clear", kind: "command" as const, name: "/clear", provider: "codex" as const,
+          source: "Codex inventory", scope: target.kind, state: "applied" as const, evidence: "runtime" as const,
+        },
+      ],
+      diagnostics: [],
+    });
+    const capabilities = { snapshot: vi.fn(async (target: { kind: "session" | "worker"; id: string }) => snapshot(target)) };
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
-    const conn = new Connection(socket, {} as unknown as SessionManager, bus, fleet, repos, undefined, undefined, catalog);
+    const conn = new Connection(socket, {} as unknown as SessionManager, bus, fleet, repos,
+      undefined, undefined, catalog, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never);
 
-    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1", workerId: "a1" }));
-    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q2", cwd: "/r" }));
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1", workerId: "w1", cwd: "/spoof", provider: "claude" }));
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q2", sessionId: "s1", cwd: "/spoof", provider: "claude" }));
 
-    expect(sent.find((m) => m.reqId === "q1").commands).toEqual([{ name: "live-cmd", description: "from live" }]);
-    expect(sent.find((m) => m.reqId === "q2").commands).toEqual([{ name: "cwd-cmd", description: "for /r" }]);
+    expect(capabilities.snapshot).toHaveBeenNthCalledWith(1, { kind: "worker", id: "w1" });
+    expect(capabilities.snapshot).toHaveBeenNthCalledWith(2, { kind: "session", id: "s1" });
+    expect(catalog.forCwd).not.toHaveBeenCalled();
+    for (const reqId of ["q1", "q2"]) {
+      const commands = sent.find((message) => message.reqId === reqId).commands;
+      expect(commands.find((candidate: { name: string }) => candidate.name === "release")).toMatchObject({
+        action: { type: "insert-prompt", text: "$release" },
+      });
+      expect(commands.find((candidate: { name: string }) => candidate.name === "capabilities")).toMatchObject({
+        action: { type: "open-capability-center", tab: "effective" },
+      });
+      expect(commands.some((candidate: { name: string }) => candidate.name === "clear")).toBe(false);
+      expect(commands.every((candidate: { action?: unknown }) => candidate.action !== undefined)).toBe(true);
+    }
   });
 
-  it("commands.list skips the Claude cwd probe for a codex session or worker (finding [6])", async () => {
+  it("commands.list returns correlated target errors and rejects an ambiguous target", async () => {
     const repos = new Repositories(openDb(":memory:"));
-    repos.createSession({ id: "s1", cwd: "/r" });
-    repos.createWorker({ id: "cx", sessionId: "s1", repoPath: "/r", label: "w", provider: "codex" });
     const bus = new EventBus();
-    const fleet = { listCommands: async () => [] } as unknown as FleetOrchestrator;
-    let probed = false;
-    const catalog = { forCwd: async () => { probed = true; return [{ name: "review", description: "x" }]; } };
+    const capabilities = { snapshot: vi.fn(async () => { throw new Error("unknown capability target: session:missing"); }) };
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
-    const conn = new Connection(socket, {} as unknown as SessionManager, bus, fleet, repos, undefined, undefined, catalog);
+    const conn = new Connection(socket, {} as SessionManager, bus, {} as FleetOrchestrator, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never);
 
-    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1", workerId: "cx" })); // codex worker (provider from the DB row)
-    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q2", cwd: "/r", provider: "codex" })); // codex master (client provider hint)
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1", sessionId: "missing" }));
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q2", sessionId: "s1", workerId: "w1" }));
 
-    expect(probed).toBe(false); // the Claude-SDK cwd probe is never run for codex
-    expect(sent.find((m) => m.reqId === "q1").commands).toEqual([]);
-    expect(sent.find((m) => m.reqId === "q2").commands).toEqual([]);
+    expect(sent.find((message) => message.reqId === "q1")).toMatchObject({ type: "error", message: expect.stringContaining("unknown capability target") });
+    expect(sent.find((message) => message.reqId === "q2")).toMatchObject({ type: "error", message: expect.stringContaining("invalid message") });
   });
 
-  it("commands.list falls back to the daemon cwd (process.cwd()) when neither cwd nor workerId is given (new session / skill)", async () => {
+  it("commands.list maps cold Claude previews to prompt actions and never probes cold Codex previews", async () => {
     const repos = new Repositories(openDb(":memory:"));
     const bus = new EventBus();
-    const fleet = { listCommands: async () => [] } as unknown as FleetOrchestrator;
-    let probed: string | undefined;
-    const catalog = { forCwd: async (cwd: string) => { probed = cwd; return [{ name: "review", description: "Run a review" }]; } };
+    const catalog = { forCwd: vi.fn(async (cwd: string) => [{ name: "review", description: `Review ${cwd}`, argumentHint: "[path]", aliases: ["rv"] }]) };
     const sent: any[] = [];
     const socket: ClientSocket = { send: (d: string) => sent.push(JSON.parse(d) as unknown) };
-    const conn = new Connection(socket, {} as unknown as SessionManager, bus, fleet, repos, undefined, undefined, catalog);
-    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1" })); // neither cwd nor workerId (new session, no repo selected)
-    expect(probed).toBe(process.cwd()); // falls back to the same default cwd as session.create
-    expect(sent.find((m) => m.reqId === "q1").commands).toEqual([{ name: "review", description: "Run a review" }]);
+    const conn = new Connection(socket, {} as SessionManager, bus, {} as FleetOrchestrator, repos, undefined, undefined, catalog);
+
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q1", cwd: "/r", provider: "claude" }));
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q2", cwd: "/r", provider: "codex" }));
+    await conn.handleRaw(JSON.stringify({ type: "commands.list", reqId: "q3" }));
+
+    expect(catalog.forCwd).toHaveBeenNthCalledWith(1, "/r");
+    expect(catalog.forCwd).toHaveBeenNthCalledWith(2, process.cwd());
+    expect(sent.find((message) => message.reqId === "q1").commands).toEqual([{
+      id: "claude.command.review",
+      name: "review",
+      description: "Review /r",
+      argumentHint: "[path]",
+      aliases: ["rv"],
+      action: { type: "insert-prompt", text: "/review" },
+    }]);
+    expect(sent.find((message) => message.reqId === "q2").commands).toEqual([]);
+    expect(sent.find((message) => message.reqId === "q3").commands[0].action).toEqual({ type: "insert-prompt", text: "/review" });
   });
 
   it("session/worker delete·archive·rename route to managers/repos and ack", async () => {

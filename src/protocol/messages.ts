@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { CoreEvent, SlackStatus } from "../core/events.js";
 import type { UsageSnapshot } from "../core/usage.js";
 import type { SettingsValues } from "../core/settings.js";
-import type { SlashCommandInfo } from "../core/commands.js";
+import type { CommandCandidate } from "../core/capabilities/commands.js";
 import type { SourceItem } from "../core/source-intake.js";
 import type { AuthStatus } from "../core/auth-status.js";
 import type {
@@ -73,7 +73,7 @@ const automationInputSchema = z.object({
   }
 });
 
-export const clientMessageSchema = z.discriminatedUnion("type", [
+const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.create"), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   // provider absent = same-provider native fork (backward compatible). provider set & different = cross-provider
   // handoff (docs/2026-07-08-cross-provider-fork-design.md). Master model/effort are a client-side per-session
@@ -137,8 +137,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   // so those ride along here (unlike session.fork). Absent provider = same-provider native fork.
   z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string(), provider: z.enum(["claude", "codex"]).optional(), model: z.string().optional(), effort: z.string().optional() }),
   z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
-  // Slash command/skill candidates. If workerId is given, probe within that live session; otherwise probe by cwd.
-  z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), workerId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
+  // Structured slash actions/skills. Existing targets are authoritative; cwd/provider are cold-preview hints only.
+  z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), sessionId: z.string().optional(), workerId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
   z.object({
     type: z.literal("capabilities.snapshot"),
     reqId: z.string(),
@@ -232,6 +232,16 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("automation.resolveSlackRefs"), reqId: z.string(), channels: z.array(z.string()).optional(), users: z.array(z.string()).optional() }),
 ]);
 
+export const clientMessageSchema = clientMessageBaseSchema.superRefine((message, ctx) => {
+  if (message.type === "commands.list" && message.sessionId && message.workerId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "commands.list accepts only one target",
+      path: ["sessionId"],
+    });
+  }
+});
+
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
 // Worker row — the single definition for fleet/worker lists (previously inlined and duplicated across worker.list.result and fleet.list.result).
@@ -303,7 +313,7 @@ export type ServerMessage =
   | { type: "models.result"; reqId: string; models: Array<{ id: string; displayName: string }> }
   | { type: "codex.models.result"; reqId: string; models: CodexModelInfo[] | null }
   | { type: "codex.authStatus.result"; reqId: string; status: CodexAuthStatus | null }
-  | { type: "commands.result"; reqId: string; commands: SlashCommandInfo[] }
+  | { type: "commands.result"; reqId: string; commands: CommandCandidate[] }
   | { type: "capabilities.snapshot.result"; reqId: string; snapshot: CapabilitySnapshot }
   | { type: "capabilities.library.result"; reqId: string; library: CapabilityLibrarySnapshot }
   | { type: "capabilities.pack.result"; reqId: string; pack: CapabilityLibraryEntry | null }

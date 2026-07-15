@@ -1,33 +1,7 @@
 import type { SlashCommandInfo } from "../agent-backend.js";
 import type { CapabilityContribution, CapabilityEntry, CapabilityScope } from "./types.js";
 import { sortCapabilityEntries } from "./types.js";
-
-const ROOKERY_COMMANDS: CapabilityEntry[] = [
-  {
-    id: "rookery.command.btw",
-    kind: "command",
-    name: "/btw",
-    description: "Ask a side question without interrupting the active conversation.",
-    detail: "<question>",
-    provider: "rookery",
-    source: "Rookery desktop",
-    scope: "builtin",
-    state: "applied",
-    evidence: "declared",
-  },
-  {
-    id: "rookery.command.side",
-    kind: "command",
-    name: "/side",
-    description: "Ask a side question without interrupting the active conversation.",
-    detail: "<question>",
-    provider: "rookery",
-    source: "Rookery desktop",
-    scope: "builtin",
-    state: "applied",
-    evidence: "declared",
-  },
-];
+import { rookeryCommandEntries } from "./commands.js";
 
 const MASTER_TOOL_GROUPS: CapabilityEntry[] = [
   {
@@ -81,7 +55,8 @@ const MASTER_TOOL_GROUPS: CapabilityEntry[] = [
 ];
 
 export function rookeryCapabilities(input: { targetKind: "session" | "worker" }): CapabilityContribution {
-  const entries = input.targetKind === "session" ? [...ROOKERY_COMMANDS, ...MASTER_TOOL_GROUPS] : [...ROOKERY_COMMANDS];
+  const commands = rookeryCommandEntries(input.targetKind);
+  const entries = input.targetKind === "session" ? [...commands, ...MASTER_TOOL_GROUPS] : commands;
   return { entries: sortCapabilityEntries(entries), diagnostics: [] };
 }
 
@@ -117,6 +92,13 @@ export function claudeCommandCapabilities(
       scope,
       state: "applied",
       evidence: "runtime",
+      invocation: { type: "prompt", name: `/${normalized}` },
+      ...(command.argumentHint?.trim() || command.aliases?.length ? {
+        command: {
+          ...(command.argumentHint?.trim() ? { argumentHint: command.argumentHint.trim() } : {}),
+          ...(command.aliases?.length ? { aliases: command.aliases } : {}),
+        },
+      } : {}),
     }];
   });
 

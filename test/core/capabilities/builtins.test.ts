@@ -7,7 +7,11 @@ describe("rookeryCapabilities", () => {
 
     expect(master.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([
       "rookery.command.btw",
+      "rookery.command.capabilities",
+      "rookery.command.hooks",
+      "rookery.command.mcp",
       "rookery.command.side",
+      "rookery.command.skills",
       "rookery.tool.memory",
       "rookery.tool.repos",
       "rookery.tool.fleet",
@@ -28,7 +32,11 @@ describe("rookeryCapabilities", () => {
 
     expect(worker.entries.map((entry) => entry.id)).toEqual([
       "rookery.command.btw",
+      "rookery.command.capabilities",
+      "rookery.command.hooks",
+      "rookery.command.mcp",
       "rookery.command.side",
+      "rookery.command.skills",
     ]);
   });
 
@@ -55,6 +63,8 @@ describe("claudeCommandCapabilities", () => {
         scope: "session",
         state: "applied",
         evidence: "runtime",
+        invocation: { type: "prompt", name: "/review" },
+        command: { argumentHint: "[path]", aliases: ["rv"] },
       },
     ]);
     expect(result.diagnostics).toEqual([]);

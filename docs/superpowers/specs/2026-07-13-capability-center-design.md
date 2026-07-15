@@ -1,14 +1,14 @@
 # Capability Center and Managed Capabilities — Design
 
 Date: 2026-07-13
-Status: accepted; Slices 1–5 implemented
+Status: accepted; Slices 1–6 implemented
 Branch: `feat/capability-center-spec`
 
-Implementation status (2026-07-14): Slices 1–5 ship Effective inventory, the persisted
+Implementation status (2026-07-14): Slices 1–6 ship Effective inventory, the persisted
 Library/Assignments model, exact-digest trust and write-only secrets, Claude/Codex runtime
 materialization, isolated Codex target homes, controlled live-worker reload, repo-shared
-discovery/watch/diagnostics, and boot-time runtime GC. Managed command actions and broader
-repo/Rookery preview surfaces remain later slices.
+discovery/watch/diagnostics, boot-time runtime GC, and contextual slash actions with
+provider-lowered managed skills. Broader repo/Rookery preview surfaces remain a later slice.
 
 ## Goal
 
@@ -839,7 +839,7 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 { type: "capabilities.worker.reload", reqId, workerId: string, whenIdle?: boolean }
 ```
 
-Through Slice 5, every request above is shipped. Library projections include file paths, modes,
+Through Slice 6, every request above is shipped. Library projections include file paths, modes,
 hashes, public MCP configuration, validation/change metadata, and secret configured
 booleans; they never include instruction bodies, skill bodies, or secret values.
 
@@ -1169,8 +1169,30 @@ but cannot execute before trust.
 - Move `/btw` and `/side` into the registry.
 - Managed-skill autocomplete and provider invocation lowering.
 
+Implemented on 2026-07-14. A provider-neutral registry now returns structured command
+candidates whose actions either insert exact prompt text or execute a Rookery client action.
+Existing master and worker requests are projected from their authoritative capability
+snapshot; supplied cwd/provider hints cannot spoof the context. Managed skills are offered
+only when their final runtime state is invocable for that target, lowered to `/name` for
+Claude and `$name` for Codex. Native inventory without a programmatic invocation remains
+visible in Effective but never becomes a dead composer suggestion.
+
+The shared desktop composer executes `/capabilities`, `/skills`, `/hooks`, `/mcp`, `/btw`,
+and `/side` through this registry. Center deep links preserve the selected master or worker
+and filter to the exact requested kind; selecting a broader category exits exact-kind mode.
+Candidate descriptions and Side argument hints are localized in the renderer.
+
 Exit: Slash preview contains only actions/skills executable in the selected context; no
 provider TUI-only dead commands are sent as prompts.
+
+Verification evidence:
+
+- Core tests cover deterministic action projection, native/managed collision handling,
+  ambiguous managed names, every non-invocable state, and Claude/Codex syntax lowering.
+- Protocol/connection tests cover authoritative session and worker lookup, spoof-resistant
+  hints, unknown targets, prompt-only cold Claude preview, and empty cold Codex preview.
+- Desktop tests cover generic selection/submission, Side actions, unknown slash text,
+  structured refresh, exact-kind Center routing, and localized built-in candidates.
 
 ## Testing strategy
 

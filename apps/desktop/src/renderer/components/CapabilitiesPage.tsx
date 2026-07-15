@@ -34,13 +34,15 @@ import { CapabilityLibraryTab } from "./capabilities/CapabilityLibraryTab.js";
 import type { CapabilityCenterApi, CapabilityTargetOptions } from "./capabilities/types.js";
 
 type Category = "all" | "instructions" | "skills" | "tools" | "hooks" | "plugins";
-type CenterTab = "effective" | "library" | "assignments";
+export type CenterTab = "effective" | "library" | "assignments";
 
 export interface CapabilitiesPageProps {
   target: CapabilityTarget | null;
   api: CapabilityCenterApi;
   targets: CapabilityTargetOptions;
   generation: number;
+  initialTab?: CenterTab;
+  initialKind?: CapabilityKind;
   pickDirectory(): Promise<string | null>;
   onClose(): void;
 }
@@ -143,18 +145,25 @@ function EntryRow({ entry }: { entry: CapabilityEntry }): JSX.Element {
   );
 }
 
-export function CapabilitiesPage({ target, api, targets, generation, pickDirectory, onClose }: CapabilitiesPageProps): JSX.Element {
+export function CapabilitiesPage({ target, api, targets, generation, initialTab = "effective", initialKind, pickDirectory, onClose }: CapabilitiesPageProps): JSX.Element {
   const t = useT();
   const [snapshot, setSnapshot] = useState<CapabilitySnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState<Category>("all");
+  const [exactKind, setExactKind] = useState<CapabilityKind | undefined>(initialKind);
   const [refresh, setRefresh] = useState(0);
-  const [tab, setTab] = useState<CenterTab>("effective");
+  const [tab, setTab] = useState<CenterTab>(initialTab);
   const [reloadBusy, setReloadBusy] = useState<"now" | "idle" | null>(null);
   const [reloadMessage, setReloadMessage] = useState<string | null>(null);
   const [reloadError, setReloadError] = useState<string | null>(null);
   const targetKey = target ? `${target.kind}:${target.id}` : "none";
+
+  useEffect(() => {
+    setTab(initialTab);
+    setCategory("all");
+    setExactKind(initialKind);
+  }, [initialTab, initialKind]);
 
   useEffect(() => {
     setCategory("all");
@@ -183,9 +192,14 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
   }, [targetKey, refresh, generation, api, tab]);
 
   const visibleEntries = useMemo(() => {
+    if (exactKind) return snapshot?.entries.filter((entry) => entry.kind === exactKind) ?? [];
     const kinds = CATEGORIES.find((item) => item.id === category)?.kinds;
     return snapshot?.entries.filter((entry) => !kinds || kinds.includes(entry.kind)) ?? [];
-  }, [category, snapshot]);
+  }, [category, exactKind, snapshot]);
+
+  const selectedCategory = exactKind
+    ? CATEGORIES.find((item) => item.kinds?.includes(exactKind))?.id ?? "all"
+    : category;
 
   const counts = useMemo(() => {
     const initial: Record<CapabilityState, number> = {
@@ -334,9 +348,9 @@ export function CapabilitiesPage({ target, api, targets, generation, pickDirecto
                 {CATEGORIES.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => setCategory(item.id)}
-                    aria-pressed={category === item.id}
-                    className={cn("rounded-md px-2.5 py-1.5 text-[11.5px] transition-colors", category === item.id ? "bg-accent/12 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
+                    onClick={() => { setExactKind(undefined); setCategory(item.id); }}
+                    aria-pressed={selectedCategory === item.id}
+                    className={cn("rounded-md px-2.5 py-1.5 text-[11.5px] transition-colors", selectedCategory === item.id ? "bg-accent/12 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
                   >
                     {t(item.labelKey)}
                   </button>

@@ -572,12 +572,13 @@ describe("store.applyEvent", () => {
     expect(useStore.getState().sessionAttention.s3).toBeUndefined();
   });
 
-  it("commands.changed refreshes the command cache only for the active context", () => {
-    useStore.setState({ activeWorkerId: "a1", activeSessionId: null, commands: [] });
+  it("commands.changed never replaces structured actions with raw provider strings", () => {
+    const existing = [{ id: "review", name: "review", description: "d", action: { type: "insert-prompt" as const, text: "/review" } }];
+    useStore.setState({ activeWorkerId: "a1", activeSessionId: null, commands: existing });
     useStore.getState().applyEvent({ type: "commands.changed", sessionId: "x", scopeId: "a1", commands: [{ name: "new", description: "d" }] });
-    expect(useStore.getState().commands).toEqual([{ name: "new", description: "d" }]);
+    expect(useStore.getState().commands).toEqual(existing);
     useStore.getState().applyEvent({ type: "commands.changed", sessionId: "x", scopeId: "other", commands: [{ name: "z", description: "" }] });
-    expect(useStore.getState().commands).toEqual([{ name: "new", description: "d" }]); // ignores inactive scope
+    expect(useStore.getState().commands).toEqual(existing);
   });
 });
 

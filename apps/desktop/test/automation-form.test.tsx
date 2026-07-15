@@ -73,7 +73,7 @@ describe("AutomationForm", () => {
       <AutomationForm
         job="new"
         repos={[{ name: "app-api", path: "/code/app" }]}
-        commands={[{ name: "review", description: "r" }]}
+        commands={[{ id: "review", name: "review", description: "r", action: { type: "insert-prompt", text: "/review" } }]}
         browseDir={vi.fn(async () => ({ dir: "/code/app", entries: [] }))}
         onClose={() => {}}
         onSubmit={onSubmit}

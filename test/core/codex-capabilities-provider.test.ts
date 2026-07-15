@@ -34,12 +34,14 @@ describe("Codex capability response mappers", () => {
       state: "unavailable",
       evidence: "runtime",
     });
+    expect(result.entries[0]?.invocation).toBeUndefined();
     expect(result.entries[1]).toMatchObject({
       id: "codex.skill.release./repo/.agents/skills/release/SKILL.md",
       name: "release",
       detail: "/repo/.agents/skills/release/SKILL.md",
       scope: "repo",
       state: "applied",
+      invocation: { type: "prompt", name: "$release" },
     });
     expect(result.diagnostics).toEqual([{
       id: "codex.skills.load./repo/.agents/skills/broken/SKILL.md",

@@ -3,6 +3,16 @@ import { parseClientMessage, serializeServerMessage, clientMessageSchema } from 
 import type { ServerMessage } from "../../src/protocol/messages.js";
 
 describe("protocol v2 client messages", () => {
+  it("parses one authoritative command target and rejects ambiguous targets", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "commands.list", reqId: "c1", sessionId: "s1", cwd: "/spoof", provider: "codex" }))).toEqual({
+      type: "commands.list", reqId: "c1", sessionId: "s1", cwd: "/spoof", provider: "codex",
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "commands.list", reqId: "c2", workerId: "w1" }))).toEqual({
+      type: "commands.list", reqId: "c2", workerId: "w1",
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "commands.list", reqId: "c3", sessionId: "s1", workerId: "w1" }))).toThrow();
+  });
+
   it("parses capability snapshots for session and worker targets and rejects invalid targets", () => {
     expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" } }))).toEqual({
       type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" },

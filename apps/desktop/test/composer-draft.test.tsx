@@ -1,13 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { Composer, parseSideCommand } from "../src/renderer/components/Composer.js";
+import type { CommandAction } from "@daemon/core/capabilities/commands.js";
+import { Composer, matchCommandAction } from "../src/renderer/components/Composer.js";
 
-describe("parseSideCommand", () => {
-  it("recognizes /btw and /side only as a leading whole command", () => {
-    expect(parseSideCommand("/btw why?")).toEqual({ command: "btw", question: "why?" });
-    expect(parseSideCommand(" /side explain this ")).toEqual({ command: "side", question: "explain this" });
-    expect(parseSideCommand("/sideways hello")).toBeNull();
-    expect(parseSideCommand("hello /btw why")).toBeNull();
+const SIDE_COMMANDS = [
+  { id: "btw", name: "btw", description: "side", argumentHint: "<question>", action: { type: "open-panel" as const, panel: "btw" as const } },
+  { id: "side", name: "side", description: "side", argumentHint: "<question>", action: { type: "open-panel" as const, panel: "side" as const } },
+];
+
+describe("matchCommandAction", () => {
+  it("matches registry names and aliases only as a leading whole command", () => {
+    expect(matchCommandAction("/btw why?", SIDE_COMMANDS)).toEqual({ candidate: SIDE_COMMANDS[0], argument: "why?" });
+    expect(matchCommandAction(" /side explain this ", SIDE_COMMANDS)).toEqual({ candidate: SIDE_COMMANDS[1], argument: "explain this" });
+    expect(matchCommandAction("/sideways hello", SIDE_COMMANDS)).toBeNull();
+    expect(matchCommandAction("hello /btw why", SIDE_COMMANDS)).toBeNull();
   });
 });
 
@@ -61,7 +67,10 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
   it("routes /btw and /side submissions to Side without sending the command token", () => {
     const onSend = vi.fn();
     const onSideSend = vi.fn();
-    const { unmount } = render(<Composer onSend={onSend} onSideSend={onSideSend} />);
+    const onCommandAction = (action: CommandAction, argument?: string) => {
+      if (action.type === "open-panel" && argument) onSideSend(argument);
+    };
+    const { unmount } = render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={onCommandAction} />);
     let ed = screen.getByRole("textbox");
     ed.textContent = "/btw why this approach?";
     fireEvent.input(ed);
@@ -71,7 +80,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     expect(ed.textContent).toBe("");
     unmount();
 
-    render(<Composer onSend={onSend} onSideSend={onSideSend} />);
+    render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={onCommandAction} />);
     ed = screen.getByRole("textbox");
     ed.textContent = "/side explain this";
     fireEvent.input(ed);
@@ -82,14 +91,38 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
 
   it("keeps a command-only draft so the user can add a question", () => {
     const onSend = vi.fn();
-    const onSideSend = vi.fn();
-    render(<Composer onSend={onSend} onSideSend={onSideSend} />);
+    const onCommandAction = vi.fn();
+    render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={onCommandAction} />);
     const ed = screen.getByRole("textbox");
     ed.textContent = "/side ";
     fireEvent.input(ed);
     fireEvent.keyDown(ed, { key: "Enter" });
-    expect(onSideSend).not.toHaveBeenCalled();
+    expect(onCommandAction).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
     expect(ed.textContent).toBe("/side ");
+  });
+
+  it("executes a typed Capability Center action and never sends it as a prompt", () => {
+    const onSend = vi.fn();
+    const onCommandAction = vi.fn();
+    const action = { type: "open-capability-center" as const, tab: "effective" as const, kind: "mcp" as const };
+    render(<Composer onSend={onSend} onCommandAction={onCommandAction} commands={[{ id: "mcp", name: "mcp", description: "open", action }]} />);
+    const ed = screen.getByRole("textbox");
+    ed.textContent = "/mcp";
+    fireEvent.input(ed);
+    fireEvent.keyDown(ed, { key: "Enter" });
+    expect(onCommandAction).toHaveBeenCalledWith(action);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(ed.textContent).toBe("");
+  });
+
+  it("continues to send unknown manual slash text as an ordinary prompt", () => {
+    const onSend = vi.fn();
+    render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={() => {}} />);
+    const ed = screen.getByRole("textbox");
+    ed.textContent = "/not-registered keep this";
+    fireEvent.input(ed);
+    fireEvent.keyDown(ed, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("/not-registered keep this");
   });
 });

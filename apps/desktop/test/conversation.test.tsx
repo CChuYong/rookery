@@ -119,7 +119,7 @@ describe("NewSessionPage", () => {
   });
 
   it("offers the selected repo's / skills in the composer (chat-composer parity)", async () => {
-    const loadCommands = vi.fn(async (cwd?: string) => (cwd === "/code/app" ? [{ name: "review", description: "Run a review" }] : []));
+    const loadCommands = vi.fn(async (cwd?: string) => (cwd === "/code/app" ? [{ id: "review", name: "review", description: "Run a review", action: { type: "insert-prompt" as const, text: "/review" } }] : []));
     render(<NewSessionPage repos={[{ name: "app", path: "/code/app" }]} onStart={vi.fn()} loadCommands={loadCommands} {...base} />);
     fireEvent.click(screen.getByText("app")); // select cwd → load that repo's skills
     await waitFor(() => expect(loadCommands).toHaveBeenCalledWith("/code/app"));
@@ -250,8 +250,8 @@ describe("Conversation", () => {
   });
 
   const CMDS = [
-    { name: "review", description: "Run a review" },
-    { name: "commit", description: "Commit changes" },
+    { id: "review", name: "review", description: "Run a review", action: { type: "insert-prompt" as const, text: "/review" } },
+    { id: "commit", name: "commit", description: "Commit changes", action: { type: "insert-prompt" as const, text: "/commit" } },
   ];
 
   it("shows a / command popup and inserts the pick on Enter (does not send)", () => {
@@ -311,8 +311,8 @@ describe("Conversation", () => {
   });
 
   it("typing just '/' surfaces more than 8 skills as candidates, including the trailing pull-request (cap 8 → plenty)", () => {
-    const many = Array.from({ length: 11 }, (_, i) => ({ name: `cmd${i}`, description: "d" }));
-    many.push({ name: "pull-request", description: "PR 열기" });
+    const many = Array.from({ length: 11 }, (_, i) => ({ id: `cmd${i}`, name: `cmd${i}`, description: "d", action: { type: "insert-prompt" as const, text: `/cmd${i}` } }));
+    many.push({ id: "pull-request", name: "pull-request", description: "PR 열기", action: { type: "insert-prompt" as const, text: "/pull-request" } });
     render(<Conversation items={[]} onSend={() => {}} commands={many} />);
     type(composer(), "/"); // empty query → all are candidates
     expect(screen.getByText("/pull-request")).toBeInTheDocument(); // index 11 — would not show under the old slice(0,8)
