@@ -112,6 +112,23 @@ describe("startDaemon (integration)", () => {
     }
   });
 
+  it("composes a private generated capability pack store under ROOKERY_HOME", async () => {
+    const home = "/tmp/rookery-server-generated-capabilities";
+    fs.rmSync(home, { recursive: true, force: true });
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) });
+    try {
+      const generatedRoot = path.join(home, "capability-packs");
+      expect(fs.statSync(generatedRoot).isDirectory()).toBe(true);
+      if (process.platform !== "win32") {
+        expect(fs.statSync(generatedRoot).mode & 0o777).toBe(0o700);
+      }
+    } finally {
+      await daemon.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("garbage-collects stale capability runtime revisions during boot", async () => {
     const home = "/tmp/rookery-server-capability-gc";
     fs.rmSync(home, { recursive: true, force: true });
