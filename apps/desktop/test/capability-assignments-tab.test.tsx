@@ -22,6 +22,7 @@ function snapshot(bindings: CapabilityBinding[] = []): CapabilityLibrarySnapshot
 function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi {
   return {
     loadSnapshot: async () => { throw new Error("unused"); }, loadLibrary: async () => snapshot(),
+    createMcpPack: async () => { throw new Error("unused"); },
     addPack: async () => pack, removePack: async () => {}, setTrust: async () => pack,
     setSecret: async (_id, key) => ({ key, configured: true }), deleteSecret: async (_id, key) => ({ key, configured: false }),
     refresh: async () => snapshot(), reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),

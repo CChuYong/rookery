@@ -26,6 +26,7 @@ function makeApi(loadSnapshot: (target: CapabilityTarget) => Promise<CapabilityS
   return {
     loadSnapshot,
     loadLibrary: async () => ({ generation: 0, packs: [], bindings: [], diagnostics: [] }),
+    createMcpPack: async () => { throw new Error("unused"); },
     addPack: async () => { throw new Error("unused"); },
     removePack: async () => {},
     setTrust: async () => { throw new Error("unused"); },

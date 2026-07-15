@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, CircleAlert, FolderPlus, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
-import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot, McpServerSpec } from "@daemon/core/capabilities/types.js";
+import { Cable, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FolderPlus, Loader2, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
+import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot, CapabilityMcpPackCreateResult, McpServerSpec } from "@daemon/core/capabilities/types.js";
 import { useT } from "../../i18n/provider.js";
+import { cn } from "../../lib/cn.js";
 import { Button } from "../../ui/button.js";
+import { McpPackBuilderDialog } from "./McpPackBuilderDialog.js";
 import type { CapabilityCenterApi } from "./types.js";
 
 export interface CapabilityLibraryTabProps {
   api: CapabilityCenterApi;
   generation: number;
+  repos: Array<{ id: string; label: string }>;
   pickDirectory(): Promise<string | null>;
 }
 
@@ -85,10 +88,11 @@ function SecretControl({ pack, secretKey, api, onChanged }: {
   );
 }
 
-function PackCard({ pack, api, reload }: {
+function PackCard({ pack, api, reload, highlighted = false }: {
   pack: CapabilityLibraryEntry;
   api: CapabilityCenterApi;
   reload(): Promise<void>;
+  highlighted?: boolean;
 }): JSX.Element {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
@@ -109,7 +113,7 @@ function PackCard({ pack, api, reload }: {
   };
 
   return (
-    <article data-testid={`capability-pack-${pack.instanceId}`} className="rounded-[var(--radius)] border border-line bg-surface/45">
+    <article data-testid={`capability-pack-${pack.instanceId}`} className={cn("rounded-[var(--radius)] border bg-surface/45 transition-colors", highlighted ? "border-pr/60 ring-2 ring-pr/15" : "border-line")}>
       <div className="flex flex-wrap items-start gap-3 px-4 py-3.5">
         <button
           className="mt-0.5 rounded p-1 text-muted hover:bg-raised hover:text-fg"
@@ -198,12 +202,14 @@ function PackCard({ pack, api, reload }: {
   );
 }
 
-export function CapabilityLibraryTab({ api, generation, pickDirectory }: CapabilityLibraryTabProps): JSX.Element {
+export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: CapabilityLibraryTabProps): JSX.Element {
   const t = useT();
   const [library, setLibrary] = useState<CapabilityLibrarySnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [created, setCreated] = useState<CapabilityMcpPackCreateResult | null>(null);
 
   const reload = async (): Promise<void> => {
     const next = await api.loadLibrary();
@@ -228,9 +234,18 @@ export function CapabilityLibraryTab({ api, generation, pickDirectory }: Capabil
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1"><h2 className="text-[14px] font-semibold text-fg">{t("capabilities.library")}</h2><p className="mt-1 text-[11px] text-muted">{t("capabilities.libraryDescription")}</p></div>
+        <Button variant="primary" size="sm" disabled={repos.length === 0} onClick={() => setBuilderOpen(true)}><Cable size={13} /> {t("capabilities.createMcpPack")}</Button>
         <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setError(message(cause))) : undefined); }}><FolderPlus size={13} /> {t("capabilities.addDirectory")}</Button>
         <Button variant="ghost" size="sm" onClick={() => { setLoading(true); void api.refresh().then((next) => { setLibrary(next); setLoading(false); }).catch((cause) => { setError(message(cause)); setLoading(false); }); }}><RefreshCw size={13} /> {t("common.refresh")}</Button>
       </div>
+      {repos.length === 0 && <p className="rounded-md border border-run/25 bg-run/5 px-3 py-2 text-[10.5px] text-run">{t("capabilities.createMcpPackNeedsRepo")}</p>}
+      {created && (
+        <section role="status" className="flex items-start gap-2 rounded-[var(--radius)] border border-pr/30 bg-pr/5 px-3.5 py-3">
+          <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-pr" />
+          <div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-pr">{t("capabilities.createMcpPackSuccess")}</p><p className="mt-1 text-[10.5px] text-fg-dim">{t("capabilities.createMcpPackNext", { repo: repos.find((repo) => repo.id === created.binding.scopeRef)?.label ?? created.binding.scopeRef })}</p></div>
+          <Button variant="ghost" size="iconSm" aria-label={t("common.close")} onClick={() => setCreated(null)}><X size={13} /></Button>
+        </section>
+      )}
       {library && library.diagnostics.length > 0 && (
         <section data-testid="capability-library-diagnostics" className="rounded-[var(--radius)] border border-fail/30 bg-fail/5 px-3.5 py-3">
           <div className="flex items-center gap-2 text-[12px] font-medium text-fail"><CircleAlert size={14} /> {t("capabilities.libraryDiagnostics")}</div>
@@ -239,7 +254,8 @@ export function CapabilityLibraryTab({ api, generation, pickDirectory }: Capabil
           </div>
         </section>
       )}
-      {library?.packs.length ? <div className="space-y-3">{library.packs.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} />)}</div> : <div className="flex flex-col items-center gap-2 py-20 text-center text-muted"><FolderPlus size={26} className="opacity-40" /><p className="text-[12px]">{t("capabilities.libraryEmpty")}</p></div>}
+      {library?.packs.length ? <div className="space-y-3">{library.packs.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} highlighted={created?.pack.instanceId === pack.instanceId} />)}</div> : <div className="flex flex-col items-center gap-2 py-20 text-center text-muted"><FolderPlus size={26} className="opacity-40" /><p className="text-[12px]">{t("capabilities.libraryEmpty")}</p></div>}
+      {builderOpen && <McpPackBuilderDialog repos={repos} create={(input) => api.createMcpPack(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setBuilderOpen(false)} />}
     </div>
   );
 }

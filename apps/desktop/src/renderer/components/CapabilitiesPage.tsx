@@ -259,7 +259,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-6">
           {tab === "library" ? (
-            <CapabilityLibraryTab api={api} generation={generation} pickDirectory={pickDirectory} />
+            <CapabilityLibraryTab api={api} generation={generation} repos={targets.repos} pickDirectory={pickDirectory} />
           ) : tab === "assignments" ? (
             <CapabilityAssignmentsTab api={api} generation={generation} targets={targets} />
           ) : !target ? (
