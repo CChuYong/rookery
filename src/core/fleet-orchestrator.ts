@@ -22,7 +22,13 @@ export interface WorkerLike {
   setPermissionMode?(mode: string): Promise<void>; // hot-swap the permission mode while running (query.setPermissionMode)
   interruptTurn?(): Promise<InterruptReceipt | undefined>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
   notice?(text: string): void; // surface an out-of-band informational notice in the worker transcript (degraded condition the orchestrator caught)
+  requestCapabilityReload?(input: {
+    whenIdle: boolean;
+    onBegin(): void;
+  }): { mode: "reloading" | "scheduled"; completion: Promise<void> };
 }
+
+export type CapabilityWorkerReloadMode = "reloading" | "scheduled" | "next-start";
 
 export type WorkerFactory = (opts: {
   id: string;
@@ -115,6 +121,12 @@ export class FleetOrchestrator {
   // Workers with a checkpoint restore in flight — send() must not start a turn while git checkout is rewriting
   // the worktree (the running-guard in restore() is only valid at the tick it runs; this closes the TOCTOU).
   private readonly restoring = new Set<string>();
+  // A scheduled reload is allowed to wait while the current turn continues. The send gate closes only
+  // when Worker synchronously calls onBegin immediately before tearing down its provider cycle.
+  private readonly capabilityReloads = new Map<string, {
+    phase: "waiting" | "reloading";
+    completion?: Promise<void>;
+  }>();
 
   constructor(private readonly deps: FleetDeps) {
     this.idgen = deps.idgen ?? (() => randomUUID());
@@ -497,6 +509,9 @@ export class FleetOrchestrator {
   }
 
   send(id: string, message: string, clientMsgId?: string): void {
+    if (this.capabilityReloads.get(id)?.phase === "reloading") {
+      throw new Error(`worker ${id} capability reload in progress; retry when it finishes`);
+    }
     // A restore is rewriting this worktree (git checkout). Starting a turn now would interleave SDK edits with
     // the checkout AND take a checkpoint of the half-rewritten tree. Reject; the caller retries after it ends.
     if (this.restoring.has(id)) throw new Error(`worker ${id} is mid-restore; retry when the restore finishes`);
@@ -506,6 +521,56 @@ export class FleetOrchestrator {
       void this.relabel(id, entry.homeSessionId, message); // task-less worker: relabel from the first message (best-effort, never throws)
     }
     entry.agent.send(message, clientMsgId);
+  }
+
+  async reloadCapabilities(
+    id: string,
+    whenIdle: boolean,
+  ): Promise<{ workerId: string; mode: CapabilityWorkerReloadMode }> {
+    const entry = this.require(id);
+    if (this.capabilityReloads.has(id)) {
+      throw new Error(`worker ${id} capability reload is already pending`);
+    }
+    if (!entry.agent) {
+      if (!FleetOrchestrator.isTerminal(entry.status) && (entry.resumeSessionId || entry.handoffFromProvider)) {
+        // A detached worker has no provider process to replace. Keep it lazy: materialize() already
+        // resolves the latest capabilities immediately before its next real provider open.
+        return { workerId: id, mode: "next-start" };
+      }
+      throw new Error(`Worker ${id} is not running (its session ended, likely a daemon restart).`);
+    }
+    const requestReload = entry.agent.requestCapabilityReload;
+    if (!requestReload) throw new Error(`worker ${id} capability reload is unavailable`);
+
+    const record: { phase: "waiting" | "reloading"; completion?: Promise<void> } = { phase: "waiting" };
+    this.capabilityReloads.set(id, record);
+    let request: ReturnType<NonNullable<WorkerLike["requestCapabilityReload"]>>;
+    try {
+      request = requestReload.call(entry.agent, {
+        whenIdle,
+        onBegin: () => { record.phase = "reloading"; },
+      });
+      record.completion = request.completion;
+    } catch (error) {
+      this.capabilityReloads.delete(id);
+      throw error;
+    }
+
+    const cleanup = (): void => {
+      if (this.capabilityReloads.get(id) === record) this.capabilityReloads.delete(id);
+    };
+    if (request.mode === "scheduled") {
+      // The request acknowledgement must not wait for a potentially long running turn. Both outcomes
+      // are observed so a later rejection never becomes an unhandled promise.
+      void request.completion.then(cleanup, cleanup);
+      return { workerId: id, mode: "scheduled" };
+    }
+    try {
+      await request.completion;
+      return { workerId: id, mode: "reloading" };
+    } finally {
+      cleanup();
+    }
   }
 
   // abort only the current turn (keep the session) — parity with master turn-abort. Requires a live agent.

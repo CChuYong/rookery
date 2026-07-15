@@ -1,12 +1,14 @@
 # Capability Center and Managed Capabilities — Design
 
 Date: 2026-07-13
-Status: accepted; Slice 1 implemented
+Status: accepted; Slices 1–5 implemented
 Branch: `feat/capability-center-spec`
 
-Implementation status (2026-07-13): Slice 1 ships the read-only Effective inventory for
-authoritative session and worker targets. Desired state, pack bindings, mutations,
-repo/Rookery previews, and slash deep-link actions remain in later slices.
+Implementation status (2026-07-14): Slices 1–5 ship Effective inventory, the persisted
+Library/Assignments model, exact-digest trust and write-only secrets, Claude/Codex runtime
+materialization, isolated Codex target homes, controlled live-worker reload, repo-shared
+discovery/watch/diagnostics, and boot-time runtime GC. Managed command actions and broader
+repo/Rookery preview surfaces remain later slices.
 
 ## Goal
 
@@ -323,9 +325,20 @@ Opt-in shared configuration lives at:
 ```
 
 The index contains pack-relative paths and optional disabled tombstones. Rookery scans it
-when a registered repo is opened or refreshed. Discovery creates no binding until the user
+at daemon boot, after repo registration, on manual refresh, and after debounced filesystem
+changes. Discovery creates no binding until the user
 trusts the current digest. A checked-in secret value is never required: shared manifests
 reference local `rookery-secret` keys or environment variable names.
+
+```json
+{
+  "schemaVersion": 1,
+  "packs": [
+    { "path": "team" },
+    { "path": "retired", "disabled": true }
+  ]
+}
+```
 
 ### Database additions
 
@@ -665,8 +678,9 @@ the queue and is intentionally terminal.
 - After restart, a detached resumable worker appears `pending-reload`; the latest desired
   capabilities compile when the worker is lazily materialized and its first provider
   frame confirms application.
-- Per-worker Codex-home cleanup and generated runtime revision garbage collection belong
-  to later slices. Slice 3 revision directories are immutable and may accumulate.
+- Per-worker Codex-home cleanup is authoritative on permanent deletion. At boot, generated
+  runtime GC keeps only live schema-2 desired revisions and removes stale/invalid revisions
+  plus interrupted staging directories without following symlinks.
 
 ### Fork, Side, Slack, automation, and External MCP
 
@@ -723,9 +737,9 @@ export interface CapabilitySnapshot {
 Slice 2 preserves that shape and adds `state: "desired"|"suppressed"`, optional managed
 binding provenance, and optional `desiredRevision`/`desiredBlocked` snapshot fields.
 Slice 3 adds `pending-next-turn`, `pending-reload`, and optional `appliedRevision` for
-Claude targets; Slice 4 applies the same runtime projection to Codex targets. Later slices
-add worker hot reload, invocation, and structured source metadata without changing Slice
-1's rule that unknown is never encoded as empty success.
+Claude targets; Slice 4 applies the same runtime projection to Codex targets. Slice 5 adds
+worker hot reload and repo-shared diagnostics/source ownership. Later slices add invocation
+without changing Slice 1's rule that unknown is never encoded as empty success.
 
 ```ts
 export type CapabilityKind =
@@ -825,8 +839,7 @@ authoritative rows. Repo/global targets are previews and may take provider/agent
 { type: "capabilities.worker.reload", reqId, workerId: string, whenIdle?: boolean }
 ```
 
-Through Slice 3, every request above is shipped except `capabilities.worker.reload`, which
-belongs to Slice 5. Library projections include file paths, modes,
+Through Slice 5, every request above is shipped. Library projections include file paths, modes,
 hashes, public MCP configuration, validation/change metadata, and secret configured
 booleans; they never include instruction bodies, skill bodies, or secret values.
 
@@ -843,9 +856,9 @@ update without a full reload.
   state: "current" | "pending-next-turn" | "pending-reload" | "blocked" | "error" }
 ```
 
-`capabilities.changed` is an `@all` invalidation event. Slice 3 ships
-`capabilities.runtime` for Claude master/worker desired, applied, blocked, drift, and
-application-error transitions. It contains target identifiers and revisions only.
+`capabilities.changed` is an `@all` invalidation event. `capabilities.runtime` covers both
+providers' master/worker desired, applied, blocked, drift, and application-error
+transitions. It contains target identifiers and revisions only.
 
 Events contain no pack bodies, instruction contents, command lines containing expanded
 secrets, or secret values.
@@ -1137,6 +1150,14 @@ Codex config or leaking one worker's bindings to another.
 - Non-terminal worker runtime reload/pending state.
 - `.rookery/capabilities.json` discovery and digest trust.
 - Reload UI and file watchers/refresh.
+
+Implemented on 2026-07-14. Idle workers replace only their provider stream and queue while
+preserving worktree, persisted identity/transcript, native session, settings, budgets, and
+cumulative metrics. Busy workers require explicit `whenIdle`; detached resumable workers
+defer to next start. Repository CRUD and filesystem watchers reconcile a strict, contained
+schema-1 index with exact-digest fail-closed trust, stable pack identities, independent
+diagnostics, authoritative disabled/stale tombstones, and no automatic binding or trust.
+Boot GC removes only owned stale runtime entries after shared discovery.
 
 Exit: Existing idle workers can adopt changes safely, and a checked-in pack is discovered
 but cannot execute before trust.

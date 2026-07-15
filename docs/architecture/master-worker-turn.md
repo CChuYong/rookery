@@ -48,7 +48,8 @@ Turns are **strictly serialized per session**: two concurrent `runTurn` calls ru
 
 ### Worker turn (`consume` loop)
 Same message taxonomy, with extra handling:
-- At `consume()` entry, resolve managed capabilities exactly once, publish desired state, and pass the immutable projection to `openSession`. The first provider frame confirms the revision applied. Later registry changes do not mutate or restart this stream; snapshots report `pending-reload`.
+- At each provider-stream `consume()` entry, resolve managed capabilities exactly once, publish desired state, and pass the immutable projection to `openSession`. The first provider frame confirms the revision applied. Later registry changes do not mutate that stream; snapshots report `pending-reload` until a controlled replacement.
+- `requestCapabilityReload` replaces only the provider stream and queue. Idle workers reload immediately; busy workers accept only `whenIdle` and start replacement after the active result reaches idle. A synchronous `onBegin` gate makes `worker.send` fail only during replacement. The replacement resumes the same provider-native session id and preserves the worker row, worktree, transcript sequence, settings, budgets, cumulative cost/turns, and lifetime settlement promise. Setup failure records a notice/runtime error and returns to idle so the user can retry.
 - **Native nested subagent** messages carry `parent_tool_use_id` and are emitted live-only via `emitNested` (no persistence), keyed by `parentToolUseId`; their `stream_event`/`system`/`tool_progress`/`result` are ignored so they never touch the parent's state/`sdkSessionId`. Enabled by `forwardSubagentText:true`.
 - On `result`: capture `sdk_session_id`, accumulate cost/turns, record `result`. `maxTurns` for a worker is **enforced** (compare `r.num_turns` directly, not `cumTurns`): on cap it records a notice, interrupts, closes the queue, aborts, transitions `stopped`, clears `deferred`.
 - After `result`, the **deferred-echo** drain runs (below). If nothing is deferred and the worker is still `running`, it transitions to `idle`.
@@ -105,6 +106,13 @@ Because Codex 0.144.x captures its inherited environment in on-disk shell snapsh
 applying shell policy, secret-bearing launches add fixed public overrides that disable that
 snapshot feature and exclude `ROOKERY_CAP_SECRET_*` from model-invoked shell environments.
 The override strings contain neither secret names nor values.
+
+At daemon boot, repo-shared reconciliation runs before runtime GC. The daemon resolves the
+current desired revision for every authoritative session and worker, then
+`gcCapabilityRuntime` keeps only matching 64-hex directories with a regular schema-2 marker
+whose embedded revision equals the directory name. Stale/invalid revisions and `.tmp-*`
+staging entries are removed; unknown names, non-directory revision-shaped files, and
+symlinks outside that owned set are never traversed.
 
 ## Sessions
 

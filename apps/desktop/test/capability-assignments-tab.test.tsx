@@ -18,13 +18,14 @@ const targets: CapabilityTargetOptions = {
   sessions: [{ id: "session-1", label: "Main Session" }],
   workers: [{ id: "worker-1", label: "Worker One" }],
 };
-function snapshot(bindings: CapabilityBinding[] = []): CapabilityLibrarySnapshot { return { generation: 1, packs: [pack], bindings }; }
+function snapshot(bindings: CapabilityBinding[] = []): CapabilityLibrarySnapshot { return { generation: 1, packs: [pack], bindings, diagnostics: [] }; }
 function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi {
   return {
     loadSnapshot: async () => { throw new Error("unused"); }, loadLibrary: async () => snapshot(),
     addPack: async () => pack, removePack: async () => {}, setTrust: async () => pack,
     setSecret: async (_id, key) => ({ key, configured: true }), deleteSecret: async (_id, key) => ({ key, configured: false }),
-    refresh: async () => snapshot(), setBinding: async (id, input) => ({ id, ...input, createdAt: "t", updatedAt: "t" }), deleteBinding: async () => {},
+    refresh: async () => snapshot(), reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
+    setBinding: async (id, input) => ({ id, ...input, createdAt: "t", updatedAt: "t" }), deleteBinding: async () => {},
     ...overrides,
   };
 }
@@ -94,5 +95,27 @@ describe("CapabilityAssignmentsTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "할당 만들기" }));
     expect(await screen.findByText("binding audience overlaps existing row")).toBeInTheDocument();
+  });
+
+  it("restricts repo-shared assignments to the selected pack's owner repo", async () => {
+    const shared: CapabilityLibraryEntry = {
+      ...pack,
+      instanceId: "shared-pack",
+      sourceKind: "repo-shared",
+      ownerRepoId: "repo-1",
+      sourcePath: "/repo/.rookery/capabilities/team",
+    };
+    const sharedTargets: CapabilityTargetOptions = {
+      ...targets,
+      repos: [{ id: "repo-1", label: "App Repo" }, { id: "repo-2", label: "Other Repo" }],
+    };
+    render(<CapabilityAssignmentsTab api={api({ loadLibrary: async () => ({ generation: 1, packs: [shared], bindings: [], diagnostics: [] }) })} generation={0} targets={sharedTargets} />);
+    await screen.findByText("새 할당");
+
+    fireEvent.change(screen.getByLabelText("범위"), { target: { value: "repo-shared" } });
+    const targetSelect = screen.getByLabelText("범위 대상");
+    await waitFor(() => expect(targetSelect).toHaveValue("repo-1"));
+    expect(within(targetSelect).getByRole("option", { name: "App Repo" })).toBeInTheDocument();
+    expect(within(targetSelect).queryByRole("option", { name: "Other Repo" })).toBeNull();
   });
 });

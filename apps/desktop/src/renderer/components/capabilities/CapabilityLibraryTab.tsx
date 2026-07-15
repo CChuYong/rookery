@@ -97,6 +97,11 @@ function PackCard({ pack, api, reload }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const statusKey = `capabilities.packStatus.${pack.status}`;
+  const sourceLabel = pack.sourceKind === "repo-shared"
+    ? t("capabilities.packSource.repoShared", { repo: pack.ownerRepoId ?? "—" })
+    : pack.sourceKind === "rookery-generated"
+      ? t("capabilities.packSource.generated")
+      : t("capabilities.packSource.local");
 
   const mutate = (action: () => Promise<unknown>): void => {
     setBusy(true); setError(null);
@@ -116,6 +121,7 @@ function PackCard({ pack, api, reload }: {
             <h3 className="text-[13px] font-semibold text-fg">{pack.manifest.displayName}</h3>
             <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-muted">v{pack.manifest.version}</span>
             <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-fg-dim">{t(statusKey)}</span>
+            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{sourceLabel}</span>
             <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">Claude · Codex</span>
           </div>
           <p className="mt-1 text-[11.5px] text-fg-dim">{pack.manifest.description}</p>
@@ -133,14 +139,14 @@ function PackCard({ pack, api, reload }: {
               <ShieldCheck size={12} /> {t("capabilities.trustCurrent")}
             </Button>
           )}
-          {!confirmRemove ? (
+          {pack.sourceKind !== "repo-shared" && (!confirmRemove ? (
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmRemove(true)}><Trash2 size={12} /> {t("common.delete")}</Button>
           ) : (
             <>
               <Button variant="danger" size="sm" disabled={busy} onClick={() => mutate(() => api.removePack(pack.instanceId))}>{t("capabilities.confirmRemove")}</Button>
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmRemove(false)}>{t("common.cancel")}</Button>
             </>
-          )}
+          ))}
         </div>
       </div>
 
@@ -225,6 +231,14 @@ export function CapabilityLibraryTab({ api, generation, pickDirectory }: Capabil
         <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setError(message(cause))) : undefined); }}><FolderPlus size={13} /> {t("capabilities.addDirectory")}</Button>
         <Button variant="ghost" size="sm" onClick={() => { setLoading(true); void api.refresh().then((next) => { setLibrary(next); setLoading(false); }).catch((cause) => { setError(message(cause)); setLoading(false); }); }}><RefreshCw size={13} /> {t("common.refresh")}</Button>
       </div>
+      {library && library.diagnostics.length > 0 && (
+        <section data-testid="capability-library-diagnostics" className="rounded-[var(--radius)] border border-fail/30 bg-fail/5 px-3.5 py-3">
+          <div className="flex items-center gap-2 text-[12px] font-medium text-fail"><CircleAlert size={14} /> {t("capabilities.libraryDiagnostics")}</div>
+          <div className="mt-2 space-y-1.5">
+            {library.diagnostics.map((diagnostic) => <p key={diagnostic.id} className="text-[11px] text-fg-dim"><span className="font-mono text-muted">{diagnostic.source}</span> · {diagnostic.message}</p>)}
+          </div>
+        </section>
+      )}
       {library?.packs.length ? <div className="space-y-3">{library.packs.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} />)}</div> : <div className="flex flex-col items-center gap-2 py-20 text-center text-muted"><FolderPlus size={26} className="opacity-40" /><p className="text-[12px]">{t("capabilities.libraryEmpty")}</p></div>}
     </div>
   );

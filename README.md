@@ -62,7 +62,17 @@ packs apply to both **Claude and Codex** without changing the user's `~/.claude`
 prompt. Claude loads skills and MCP through generated local plugins; Codex loads them from
 Rookery-owned, target-specific `CODEX_HOME` directories. Masters pick up changes on their
 next turn; newly started or lazily resumed workers apply once when their provider stream
-opens. An already-live worker reports **Reload required** until explicit hot reload ships.
+opens. An already-live worker reports **Reload required** and can either reload immediately
+while idle or schedule a reload for the current turn boundary. Reload preserves the worker
+row, worktree, transcript, provider-native conversation, model, effort, permission mode,
+and lifetime budgets.
+
+Registered repositories may check in an opt-in shared index at
+`.rookery/capabilities.json`; its pack paths are contained under
+`.rookery/capabilities/`. Rookery discovers and watches those packs, but never trusts or
+binds them automatically. A content change invalidates the exact-digest trust decision
+until the new digest is reviewed. Removing, disabling, or deleting an index entry is an
+authoritative tombstone for that repo-owned Library row.
 
 Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
 
@@ -83,6 +93,9 @@ directory is honored without invoking a shell.
 For secret-bearing Codex launches, Rookery also disables Codex shell snapshots and removes
 managed aliases from model-invoked shell environments using fixed public overrides; no
 secret name or value is placed in argv.
+On daemon boot, Rookery keeps only valid schema-2 runtime revisions still desired by an
+authoritative session or worker and removes stale revisions and interrupted staging
+directories without following symlinks.
 
 ### The fleet
 

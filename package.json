@@ -26,6 +26,7 @@
     "test:watch": "vitest",
     "smoke:capabilities": "node scripts/smoke-capability-runtime.mjs",
     "smoke:capabilities:codex": "node scripts/smoke-capability-center-codex.mjs",
+    "smoke:capabilities:slice5": "node scripts/smoke-capability-center-slice5.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

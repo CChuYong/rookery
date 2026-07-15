@@ -184,7 +184,7 @@ Index: `idx_pending_notifications_session (session_id)`.
 
 ### `capability_packs`
 
-One registered local capability-pack instance. `manifest_json` is the registry's sanitized
+One registered local or repository-owned capability-pack instance. `manifest_json` is the registry's sanitized
 validated document (manifest, file metadata, change list, validation status, and errors),
 not expanded instructions or secret values.
 
@@ -201,6 +201,14 @@ not expanded instructions or secret values.
 | `updated_at` | TEXT | NOT NULL | ISO timestamp |
 
 Unique: `(source_kind, source_path)`.
+
+For `source_kind = repo-shared`, `owner_repo_id` is the authoritative registered repo id
+and `source_path` is contained under `<repo>/.rookery/capabilities/`. The checked-in schema-1
+index at `<repo>/.rookery/capabilities.json` owns discovery and removal; it stores no trust,
+secrets, or bindings. Reconciliation updates an existing instance in place so those local
+rows survive ordinary content changes, while the changed digest no longer matches an old
+trust row. Invalid indexes leave existing rows present but invalid/fail-closed and expose
+sanitized in-memory Library diagnostics.
 
 ### `capability_bindings`
 
@@ -249,6 +257,9 @@ Capability-pack removal explicitly deletes its bindings, trust rows, and secrets
 deleting the pack. Session, worker, and repository deletion likewise removes bindings for
 that authoritative scope; repository deletion also removes packs it owns and all of their
 dependent state. These cleanup paths do not depend on SQLite cascade behavior.
+Repository removal captures every affected binding scope before that transaction and emits
+one repository-change notification, allowing capability snapshots to invalidate even when
+an owned pack had a Rookery/session/worker binding outside the repo scope itself.
 
 ## Access patterns
 

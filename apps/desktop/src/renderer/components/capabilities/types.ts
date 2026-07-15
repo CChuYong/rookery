@@ -17,6 +17,7 @@ export interface CapabilityCenterApi {
   setSecret(instanceId: string, key: string, value: string): Promise<CapabilitySecretStatus>;
   deleteSecret(instanceId: string, key: string): Promise<CapabilitySecretStatus>;
   refresh(instanceId?: string): Promise<CapabilityLibrarySnapshot>;
+  reloadWorker(workerId: string, whenIdle: boolean): Promise<{ workerId: string; mode: "reloading" | "scheduled" | "next-start" }>;
   setBinding(id: string, input: CapabilityBindingInput): Promise<CapabilityBinding>;
   deleteBinding(id: string): Promise<void>;
 }

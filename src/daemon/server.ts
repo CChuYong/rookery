@@ -36,7 +36,8 @@ import { CapabilityService } from "../core/capabilities/service.js";
 import { CapabilityRegistry } from "../core/capabilities/registry.js";
 import { CapabilityResolver } from "../core/capabilities/resolver.js";
 import { CapabilityRuntimeState } from "../core/capabilities/runtime-state.js";
-import { CapabilityRuntime } from "./capability-runtime.js";
+import { CapabilityRuntime, gcCapabilityRuntime } from "./capability-runtime.js";
+import { CapabilityRepoWatcher } from "./capability-repo-watcher.js";
 import { Settings, applyApiKeyToEnv } from "../core/settings.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -513,6 +514,18 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     resolver: capabilityResolver,
     runtimeState: capabilityRuntimeState,
   });
+  const capabilityRepoWatcher = new CapabilityRepoWatcher(repos, capabilityRegistry);
+  capabilityRepoWatcher.start();
+  const liveCapabilityRevisions = new Set<string>();
+  for (const session of repos.listSessions()) {
+    try { liveCapabilityRevisions.add(capabilityService.resolveManaged({ kind: "session", id: session.id }).revision); }
+    catch { /* a corrupt target must not prevent cleanup of independently valid revisions */ }
+  }
+  for (const worker of repos.listAllWorkers()) {
+    try { liveCapabilityRevisions.add(capabilityService.resolveManaged({ kind: "worker", id: worker.id }).revision); }
+    catch { /* a corrupt target must not prevent cleanup of independently valid revisions */ }
+  }
+  gcCapabilityRuntime(config.home, liveCapabilityRevisions);
 
   // External MCP server (rookery-as-MCP): a SECOND McpBridge mounted at /mcp-ext, gating fleet control for
   // external MCP clients (Claude Code/Cursor/Codex). Off by default (fail-closed) via the mcpExposure setting;
@@ -709,6 +722,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // master turn (in-process SDK MCP) doesn't need the http server, so this only helps.
     await fleet.close(5000);
     await sessions.drain(5000);
+    capabilityRepoWatcher.close();
     // Drain done → tear down the http server (and with it the now-idle MCP bridge), then close the DB last.
     httpServer.closeAllConnections?.(); // Node 18.2+: forcibly close any remaining keep-alive connections
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));

@@ -598,6 +598,12 @@ export class Connection {
         });
         return;
       }
+      case "capabilities.worker.reload": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        const result = await this.fleet.reloadCapabilities(msg.workerId, msg.whenIdle ?? false);
+        this.reply({ type: "capabilities.worker.reload.result", reqId: msg.reqId, ...result });
+        return;
+      }
       case "usage.get": {
         this.reply({ type: "usage.result", reqId: msg.reqId, usage: this.usage?.snapshot() ?? emptyUsage() });
         return;

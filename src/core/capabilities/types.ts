@@ -153,6 +153,7 @@ export interface CapabilityLibrarySnapshot {
   generation: number;
   packs: CapabilityLibraryEntry[];
   bindings: CapabilityBinding[];
+  diagnostics: CapabilityDiagnostic[];
 }
 
 export interface ResolvedCapabilitySource {

@@ -37,6 +37,65 @@ export interface CodexRuntimeLaunchOptions {
   diagnostics: string[];
 }
 
+export interface CapabilityRuntimeGcResult {
+  removed: string[];
+  kept: string[];
+  failed: string[];
+}
+
+const REVISION_DIRECTORY = /^[a-f0-9]{64}$/;
+
+function removeRuntimeEntry(entryPath: string, stat: fs.Stats): void {
+  if (stat.isDirectory() && !stat.isSymbolicLink()) fs.rmSync(entryPath, { recursive: true, force: true });
+  else fs.unlinkSync(entryPath);
+}
+
+export function gcCapabilityRuntime(home: string, liveRevisions: ReadonlySet<string>): CapabilityRuntimeGcResult {
+  const result: CapabilityRuntimeGcResult = { removed: [], kept: [], failed: [] };
+  const runtimeParent = path.join(home, "capability-runtime");
+  let parentStat: fs.Stats;
+  try { parentStat = fs.lstatSync(runtimeParent); }
+  catch { return result; }
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) return result;
+
+  let names: string[];
+  try { names = fs.readdirSync(runtimeParent).sort(); }
+  catch {
+    result.failed.push("<runtime-parent>");
+    return result;
+  }
+  for (const name of names) {
+    const entryPath = path.join(runtimeParent, name);
+    try {
+      const stat = fs.lstatSync(entryPath);
+      const temporary = name.startsWith(".tmp-");
+      const revisionDirectory = REVISION_DIRECTORY.test(name) && stat.isDirectory() && !stat.isSymbolicLink();
+      if (!temporary && !revisionDirectory) continue;
+
+      let validLiveRevision = false;
+      if (revisionDirectory && liveRevisions.has(name)) {
+        const marker = path.join(entryPath, ".complete.json");
+        try {
+          const markerStat = fs.lstatSync(marker);
+          if (markerStat.isFile() && !markerStat.isSymbolicLink()) {
+            const parsed = JSON.parse(fs.readFileSync(marker, "utf8")) as { schemaVersion?: unknown; revision?: unknown };
+            validLiveRevision = parsed.schemaVersion === 2 && parsed.revision === name;
+          }
+        } catch { validLiveRevision = false; }
+      }
+      if (validLiveRevision) {
+        result.kept.push(name);
+        continue;
+      }
+      removeRuntimeEntry(entryPath, stat);
+      result.removed.push(name);
+    } catch {
+      result.failed.push(name);
+    }
+  }
+  return result;
+}
+
 function sourceDirName(packInstanceId: string): string {
   return Buffer.from(packInstanceId).toString("hex");
 }

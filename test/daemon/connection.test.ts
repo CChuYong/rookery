@@ -146,7 +146,7 @@ describe("Connection", () => {
 
   it("routes every capability registry mutation with sanitized correlated results", async () => {
     const { sent, repos, bus, fleet, sm, socket } = setup();
-    const library = { generation: 4, packs: [], bindings: [] };
+    const library = { generation: 4, packs: [], bindings: [], diagnostics: [] };
     const pack = { instanceId: "pack-1", status: "trusted" };
     const binding = {
       id: "binding-1",
@@ -222,6 +222,26 @@ describe("Connection", () => {
     await conn.handleRaw(JSON.stringify({ type: "capabilities.pack.add", reqId: "cap-bad", path: "/bad" }));
     expect(parsed(sent).at(-1)).toMatchObject({
       type: "error", reqId: "cap-bad", message: expect.stringContaining("invalid capability pack"),
+    });
+  });
+
+  it("routes worker capability reloads and preserves the scheduling result", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const capabilities = { snapshot: vi.fn() };
+    const reload = vi.spyOn(fleet, "reloadCapabilities").mockResolvedValue({ workerId: "worker-1", mode: "scheduled" });
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({
+      type: "capabilities.worker.reload", reqId: "cap-reload", workerId: "worker-1", whenIdle: true,
+    }));
+
+    expect(reload).toHaveBeenCalledWith("worker-1", true);
+    expect(parsed(sent).at(-1)).toEqual({
+      type: "capabilities.worker.reload.result", reqId: "cap-reload", workerId: "worker-1", mode: "scheduled",
     });
   });
 

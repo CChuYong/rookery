@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { Repositories, CapabilityPackRow } from "../../persistence/repositories.js";
 import {
   CapabilityPackValidationError,
   collectSecretRequirements,
   validateCapabilityPack,
 } from "./manifest.js";
+import { loadRepoSharedIndex, resolveRepoSharedPackPath } from "./repo-shared.js";
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
+  CapabilityDiagnostic,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
   CapabilityPackChange,
@@ -100,6 +103,7 @@ function validationErrors(error: unknown): string[] {
 
 export class CapabilityRegistry {
   private generation = 0;
+  private readonly repoDiagnostics = new Map<string, CapabilityDiagnostic[]>();
   private readonly createId: () => string;
   private readonly onChanged?: (change: CapabilityRegistryChange) => void;
 
@@ -206,45 +210,210 @@ export class CapabilityRegistry {
       generation: this.generation,
       packs: this.repos.listCapabilityPacks().map((row) => this.entryFromRow(row)),
       bindings: this.repos.listCapabilityBindings(),
+      diagnostics: [...this.repoDiagnostics.values()].flat().sort((a, b) =>
+        compareText(a.source, b.source) || compareText(a.id, b.id)),
     };
   }
 
+  private updateRowFromSource(row: CapabilityPackRow): CapabilityScopeRef[] {
+    const previous = parseDocument(row);
+    let document: CapabilityRegistryDocument;
+    let logicalId = row.logical_id;
+    let digest = row.digest;
+    try {
+      const validated = validateCapabilityPack(row.source_path);
+      document = {
+        manifest: validated.manifest,
+        files: validated.files,
+        changes: changesBetween(previous.files, validated.files),
+        validationStatus: "valid",
+        errors: [],
+      };
+      logicalId = validated.manifest.id;
+      digest = validated.digest;
+    } catch (error) {
+      document = {
+        ...previous,
+        validationStatus: fs.existsSync(row.source_path) ? "invalid" : "source-missing",
+        errors: validationErrors(error),
+      };
+    }
+    this.repos.updateCapabilityPack(row.instance_id, {
+      logicalId,
+      manifestJson: serializeDocument(document),
+      digest,
+    });
+    return this.affectedForPack(row.instance_id);
+  }
+
+  private markRepoRowsInvalid(repoId: string, message: string): CapabilityScopeRef[] {
+    const affected: CapabilityScopeRef[] = [];
+    for (const row of this.repos.listCapabilityPacks().filter((pack) => pack.source_kind === "repo-shared" && pack.owner_repo_id === repoId)) {
+      const previous = parseDocument(row);
+      this.repos.updateCapabilityPack(row.instance_id, {
+        logicalId: row.logical_id,
+        manifestJson: serializeDocument({ ...previous, validationStatus: "invalid", errors: [message] }),
+        digest: row.digest,
+      });
+      affected.push(...this.affectedForPack(row.instance_id));
+    }
+    return affected;
+  }
+
+  reconcileRepoShared(repoId?: string): CapabilityLibrarySnapshot {
+    const selected = this.repos.listRepos().filter((repo) => repoId === undefined || repo.id === repoId);
+    if (repoId !== undefined && selected.length === 0) throw new Error(`unknown repo capability owner: ${repoId}`);
+    const affected: CapabilityScopeRef[] = [];
+    let changed = false;
+
+    for (const repo of selected) {
+      const source = `repo:${repo.name}/.rookery/capabilities.json`;
+      const index = loadRepoSharedIndex(repo.path);
+      const owned = this.repos.listCapabilityPacks().filter((pack) => pack.source_kind === "repo-shared" && pack.owner_repo_id === repo.id);
+      const diagnostics: CapabilityDiagnostic[] = [];
+
+      if (index.status === "invalid") {
+        const message = `Invalid repo-shared capability index: ${index.error}`;
+        affected.push(...this.markRepoRowsInvalid(repo.id, message));
+        diagnostics.push({ id: `repo-shared:${repo.id}:index`, source, severity: "error", message });
+        if (owned.length > 0 || JSON.stringify(this.repoDiagnostics.get(repo.id) ?? []) !== JSON.stringify(diagnostics)) changed = true;
+        this.repoDiagnostics.set(repo.id, diagnostics);
+        continue;
+      }
+
+      if (index.status === "missing") {
+        for (const row of owned) {
+          affected.push(...this.affectedForPack(row.instance_id));
+          this.repos.deleteCapabilityPack(row.instance_id);
+          changed = true;
+        }
+        if (this.repoDiagnostics.has(repo.id)) changed = true;
+        this.repoDiagnostics.delete(repo.id);
+        continue;
+      }
+
+      const retained = new Set<string>();
+      for (const [position, entry] of index.entries.entries()) {
+        let sourcePath: string;
+        try {
+          sourcePath = resolveRepoSharedPackPath(repo.path, entry.path);
+        } catch (error) {
+          diagnostics.push({
+            id: `repo-shared:${repo.id}:${position}`,
+            source: `${source}#${entry.path}`,
+            severity: "error",
+            message: validationErrors(error)[0]!,
+          });
+          continue;
+        }
+        const existing = owned.find((row) => path.resolve(row.source_path) === path.resolve(sourcePath));
+        if (entry.disabled) {
+          if (existing) {
+            affected.push(...this.affectedForPack(existing.instance_id));
+            this.repos.deleteCapabilityPack(existing.instance_id);
+            changed = true;
+          }
+          continue;
+        }
+        if (existing && retained.has(existing.instance_id)) {
+          diagnostics.push({
+            id: `repo-shared:${repo.id}:${position}`,
+            source: `${source}#${entry.path}`,
+            severity: "error",
+            message: `Duplicate repo-shared capability path: ${entry.path}`,
+          });
+          continue;
+        }
+        try {
+          if (existing) {
+            retained.add(existing.instance_id);
+            affected.push(...this.updateRowFromSource(existing));
+            changed = true;
+          } else {
+            const validated = validateCapabilityPack(sourcePath);
+            const instanceId = this.createId();
+            this.repos.createCapabilityPack({
+              instanceId,
+              logicalId: validated.manifest.id,
+              sourceKind: "repo-shared",
+              ownerRepoId: repo.id,
+              sourcePath: validated.root,
+              manifestJson: serializeDocument({
+                manifest: validated.manifest,
+                files: validated.files,
+                changes: [],
+                validationStatus: "valid",
+                errors: [],
+              }),
+              digest: validated.digest,
+            });
+            retained.add(instanceId);
+            changed = true;
+          }
+        } catch (error) {
+          const errors = validationErrors(error);
+          if (existing) {
+            retained.add(existing.instance_id);
+            const previous = parseDocument(existing);
+            this.repos.updateCapabilityPack(existing.instance_id, {
+              logicalId: existing.logical_id,
+              manifestJson: serializeDocument({ ...previous, validationStatus: fs.existsSync(sourcePath) ? "invalid" : "source-missing", errors }),
+              digest: existing.digest,
+            });
+            affected.push(...this.affectedForPack(existing.instance_id));
+            changed = true;
+          }
+          diagnostics.push({
+            id: `repo-shared:${repo.id}:${position}`,
+            source: `${source}#${entry.path}`,
+            severity: "error",
+            message: errors[0]!,
+          });
+        }
+      }
+
+      for (const row of owned) {
+        if (retained.has(row.instance_id) || !this.repos.getCapabilityPack(row.instance_id)) continue;
+        affected.push(...this.affectedForPack(row.instance_id));
+        this.repos.deleteCapabilityPack(row.instance_id);
+        changed = true;
+      }
+      if (JSON.stringify(this.repoDiagnostics.get(repo.id) ?? []) !== JSON.stringify(diagnostics)) changed = true;
+      if (diagnostics.length > 0) this.repoDiagnostics.set(repo.id, diagnostics);
+      else this.repoDiagnostics.delete(repo.id);
+    }
+
+    if (changed) this.emit(affected);
+    return this.list();
+  }
+
+  invalidate(affected: CapabilityScopeRef[], repoId?: string): void {
+    if (repoId) this.repoDiagnostics.delete(repoId);
+    this.emit(affected);
+  }
+
   refresh(instanceId?: string): CapabilityLibrarySnapshot {
+    if (instanceId === undefined) {
+      const affected: CapabilityScopeRef[] = [];
+      const localRows = this.repos.listCapabilityPacks().filter((pack) => pack.source_kind !== "repo-shared");
+      for (const row of localRows) {
+        affected.push(...this.updateRowFromSource(row));
+      }
+      if (localRows.length > 0) this.emit(affected);
+      return this.reconcileRepoShared();
+    }
     const rows = instanceId === undefined
       ? this.repos.listCapabilityPacks()
       : [this.repos.getCapabilityPack(instanceId)].filter((row): row is CapabilityPackRow => row !== undefined);
     if (instanceId !== undefined && rows.length === 0) throw new Error(`unknown capability pack: ${instanceId}`);
 
+    if (rows[0]?.source_kind === "repo-shared") return this.reconcileRepoShared(rows[0].owner_repo_id!);
+
+    const affected: CapabilityScopeRef[] = [];
     for (const row of rows) {
-      const previous = parseDocument(row);
-      let document: CapabilityRegistryDocument;
-      let logicalId = row.logical_id;
-      let digest = row.digest;
-      try {
-        const validated = validateCapabilityPack(row.source_path);
-        document = {
-          manifest: validated.manifest,
-          files: validated.files,
-          changes: changesBetween(previous.files, validated.files),
-          validationStatus: "valid",
-          errors: [],
-        };
-        logicalId = validated.manifest.id;
-        digest = validated.digest;
-      } catch (error) {
-        document = {
-          ...previous,
-          validationStatus: fs.existsSync(row.source_path) ? "invalid" : "source-missing",
-          errors: validationErrors(error),
-        };
-      }
-      this.repos.updateCapabilityPack(row.instance_id, {
-        logicalId,
-        manifestJson: serializeDocument(document),
-        digest,
-      });
-      this.emit(this.affectedForPack(row.instance_id));
+      affected.push(...this.updateRowFromSource(row));
     }
+    this.emit(affected);
     return this.list();
   }
 

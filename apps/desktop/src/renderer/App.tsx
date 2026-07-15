@@ -859,6 +859,10 @@ export function App(): JSX.Element {
       setSecret: (instanceId, key, value) => connected().request({ type: "capabilities.secret.set", instanceId, key, value }).then((response) => response.secret),
       deleteSecret: (instanceId, key) => connected().request({ type: "capabilities.secret.delete", instanceId, key }).then((response) => response.secret),
       refresh: (instanceId) => connected().request({ type: "capabilities.refresh", ...(instanceId ? { instanceId } : {}) }).then((response) => response.library),
+      reloadWorker: (workerId, whenIdle) => connected().request({ type: "capabilities.worker.reload", workerId, whenIdle }).then((response) => ({
+        workerId: response.workerId,
+        mode: response.mode,
+      })),
       setBinding: (id, binding) => connected().request({ type: "capabilities.binding.set", id, binding }).then((response) => {
         if (!response.binding) throw new Error("capability binding update returned no binding");
         return response.binding;

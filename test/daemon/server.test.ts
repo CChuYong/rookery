@@ -112,6 +112,27 @@ describe("startDaemon (integration)", () => {
     }
   });
 
+  it("garbage-collects stale capability runtime revisions during boot", async () => {
+    const home = "/tmp/rookery-server-capability-gc";
+    fs.rmSync(home, { recursive: true, force: true });
+    const parent = path.join(home, "capability-runtime");
+    const stale = "b".repeat(64);
+    fs.mkdirSync(path.join(parent, stale), { recursive: true });
+    fs.writeFileSync(path.join(parent, stale, ".complete.json"), JSON.stringify({ schemaVersion: 2, revision: stale }));
+    fs.mkdirSync(path.join(parent, ".tmp-interrupted"));
+    fs.writeFileSync(path.join(parent, "operator-note"), "preserve");
+    const config = loadConfig({ ROOKERY_HOME: home, ROOKERY_PORT: "0" });
+    const daemon = await startDaemon({ config, acquireLock: false, queryFn: fakeQuery([]) });
+    try {
+      expect(fs.existsSync(path.join(parent, stale))).toBe(false);
+      expect(fs.existsSync(path.join(parent, ".tmp-interrupted"))).toBe(false);
+      expect(fs.readFileSync(path.join(parent, "operator-note"), "utf8")).toBe("preserve");
+    } finally {
+      await daemon.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("applies a trusted Claude pack to the next master turn and exposes matching runtime revisions", { timeout: 10000 }, async () => {
     const home = "/tmp/rookery-server-capability-runtime";
     const packRoot = "/tmp/rookery-server-capability-runtime-pack";

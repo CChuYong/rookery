@@ -329,7 +329,7 @@ describe("CapabilityService", () => {
   });
 
   it("delegates sanitized registry mutations through the service facade", () => {
-    const library = { generation: 1, packs: [], bindings: [] };
+    const library = { generation: 1, packs: [], bindings: [], diagnostics: [] };
     const registry = {
       list: vi.fn(() => library),
       add: vi.fn(() => ({ instanceId: "pack-1" })),
