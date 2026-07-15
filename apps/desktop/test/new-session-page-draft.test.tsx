@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { NewSessionPage, NEW_SESSION_DRAFT_KEY } from "../src/renderer/components/NewSessionPage.js";
 import { useDraftStore, emptyDraftState } from "../src/renderer/store/drafts.js";
+import { setPromptEditorText } from "./prompt-editor-helpers.js";
 
 // Audit #5: the New Session composer must wire into the drafts store under the fixed "newSession" key —
 // exactly like ConversationPane does per-session — so a typed-but-unsent prompt survives page close/reopen
@@ -21,8 +22,7 @@ describe("NewSessionPage draft persistence (audit #5)", () => {
   it("writes typed input back into the newSession draft key as the user types", () => {
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={() => {}} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "typing a prompt";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "typing a prompt");
     expect(useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY]).toBe("typing a prompt");
   });
 });

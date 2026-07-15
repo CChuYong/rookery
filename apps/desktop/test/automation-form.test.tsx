@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { AutomationForm } from "../src/renderer/components/AutomationForm.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
+import { setPromptEditorText } from "./prompt-editor-helpers.js";
 
 describe("AutomationForm", () => {
   it("submits a new cron + master automation", () => {
@@ -12,8 +13,7 @@ describe("AutomationForm", () => {
     fireEvent.change(screen.getByLabelText("Cron 식"), { target: { value: "0 3 * * *" } });
     // PromptEditor is a contenteditable div — set its textContent and fire an input event
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "summarize";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "summarize");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/some/path" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(
@@ -32,8 +32,7 @@ describe("AutomationForm", () => {
     fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "interval" } });
     fireEvent.change(screen.getByLabelText("실행 주기 (분)"), { target: { value: "20" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "poll now";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "poll now");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/some/path" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(
@@ -54,8 +53,7 @@ describe("AutomationForm", () => {
     fireEvent.change(screen.getByLabelText("키워드"), { target: { value: "deploy" } });
     // PromptEditor is a contenteditable div — set its textContent and fire an input event
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "handle {{message}}";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "handle {{message}}");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/some/path" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(
@@ -82,8 +80,7 @@ describe("AutomationForm", () => {
     fireEvent.change(getByLabelText("이름"), { target: { value: "auto1" } });
     fireEvent.change(getByPlaceholderText("/path/to/repo"), { target: { value: "/code/app" } });
     const editor = getByLabelText("프롬프트");
-    editor.textContent = "do {{message}}";
-    fireEvent.input(editor);
+    setPromptEditorText(editor, "do {{message}}");
     fireEvent.click(getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       name: "auto1",
@@ -147,8 +144,7 @@ describe("AutomationForm", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do something";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do something");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(
@@ -167,8 +163,7 @@ describe("AutomationForm", () => {
     fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
     // fill task
     const taskEditor = screen.getByLabelText("작업");
-    taskEditor.textContent = "fix the bug";
-    fireEvent.input(taskEditor);
+    setPromptEditorText(taskEditor, "fix the bug");
     // set maxTurns
     fireEvent.change(screen.getByLabelText("최대 턴 수"), { target: { value: "10" } });
     fireEvent.click(screen.getByText("저장"));
@@ -187,8 +182,7 @@ describe("AutomationForm", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do it";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do it");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     expect(await screen.findByText("invalid cron expression")).toBeInTheDocument();
@@ -232,8 +226,7 @@ describe("AutomationForm", () => {
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do it";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do it");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "claude" }));
@@ -246,8 +239,7 @@ describe("AutomationForm", () => {
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do it";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do it");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex" }));
@@ -261,8 +253,7 @@ describe("AutomationForm", () => {
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "workerjob" } });
     const taskEditor = screen.getByLabelText("작업");
-    taskEditor.textContent = "fix the bug";
-    fireEvent.input(taskEditor);
+    setPromptEditorText(taskEditor, "fix the bug");
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex" }));
   });
@@ -302,8 +293,7 @@ describe("AutomationForm", () => {
     fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do it";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do it");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     const submitted = onSubmit.mock.calls[0][0];
@@ -374,8 +364,7 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do something";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do something");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: null }));
@@ -386,8 +375,7 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do something";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do something");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "12.5" } });
     fireEvent.click(screen.getByText("저장"));
@@ -400,8 +388,7 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "workerjob" } });
     fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
     const taskEditor = screen.getByLabelText("작업");
-    taskEditor.textContent = "fix the bug";
-    fireEvent.input(taskEditor);
+    setPromptEditorText(taskEditor, "fix the bug");
     fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "3" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: 3 }));
@@ -412,8 +399,7 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do something";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do something");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "-1" } });
     fireEvent.click(screen.getByText("저장"));
@@ -545,8 +531,7 @@ describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "do it";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "do it");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ provider: "codex", model: "gpt-5.4", effort: "medium" }));
@@ -568,8 +553,7 @@ describe("AutomationForm worker-settled trigger", () => {
     fireEvent.change(screen.getByLabelText("레포 필터"), { target: { value: "app-api" } });
     fireEvent.change(screen.getByLabelText("라벨 필터 (부분일치)"), { target: { value: "impl" } });
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "review {{branch}}: {{tail}}";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "review {{branch}}: {{tail}}");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/some/path" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).toHaveBeenCalledWith(
@@ -588,8 +572,7 @@ describe("AutomationForm worker-settled trigger", () => {
     fireEvent.click(screen.getByLabelText(/종료됨/));
     fireEvent.click(screen.getByLabelText(/실패/));
     const promptEditor = screen.getByLabelText("프롬프트");
-    promptEditor.textContent = "p";
-    fireEvent.input(promptEditor);
+    setPromptEditorText(promptEditor, "p");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/w" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).not.toHaveBeenCalled();

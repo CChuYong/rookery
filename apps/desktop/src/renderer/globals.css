@@ -76,13 +76,13 @@ body {
 @keyframes chip-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
 .mention-chip::before { content: "@"; opacity: 0.55; margin-right: 1px; }
 
-/* composer markdown shortcuts: line-leading bullet (• marker, an uneditable atomic unit) + inline `code`. **bold** is native <strong>. */
-.md-bullet { user-select: none; cursor: default; color: var(--color-muted); }
+/* composer markdown shortcuts: inline code; lists are rendered by Lexical. */
 .md-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
   padding: 0 4px; border-radius: 4px;
   background: var(--color-raised); color: var(--color-fg-dim);
 }
+.prompt-list { list-style: disc; padding-left: 1.25rem; }
 
 @keyframes strip-sheen { 0% { transform: translateX(-100%); } 100% { transform: translateX(220%); } }
 .sheen::after {

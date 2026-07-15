@@ -1,37 +1,37 @@
-import { afterEach, describe, it, expect, vi } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRef } from "react";
-import { PromptEditor, slashQueryOf, matchCommands } from "../src/renderer/components/PromptEditor.js";
-import type { PromptEditorHandle } from "../src/renderer/components/PromptEditor.js";
-import { insertNodesAtCaret } from "../src/renderer/lib/mention-editor.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  getEditorPropertyFromDOMNode,
+  isLexicalEditor,
+  REDO_COMMAND,
+  UNDO_COMMAND,
+} from "lexical";
+import {
+  matchCommands,
+  PromptEditor,
+  slashQueryOf,
+  type PromptEditorHandle,
+} from "../src/renderer/components/PromptEditor.js";
 
 const CMDS = [
   { id: "review", name: "review", description: "review code", action: { type: "insert-prompt" as const, text: "$review" } },
   { id: "remember", name: "remember", description: "save memory", action: { type: "insert-prompt" as const, text: "/remember" } },
 ];
 
-const originalExecCommand = document.execCommand;
-
-function installExecCommand(impl: (command: string, showDefaultUI?: boolean, value?: string) => boolean): ReturnType<typeof vi.fn> {
-  const mock = vi.fn(impl);
-  Object.defineProperty(document, "execCommand", { configurable: true, writable: true, value: mock });
-  return mock;
+function insert(ref: React.RefObject<PromptEditorHandle | null>, text: string): void {
+  act(() => ref.current!.insertText(text));
 }
 
-function placeCaretAtTextEnd(root: HTMLElement): void {
-  const text = root.lastChild;
-  if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error("expected a trailing text node");
-  const range = document.createRange();
-  range.setStart(text, text.textContent?.length ?? 0);
-  range.collapse(true);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
+function paste(root: HTMLElement, text: string, html = "<b>ignored</b>"): void {
+  fireEvent.paste(root, {
+    clipboardData: {
+      files: [],
+      getData: (type: string) => type === "text/plain" ? text : html,
+      types: ["text/plain", "text/html"],
+    },
+  });
 }
-
-afterEach(() => {
-  Object.defineProperty(document, "execCommand", { configurable: true, writable: true, value: originalExecCommand });
-});
 
 describe("slashQueryOf / matchCommands", () => {
   it("extracts slash query at caret token only", () => {
@@ -40,169 +40,229 @@ describe("slashQueryOf / matchCommands", () => {
     expect(slashQueryOf("a/b")).toBeNull();
     expect(slashQueryOf("plain")).toBeNull();
   });
+
   it("matches by substring, prefix-first", () => {
-    expect(matchCommands(CMDS, "re").map((c) => c.name)).toEqual(["review", "remember"]);
-    expect(matchCommands(CMDS, "mem").map((c) => c.name)).toEqual(["remember"]);
+    expect(matchCommands(CMDS, "re").map((command) => command.name)).toEqual(["review", "remember"]);
+    expect(matchCommands(CMDS, "mem").map((command) => command.name)).toEqual(["remember"]);
   });
 });
 
 describe("PromptEditor", () => {
   it("seeds initialText and getText returns it", () => {
     const ref = createRef<PromptEditorHandle>();
-    render(<PromptEditor ref={ref} initialText="hello" />);
+    const { getByRole } = render(<PromptEditor ref={ref} initialText="hello" />);
     expect(ref.current!.getText()).toBe("hello");
+    expect(getByRole("textbox")).toHaveTextContent("hello");
   });
-  it("onChange fires on input", () => {
-    const onChange = vi.fn();
-    const { getByRole } = render(<PromptEditor onChange={onChange} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "typed";
-    fireEvent.input(ed);
-    expect(onChange).toHaveBeenLastCalledWith("typed");
-  });
-  it("pastes plain text through the native editing command without applying markdown shortcuts", () => {
-    const onChange = vi.fn();
-    const ref = createRef<PromptEditorHandle>();
-    const { getByRole } = render(<PromptEditor ref={ref} onChange={onChange} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "before ";
-    fireEvent.input(ed);
-    placeCaretAtTextEnd(ed);
 
-    const execCommand = installExecCommand((_command, _showDefaultUI, value) => {
-      insertNodesAtCaret(ed, [document.createTextNode(value ?? "")]);
-      placeCaretAtTextEnd(ed);
-      fireEvent.input(ed, { inputType: "insertText", data: value });
-      return true;
+  it("publishes serialized changes from Lexical state", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const onChange = vi.fn();
+    render(<PromptEditor ref={ref} onChange={onChange} />);
+
+    insert(ref, "typed");
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("typed"));
+    expect(ref.current!.getText()).toBe("typed");
+  });
+
+  it("pastes only text/plain without document.execCommand or clipboard HTML", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const execCommand = vi.fn();
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
     });
-    const getData = vi.fn((type: string) => type === "text/plain" ? "**pasted**" : "<strong>pasted</strong>");
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    insert(ref, "before ");
 
-    fireEvent.paste(ed, { clipboardData: { getData } });
+    paste(getByRole("textbox"), "**pasted**", "<strong>HTML</strong>");
 
-    expect(getData).toHaveBeenCalledWith("text/plain");
-    expect(execCommand).toHaveBeenCalledWith("insertText", false, "**pasted**");
-    expect(ref.current!.getText()).toBe("before **pasted**");
-    expect(ed.querySelector("strong")).toBeNull();
-    expect(onChange).toHaveBeenLastCalledWith("before **pasted**");
+    await waitFor(() => expect(ref.current!.getText()).toBe("before **pasted**"));
+    expect(execCommand).not.toHaveBeenCalled();
+    expect(getByRole("textbox")).not.toHaveTextContent("HTML");
+    expect(getByRole("textbox").querySelector("strong")).toBeNull();
   });
-  it("falls back to Range insertion when the native editing command is unavailable", () => {
-    const onChange = vi.fn();
-    const ref = createRef<PromptEditorHandle>();
-    const { getByRole } = render(<PromptEditor ref={ref} onChange={onChange} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "before ";
-    fireEvent.input(ed);
-    placeCaretAtTextEnd(ed);
-    const execCommand = installExecCommand(() => false);
 
-    fireEvent.paste(ed, { clipboardData: { getData: () => "pasted" } });
-
-    expect(execCommand).toHaveBeenCalledWith("insertText", false, "pasted");
-    expect(ref.current!.getText()).toBe("before pasted");
-    expect(onChange).toHaveBeenLastCalledWith("before pasted");
-  });
-  it("falls back to Range insertion when the native editing command throws", () => {
+  it("keeps paste as its own undo item, then accepts fresh Korean text", async () => {
     const ref = createRef<PromptEditorHandle>();
     const { getByRole } = render(<PromptEditor ref={ref} />);
-    const ed = getByRole("textbox");
-    const execCommand = installExecCommand(() => { throw new Error("unsupported"); });
+    const editor = getByRole("textbox");
+    insert(ref, "하이 ");
+    paste(editor, "붙임");
+    await waitFor(() => expect(ref.current!.getText()).toBe("하이 붙임"));
 
-    fireEvent.paste(ed, { clipboardData: { getData: () => "pasted" } });
+    fireEvent.keyDown(editor, { key: "z", code: "KeyZ", ctrlKey: true });
+    await waitFor(() => expect(ref.current!.getText()).toBe("하이 "));
 
-    expect(execCommand).toHaveBeenCalledWith("insertText", false, "pasted");
-    expect(ref.current!.getText()).toBe("pasted");
+    insert(ref, "안녕");
+    await waitFor(() => expect(ref.current!.getText()).toBe("하이 안녕"));
   });
-  it.each(["historyUndo", "historyRedo"])("syncs %s without applying markdown shortcuts", (inputType) => {
+
+  it("opens the slash popup and replaces only the active token", async () => {
     const ref = createRef<PromptEditorHandle>();
-    const { getByRole } = render(<PromptEditor ref={ref} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "**restored**";
-    placeCaretAtTextEnd(ed);
+    const { findByText } = render(<PromptEditor ref={ref} commands={CMDS} />);
+    insert(ref, "hi /rev");
 
-    fireEvent.input(ed, { inputType });
+    fireEvent.click(await findByText("/review"));
 
-    expect(ref.current!.getText()).toBe("**restored**");
-    expect(ed.querySelector("strong")).toBeNull();
+    await waitFor(() => expect(ref.current!.getText()).toBe("hi $review "));
   });
-  it("opens /skill popup and pick replaces the token", () => {
-    const ref = createRef<PromptEditorHandle>();
-    const { getByRole, getByText } = render(<PromptEditor ref={ref} commands={CMDS} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "/rev";
-    fireEvent.input(ed);
-    fireEvent.click(getByText("/review"));
-    expect(ref.current!.getText()).toContain("$review ");
-  });
-  it("executes a zero-argument client action on pick instead of inserting or submitting it", () => {
+
+  it("executes a zero-argument client action instead of inserting it", async () => {
     const ref = createRef<PromptEditorHandle>();
     const onCommandAction = vi.fn();
+    const action = {
+      type: "open-capability-center" as const,
+      tab: "effective" as const,
+      kind: "skill" as const,
+    };
     const commands = [{
       id: "skills",
       name: "skills",
       description: "open skills",
-      action: { type: "open-capability-center" as const, tab: "effective" as const, kind: "skill" as const },
+      action,
     }];
-    const { getByRole, getByText } = render(<PromptEditor ref={ref} commands={commands} onCommandAction={onCommandAction} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "/ski";
-    fireEvent.input(ed);
-    fireEvent.click(getByText("/skills"));
-    expect(onCommandAction).toHaveBeenCalledWith(commands[0]!.action);
+    const { findByText } = render(
+      <PromptEditor ref={ref} commands={commands} onCommandAction={onCommandAction} />,
+    );
+    insert(ref, "/ski");
+
+    fireEvent.click(await findByText("/skills"));
+
+    await waitFor(() => expect(onCommandAction).toHaveBeenCalledWith(action));
     expect(ref.current!.getText()).toBe("");
   });
-  it("WITHOUT onSubmit, Enter does NOT submit (inserts newline)", () => {
-    const { getByRole } = render(<PromptEditor />);
-    const ed = getByRole("textbox");
-    ed.textContent = "line";
-    fireEvent.input(ed);
-    fireEvent.keyDown(ed, { key: "Enter" });
-    expect(true).toBe(true);
+
+  it("replaces an @ query with a serialized inline file chip", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const browseDir = vi.fn(async () => ({
+      dir: "/repo",
+      entries: [{ name: "src.ts", isDir: false }],
+    }));
+    const { findByText, getByRole } = render(
+      <PromptEditor ref={ref} browseDir={browseDir} />,
+    );
+    insert(ref, "check @sr");
+
+    fireEvent.mouseDown(await findByText("src.ts"));
+
+    await waitFor(() => expect(ref.current!.getText()).toBe("check @/repo/src.ts "));
+    expect(getByRole("textbox").querySelector(".mention-chip")).toHaveTextContent("src.ts");
   });
-  it("WITH onSubmit, Enter (no popup) calls onSubmit", () => {
+
+  it("inserts semantic file chips through the imperative bridge", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    act(() => ref.current!.insertFiles([
+      { path: "/repo/a.ts", name: "a.ts" },
+      { path: "/repo/b.ts", name: "b.ts" },
+    ]));
+
+    await waitFor(() => expect(ref.current!.getText()).toBe("@/repo/a.ts @/repo/b.ts "));
+    expect(getByRole("textbox").querySelectorAll(".mention-chip")).toHaveLength(2);
+  });
+
+  it("undoes and redoes semantic file insertion as one history item", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    const editor = getByRole("textbox");
+    act(() => ref.current!.insertFiles([{ path: "/repo/a.ts", name: "a.ts" }]));
+    await waitFor(() => expect(ref.current!.getText()).toBe("@/repo/a.ts "));
+    const lexicalEditor = getEditorPropertyFromDOMNode(editor);
+    if (!isLexicalEditor(lexicalEditor)) throw new Error("expected Lexical editor");
+
+    act(() => lexicalEditor.dispatchCommand(UNDO_COMMAND, undefined));
+    await waitFor(() => expect(ref.current!.getText()).toBe(""));
+    act(() => lexicalEditor.dispatchCommand(REDO_COMMAND, undefined));
+
+    await waitFor(() => expect(ref.current!.getText()).toBe("@/repo/a.ts "));
+  });
+
+  it("applies the supported bold and list Markdown shortcuts", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    const editor = getByRole("textbox");
+    insert(ref, "hello **world*");
+    insert(ref, "*");
+    await waitFor(() => expect(editor.querySelector("strong")).toHaveTextContent("world"));
+    expect(ref.current!.getText()).toBe("hello **world**");
+
+    act(() => ref.current!.clear());
+    insert(ref, "-");
+    insert(ref, " ");
+    insert(ref, "item");
+    await waitFor(() => expect(editor.querySelector("ul")).toHaveTextContent("item"));
+    expect(ref.current!.getText()).toBe("- item");
+  });
+
+  it("without onSubmit, Enter inserts a new paragraph", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} />);
+    insert(ref, "line");
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter" });
+    insert(ref, "two");
+    await waitFor(() => expect(ref.current!.getText()).toBe("line\ntwo"));
+  });
+
+  it("with onSubmit, plain Enter submits", () => {
+    const ref = createRef<PromptEditorHandle>();
     const onSubmit = vi.fn();
-    const { getByRole } = render(<PromptEditor onSubmit={onSubmit} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "msg";
-    fireEvent.input(ed);
-    fireEvent.keyDown(ed, { key: "Enter" });
+    const { getByRole } = render(<PromptEditor ref={ref} onSubmit={onSubmit} />);
+    insert(ref, "msg");
+
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter" });
+
     expect(onSubmit).toHaveBeenCalledOnce();
   });
-  it("Shift+Enter never submits", () => {
-    const onSubmit = vi.fn();
+
+  it("Shift+Enter inserts a line break and never submits", async () => {
     const ref = createRef<PromptEditorHandle>();
+    const onSubmit = vi.fn();
     const { getByRole } = render(<PromptEditor ref={ref} onSubmit={onSubmit} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "msg"; fireEvent.input(ed);
-    fireEvent.keyDown(ed, { key: "Enter", shiftKey: true });
+    insert(ref, "msg");
+
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter", shiftKey: true });
+
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(ref.current!.getText()).toBe("msg\n");
+    await waitFor(() => expect(ref.current!.getText()).toBe("msg\n"));
   });
-  it("Shift+Enter inserts a newline instead of picking a slash command", () => {
-    const onSubmit = vi.fn();
+
+  it("does not submit an IME composition-commit Enter", () => {
     const ref = createRef<PromptEditorHandle>();
-    const { getByRole } = render(<PromptEditor ref={ref} commands={CMDS} onSubmit={onSubmit} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "/rev"; fireEvent.input(ed);
-    fireEvent.keyDown(ed, { key: "Enter", shiftKey: true });
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(ref.current!.getText()).toBe("/rev\n");
-  });
-  it("Shift+Enter during IME composition inserts a newline after composition commits", async () => {
     const onSubmit = vi.fn();
-    const ref = createRef<PromptEditorHandle>();
     const { getByRole } = render(<PromptEditor ref={ref} onSubmit={onSubmit} />);
-    const ed = getByRole("textbox");
-    ed.textContent = "~/Desktop/wt.png"; fireEvent.input(ed);
-    fireEvent.keyDown(ed, { key: "Enter", shiftKey: true, isComposing: true });
+    insert(ref, "안녕");
+
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter", isComposing: true });
+
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(ref.current!.getText()).toBe("~/Desktop/wt.png");
-    fireEvent.compositionEnd(ed);
-    await waitFor(() => expect(ref.current!.getText()).toBe("~/Desktop/wt.png\n"));
+    expect(ref.current!.getText()).toBe("안녕");
   });
-  it("handle.clear empties the editor", () => {
+
+  it("clear empties editor state and its rendered content", async () => {
     const ref = createRef<PromptEditorHandle>();
-    render(<PromptEditor ref={ref} initialText="x" />);
-    ref.current!.clear();
-    expect(ref.current!.getText()).toBe("");
+    const { getByRole } = render(<PromptEditor ref={ref} initialText="x" />);
+
+    act(() => ref.current!.clear());
+
+    await waitFor(() => expect(ref.current!.getText()).toBe(""));
+    expect(getByRole("textbox")).not.toHaveTextContent("x");
+  });
+
+  it("starts a fresh undo history after clear", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { getByRole } = render(<PromptEditor ref={ref} initialText="sent draft" />);
+    const root = getByRole("textbox");
+    const lexicalEditor = getEditorPropertyFromDOMNode(root);
+    if (!isLexicalEditor(lexicalEditor)) throw new Error("expected Lexical editor");
+    act(() => ref.current!.clear());
+    insert(ref, "fresh");
+    await waitFor(() => expect(ref.current!.getText()).toBe("fresh"));
+
+    act(() => lexicalEditor.dispatchCommand(UNDO_COMMAND, undefined));
+
+    await waitFor(() => expect(ref.current!.getText()).toBe(""));
+    expect(ref.current!.getText()).not.toContain("sent draft");
   });
 });
