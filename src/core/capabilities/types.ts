@@ -1,6 +1,12 @@
-export type CapabilityTarget =
+export type CapabilityLiveTarget =
   | { kind: "session"; id: string }
   | { kind: "worker"; id: string };
+
+export type CapabilityPreviewTarget =
+  | { kind: "rookery"; provider: "claude" | "codex"; agent: "master" | "worker" }
+  | { kind: "repo"; id: string; provider: "claude" | "codex"; agent: "master" | "worker" };
+
+export type CapabilityTarget = CapabilityLiveTarget | CapabilityPreviewTarget;
 
 export type CapabilityProvider = "rookery" | "claude" | "codex";
 
@@ -273,7 +279,7 @@ export interface CapabilitySnapshot {
   target: CapabilityTarget & {
     label: string;
     provider: "claude" | "codex";
-    cwd: string;
+    cwd: string | null;
   };
   generatedAt: string;
   desiredRevision?: string;

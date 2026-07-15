@@ -213,6 +213,111 @@ describe("CapabilityService", () => {
     }).snapshot({ kind: "worker", id: "w1" })).rejects.toThrow("unsupported capability provider: future");
   });
 
+  it("resolves a scope-only Rookery preview without provider probes or runtime access", async () => {
+    const listClaudeCommands = vi.fn(async () => ({ commands: [] }));
+    const listCodexCapabilities = vi.fn(async () => codexContribution);
+    const codexEnvForTarget = vi.fn(() => ({ CODEX_HOME: "/must-not-be-used" }));
+    const resolve = vi.fn(() => ({
+      revision: "preview-revision",
+      blocked: false,
+      runtime: { revision: "preview-revision", blocked: false, instructions: [], skills: [], mcpServers: [] },
+      entries: [{
+        id: "managed:pack:skill:review",
+        kind: "skill" as const,
+        name: "review",
+        provider: "rookery" as const,
+        source: "Review Pack",
+        scope: "system" as const,
+        state: "desired" as const,
+        evidence: "declared" as const,
+        invocation: { type: "prompt" as const, name: "$review" },
+      }],
+      diagnostics: [],
+    }));
+    const inspect = vi.fn();
+    const capabilities = service({
+      listClaudeCommands,
+      listCodexCapabilities,
+      codexEnvForTarget,
+      resolver: { resolve } as never,
+      runtimeState: { inspect } as never,
+    });
+
+    const target = { kind: "rookery", provider: "codex", agent: "worker" } as const;
+    const snapshot = await capabilities.snapshot(target);
+
+    expect(snapshot.target).toEqual({ ...target, label: "Rookery defaults", cwd: null });
+    expect(resolve).toHaveBeenCalledWith({
+      kind: "worker",
+      id: "preview:rookery:codex:worker",
+      provider: "codex",
+      origin: "ui",
+      cwd: "",
+    });
+    expect(listClaudeCommands).not.toHaveBeenCalled();
+    expect(listCodexCapabilities).not.toHaveBeenCalled();
+    expect(codexEnvForTarget).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
+    expect(snapshot.appliedRevision).toBeUndefined();
+    expect(snapshot.entries.find((entry) => entry.id === "managed:pack:skill:review")).toMatchObject({ state: "desired" });
+    expect(snapshot.entries.every((entry) => entry.invocation === undefined)).toBe(true);
+  });
+
+  it("previews a registered repository at its authoritative path without target Codex env or runtime", async () => {
+    const providerEntry = {
+      ...codexContribution.entries[0]!,
+      invocation: { type: "prompt" as const, name: "$ship" },
+    };
+    const listCodexCapabilities = vi.fn(async () => ({ entries: [providerEntry], diagnostics: [] }));
+    const codexEnvForTarget = vi.fn(() => ({ CODEX_HOME: "/must-not-be-used" }));
+    const resolve = vi.fn(() => ({
+      revision: "repo-preview-revision",
+      blocked: false,
+      runtime: { revision: "repo-preview-revision", blocked: false, instructions: [], skills: [], mcpServers: [] },
+      entries: [],
+      diagnostics: [],
+    }));
+    const inspect = vi.fn();
+    const capabilities = service({
+      listRepos: () => [{ id: "repo-1", path: "/repos/one", name: "One" }],
+      listCodexCapabilities,
+      codexEnvForTarget,
+      resolver: { resolve } as never,
+      runtimeState: { inspect } as never,
+    });
+    const target = { kind: "repo", id: "repo-1", provider: "codex", agent: "master" } as const;
+
+    const snapshot = await capabilities.snapshot(target);
+
+    expect(snapshot.target).toEqual({ ...target, label: "One", cwd: "/repos/one" });
+    expect(listCodexCapabilities).toHaveBeenCalledWith({ target, cwd: "/repos/one" });
+    expect(codexEnvForTarget).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledWith({
+      kind: "master",
+      id: "preview:repo:repo-1:codex:master",
+      provider: "codex",
+      origin: "ui",
+      cwd: "/repos/one",
+      repoId: "repo-1",
+    });
+    expect(inspect).not.toHaveBeenCalled();
+    expect(snapshot.appliedRevision).toBeUndefined();
+    expect(snapshot.entries.find((entry) => entry.id === "codex.skill.ship")).toMatchObject({
+      state: "desired",
+      evidence: "declared",
+    });
+    expect(snapshot.entries.every((entry) => entry.invocation === undefined)).toBe(true);
+  });
+
+  it("rejects unknown repository previews", async () => {
+    await expect(service({ listRepos: () => [] }).snapshot({
+      kind: "repo",
+      id: "missing",
+      provider: "claude",
+      agent: "worker",
+    })).rejects.toThrow("unknown capability target: repo:missing");
+  });
+
   it("resolves desired state from authoritative session origin and longest registered repo", async () => {
     const resolve = vi.fn(() => ({
       revision: "desired-revision",
