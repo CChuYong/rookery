@@ -50,8 +50,8 @@ export function SkillImportDialog(props: SkillImportDialogProps): JSX.Element {
   useFocusTrap(panelRef);
 
   return (
-    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}> 
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="skill-import-title" className={cn("w-[min(620px,96vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-2xl", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}> 
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="skill-import-title" className={cn("w-[min(620px,96vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-2xl", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}>
         <div className="flex items-start gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0 flex-1"><h2 id="skill-import-title" className="text-[15px] font-semibold text-fg">{t("capabilityCatalog.skillTitle")}</h2><p className="mt-1 text-[11px] text-muted">{t("capabilityCatalog.skillDescription")}</p></div>
           <Button variant="ghost" size="iconSm" aria-label={t("common.close")} disabled={busy} onClick={dismiss}><X size={15} /></Button>
