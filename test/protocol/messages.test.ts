@@ -64,6 +64,77 @@ describe("protocol v2 client messages", () => {
     for (const message of invalid) expect(() => parseClientMessage(JSON.stringify(message))).toThrow();
   });
 
+  it("parses generated MCP pack creation without flattening arguments or secret references", () => {
+    const parsed = clientMessageSchema.parse({
+      type: "capabilities.mcpPack.create",
+      reqId: "q1",
+      input: {
+        id: "repo-tools",
+        displayName: "Repo Tools",
+        version: "1.0.0",
+        description: "Repository MCP servers",
+        repoId: "repo-1",
+        agents: ["master", "worker"],
+        mcpServers: [
+          {
+            id: "db",
+            transport: "stdio",
+            command: "npx",
+            args: ["-y", "db-mcp"],
+            secretEnv: { TOKEN: { source: "rookery-secret", key: "db-token" } },
+          },
+          {
+            id: "docs",
+            transport: "streamable-http",
+            url: "https://example.test/mcp",
+            auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+          },
+        ],
+        secretValues: { "db-token": "db-value", "docs-token": "docs-value" },
+      },
+    });
+
+    expect(parsed.type).toBe("capabilities.mcpPack.create");
+    if (parsed.type !== "capabilities.mcpPack.create") throw new Error("unexpected message type");
+    expect(parsed.input.mcpServers[0]).toMatchObject({ args: ["-y", "db-mcp"] });
+    expect(parsed.input.mcpServers[1]).toMatchObject({
+      auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+    });
+  });
+
+  it("rejects unsafe generated MCP pack creation inputs", () => {
+    const valid = {
+      type: "capabilities.mcpPack.create",
+      reqId: "q1",
+      input: {
+        id: "repo-tools",
+        displayName: "Repo Tools",
+        version: "1.0.0",
+        description: "Repository MCP servers",
+        repoId: "repo-1",
+        agents: ["master", "worker"],
+        mcpServers: [
+          { id: "docs", transport: "streamable-http", url: "https://example.test/mcp" },
+        ],
+      },
+    };
+    const invalid = [
+      { ...valid, input: { ...valid.input, mcpServers: [] } },
+      { ...valid, input: { ...valid.input, mcpServers: [valid.input.mcpServers[0], valid.input.mcpServers[0]] } },
+      { ...valid, input: { ...valid.input, mcpServers: [{ ...valid.input.mcpServers[0], id: "Invalid ID" }] } },
+      { ...valid, input: { ...valid.input, mcpServers: [{ id: "docs", transport: "streamable-http", url: "file:///tmp/mcp" }] } },
+      { ...valid, input: { ...valid.input, mcpServers: [{ id: "docs", transport: "stdio", command: "" }] } },
+      { ...valid, input: { ...valid.input, agents: ["side"] } },
+      { ...valid, input: { ...valid.input, mcpServers: [{ ...valid.input.mcpServers[0], auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } } }], secretValues: { "docs-token": "   " } } },
+      { ...valid, input: { ...valid.input, secretValues: { undeclared: "secret" } } },
+      { ...valid, input: { ...valid.input, unexpected: true } },
+    ];
+
+    for (const message of invalid) {
+      expect(clientMessageSchema.safeParse(message).success).toBe(false);
+    }
+  });
+
   it("settings.set: accepts null (reset-to-default) and validates effort against the enum", () => {
     // null → reset to default (only reachable if the schema is nullable)
     expect(() => parseClientMessage(JSON.stringify({ type: "settings.set", reqId: "q", settings: { masterModel: null } }))).not.toThrow();

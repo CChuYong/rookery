@@ -9,6 +9,7 @@ import type {
   CapabilityBinding,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpPackCreateResult,
   CapabilitySecretStatus,
   CapabilitySnapshot,
 } from "../core/capabilities/types.js";
@@ -50,6 +51,118 @@ const capabilityBindingInputSchema = z.object({
   }
   if (binding.scopeKind !== "rookery" && !binding.scopeRef.trim()) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["scopeRef"], message: `${binding.scopeKind} scopeRef must not be empty` });
+  }
+});
+
+const capabilityMcpIdSchema = z.string().trim().regex(
+  /^[a-z0-9][a-z0-9._-]{0,63}$/,
+  "must match /^[a-z0-9][a-z0-9._-]{0,63}$/",
+);
+const capabilitySecretKeySchema = z.string().trim().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
+  "must be a valid secret key",
+);
+const capabilityEnvNameSchema = z.string().trim().regex(
+  /^[A-Za-z_][A-Za-z0-9_]*$/,
+  "must be a valid environment variable name",
+);
+const capabilityRelativePathSchema = z.string().trim().min(1).refine((value) => {
+  if (value.includes("\0") || value.includes("\\")) return false;
+  if (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) return false;
+  return !value.split("/").some((part) => part === "..");
+}, "must be a portable relative path inside the pack root").transform((value) => value.replace(/^\.\/+/, ""));
+const capabilitySecretRefSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("rookery-secret"), key: capabilitySecretKeySchema }).strict(),
+  z.object({ source: z.literal("environment"), name: capabilityEnvNameSchema }).strict(),
+]);
+const capabilityStringMapSchema = z.record(z.string().min(1), z.string());
+const capabilitySecretMapSchema = z.record(z.string().min(1), capabilitySecretRefSchema);
+const capabilityToolListSchema = z.array(z.string().trim().min(1)).max(1_000)
+  .transform((values) => [...new Set(values)].sort());
+const capabilityMcpCommonShape = {
+  id: capabilityMcpIdSchema,
+  enabledTools: capabilityToolListSchema.optional(),
+  disabledTools: capabilityToolListSchema.optional(),
+  required: z.boolean().optional(),
+  startupTimeoutSec: z.number().int().min(1).max(120).optional(),
+  toolTimeoutSec: z.number().int().min(1).max(600).optional(),
+};
+const capabilityStdioMcpSchema = z.object({
+  ...capabilityMcpCommonShape,
+  transport: z.literal("stdio"),
+  command: z.string().trim().min(1).max(4_096),
+  args: z.array(z.string().max(16_384)).max(1_000).optional(),
+  cwd: capabilityRelativePathSchema.optional(),
+  env: capabilityStringMapSchema.optional(),
+  secretEnv: capabilitySecretMapSchema.optional(),
+}).strict();
+const capabilityHttpMcpSchema = z.object({
+  ...capabilityMcpCommonShape,
+  transport: z.literal("streamable-http"),
+  url: z.string().trim().min(1).max(8_192).refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "must be an HTTP or HTTPS URL"),
+  headers: capabilityStringMapSchema.optional(),
+  secretHeaders: capabilitySecretMapSchema.optional(),
+  auth: z.object({ bearerToken: capabilitySecretRefSchema }).strict().optional(),
+}).strict();
+const capabilityMcpServerSchema = z.discriminatedUnion("transport", [
+  capabilityStdioMcpSchema,
+  capabilityHttpMcpSchema,
+]);
+const capabilityMcpPackCreateInputSchema = z.object({
+  id: capabilityMcpIdSchema,
+  displayName: z.string().trim().min(1).max(80),
+  version: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500),
+  repoId: capabilityIdSchema,
+  agents: z.array(z.enum(["master", "worker"])).min(1).max(2),
+  mcpServers: z.array(capabilityMcpServerSchema).min(1).max(1_000),
+  secretValues: z.record(
+    capabilitySecretKeySchema,
+    z.string().max(1_048_576).refine((value) => value.trim().length > 0, "secret value must not be empty"),
+  ).optional(),
+}).strict().superRefine((input, context) => {
+  const normalizedIds = new Map<string, string>();
+  const declaredSecretKeys = new Set<string>();
+  const declareSecret = (ref: z.infer<typeof capabilitySecretRefSchema>) => {
+    if (ref.source === "rookery-secret") declaredSecretKeys.add(ref.key);
+  };
+
+  for (const [index, server] of input.mcpServers.entries()) {
+    const normalizedId = server.id.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    const previous = normalizedIds.get(normalizedId);
+    if (previous) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mcpServers", index, "id"],
+        message: `MCP server id collides with ${previous} after provider normalization`,
+      });
+    } else {
+      normalizedIds.set(normalizedId, server.id);
+    }
+
+    if (server.transport === "stdio") {
+      Object.values(server.secretEnv ?? {}).forEach(declareSecret);
+    } else {
+      Object.values(server.secretHeaders ?? {}).forEach(declareSecret);
+      if (server.auth) declareSecret(server.auth.bearerToken);
+    }
+  }
+
+  for (const secretKey of Object.keys(input.secretValues ?? {})) {
+    if (!declaredSecretKeys.has(secretKey)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["secretValues", secretKey],
+        message: "secret value must have a declared rookery-secret reference",
+      });
+    }
   }
 });
 
@@ -148,6 +261,11 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
     ]),
   }),
   z.object({ type: z.literal("capabilities.library"), reqId: capabilityIdSchema }),
+  z.object({
+    type: z.literal("capabilities.mcpPack.create"),
+    reqId: capabilityIdSchema,
+    input: capabilityMcpPackCreateInputSchema,
+  }).strict(),
   z.object({ type: z.literal("capabilities.pack.add"), reqId: capabilityIdSchema, path: z.string().trim().min(1) }),
   z.object({ type: z.literal("capabilities.pack.remove"), reqId: capabilityIdSchema, instanceId: capabilityIdSchema }),
   z.object({ type: z.literal("capabilities.binding.set"), reqId: capabilityIdSchema, id: capabilityIdSchema, binding: capabilityBindingInputSchema }),
@@ -316,6 +434,7 @@ export type ServerMessage =
   | { type: "commands.result"; reqId: string; commands: CommandCandidate[] }
   | { type: "capabilities.snapshot.result"; reqId: string; snapshot: CapabilitySnapshot }
   | { type: "capabilities.library.result"; reqId: string; library: CapabilityLibrarySnapshot }
+  | ({ type: "capabilities.mcpPack.result"; reqId: string } & CapabilityMcpPackCreateResult)
   | { type: "capabilities.pack.result"; reqId: string; pack: CapabilityLibraryEntry | null }
   | { type: "capabilities.binding.result"; reqId: string; binding: CapabilityBinding | null }
   | { type: "capabilities.secret.result"; reqId: string; instanceId: string; secret: CapabilitySecretStatus }
@@ -381,6 +500,7 @@ export interface RequestResultMap {
   "commands.list": Extract<ServerMessage, { type: "commands.result" }>;
   "capabilities.snapshot": Extract<ServerMessage, { type: "capabilities.snapshot.result" }>;
   "capabilities.library": Extract<ServerMessage, { type: "capabilities.library.result" }>;
+  "capabilities.mcpPack.create": Extract<ServerMessage, { type: "capabilities.mcpPack.result" }>;
   "capabilities.pack.add": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
   "capabilities.pack.remove": Extract<ServerMessage, { type: "capabilities.pack.result" }>;
   "capabilities.binding.set": Extract<ServerMessage, { type: "capabilities.binding.result" }>;

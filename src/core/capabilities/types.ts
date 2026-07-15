@@ -156,6 +156,22 @@ export interface CapabilityLibrarySnapshot {
   diagnostics: CapabilityDiagnostic[];
 }
 
+export interface CapabilityMcpPackCreateInput {
+  id: string;
+  displayName: string;
+  version: string;
+  description: string;
+  repoId: string;
+  agents: Array<"master" | "worker">;
+  mcpServers: McpServerSpec[];
+  secretValues?: Record<string, string>;
+}
+
+export interface CapabilityMcpPackCreateResult {
+  pack: CapabilityLibraryEntry;
+  binding: CapabilityBinding;
+}
+
 export interface ResolvedCapabilitySource {
   packInstanceId: string;
   packId: string;
