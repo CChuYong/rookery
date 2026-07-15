@@ -3,7 +3,6 @@ import type { DragEvent, ReactNode } from "react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { Send, Paperclip, Square, Loader2, MessageCircleQuestion } from "lucide-react";
 import { baseName as basename } from "../lib/path.js";
-import { makeChip } from "../lib/mention-editor.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
 import { Select, Input } from "../ui/input.js";
@@ -161,13 +160,11 @@ export function Composer({
     promptRef.current?.clear();
   };
 
-  // Insert paths as inline chips at the caret position (show only the filename, serialize as @path). Shared by button attach and drag-drop.
+  // Insert paths as Lexical-owned inline chips (show only the filename, serialize as @path).
   const addAttachments = (paths: string[]) => {
     const valid = paths.filter(Boolean);
     if (!valid.length) return;
-    const nodes: Node[] = [];
-    for (const p of valid) nodes.push(makeChip(p, basename(p)), document.createTextNode(" "));
-    promptRef.current?.insertNodes(nodes);
+    promptRef.current?.insertFiles(valid.map((path) => ({ path, name: basename(path) })));
   };
 
   // File selection → attach.
@@ -177,18 +174,11 @@ export function Composer({
     if (p) addAttachments([p]);
   };
 
-  // Drag-drop → convert Files to absolute paths and insert chips at the drop point (when possible).
+  // Drag-drop → convert Files to absolute paths and insert chips at the editor's latest selection.
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     if (disabled || !onDropFiles) return;
-    const ed = promptRef.current?.getElement();
-    const r = (document as { caretRangeFromPoint?: (x: number, y: number) => Range | null }).caretRangeFromPoint?.(e.clientX, e.clientY);
-    if (ed && r && ed.contains(r.commonAncestorContainer)) {
-      const s = window.getSelection();
-      s?.removeAllRanges();
-      s?.addRange(r);
-    }
     const files = Array.from(e.dataTransfer.files);
     if (files.length) addAttachments(onDropFiles(files));
   };

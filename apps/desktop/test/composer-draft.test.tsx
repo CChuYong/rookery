@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { Composer, matchCommandAction } from "../src/renderer/components/Composer.js";
+import { setPromptEditorText } from "./prompt-editor-helpers.js";
 
 const SIDE_COMMANDS = [
   { id: "btw", name: "btw", description: "side", argumentHint: "<question>", action: { type: "open-panel" as const, panel: "btw" as const } },
@@ -34,8 +35,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     const onDraftChange = vi.fn();
     render(<Composer onSend={() => {}} onDraftChange={onDraftChange} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "hello";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "hello");
     expect(onDraftChange).toHaveBeenLastCalledWith("hello");
   });
 
@@ -44,8 +44,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     const onDraftChange = vi.fn();
     render(<Composer onSend={onSend} onDraftChange={onDraftChange} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "send me";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "send me");
     fireEvent.keyDown(ed, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("send me");
     expect(onDraftChange).toHaveBeenLastCalledWith("");
@@ -56,8 +55,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     const onSideSend = vi.fn();
     render(<Composer onSend={onSend} onSideSend={onSideSend} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "why this approach?";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "why this approach?");
     fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
     expect(onSideSend).toHaveBeenCalledWith("why this approach?");
     expect(onSend).not.toHaveBeenCalled();
@@ -72,8 +70,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     };
     const { unmount } = render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={onCommandAction} />);
     let ed = screen.getByRole("textbox");
-    ed.textContent = "/btw why this approach?";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "/btw why this approach?");
     fireEvent.keyDown(ed, { key: "Enter" });
     expect(onSideSend).toHaveBeenLastCalledWith("why this approach?");
     expect(onSend).not.toHaveBeenCalled();
@@ -82,8 +79,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
 
     render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={onCommandAction} />);
     ed = screen.getByRole("textbox");
-    ed.textContent = "/side explain this";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "/side explain this");
     fireEvent.keyDown(ed, { key: "Enter" });
     expect(onSideSend).toHaveBeenLastCalledWith("explain this");
     expect(onSend).not.toHaveBeenCalled();
@@ -94,8 +90,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     const onCommandAction = vi.fn();
     render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={onCommandAction} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "/side ";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "/side ");
     fireEvent.keyDown(ed, { key: "Enter" });
     expect(onCommandAction).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
@@ -108,8 +103,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     const action = { type: "open-capability-center" as const, tab: "effective" as const, kind: "mcp" as const };
     render(<Composer onSend={onSend} onCommandAction={onCommandAction} commands={[{ id: "mcp", name: "mcp", description: "open", action }]} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "/mcp";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "/mcp");
     fireEvent.keyDown(ed, { key: "Enter" });
     expect(onCommandAction).toHaveBeenCalledWith(action);
     expect(onSend).not.toHaveBeenCalled();
@@ -120,8 +114,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     const onSend = vi.fn();
     render(<Composer onSend={onSend} commands={SIDE_COMMANDS} onCommandAction={() => {}} />);
     const ed = screen.getByRole("textbox");
-    ed.textContent = "/not-registered keep this";
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "/not-registered keep this");
     fireEvent.keyDown(ed, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("/not-registered keep this");
   });

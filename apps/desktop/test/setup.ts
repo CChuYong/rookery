@@ -8,3 +8,18 @@ class ResizeObserverMock {
   disconnect(): void {}
 }
 globalThis.ResizeObserver ??= ResizeObserverMock as unknown as typeof ResizeObserver;
+
+// Lexical uses browser geometry to keep a restored model selection visible.
+// jsdom intentionally has no layout engine, so stable zero-sized geometry is
+// sufficient for editor behavior tests.
+Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
+
+// @lexical/utils checks both DragEvent and ClipboardEvent constructors while
+// routing rich-text commands. jsdom does not currently define DragEvent.
+if (globalThis.DragEvent == null) {
+  class DragEventMock extends MouseEvent {
+    readonly dataTransfer: DataTransfer | null = null;
+  }
+  globalThis.DragEvent = DragEventMock as unknown as typeof DragEvent;
+}
