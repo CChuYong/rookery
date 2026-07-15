@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { useStore } from "../src/renderer/store/store.js";
 import { ConversationPane } from "../src/renderer/components/ConversationPane.js";
+import { setPromptEditorText } from "./prompt-editor-helpers.js";
 
 // Shared master/worker composer busy rule: running (authoritative) ‖ pending (optimistic) → stop button.
 // Since both go through the same component, only one side can't break in isolation — lock it with both cases.
@@ -22,8 +23,7 @@ describe("ConversationPane Side drawer", () => {
     const onSideClose = vi.fn();
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "why this approach?";
-    fireEvent.input(editor);
+    setPromptEditorText(editor, "why this approach?");
     fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
     expect(onSideStart).toHaveBeenCalledWith("why this approach?");
     expect(await screen.findByText("메인 세션의 문맥 · 읽기 전용")).toBeInTheDocument();
@@ -38,8 +38,7 @@ describe("ConversationPane Side drawer", () => {
     const onSideSend = vi.fn();
     render(<ConversationPane kind="worker" id="w1" onSend={() => {}} onSideStart={onSideStart} onSideSend={onSideSend} />);
     const mainEditor = screen.getByRole("textbox");
-    mainEditor.textContent = "what changed?";
-    fireEvent.input(mainEditor);
+    setPromptEditorText(mainEditor, "what changed?");
     fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
     expect(await screen.findByText("이 워커의 문맥 · live worktree · 읽기 전용")).toBeInTheDocument();
     await act(async () => {
@@ -47,8 +46,7 @@ describe("ConversationPane Side drawer", () => {
     });
     const editors = screen.getAllByRole("textbox");
     const sideEditor = editors.at(-1)!;
-    sideEditor.textContent = "which file?";
-    fireEvent.input(sideEditor);
+    setPromptEditorText(sideEditor, "which file?");
     fireEvent.keyDown(sideEditor, { key: "Enter" });
     expect(onSideSend).toHaveBeenCalledWith("side-w", "which file?");
   });
@@ -59,8 +57,7 @@ describe("ConversationPane Side drawer", () => {
       { id: "review", name: "review", description: "review code", action: { type: "insert-prompt", text: "/review" } },
     ]} />);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "/";
-    fireEvent.input(editor);
+    setPromptEditorText(editor, "/");
     expect(screen.getByText((_text, el) => el?.textContent === "/btw<질문>")).toBeInTheDocument();
     expect(screen.getByText((_text, el) => el?.textContent === "/side<질문>")).toBeInTheDocument();
     expect(screen.getByText("/review")).toBeInTheDocument();
@@ -72,12 +69,10 @@ describe("ConversationPane Side drawer", () => {
       { id: "review", name: "review", description: "review code", action: { type: "insert-prompt", text: "/review" } },
     ]} />);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "open side";
-    fireEvent.input(editor);
+    setPromptEditorText(editor, "open side");
     fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
     await screen.findByLabelText("Side 질문");
-    editor.textContent = "/";
-    fireEvent.input(editor);
+    setPromptEditorText(editor, "/");
     expect(screen.getByText("/review")).toBeInTheDocument();
     expect(screen.queryByText((_text, el) => el?.textContent === "/btw<질문>")).toBeNull();
     expect(screen.queryByText((_text, el) => el?.textContent === "/side<질문>")).toBeNull();

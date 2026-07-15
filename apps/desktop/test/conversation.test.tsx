@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  $getSelection,
+  $isRangeSelection,
+  getEditorPropertyFromDOMNode,
+  isLexicalEditor,
+} from "lexical";
 import { MessageList } from "../src/renderer/components/MessageList.js";
 import { StatusBadge } from "../src/renderer/components/StatusBadge.js";
 import { Conversation } from "../src/renderer/views/Conversation.js";
@@ -10,6 +16,7 @@ import { ConversationPane } from "../src/renderer/components/ConversationPane.js
 import { MetricsView } from "../src/renderer/components/MetricsView.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { LogItem, FleetRow } from "../src/renderer/store/reduce.js";
+import { setPromptEditorText } from "./prompt-editor-helpers.js";
 
 describe("MessageList", () => {
   it("renders messages, plan cards, worker lines; metrics item renders no inline bubble", () => {
@@ -84,7 +91,7 @@ describe("RepoTree", () => {
 describe("NewSessionPage", () => {
   const base = { defaultModel: "claude-opus-4-8", defaultEffort: "high", onClose: () => {} };
   const composer = (): HTMLElement => screen.getByRole("textbox", { name: "메시지 입력" });
-  const type = (ed: HTMLElement, value: string): void => { ed.textContent = value; fireEvent.input(ed); };
+  const type = setPromptEditorText;
 
   it("picks a registered repo path and starts with that cwd + default model/effort", () => {
     const onStart = vi.fn();
@@ -132,14 +139,7 @@ describe("NewSessionPage", () => {
     render(<NewSessionPage repos={[{ name: "app", path: "/code/app" }]} onStart={vi.fn()} browseDir={browseDir} {...base} />);
     fireEvent.click(screen.getByText("app"));
     const ed = composer();
-    ed.textContent = "@";
-    const selRange = window.getSelection()!;
-    const r = document.createRange();
-    r.setStart(ed.firstChild as Text, 1);
-    r.collapse(true);
-    selRange.removeAllRanges();
-    selRange.addRange(r);
-    fireEvent.input(ed);
+    setPromptEditorText(ed, "@");
     await waitFor(() => expect(screen.getByText("readme.md")).toBeInTheDocument());
     expect(browseDir).toHaveBeenCalledWith("", "/code/app"); // relative to the selected repo's cwd (live)
   });
@@ -147,7 +147,7 @@ describe("NewSessionPage", () => {
 
 describe("Conversation", () => {
   const composer = (): HTMLElement => screen.getByRole("textbox", { name: "메시지 입력" });
-  const type = (ed: HTMLElement, value: string): void => { ed.textContent = value; fireEvent.input(ed); };
+  const type = setPromptEditorText;
 
   it("sends input text on submit", () => {
     const onSend = vi.fn();
@@ -162,12 +162,22 @@ describe("Conversation", () => {
     const onDropFiles = vi.fn((files: File[]) => files.map((f) => `/abs/${f.name}`));
     render(<Conversation items={[]} onSend={onSend} onDropFiles={onDropFiles} />);
     const ed = composer();
-    fireEvent.drop(ed, { dataTransfer: { files: [new File(["x"], "a.ts"), new File(["y"], "b.png")] } });
+    fireEvent.drop(ed, {
+      dataTransfer: {
+        files: [new File(["x"], "a.ts"), new File(["y"], "b.png")],
+        types: ["Files"],
+      },
+    });
     expect(screen.getByText("a.ts")).toBeInTheDocument(); // chip = filename only
     expect(screen.getByText("b.png")).toBeInTheDocument();
     expect(screen.queryByText("/abs/a.ts")).toBeNull();
-    ed.appendChild(document.createTextNode("이거 봐줘")); // text after the chip
-    fireEvent.input(ed);
+    // The editor selection remains after the inserted chips, so append ordinary text through Lexical state.
+    const lexicalEditor = getEditorPropertyFromDOMNode(ed);
+    if (!isLexicalEditor(lexicalEditor)) throw new Error("expected Lexical editor");
+    act(() => lexicalEditor.update(() => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) selection.insertText("이거 봐줘");
+    }, { discrete: true }));
     fireEvent.click(screen.getByRole("button", { name: "보내기" }));
     expect(onSend).toHaveBeenCalledWith("@/abs/a.ts @/abs/b.png 이거 봐줘");
   });
@@ -331,18 +341,7 @@ describe("Conversation", () => {
 
 describe("Conversation @ file mention", () => {
   const composer = (): HTMLElement => screen.getByRole("textbox", { name: "메시지 입력" });
-  // @ detection reads the caret context, so place the caret at the end of the text node and then fire input (reproducing real typing).
-  const typeAt = (ed: HTMLElement, value: string): void => {
-    ed.textContent = value;
-    const node = ed.firstChild as Text;
-    const sel = window.getSelection()!;
-    const r = document.createRange();
-    r.setStart(node, value.length);
-    r.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(r);
-    fireEvent.input(ed);
-  };
+  const typeAt = setPromptEditorText;
   const makeBrowse = () =>
     vi.fn(async (dir: string) => {
       if (dir === "") return { dir: "/proj", entries: [{ name: "src", isDir: true }, { name: "readme.md", isDir: false, size: 10 }] };
