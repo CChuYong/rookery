@@ -1,14 +1,15 @@
 # Capability Center and Managed Capabilities — Design
 
 Date: 2026-07-13
-Status: accepted; Slices 1–6 implemented
+Status: accepted; Slices 1–7 implemented
 Branch: `feat/capability-center-spec`
 
-Implementation status (2026-07-14): Slices 1–6 ship Effective inventory, the persisted
+Implementation status (2026-07-15): Slices 1–7 ship Effective inventory, the persisted
 Library/Assignments model, exact-digest trust and write-only secrets, Claude/Codex runtime
 materialization, isolated Codex target homes, controlled live-worker reload, repo-shared
 discovery/watch/diagnostics, boot-time runtime GC, and contextual slash actions with
-provider-lowered managed skills. Broader repo/Rookery preview surfaces remain a later slice.
+provider-lowered managed skills, plus UI-created multi-server MCP packs with repo-local
+bindings and review-before-trust. Broader repo/Rookery preview surfaces remain a later slice.
 
 ## Goal
 
