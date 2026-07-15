@@ -37,6 +37,7 @@ import type { SlashCommand } from "./views/Conversation.js";
 import { AutomationPage } from "./components/AutomationPage.js";
 import { AutomationForm } from "./components/AutomationForm.js";
 import { CapabilitiesPage } from "./components/CapabilitiesPage.js";
+import { RepositorySettingsPage } from "./components/repository-settings/RepositorySettingsPage.js";
 import type { CapabilityCenterApi } from "./components/capabilities/types.js";
 import { WorkerHeader, SessionHeader } from "./components/WorkspaceHeaders.js";
 import { WindowControls } from "./components/WindowControls.js";
@@ -129,6 +130,7 @@ type AppSelected = Pick<
   | "showRepos"
   | "activeSessionId"
   | "activeWorkerId"
+  | "repoSettingsId"
   | "navBack"
   | "navFwd"
   | "navigate"
@@ -172,6 +174,7 @@ export function App(): JSX.Element {
         showRepos: st.showRepos,
         activeSessionId: st.activeSessionId,
         activeWorkerId: st.activeWorkerId,
+        repoSettingsId: st.repoSettingsId,
         navBack: st.navBack,
         navFwd: st.navFwd,
         navigate: st.navigate,
@@ -256,6 +259,14 @@ export function App(): JSX.Element {
     setCapabilityRoute({ tab: "effective" });
     navigate({ overlay: "capabilities" });
   }, [navigate, overlay]);
+  const openCapabilityCatalog = useCallback(() => {
+    setCapabilityRoute({ tab: "library" });
+    navigate({ overlay: "capabilities" });
+  }, [navigate]);
+  const openAdvancedCapabilityAssignments = useCallback(() => {
+    setCapabilityRoute({ tab: "assignments" });
+    navigate({ overlay: "capabilities" });
+  }, [navigate]);
   const [repoModal, setRepoModal] = useState(false);
   const [spawnRepo, setSpawnRepo] = useState<string | null>(null);
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
@@ -403,11 +414,11 @@ export function App(): JSX.Element {
     if (!v) return;
     if (v.subId && s.fleet[v.subId]) {
       const subId = v.subId;
-      useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId });
+      useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId, repoId: null });
       void client?.request({ type: "worker.history", id: subId }).then((r) => useStore.getState().seedWorkerHistory(subId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(subId, true));
     } else if (v.sessionId && s.sessions.some((x) => x.id === v.sessionId)) {
       const sessionId = v.sessionId;
-      useStore.getState().restoreLocation({ overlay: null, showRepos: v.showRepos, sessionId, subId: null });
+      useStore.getState().restoreLocation({ overlay: null, showRepos: v.showRepos, sessionId, subId: null, repoId: null });
       void client?.request({ type: "session.history", sessionId }).then((r) => useStore.getState().seedHistory(sessionId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(sessionId, true));
     }
   }, [s.daemon, s.sessionsLoaded, s.fleetLoaded]);
@@ -912,6 +923,10 @@ export function App(): JSX.Element {
     sessions: s.sessions.map((session) => ({ id: session.id, label: session.label?.trim() || session.cwd })),
     workers: Object.values(s.fleet).map((worker) => ({ id: worker.id, label: worker.label })),
   }), [s.repos, s.sessions, s.fleet]);
+  const repoSettingsRepo = useMemo(() => s.repos.find((repo) => repo.id === s.repoSettingsId) ?? null, [s.repos, s.repoSettingsId]);
+  useEffect(() => {
+    if (overlay === "repoSettings" && s.fleetLoaded && !repoSettingsRepo) navigate({ overlay: null });
+  }, [navigate, overlay, repoSettingsRepo, s.fleetLoaded]);
   const fleet = useMemo(() => Object.values(s.fleet), [s.fleet]); // used in RepoTree (Repos view)
   // Master composer model/effort controls — inline would be a new ref every render, breaking the Conversation memo. Keep the same ref
   // across unrelated re-renders like usage polling (deps: settings/active session/overrides only).
@@ -1057,7 +1072,7 @@ export function App(): JSX.Element {
   // Including high-frequency fields like token/usage/metrics would replay enter on every in-page stream tick,
   // which is worse than static. TerminalPanel sits outside this wrapper (protects the live xterm).
   const pageId = overlay
-    ? `ov:${overlay}`
+    ? `ov:${overlay}:${overlay === "repoSettings" ? s.repoSettingsId ?? "missing" : ""}`
     : s.daemon === "down"
       ? "daemon-down"
       : showRepos
@@ -1182,7 +1197,7 @@ export function App(): JSX.Element {
               </div>
             )}
             {showRepos ? (
-              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
+              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
             ) : (
               <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
@@ -1241,7 +1256,18 @@ export function App(): JSX.Element {
         )}
         {/* replay rise-in on every page/overlay swap (key=pageId). Keep TerminalPanel outside this div to preserve the xterm. */}
         <div key={pageId} className="flex min-h-0 flex-1 flex-col rise-in">
-        {overlay === "capabilities" ? (
+        {overlay === "repoSettings" && repoSettingsRepo ? (
+          <RepositorySettingsPage
+            repo={repoSettingsRepo}
+            api={capabilityApi}
+            generation={s.capabilityGeneration}
+            onClose={closeOverlay}
+            onOpenCatalog={openCapabilityCatalog}
+            onOpenAdvancedAssignments={openAdvancedCapabilityAssignments}
+          />
+        ) : overlay === "repoSettings" ? (
+          <div className="flex flex-1 items-center justify-center gap-2 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
+        ) : overlay === "capabilities" ? (
           <CapabilitiesPage
             target={capabilityTarget}
             api={capabilityApi}

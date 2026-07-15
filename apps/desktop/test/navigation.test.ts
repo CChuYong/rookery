@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { initialNav, navigate, back, forward, reset, sameLoc, type Location } from "../src/renderer/store/navigation.js";
 
-const L = (p: Partial<Location> = {}): Location => ({ overlay: null, showRepos: false, sessionId: null, subId: null, ...p });
+const L = (p: Partial<Location> = {}): Location => ({ overlay: null, showRepos: false, sessionId: null, subId: null, repoId: null, ...p });
 
 describe("navigation model", () => {
   it("navigate pushes current to back, clears forward, sets next", () => {
@@ -54,10 +54,20 @@ describe("navigation model", () => {
     expect(back(st)).toBe(st); // nothing to go back to
   });
 
-  it("sameLoc compares all 4 axes", () => {
+  it("sameLoc compares all location axes", () => {
     expect(sameLoc(L({ sessionId: "s1" }), L({ sessionId: "s1" }))).toBe(true);
     expect(sameLoc(L({ sessionId: "s1" }), L({ sessionId: "s2" }))).toBe(false);
     expect(sameLoc(L({ overlay: "settings" }), L())).toBe(false);
+    expect(sameLoc(L({ overlay: "repoSettings", repoId: "repo-1" }), L({ overlay: "repoSettings", repoId: "repo-2" }))).toBe(false);
+  });
+
+  it("keeps repository settings in history and clears its repository when leaving the overlay", () => {
+    let st = navigate(initialNav, { overlay: "repoSettings", showRepos: true, repoId: "repo-1" });
+    expect(st.loc).toEqual(L({ overlay: "repoSettings", showRepos: true, repoId: "repo-1" }));
+    st = navigate(st, { overlay: "capabilities" });
+    expect(st.loc).toEqual(L({ overlay: "capabilities", showRepos: true, repoId: null }));
+    st = back(st);
+    expect(st.loc).toEqual(L({ overlay: "repoSettings", showRepos: true, repoId: "repo-1" }));
   });
 
   it("Capability Center preserves its selected session or worker through back/forward", () => {

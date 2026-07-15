@@ -1,5 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "repoTree.repoSettings": "Settings for {repo}",
   "repoTree.unreadTitle": "New activity — not seen yet",
   "repoTree.spawnWorker": "Spawn worker…",
   "repoTree.removeRepo": "Unregister repo",

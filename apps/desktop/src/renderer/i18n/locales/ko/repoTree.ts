@@ -1,5 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
+  "repoTree.repoSettings": "{repo} 설정",
   "repoTree.unreadTitle": "새 변화 — 아직 안 봄",
   "repoTree.spawnWorker": "워커 스폰…",
   "repoTree.removeRepo": "레포 등록 해제",

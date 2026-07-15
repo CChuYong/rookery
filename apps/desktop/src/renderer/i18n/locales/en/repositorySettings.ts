@@ -1,0 +1,23 @@
+import type { Catalog } from "../../types.js";
+export default {
+  "repositorySettings.title": "Repository settings",
+  "repositorySettings.navigation": "Repository settings sections",
+  "repositorySettings.capabilities": "Capabilities",
+  "repositorySettings.capabilitiesNavDescription": "MCP, skills, and packs",
+  "repositorySettings.capabilitiesDescription": "Choose which Catalog capabilities this repository uses for UI-started master sessions and workers.",
+  "repositorySettings.loadFailed": "Couldn't load repository capabilities.",
+  "repositorySettings.empty": "The Catalog is empty. Register an MCP server, skill, or pack first.",
+  "repositorySettings.openCatalog": "Open Capability Center",
+  "repositorySettings.openAdvanced": "Advanced assignments",
+  "repositorySettings.search": "Search repository capabilities",
+  "repositorySettings.noMatches": "No capabilities match this search.",
+  "repositorySettings.mode": "Assignment",
+  "repositorySettings.modeFor": "Assignment for {name}",
+  "repositorySettings.mode.inherit": "Inherit",
+  "repositorySettings.mode.enabled": "Enabled",
+  "repositorySettings.mode.disabled": "Disabled",
+  "repositorySettings.agents": "Agents",
+  "repositorySettings.agentRequired": "Select Master or Worker for an explicit assignment.",
+  "repositorySettings.missingSecrets": "{count} required secrets are missing",
+  "repositorySettings.customAssignment": "This capability has a custom overlapping assignment. Edit it in advanced Assignments to avoid losing audience rules.",
+} satisfies Catalog;

@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreHorizontal } from "lucide-react";
+import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreHorizontal, Settings2 } from "lucide-react";
 import { useStore } from "../store/store.js";
 import { useRepoTreeStore } from "../store/repotree.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
@@ -14,7 +14,7 @@ import { ProviderBadge } from "../components/StatusBadge.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { useT, useLocale } from "../i18n/provider.js";
 
-type Repo = { name: string; path: string; description: string; base: string | null };
+type Repo = { id?: string; name: string; path: string; description: string; base: string | null };
 
 // A worker's label started life as its repo name (the spawn-time placeholder, see fleet-tools.ts) and was never
 // upgraded by the daemon's async task-summary relabel (worker.label) — i.e. it's still the repo/folder fallback,
@@ -70,6 +70,7 @@ function RepoTreeImpl(p: {
   onNewRepo: () => void;
   onRemoveRepo: (name: string) => void;
   onNewSub: (repoName: string) => void;
+  onRepoSettings?: (repoId: string) => void;
   attention?: Record<string, boolean>; // workers that settled without being viewed → unread dot on the right of the row
   onStopSub?: (id: string) => void;
   onRenameSub?: (id: string, label: string) => void;
@@ -185,7 +186,7 @@ function RepoTreeImpl(p: {
     );
   };
 
-  const group = (key: string, title: string, subs: FleetRow[], opts: { removable: boolean; canAdd: boolean }) => {
+  const group = (key: string, title: string, subs: FleetRow[], opts: { removable: boolean; canAdd: boolean; repoId?: string }) => {
     const foldable = subs.length > 0; // collapsible only when there are workers. Otherwise just a flat header.
     const open = foldable && (filtering || !collapsed[key]); // filtering forces groups open so matches surface
     const headerInner = (
@@ -215,6 +216,16 @@ function RepoTreeImpl(p: {
               className="flex h-6 w-6 items-center justify-center rounded text-muted transition-colors hover:text-accent"
             >
               <Plus size={13} />
+            </button>
+          )}
+          {opts.repoId && p.onRepoSettings && (
+            <button
+              onClick={() => p.onRepoSettings?.(opts.repoId!)}
+              aria-label={t("repoTree.repoSettings", { repo: title })}
+              title={t("repoTree.repoSettings", { repo: title })}
+              className="flex h-6 w-6 items-center justify-center rounded text-muted transition-colors hover:text-accent"
+            >
+              <Settings2 size={12} />
             </button>
           )}
           {opts.removable && (
@@ -259,7 +270,7 @@ function RepoTreeImpl(p: {
       ) : (
         (p.loaded ?? true) && p.repos.length === 0 && orphans.length === 0 && <div className="px-2 py-3 text-[12px] leading-relaxed text-muted">{t("repoTree.emptyState")}</div>
       )}
-      {p.repos.filter((repo) => !filtering || shown.some((f) => f.repoPath === repo.path)).map((repo) => group(repo.name, repo.name, shown.filter((f) => f.repoPath === repo.path), { removable: true, canAdd: true }))}
+      {p.repos.filter((repo) => !filtering || shown.some((f) => f.repoPath === repo.path)).map((repo) => group(repo.name, repo.name, shown.filter((f) => f.repoPath === repo.path), { removable: true, canAdd: true, ...(repo.id ? { repoId: repo.id } : {}) }))}
       {orphans.length > 0 && group("__orphans__", t("repoTree.uncategorized"), orphans, { removable: false, canAdd: false })}
       {filtering && shown.length === 0 && <div className="px-2 py-3 text-[12px] text-muted">{t("repoTree.noMatches")}</div>}
 
