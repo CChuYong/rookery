@@ -15,7 +15,7 @@ describe("makeSlackCapabilities", () => {
     expect(caps.mcpServers).toBeUndefined(); // no opaque mcpServers entry
     expect(Object.keys(caps.toolDefs ?? {})).toContain(SLACK_SERVER_NAME);
     expect(caps.toolDefs?.[SLACK_SERVER_NAME]?.map((d) => d.name)).toEqual([
-      "read_thread", "read_channel", "list_channels", "get_user_info", "get_permalink",
+      "read_thread", "read_channel", "list_channels", "get_user_info", "get_permalink", "download_file",
     ]);
     expect(caps.allowedTools).toEqual([...SLACK_TOOL_NAMES]);
     expect(caps.systemPromptAppend).toBe(SLACK_THREAD_HINT);

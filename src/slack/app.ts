@@ -171,9 +171,10 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
     await deps.onMessage?.({ channel: m.channel, userId: m.user, text, ts: m.ts, threadTs: m.thread_ts ?? m.ts, team: context.teamId });
   });
 
-  // Register the slack read ops (replies/history/list/users.info/getPermalink) on the daemon holder →
-  // used by the master's slack read-tool capability (read_thread/read_channel/...).
-  const readOps = makeSlackReadOps(app.client as unknown as SlackReadClient);
+  // Register the slack read ops (replies/history/list/users.info/getPermalink/files.info) on the daemon
+  // holder → used by the master's slack read-tool capability (read_thread/read_channel/download_file/...).
+  // Shares the incoming-message FileDownloader, so download_file lands in the same slack-files dir.
+  const readOps = makeSlackReadOps(app.client as unknown as SlackReadClient, download);
   deps.setSlackReadOps?.(readOps);
 
   // Register the channel/user name resolver (conversations.info/users.info) on the daemon holder → backs

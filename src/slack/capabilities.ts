@@ -7,7 +7,8 @@ import type { SlackReadOps } from "../tools/slack-tools.js";
 // Kept in English to match the tone of the base prompt (SYSTEM_PROMPT_BASE), which is in English.
 export const SLACK_THREAD_HINT =
   "This conversation is a Slack thread. If the user's question seems to depend on earlier discussion you can't see (messages before or after in the thread), call the read_thread tool to fetch that context before answering. " +
-  "You can also read other channels the bot is a member of (read_channel / list_channels), resolve user ids to names (get_user_info), and build message links (get_permalink) — all read-only.";
+  "You can also read other channels the bot is a member of (read_channel / list_channels), resolve user ids to names (get_user_info), and build message links (get_permalink) — all read-only. " +
+  "Attachments show up as [file: … id=…] markers — call download_file with the id, then use Read on the returned local path (works for images).";
 
 // For a Slack session, builds the capability with that thread's slack read tools + hint
 // (daemon→SessionManager.makeCapabilities). For non-Slack, returns undefined → base only. Even if
