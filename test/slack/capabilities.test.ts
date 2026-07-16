@@ -1,28 +1,29 @@
 import { describe, it, expect } from "vitest";
 import { makeSlackCapabilities, SLACK_THREAD_HINT } from "../../src/slack/capabilities.js";
-import { SLACK_THREAD_SERVER_NAME } from "../../src/tools/slack-thread-tools.js";
+import { SLACK_SERVER_NAME, SLACK_TOOL_NAMES } from "../../src/tools/slack-tools.js";
 
-const noReader = () => null;
+const noOps = () => null;
 
 describe("makeSlackCapabilities", () => {
-  // Task 3 (P2.5 Track C): read_thread now travels via caps.toolDefs (the provider-neutral port), not
-  // an opaque caps.mcpServers entry — so a codex slack session's master turn flattens it onto the MCP
-  // bridge the same way it does memory/repos/fleet/schedule (master-agent.ts's toolDefs merge already
-  // handles this generically; see test/core/master-capabilities.test.ts's toolDefs-merge coverage).
-  it("returns a capability resolver for a slack thread key (read_thread tool via toolDefs + hint)", () => {
-    const resolve = makeSlackCapabilities("slack:T1:C1:1700.1", noReader);
+  // read tools travel via caps.toolDefs (the provider-neutral port), not an opaque caps.mcpServers
+  // entry — so a codex slack session's master turn flattens them onto the MCP bridge the same way it
+  // does memory/repos/fleet/schedule (see test/core/master-capabilities.test.ts's toolDefs coverage).
+  it("returns a capability resolver for a slack thread key (five read tools via toolDefs + hint)", () => {
+    const resolve = makeSlackCapabilities("slack:T1:C1:1700.1", noOps);
     expect(resolve).toBeTypeOf("function");
     const caps = resolve!();
-    expect(caps.mcpServers).toBeUndefined(); // no longer an opaque mcpServers entry
-    expect(Object.keys(caps.toolDefs ?? {})).toContain(SLACK_THREAD_SERVER_NAME);
-    expect(caps.toolDefs?.[SLACK_THREAD_SERVER_NAME]?.map((d) => d.name)).toEqual(["read_thread"]);
-    expect(caps.allowedTools).toContain("mcp__slack__read_thread");
+    expect(caps.mcpServers).toBeUndefined(); // no opaque mcpServers entry
+    expect(Object.keys(caps.toolDefs ?? {})).toContain(SLACK_SERVER_NAME);
+    expect(caps.toolDefs?.[SLACK_SERVER_NAME]?.map((d) => d.name)).toEqual([
+      "read_thread", "read_channel", "list_channels", "get_user_info", "get_permalink",
+    ]);
+    expect(caps.allowedTools).toEqual([...SLACK_TOOL_NAMES]);
     expect(caps.systemPromptAppend).toBe(SLACK_THREAD_HINT);
   });
 
   it("returns undefined for non-slack sessions", () => {
-    expect(makeSlackCapabilities(null, noReader)).toBeUndefined();
-    expect(makeSlackCapabilities("thread-1", noReader)).toBeUndefined();
-    expect(makeSlackCapabilities("ui:fleet", noReader)).toBeUndefined();
+    expect(makeSlackCapabilities(null, noOps)).toBeUndefined();
+    expect(makeSlackCapabilities("thread-1", noOps)).toBeUndefined();
+    expect(makeSlackCapabilities("ui:fleet", noOps)).toBeUndefined();
   });
 });
