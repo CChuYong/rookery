@@ -1,11 +1,12 @@
 import type { CoreEvent, WorkerEventData, InteractionQuestion } from "@daemon/core/events.js";
 import type { WorkerRow } from "@daemon/protocol/messages.js";
+import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot, WorkflowRunSummary } from "@daemon/core/workflow-activity.js";
 import { contextPct } from "../format.js";
 
 export type LogItem =
   | { kind: "message"; role: string; content: string; streaming?: boolean; ts?: number } // ts: arrival epoch ms (for hover relative time)
   | { kind: "thinking"; text: string; streaming?: boolean } // thinking summary (collapsible, display:summarized)
-  | { kind: "tool"; toolId: string; name: string; status: "in_progress" | "complete"; ok?: boolean; input?: string; result?: string; elapsedSec?: number }
+  | { kind: "tool"; toolId: string; name: string; status: "in_progress" | "background" | "complete"; ok?: boolean; input?: string; result?: string; elapsedSec?: number; workflow?: WorkflowRunSummary }
   | { kind: "worker"; workerId: string; status: string }
   | { kind: "notice"; text: string; code?: string; params?: Record<string, string | number> } // informational system push (compaction/retry/fallback)
   // Master canUseTool (approve/AskUserQuestion) inline card. When resolved, shows a one-line summary instead of buttons.
@@ -14,7 +15,7 @@ export type LogItem =
 
 // The worker row's single source of truth is the protocol WorkerRow. archived always arrives on fleet.list but is omitted when building worker.* events, so it's optional.
 // permissionMode is required here (the worker composer's selector reads it) — defaulted to "bypassPermissions" wherever the source (event/list) doesn't carry it.
-export interface FleetRow extends WorkerRow { archived?: boolean; permissionMode: string }
+export interface FleetRow extends WorkerRow { archived?: boolean; permissionMode: string; bg?: { count: number; types: string[] } }
 
 export interface AppState {
   capabilityGeneration: number;
@@ -33,10 +34,18 @@ export interface AppState {
   pendingBySession: Record<string, { clientMsgId: string; text: string; epoch?: number }[]>;
   // "Pending" messages sent while the worker is busy (not yet committed at the boundary) — keyed by workerId. Reconciled via the clientMsgId of the worker.event echo.
   pendingByWorker: Record<string, { clientMsgId: string; text: string }[]>;
+  workflows: Record<string, Record<string, WorkflowRunSnapshot>>;
+  workflowAgentLogs: Record<string, LogItem[]>;
+  workflowAgentHistoryLoading: Record<string, boolean>;
+  workflowAgentHistoryFailed: Record<string, boolean>;
 }
 
 export function emptyState(): AppState {
-  return { capabilityGeneration: 0, logsBySession: {}, workerLogs: {}, fleet: {}, deletingWorkers: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {} };
+  return { capabilityGeneration: 0, logsBySession: {}, workerLogs: {}, fleet: {}, deletingWorkers: {}, nested: {}, sideConversations: {}, pendingBySession: {}, pendingByWorker: {}, workflows: {}, workflowAgentLogs: {}, workflowAgentHistoryLoading: {}, workflowAgentHistoryFailed: {} };
+}
+
+export function workflowAgentKey(workerId: string, taskId: string, agentId: string): string {
+  return `${workerId}/${taskId}/${agentId}`;
 }
 
 function finalizeSideItems(items: LogItem[]): LogItem[] {
@@ -178,6 +187,57 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
   }
 }
 
+export function syncWorkflowTools(log: LogItem[], runs: Record<string, WorkflowRunSnapshot> | undefined): LogItem[] {
+  if (!runs) return log;
+  const byTool = new Map(Object.values(runs).flatMap((run) => run.toolUseId ? [[run.toolUseId, run] as const] : []));
+  return log.map((item) => {
+    if (item.kind !== "tool" || item.name !== "Workflow") return item;
+    const run = byTool.get(item.toolId);
+    if (!run) return item;
+    const { agents: _agents, ...summary } = run;
+    return {
+      ...item,
+      workflow: summary,
+      status: run.status === "running" ? "background" : "complete",
+      ok: run.status === "failed" ? false : item.ok,
+    };
+  });
+}
+
+function snapshotFromSummary(run: WorkflowRunSummary, previous?: WorkflowRunSnapshot): WorkflowRunSnapshot {
+  return { ...run, agents: previous?.agents ?? [] };
+}
+
+function retainWorkflowKeys<T>(map: Record<string, T>, workerId: string, taskIds: Set<string>): Record<string, T> {
+  const workerPrefix = `${workerId}/`;
+  return Object.fromEntries(Object.entries(map).filter(([key]) => {
+    if (!key.startsWith(workerPrefix)) return true;
+    const taskId = key.slice(workerPrefix.length).split("/")[0];
+    return Boolean(taskId && taskIds.has(taskId));
+  }));
+}
+
+export function seedWorkflowRuns(state: AppState, workerId: string, runs: WorkflowRunSnapshot[]): AppState {
+  const live = state.workflows[workerId] ?? {};
+  const next = Object.fromEntries(runs.map((snapshot) => {
+    const current = live[snapshot.taskId];
+    return [snapshot.taskId, current && current.lastActivityAt > snapshot.lastActivityAt ? current : snapshot];
+  }));
+  const taskIds = new Set(Object.keys(next));
+  return {
+    ...state,
+    workflows: { ...state.workflows, [workerId]: next },
+    workerLogs: { ...state.workerLogs, [workerId]: syncWorkflowTools(state.workerLogs[workerId] ?? [], next) },
+    workflowAgentLogs: retainWorkflowKeys(state.workflowAgentLogs, workerId, taskIds),
+    workflowAgentHistoryLoading: retainWorkflowKeys(state.workflowAgentHistoryLoading, workerId, taskIds),
+    workflowAgentHistoryFailed: retainWorkflowKeys(state.workflowAgentHistoryFailed, workerId, taskIds),
+  };
+}
+
+export function workflowHistoryLog(events: WorkflowAgentHistoryEntry[]): LogItem[] {
+  return events.reduce<LogItem[]>((log, event) => applySubEvent(log, event.data, event.createdAt ? Date.parse(event.createdAt) : undefined), []);
+}
+
 // now (epoch ms): the arrival time to stamp on a message LogItem. Live: applyEvent injects Date.now(); history injects created_at.
 // Optional — if omitted, no ts timestamp (pure reduce tests / existing call sites unaffected).
 export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppState {
@@ -301,7 +361,20 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
         delete fleet[e.workerId];
         delete pendingByWorker[e.workerId];
       }
-      return { ...state, deletingWorkers, fleet, pendingByWorker };
+      if (e.phase === "failed") return { ...state, deletingWorkers, fleet, pendingByWorker };
+      const workflows = { ...state.workflows };
+      delete workflows[e.workerId];
+      const taskIds = new Set<string>();
+      return {
+        ...state,
+        deletingWorkers,
+        fleet,
+        pendingByWorker,
+        workflows,
+        workflowAgentLogs: retainWorkflowKeys(state.workflowAgentLogs, e.workerId, taskIds),
+        workflowAgentHistoryLoading: retainWorkflowKeys(state.workflowAgentHistoryLoading, e.workerId, taskIds),
+        workflowAgentHistoryFailed: retainWorkflowKeys(state.workflowAgentHistoryFailed, e.workerId, taskIds),
+      };
     }
     case "worker.status": {
       // Membership belongs to worker.spawned/fleet.list. A late stop/error event from a permanent delete must not
@@ -314,7 +387,9 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       if (!prev || state.deletingWorkers[e.workerId]) {
         return pendingByWorker === state.pendingByWorker ? state : { ...state, pendingByWorker };
       }
-      return { ...state, pendingByWorker, fleet: { ...state.fleet, [e.workerId]: { ...prev, status: e.status } }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status: e.status }) } };
+      const nextRow = { ...prev, status: e.status, ...(e.bg ? { bg: e.bg } : {}) };
+      if (!e.bg) delete nextRow.bg;
+      return { ...state, pendingByWorker, fleet: { ...state.fleet, [e.workerId]: nextRow }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status: e.status }) } };
     }
     case "worker.label": {
       // Auto-generated label update — update only existing rows (don't resurrect discarded rows).
@@ -330,12 +405,34 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
         : state.pendingByWorker;
       // Same as master.message: clientMsgId is the authoritative dedup. Content matching is a fallback only for echoes without a clientMsgId (A3).
       if (d.kind === "message" && !e.clientMsgId && isEchoUser(state.workerLogs[e.workerId], d.role, d.content)) return { ...state, pendingByWorker };
-      return { ...state, pendingByWorker, workerLogs: { ...state.workerLogs, [e.workerId]: applySubEvent(state.workerLogs[e.workerId] ?? [], d, now) } };
+      const log = applySubEvent(state.workerLogs[e.workerId] ?? [], d, now);
+      return { ...state, pendingByWorker, workerLogs: { ...state.workerLogs, [e.workerId]: syncWorkflowTools(log, state.workflows[e.workerId]) } };
     }
     case "worker.nested": {
       const cur = state.nested[e.workerId] ?? {};
       const panel = applySubEvent(cur[e.parentToolUseId] ?? [], e.data, now);
       return { ...state, nested: { ...state.nested, [e.workerId]: { ...cur, [e.parentToolUseId]: panel } } };
+    }
+    case "worker.workflow.run": {
+      const runs = state.workflows[e.workerId] ?? {};
+      const previous = runs[e.run.taskId];
+      if (previous && previous.lastActivityAt > e.run.lastActivityAt) return state;
+      const run = snapshotFromSummary(e.run, previous);
+      const nextRuns = { ...runs, [run.taskId]: run };
+      return {
+        ...state,
+        workflows: { ...state.workflows, [e.workerId]: nextRuns },
+        workerLogs: { ...state.workerLogs, [e.workerId]: syncWorkflowTools(state.workerLogs[e.workerId] ?? [], nextRuns) },
+      };
+    }
+    case "worker.workflow.agent": {
+      const runs = state.workflows[e.workerId] ?? {};
+      const run = runs[e.taskId];
+      if (!run) return state;
+      const agents = run.agents.some((agent) => agent.agentId === e.agent.agentId)
+        ? run.agents.map((agent) => agent.agentId === e.agent.agentId && agent.lastActivityAt <= e.agent.lastActivityAt ? e.agent : agent)
+        : [...run.agents, e.agent];
+      return { ...state, workflows: { ...state.workflows, [e.workerId]: { ...runs, [e.taskId]: { ...run, agents } } } };
     }
     case "error":
       // Surface the session error in the conversation (previously not shown) + clear the typing indicator.

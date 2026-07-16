@@ -5,6 +5,7 @@ import { I18nProvider } from "../src/renderer/i18n/provider.js";
 import { usePrefsStore } from "../src/renderer/store/prefs.js";
 import { useDockPanelsStore } from "../src/renderer/store/dock-panels.js";
 import { useLayoutStore, emptyLayoutState } from "../src/renderer/store/layout.js";
+import { useStore } from "../src/renderer/store/store.js";
 
 const baseProps = {
   termPageKey: null, termPageOpen: false, rightOpen: false,
@@ -16,6 +17,25 @@ const openExternal = vi.fn();
 beforeEach(() => {
   // OpenInAppMenu (header right side) reads window.rookery.apps.list, so mock it too.
   (window as unknown as { rookery: unknown }).rookery = { openExternal, apps: { list: async () => [] } };
+  useStore.setState({ workflows: {} });
+});
+
+describe("WorkerHeader background reason", () => {
+  it("shows active workflow count without replacing the worker status", () => {
+    useStore.setState({ workflows: { w1: { task: { taskId: "task", workflowName: "audit", summary: "", status: "running", visibility: "live", startedAt: 1, lastActivityAt: 2, counts: { started: 1, active: 1, completed: 0, stopped: 0 }, agents: [] } } } } as never);
+    render(<WorkerHeader {...baseProps} worker={{ id: "w1", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 1, types: ["local_workflow"] } } as never} />);
+    expect(screen.getByText("Workflow · 1")).toBeInTheDocument();
+    expect(screen.getByText("백그라운드 작업 중")).toBeInTheDocument();
+    expect(screen.queryByText("백그라운드 · 1")).toBeNull();
+  });
+
+  it("falls back to the general background count and hides reasons once idle", () => {
+    const { rerender } = render(<WorkerHeader {...baseProps} worker={{ id: "w2", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 2, types: ["local_bash"] } } as never} />);
+    expect(screen.getByText("백그라운드 · 2")).toBeInTheDocument();
+    rerender(<WorkerHeader {...baseProps} worker={{ id: "w2", label: "t", repoPath: "/r", status: "idle", branch: null, model: null } as never} />);
+    expect(screen.queryByText(/백그라운드 ·/)).toBeNull();
+    expect(screen.queryByText(/Workflow ·/)).toBeNull();
+  });
 });
 afterEach(() => { openExternal.mockReset(); delete (window as unknown as { rookery?: unknown }).rookery; });
 

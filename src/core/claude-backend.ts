@@ -1,12 +1,14 @@
 import { query as sdkQuery, createSdkMcpServer, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, SlashCommandInfo } from "./agent-backend.js";
-import { extractText, extractToolUses, extractToolResults } from "./sdk-extract.js";
+import { extractText, extractToolUses, extractToolResults, extractWorkflowLaunch } from "./sdk-extract.js";
 import { classifySystemPush } from "./system-push.js";
 import { turnContext } from "./result-telemetry.js";
 import { effortApplies, coerceEffort } from "./effort.js";
 import type { ClaudeRuntimeLaunchOptions } from "./claude-capabilities.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
+import { truncateBytes } from "./truncate.js";
+import { parseWorkflowProgress } from "./claude-workflow-transcript.js";
 
 // The Claude Agent SDK query() signature — the adapter's own contract (canonical home; formerly worker.ts).
 // Injected at the composition root (real sdkQuery in the daemon, fakeQuery in tests). Claude-specific
@@ -34,6 +36,29 @@ export async function* claudeUserMessages(input: AsyncIterable<string>): AsyncIt
 // computed from the LAST request's usage, falling back to the cumulative value (turnContext).
 interface DecodeState {
   lastReqContextTokens: number;
+  workflowTaskIds: Set<string>;
+}
+
+function workflowUsage(raw: unknown): { totalTokens: number; toolUses: number; durationMs: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const usage = raw as { total_tokens?: unknown; tool_uses?: unknown; duration_ms?: unknown };
+  const finite = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+  return {
+    totalTokens: finite(usage.total_tokens),
+    toolUses: finite(usage.tool_uses),
+    durationMs: finite(usage.duration_ms),
+  };
+}
+
+function workflowOutcome(status: string | undefined): "completed" | "failed" | "stopped" | undefined {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "stopped" || status === "killed") return "stopped";
+  return undefined;
+}
+
+function workflowText(value: unknown, maxBytes: number): string | undefined {
+  return typeof value === "string" && value ? truncateBytes(value, maxBytes) : undefined;
 }
 
 // Translate one raw SDK message into zero or more provider-neutral AgentEvents.
@@ -60,6 +85,11 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     if (text !== "") yield { kind: "message", role: type, text, parentToolUseId: parentId };
     for (const tu of extractToolUses(msg)) yield { kind: "tool_use", id: tu.id, name: tu.name, input: tu.input, parentToolUseId: parentId };
     for (const tr of extractToolResults(msg)) yield { kind: "tool_result", toolUseId: tr.toolUseId, isError: tr.isError, content: tr.content, parentToolUseId: parentId };
+    const launch = type === "user" ? extractWorkflowLaunch(msg) : null;
+    if (launch) {
+      state.workflowTaskIds.add(launch.taskId);
+      yield { kind: "workflow_launched", launch };
+    }
     return;
   }
   // Nested system/tool_progress/result never touch the parent session (both consumers skipped these).
@@ -87,16 +117,79 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       return;
     }
     if (sub === "task_started" || sub === "task_updated" || sub === "task_notification" || sub === "task_progress") {
-      const tm = msg as { task_id?: string; task_type?: string; status?: string; patch?: { status?: string } };
-      if (!tm.task_id || sub === "task_progress") return;
+      const tm = msg as {
+        task_id?: string;
+        tool_use_id?: string;
+        task_type?: string;
+        workflow_name?: string;
+        description?: string;
+        summary?: string;
+        last_tool_name?: string;
+        workflow_progress?: unknown;
+        usage?: unknown;
+        status?: string;
+        patch?: { status?: string };
+      };
+      if (typeof tm.task_id !== "string" || !tm.task_id || tm.task_id.length > 512) return;
+      const taskType = workflowText(tm.task_type, 256);
+      const workflowName = workflowText(tm.workflow_name, 256);
+      const description = workflowText(tm.description, 4_000);
+      const summary = workflowText(tm.summary, 4_000);
+      const lastToolName = workflowText(tm.last_tool_name, 256);
       if (sub === "task_started") {
-        yield { kind: "background_task", taskId: tm.task_id, taskType: tm.task_type, status: "started" };
+        if (taskType === "local_workflow") {
+          state.workflowTaskIds.add(tm.task_id);
+          yield {
+            kind: "workflow_task",
+            update: {
+              taskId: tm.task_id,
+              phase: "started",
+              ...(workflowName ? { workflowName } : {}),
+              ...(description ? { description } : {}),
+            },
+          };
+        }
+        yield { kind: "background_task", taskId: tm.task_id, ...(taskType ? { taskType } : {}), status: "started" };
         return;
       }
-      const st = sub === "task_notification" ? (tm.status ?? "completed") : tm.patch?.status;
-      if (sub === "task_notification" || st === "completed" || st === "failed" || st === "killed") {
+      if (sub === "task_progress") {
+        if (state.workflowTaskIds.has(tm.task_id)) {
+          const usage = workflowUsage(tm.usage);
+          const progress = tm.workflow_progress === undefined ? undefined : parseWorkflowProgress(tm.workflow_progress);
+          yield {
+            kind: "workflow_task",
+            update: {
+              taskId: tm.task_id,
+              phase: "progress",
+              ...(description ? { description } : {}),
+              ...(summary ? { summary } : {}),
+              ...(lastToolName ? { lastToolName } : {}),
+              ...(usage ? { usage } : {}),
+              ...(progress && (progress.phases.length > 0 || progress.agents.length > 0) ? { progress } : {}),
+            },
+          };
+        }
+        return;
+      }
+      const rawStatus = sub === "task_notification" ? (typeof tm.status === "string" ? tm.status : "completed") : tm.patch?.status;
+      const outcome = workflowOutcome(rawStatus);
+      if (outcome && state.workflowTaskIds.has(tm.task_id)) {
+        const usage = workflowUsage(tm.usage);
+        yield {
+          kind: "workflow_task",
+          update: {
+            taskId: tm.task_id,
+            phase: "settled",
+            ...(summary ? { summary } : {}),
+            ...(usage ? { usage } : {}),
+            outcome,
+          },
+        };
+      }
+      if (sub === "task_notification" || outcome) {
         yield { kind: "background_task", taskId: tm.task_id, status: "settled" };
       }
+      if (sub === "task_notification") state.workflowTaskIds.delete(tm.task_id);
       return; // non-terminal task_updated patches (running/paused/description) are ignored
     }
     const push = classifySystemPush(msg);
@@ -144,7 +237,7 @@ class ClaudeStream implements AgentStream {
   constructor(private readonly q: ReturnType<QueryFn>) {}
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
-    const state: DecodeState = { lastReqContextTokens: 0 };
+    const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set() };
     for await (const msg of this.q) yield* translate(msg, state);
   }
 

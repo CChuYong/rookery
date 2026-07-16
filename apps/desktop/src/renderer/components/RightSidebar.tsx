@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Files, GitBranch, Bot } from "lucide-react";
 import { useWsStore } from "../store/workspace.js";
 import { useStore } from "../store/store.js";
-import { NestedAgents } from "../views/NestedAgents.js";
+import { ActivityPanel } from "../views/ActivityPanel.js";
 import { useResizableWidth } from "../lib/useResizableWidth.js";
 import { ResizeHandle } from "./ResizeHandle.js";
 import { cn } from "../lib/cn.js";
@@ -24,12 +24,15 @@ type Nested = { id: string; label: string; items: LogItem[] };
 const EMPTY_NESTED: Record<string, LogItem[]> = {};
 const EMPTY_LOG: LogItem[] = [];
 
-export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath }: { open: boolean; pageKey: string; subId: string | null; cwd?: string; activeTabPath: string | null }): JSX.Element {
+export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath, loadAgentHistory = () => {} }: { open: boolean; pageKey: string; subId: string | null; cwd?: string; activeTabPath: string | null; loadAgentHistory?: (workerId: string, taskId: string, agentId: string) => void }): JSX.Element {
   const t = useT();
+  const activeWorkflowAgents = useStore((st) => subId
+    ? Object.values(st.workflows[subId] ?? {}).reduce((count, run) => count + run.counts.active, 0)
+    : 0);
   const SEGMENTS: Array<SegmentItem<SegmentKey>> = [
     { value: "files", icon: Files, label: t("rightSidebar.segmentFiles"), title: t("rightSidebar.segmentFiles") },
     { value: "git", icon: GitBranch, label: "Git", title: "Git" },
-    { value: "worker", icon: Bot, label: t("rightSidebar.segmentWorker"), title: t("rightSidebar.segmentWorker") },
+    { value: "worker", icon: Bot, label: t("rightSidebar.segmentWorker"), title: t("rightSidebar.segmentWorker"), ...(activeWorkflowAgents > 0 ? { count: activeWorkflowAgents } : {}) },
   ];
   const segment = useWsStore((s) => s.right.segment);
   const setSegment = useWsStore((s) => s.setSegment_);
@@ -83,11 +86,8 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath }: { ope
         <div key={segment} className="rise-in min-h-0 flex-1 overflow-y-auto">
           {segment === "files" && (ready ? <FileTree root={root!} pageKey={pageKey} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback)}
           {segment === "git" && (ready ? <GitChanges root={root!} pageKey={pageKey} version={treeVersion} /> : workRootFallback)}
-          {segment === "worker" && (
-            nestedPanels.length > 0
-              ? <NestedAgents panels={nestedPanels} />
-              : <div className="px-3 py-3 text-[12px] leading-relaxed text-muted">{t("rightSidebar.noNestedAgents")}</div>
-          )}
+          {segment === "worker" && subId && <ActivityPanel workerId={subId} nestedPanels={nestedPanels} loadAgentHistory={loadAgentHistory} />}
+          {segment === "worker" && !subId && <div className="px-3 py-3 text-[12px] leading-relaxed text-muted">{t("rightSidebar.noNestedAgents")}</div>}
         </div>
       </aside>
     </>

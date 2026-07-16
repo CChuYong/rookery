@@ -6,6 +6,7 @@ import type { Automation } from "@daemon/persistence/repositories.js";
 import type { CapabilityPreviewTarget, CapabilityTarget } from "@daemon/core/capabilities/types.js";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { useStore } from "./store/store.js";
+import { workflowAgentKey } from "./store/reduce.js";
 import { baseName } from "./lib/path.js";
 import { resolveMasterControls } from "./lib/master-controls.js";
 import { useShallow } from "zustand/react/shallow";
@@ -66,7 +67,7 @@ import { TabBar } from "./components/TabBar.js";
 import { isDockableEnabled } from "./lib/flags.js";
 import { WorkspaceDock } from "./workspace/WorkspaceDock.js";
 import { WorkspaceRenderProvider, type WorkspaceRender } from "./workspace/WorkspaceRender.js";
-import { NestedPanelBody } from "./workspace/panels.js";
+import { ActivityPanelBody } from "./workspace/panels.js";
 import { FileTree } from "./components/FileTree.js";
 import { GitChanges } from "./components/GitChanges.js";
 import { SkeletonRows } from "./components/Skeleton.js";
@@ -391,6 +392,28 @@ export function App(): JSX.Element {
   const mounted = useRef(true);
   const restoredView = useRef(false);
   const restoredTermPages = useRef<Set<string>>(new Set());
+  const loadWorkerHistory = useCallback((workerId: string, connection: WsClient | null = client): void => {
+    if (!connection) return;
+    void connection.request({ type: "worker.history", id: workerId })
+      .then((result) => useStore.getState().seedWorkerHistory(workerId, result.events ?? []))
+      .catch(() => useStore.getState().setHistoryLoadFailed(workerId, true));
+    void connection.request({ type: "workflow.list", workerId })
+      .then((result) => useStore.getState().seedWorkflowRuns(workerId, result.runs))
+      .catch(() => {}); // reconnect hydration only; live events continue even if this snapshot misses
+  }, []);
+  const loadWorkflowAgentHistory = useCallback((workerId: string, taskId: string, agentId: string): void => {
+    const key = workflowAgentKey(workerId, taskId, agentId);
+    const store = useStore.getState();
+    if (Object.prototype.hasOwnProperty.call(store.workflowAgentLogs, key) || store.workflowAgentHistoryLoading[key]) return;
+    store.beginWorkflowAgentHistory(key);
+    if (!client) {
+      store.failWorkflowAgentHistory(key);
+      return;
+    }
+    void client.request({ type: "workflow.agent.history", workerId, taskId, agentId })
+      .then((result) => useStore.getState().seedWorkflowAgentHistory(key, result.events))
+      .catch(() => useStore.getState().failWorkflowAgentHistory(key));
+  }, []);
   // Spawn one new shell in the page's working folder + register a tab (shared by restore and auto-open).
   const spawnTerminalForPage = useCallback(async (key: string, subId: string | null, cwd: string | undefined): Promise<void> => {
     const r = await window.rookery.term.create({ sessionId: key, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
@@ -437,13 +460,13 @@ export function App(): JSX.Element {
     if (v.subId && s.fleet[v.subId]) {
       const subId = v.subId;
       useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId, repoId: null });
-      void client?.request({ type: "worker.history", id: subId }).then((r) => useStore.getState().seedWorkerHistory(subId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(subId, true));
+      loadWorkerHistory(subId);
     } else if (v.sessionId && s.sessions.some((x) => x.id === v.sessionId)) {
       const sessionId = v.sessionId;
       useStore.getState().restoreLocation({ overlay: null, showRepos: v.showRepos, sessionId, subId: null, repoId: null });
       void client?.request({ type: "session.history", sessionId }).then((r) => useStore.getState().seedHistory(sessionId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(sessionId, true));
     }
-  }, [s.daemon, s.sessionsLoaded, s.fleetLoaded]);
+  }, [s.daemon, s.sessionsLoaded, s.fleetLoaded, loadWorkerHistory]);
 
   // When the active conversation pane changes, prefetch and cache that context's slash command/skill candidates (for / autocomplete).
   useEffect(() => {
@@ -581,7 +604,7 @@ export function App(): JSX.Element {
       // tool-end/result lost while disconnected (the DB is the source of truth, so we re-fetch the full transcript and overwrite).
       const { activeSessionId, activeWorkerId } = useStore.getState();
       if (activeSessionId) void c.request({ type: "session.history", sessionId: activeSessionId }).then((r) => useStore.getState().seedHistory(activeSessionId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(activeSessionId, true));
-      if (activeWorkerId) void c.request({ type: "worker.history", id: activeWorkerId }).then((r) => useStore.getState().seedWorkerHistory(activeWorkerId, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(activeWorkerId, true));
+      if (activeWorkerId) loadWorkerHistory(activeWorkerId, c);
     });
     // On disconnect, drop the daemon indicator to 'starting' (back to 'up' on the reconnect's onOpen). Prevents 'up' from getting stuck.
     c.onClose(() => {
@@ -597,7 +620,7 @@ export function App(): JSX.Element {
         useStore.getState().setDaemon("down");
       }
     }, 8000);
-  }, []);
+  }, [loadWorkerHistory]);
 
   useEffect(() => {
     mounted.current = true;
@@ -619,9 +642,9 @@ export function App(): JSX.Element {
   }, []);
   // Retry hook for MessageList's load-failed row (audit #43) — re-fires the same history fetch that failed, for either kind.
   const retryHistory = useCallback((k: "master" | "worker", id: string) => {
-    if (k === "worker") void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
+    if (k === "worker") loadWorkerHistory(id);
     else void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
-  }, []);
+  }, [loadWorkerHistory]);
   const create = () => navigate({ overlay: "newSession" }); // open the new-session full page (mutually exclusive with settings/automation)
   // Getting Started "first worker": land the user in a composer pre-filled with an example natural-language ask
   // (register the repo → spawn a worker → report back). With no usable session yet, seed the New Session page's
@@ -776,8 +799,8 @@ export function App(): JSX.Element {
 
   const selectSub = useCallback((id: string) => {
     useStore.getState().navigate({ overlay: null, showRepos: true, subId: id });
-    void client?.request({ type: "worker.history", id }).then((r) => useStore.getState().seedWorkerHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
-  }, []);
+    loadWorkerHistory(id);
+  }, [loadWorkerHistory]);
   // Right-click "Fork" → open the Fork dialog. Workers persist model/effort as columns, so those ride along in worker.fork.
   const forkSub = useCallback((id: string) => {
     const provider = useStore.getState().fleet[id]?.provider ?? "claude";
@@ -1038,7 +1061,7 @@ export function App(): JSX.Element {
         terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} dock />,
         files: () => (wsRootState === "ready" ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback),
         git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : workRootFallback),
-        nested: () => <NestedPanelBody subId={activeSub.id} />,
+        nested: () => <ActivityPanelBody subId={activeSub.id} loadAgentHistory={loadWorkflowAgentHistory} />,
       }
     : null;
   const masterRender: WorkspaceRender | null = s.activeSessionId
@@ -1072,7 +1095,7 @@ export function App(): JSX.Element {
         terminal: () => <TerminalPanel sessionId={s.activeSessionId!} subId={null} cwd={activeSess?.cwd} dock />,
         files: () => (wsRootState === "ready" ? <FileTree root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback),
         git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={s.activeSessionId!} version={treeVersion} /> : workRootFallback),
-        nested: () => <NestedPanelBody subId={null} />,
+        nested: () => <ActivityPanelBody subId={null} loadAgentHistory={loadWorkflowAgentHistory} />,
       }
     : null;
 
@@ -1571,7 +1594,7 @@ export function App(): JSX.Element {
         )}
       </main>
       {rightMounted && termPageKey && !dockable && (
-        <RightSidebar open={rightVisible} pageKey={termPageKey} subId={showRepos ? s.activeWorkerId : null} cwd={showRepos ? undefined : activeSess?.cwd} activeTabPath={activeTab.startsWith("file:") ? activeTab.slice("file:".length) : null} />
+        <RightSidebar open={rightVisible} pageKey={termPageKey} subId={showRepos ? s.activeWorkerId : null} cwd={showRepos ? undefined : activeSess?.cwd} activeTabPath={activeTab.startsWith("file:") ? activeTab.slice("file:".length) : null} loadAgentHistory={loadWorkflowAgentHistory} />
       )}
 
       <Toaster />

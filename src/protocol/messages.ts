@@ -16,6 +16,7 @@ import type {
 } from "../core/capabilities/types.js";
 import type { Automation, AutomationInput } from "../persistence/repositories.js";
 import { isValidCron } from "../core/cron.js";
+import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot } from "../core/workflow-activity.js";
 
 // effort validation: allow only valid members (reject invalid values), but keep the inferred type as string (compatible with SettingsValues).
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
@@ -297,6 +298,8 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("repos.remove"), reqId: z.string(), name: z.string() }),
   z.object({ type: z.literal("session.history"), reqId: z.string(), sessionId: z.string() }),
   z.object({ type: z.literal("worker.history"), reqId: z.string(), id: z.string() }),
+  z.object({ type: z.literal("workflow.list"), reqId: z.string(), workerId: z.string() }),
+  z.object({ type: z.literal("workflow.agent.history"), reqId: z.string(), workerId: z.string(), taskId: z.string(), agentId: z.string() }),
   z.object({ type: z.literal("worker.send"), id: z.string(), text: z.string(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
   // Live-change the model of a running worker (query.setModel).
   z.object({ type: z.literal("worker.setModel"), id: z.string(), model: z.string(), reqId: z.string().optional() }),
@@ -499,6 +502,8 @@ export type ServerMessage =
   | { type: "repos.ack"; reqId: string; action: string; name: string }
   | { type: "session.history.result"; reqId: string; sessionId: string; events: Array<{ seq: number; type: string; payload: unknown; createdAt: string }> }
   | { type: "worker.history.result"; reqId: string; id: string; events: Array<{ seq: number; type: string; payload: unknown; createdAt: string }> }
+  | { type: "workflow.list.result"; reqId: string; workerId: string; runs: WorkflowRunSnapshot[] }
+  | { type: "workflow.agent.history.result"; reqId: string; workerId: string; taskId: string; agentId: string; events: WorkflowAgentHistoryEntry[] }
   | { type: "worker.checkpoints.result"; reqId: string; id: string; checkpoints: Array<{ seq: number; sha: string; createdAt: string }> }
   | { type: "fleet.spawn.result"; reqId: string; id: string }
   | { type: "usage.result"; reqId: string; usage: UsageSnapshot }
@@ -568,6 +573,8 @@ export interface RequestResultMap {
   "repos.remove": Extract<ServerMessage, { type: "repos.ack" }>;
   "session.history": Extract<ServerMessage, { type: "session.history.result" }>;
   "worker.history": Extract<ServerMessage, { type: "worker.history.result" }>;
+  "workflow.list": Extract<ServerMessage, { type: "workflow.list.result" }>;
+  "workflow.agent.history": Extract<ServerMessage, { type: "workflow.agent.history.result" }>;
   "worker.checkpoints": Extract<ServerMessage, { type: "worker.checkpoints.result" }>;
   "usage.get": Extract<ServerMessage, { type: "usage.result" }>;
   "models.list": Extract<ServerMessage, { type: "models.result" }>;

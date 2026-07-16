@@ -35,6 +35,8 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `worker.rename` | ✓ | `id`, `label` | rename a worker (emits `worker.label`) | `fleet.ack` (`rename`) |
 | `worker.delete` | ✓ | `id` | discard worktree + remove DB row | `fleet.ack` (`delete`) |
 | `worker.history` | ✓ | `id` | replay persisted `worker_events` | `worker.history.result` |
+| `workflow.list` | ✓ | `workerId` | snapshot daemon-live Dynamic Workflow runs for reconnect | `workflow.list.result` |
+| `workflow.agent.history` | ✓ | `workerId`, `taskId`, `agentId` | load one validated, bounded workflow-agent transcript by ids | `workflow.agent.history.result` |
 | `worker.send` | opt | `id`, `text`, `clientMsgId?` | follow-up to a running worker | (none) |
 | `worker.setModel` | opt | `id`, `model` | live-change worker model | (none) |
 | `worker.setPermissionMode` | opt | `id`, `permissionMode` (`bypassPermissions\|plan`) | live-change worker permission mode | (none) |
@@ -119,6 +121,8 @@ Notes:
 | `auth.status.result` | `reqId` + `AuthStatus` | Claude auth status |
 | `session.history.result` | `reqId`, `sessionId`, `events[]` (`seq,type,payload,createdAt`) | replayed master transcript |
 | `worker.history.result` | `reqId`, `id`, `events[]` | replayed worker transcript |
+| `workflow.list.result` | `reqId`, `workerId`, `runs: WorkflowRunSnapshot[]` | path-free daemon-live workflow run/agent snapshot, including sanitized phase definitions and agent phase/label/model metadata when available |
+| `workflow.agent.history.result` | `reqId`, `workerId`, `taskId`, `agentId`, `events[]` | selected agent history, capped at 200 events/4,000 bytes per field |
 | `worker.checkpoints.result` | `reqId`, `id`, `checkpoints[]` (`seq,sha,createdAt`) | worktree checkpoints |
 | `usage.result` | `reqId`, `usage: UsageSnapshot` | usage snapshot |
 | `models.result` | `reqId`, `models[]` (`id,displayName`) | model picker list |
@@ -141,6 +145,8 @@ Notes:
 | `error` | `message`, `reqId?` | parse/handler failure |
 
 `WorkerRow` (shared by worker.list/fleet.list): `id`, `label`, `repoPath`, `status`, `branch`, `model`, `permissionMode?`, `ticketKey?`, `ticketUrl?` (no `pr_url` — there is no automatic PR pipeline).
+
+Workflow requests accept ids only—never a transcript path. The daemon registry verifies worker/task/agent ownership and reads histories only beneath the launch directory it previously realpath-validated against `<sdkSessionId>/subagents/workflows/<runId>`. Phase grouping arrives live from the Claude adapter's allowlisted `task_progress.workflow_progress` decoder; an independently realpath-validated sibling `<sdkSessionId>/workflows/<runId>.json` provides recovery/enrichment. Only ordered phase definitions and agent `label`/`phaseIndex`/`phaseTitle`/`model` fields cross the protocol. Snapshots are live in daemon memory, not SQLite-backed.
 
 Capability mutations emit `capabilities.changed` on `@all`. Clients use its monotonic
 in-process `generation` as an invalidation signal and refetch. Claude application also

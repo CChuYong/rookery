@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reduceEvent, emptyState, seedSessionLog, applySubEvent } from "../src/renderer/store/reduce.js";
+import { reduceEvent, emptyState, seedSessionLog, applySubEvent, seedWorkflowRuns } from "../src/renderer/store/reduce.js";
 import type { LogItem } from "../src/renderer/store/reduce.js";
 import { useStore } from "../src/renderer/store/store.js";
 import { fmtTokens, fmtDuration, contextPct } from "../src/renderer/format.js";
@@ -25,6 +25,63 @@ describe("capability generation", () => {
       state: "current" as const,
     };
     expect(reduceEvent(state, event).capabilityGeneration).toBe(8);
+  });
+});
+
+describe("Dynamic Workflow reducer convergence", () => {
+  const runningRun = {
+    taskId: "task-1",
+    toolUseId: "tool-1",
+    runId: "run-1",
+    workflowName: "logic-audit",
+    summary: "Audit logic",
+    status: "running" as const,
+    visibility: "live" as const,
+    startedAt: 100,
+    lastActivityAt: 200,
+    counts: { started: 12, active: 6, completed: 6, stopped: 0 },
+    agents: [],
+  };
+  const toolUse = { type: "worker.event" as const, sessionId: "s1", workerId: "w1", seq: 1, data: { kind: "tool_use" as const, id: "tool-1", name: "Workflow", input: "{}" } };
+  const toolResult = { type: "worker.event" as const, sessionId: "s1", workerId: "w1", seq: 2, data: { kind: "tool_result" as const, id: "tool-1", content: "Workflow launched", isError: false } };
+  const runEvent = { type: "worker.workflow.run" as const, sessionId: "s1", workerId: "w1", run: runningRun };
+
+  it.each(["tool-first", "workflow-first"] as const)("converges the Workflow card when %s", (order) => {
+    let state = emptyState();
+    const events = order === "tool-first" ? [toolUse, toolResult, runEvent] : [runEvent, toolUse, toolResult];
+    for (const event of events) state = reduceEvent(state, event);
+    expect(state.workerLogs.w1?.find((item) => item.kind === "tool" && item.toolId === "tool-1")).toMatchObject({
+      status: "background",
+      workflow: { taskId: "task-1", counts: { started: 12, active: 6, completed: 6, stopped: 0 } },
+    });
+  });
+
+  it("settles a failed workflow card with the terminal tone", () => {
+    let state = reduceEvent(reduceEvent(reduceEvent(emptyState(), toolUse), toolResult), runEvent);
+    state = reduceEvent(state, { ...runEvent, run: { ...runningRun, status: "failed", lastActivityAt: 300, endedAt: 300 } });
+    expect(state.workerLogs.w1?.find((item) => item.kind === "tool")).toMatchObject({ status: "complete", ok: false, workflow: { status: "failed" } });
+  });
+
+  it("decorates persisted history when the reconnect snapshot arrives later", () => {
+    let state = reduceEvent(reduceEvent(emptyState(), toolUse), toolResult);
+    state = seedWorkflowRuns(state, "w1", [runningRun]);
+    expect(state.workerLogs.w1?.find((item) => item.kind === "tool")).toMatchObject({ status: "background", workflow: { taskId: "task-1" } });
+  });
+
+  it("ignores a stale agent-history response after another agent is selected", () => {
+    useStore.setState({ workflowAgentLogs: {}, workflowAgentHistoryLoading: {}, workflowAgentHistoryFailed: {} });
+    const first = "w1/task-1/a1";
+    const second = "w1/task-1/a2";
+    useStore.getState().beginWorkflowAgentHistory(first);
+    useStore.getState().beginWorkflowAgentHistory(second);
+
+    useStore.getState().seedWorkflowAgentHistory(first, [{ data: { kind: "message", role: "assistant", content: "stale" } }]);
+    useStore.getState().failWorkflowAgentHistory(first);
+    expect(useStore.getState().workflowAgentLogs[first]).toBeUndefined();
+    expect(useStore.getState().workflowAgentHistoryFailed[first]).toBeUndefined();
+
+    useStore.getState().seedWorkflowAgentHistory(second, [{ data: { kind: "message", role: "assistant", content: "current" } }]);
+    expect(useStore.getState().workflowAgentLogs[second]).toEqual([{ kind: "message", role: "assistant", content: "current" }]);
   });
 });
 

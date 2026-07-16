@@ -6,7 +6,8 @@ import type { IntegrationsStatus, WorkerRow, CodexModelInfo, CodexAuthStatus } f
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import type { CommandCandidate } from "@daemon/core/capabilities/commands.js";
-import { emptyState, reduceEvent, applySubEvent, seedSessionLog } from "./reduce.js";
+import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot } from "@daemon/core/workflow-activity.js";
+import { emptyState, reduceEvent, applySubEvent, seedSessionLog, seedWorkflowRuns as mergeWorkflowRuns, syncWorkflowTools, workflowHistoryLog } from "./reduce.js";
 import type { AppState, FleetRow, LogItem } from "./reduce.js";
 import { navigate as navGo, back as navBackFn, forward as navFwdFn, reset as navReset } from "./navigation.js";
 import type { Location, Overlay, NavState } from "./navigation.js";
@@ -118,6 +119,10 @@ interface Store extends AppState {
   setDaemonNote: (note: string | null) => void;
   seedHistory: (sid: string, events: Array<{ seq: number; type: string; payload: unknown; createdAt?: string }>) => void;
   seedWorkerHistory: (id: string, events: Array<{ seq: number; type: string; payload: unknown; createdAt?: string }>) => void;
+  seedWorkflowRuns: (workerId: string, runs: WorkflowRunSnapshot[]) => void;
+  beginWorkflowAgentHistory: (key: string) => void;
+  seedWorkflowAgentHistory: (key: string, events: WorkflowAgentHistoryEntry[]) => void;
+  failWorkflowAgentHistory: (key: string) => void;
   // Per-conversation history-fetch state (audit #43), keyed by the same session/worker id as logsBySession/workerLogs.
   // Prevents the false "empty conversation" flash while session.history/worker.history is in flight, and turns a
   // swallowed fetch failure into a visible error+retry row instead of a permanently blank pane. seedHistory/seedWorkerHistory
@@ -330,12 +335,41 @@ export const useStore = create<Store>((set, get) => ({
   // Roll back an optimistic master bubble whose session.send was rejected (unknown session, runTurn throw, disconnected).
   dropPending: (sid, clientMsgId) => set((s) => ({ pendingBySession: { ...s.pendingBySession, [sid]: (s.pendingBySession[sid] ?? []).filter((p) => p.clientMsgId !== clientMsgId) } })),
   seedWorkerHistory: (id, events) =>
-    set((s) => ({
-      workerLogs: {
-        ...s.workerLogs,
-        [id]: events.reduce<LogItem[]>((log, ev) => applySubEvent(log, ev.payload as WorkerEventData, ev.createdAt ? Date.parse(ev.createdAt) : undefined), []),
-      },
-      historyLoaded: { ...s.historyLoaded, [id]: true },
-      historyLoadFailed: { ...s.historyLoadFailed, [id]: false },
-    })),
+    set((s) => {
+      const replayed = events.reduce<LogItem[]>((log, ev) => applySubEvent(log, ev.payload as WorkerEventData, ev.createdAt ? Date.parse(ev.createdAt) : undefined), []);
+      return {
+        workerLogs: { ...s.workerLogs, [id]: syncWorkflowTools(replayed, s.workflows[id]) },
+        historyLoaded: { ...s.historyLoaded, [id]: true },
+        historyLoadFailed: { ...s.historyLoadFailed, [id]: false },
+      };
+    }),
+  seedWorkflowRuns: (workerId, runs) => set((s) => mergeWorkflowRuns(s, workerId, runs)),
+  beginWorkflowAgentHistory: (key) => set((s) => {
+    const slash = key.indexOf("/");
+    const prefix = slash === -1 ? `${key}/` : key.slice(0, slash + 1);
+    const withoutWorker = <T,>(map: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(map).filter(([candidate]) => !candidate.startsWith(prefix)));
+    return {
+      workflowAgentLogs: withoutWorker(s.workflowAgentLogs),
+      workflowAgentHistoryLoading: { ...withoutWorker(s.workflowAgentHistoryLoading), [key]: true },
+      workflowAgentHistoryFailed: { ...withoutWorker(s.workflowAgentHistoryFailed), [key]: false },
+    };
+  }),
+  seedWorkflowAgentHistory: (key, events) => set((s) => {
+    if (!s.workflowAgentHistoryLoading[key]) return {};
+    return {
+      workflowAgentLogs: { ...s.workflowAgentLogs, [key]: workflowHistoryLog(events) },
+      workflowAgentHistoryLoading: { ...s.workflowAgentHistoryLoading, [key]: false },
+      workflowAgentHistoryFailed: { ...s.workflowAgentHistoryFailed, [key]: false },
+    };
+  }),
+  failWorkflowAgentHistory: (key) => set((s) => {
+    if (!s.workflowAgentHistoryLoading[key]) return {};
+    const workflowAgentLogs = { ...s.workflowAgentLogs };
+    delete workflowAgentLogs[key];
+    return {
+      workflowAgentLogs,
+      workflowAgentHistoryLoading: { ...s.workflowAgentHistoryLoading, [key]: false },
+      workflowAgentHistoryFailed: { ...s.workflowAgentHistoryFailed, [key]: true },
+    };
+  }),
 }));

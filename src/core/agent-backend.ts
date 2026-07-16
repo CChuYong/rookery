@@ -1,5 +1,6 @@
 import type { SystemPush } from "./system-push.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
+import type { WorkflowLaunch, WorkflowTaskUpdate } from "./workflow-activity.js";
 
 // Provider-neutral agent backend port (P0 seam — docs/2026-07-05-codex-backend-parity.md).
 // Both stream loops (Worker/MasterAgent) consume only this vocabulary; adapters (claude-backend.ts,
@@ -50,6 +51,8 @@ export type AgentEvent =
   // membership change — REPLACE semantics. SDK guidance: do not correlate with the edge frames above; once
   // a consumer sees a level frame it should trust levels only (Worker latches edges out on first sight).
   | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string }> }
+  | { kind: "workflow_launched"; launch: WorkflowLaunch }
+  | { kind: "workflow_task"; update: WorkflowTaskUpdate }
   // End of one turn. costUsd/numTurns/durationMs are THIS turn's raw values (numTurns is the provider's
   // per-send cumulative agentic turn count) — consumers accumulate their own session totals.
   // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried

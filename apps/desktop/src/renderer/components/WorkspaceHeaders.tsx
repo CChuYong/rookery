@@ -22,6 +22,20 @@ function WorkerMetrics({ workerId }: { workerId: string }): JSX.Element | null {
   return <MetricsView items={items} />;
 }
 
+// Keep the primary Worker status badge authoritative while adding a compact explanation for its background state.
+// This child subscribes directly so workflow heartbeats do not pull the whole App through a render.
+function WorkerActivityReason({ worker }: { worker: FleetRow }): JSX.Element | null {
+  const t = useT();
+  const activeWorkflows = useStore((state) => Object.values(state.workflows[worker.id] ?? {}).filter((run) => run.status === "running").length);
+  if (activeWorkflows > 0) {
+    return <span className="shrink-0 rounded border border-run/25 bg-run/10 px-1.5 py-0.5 font-mono text-[10px] text-run">{t("workspaceHeaders.workflowTasks", { count: activeWorkflows })}</span>;
+  }
+  if (worker.status === "background" && worker.bg?.count) {
+    return <span className="shrink-0 rounded border border-line bg-ink/40 px-1.5 py-0.5 font-mono text-[10px] text-muted">{t("workspaceHeaders.backgroundTasks", { count: worker.bg.count })}</span>;
+  }
+  return null;
+}
+
 // Shared right-side toggles for the worker/session header (open in other app + terminal bottom panel + right panel). The right toggle only shows when a page exists.
 function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd, dock, agentKind = "master" }: {
   termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void;
@@ -77,6 +91,7 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
   return (
     <div className="workspace-header drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
       <StatusBadge status={worker.status} />
+      <WorkerActivityReason worker={worker} />
       <span className="workspace-header-provider shrink-0"><ProviderBadge provider={worker.provider} /></span>
       <span className="workspace-header-eyebrow eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.workerEyebrow")}</span>
       <span className="workspace-header-title min-w-0 truncate font-semibold tracking-[-0.01em]" title={worker.label}>{worker.label}</span>

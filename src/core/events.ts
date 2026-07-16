@@ -1,3 +1,5 @@
+import type { WorkflowAgentSummary, WorkflowRunSummary } from "./workflow-activity.js";
+
 export type WorkerEventData =
   | { kind: "system"; text: string }
   | { kind: "message"; role: "assistant" | "user"; content: string }
@@ -48,6 +50,8 @@ export type CoreEvent =
   | { type: "worker.event"; sessionId: string; workerId: string; seq: number; data: WorkerEventData; clientMsgId?: string }
   // Native nested subagent (SDK subagent spawned by a worker via Task) activity — live only (not persisted), grouped by parentToolUseId.
   | { type: "worker.nested"; sessionId: string; workerId: string; parentToolUseId: string; data: WorkerEventData }
+  | { type: "worker.workflow.run"; sessionId: string; workerId: string; run: WorkflowRunSummary }
+  | { type: "worker.workflow.agent"; sessionId: string; workerId: string; taskId: string; agent: WorkflowAgentSummary }
   // bg: present only while harness-tracked background tasks run (status "background") — count + distinct
   // task types (e.g. local_bash) so clients can label WHY the worker is still busy after its turn ended.
   | { type: "worker.status"; sessionId: string; workerId: string; status: string; bg?: { count: number; types: string[] } }

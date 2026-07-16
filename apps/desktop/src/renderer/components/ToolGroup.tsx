@@ -14,11 +14,11 @@ export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { to
   const t = useT();
   const [open, setOpen] = useState(false);
   // Always call hooks above the early return (rules of hooks). Settle once when the group transitions from 'running' to 'ended'.
-  const running = tools.some((t) => t.status === "in_progress");
+  const running = tools.some((t) => t.status !== "complete");
   const justSettled = useJustEnded(running);
   if (tools.length === 1) {
     const t = tools[0]!;
-    return <ToolBlock name={t.name} status={t.status} ok={t.ok} input={t.input} result={t.result} elapsedSec={t.elapsedSec} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} className={className} />;
+    return <ToolBlock name={t.name} status={t.status} ok={t.ok} input={t.input} result={t.result} elapsedSec={t.elapsedSec} workflow={t.workflow} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} className={className} />;
   }
   const errors = tools.filter((t) => t.ok === false).length;
   const names = [...new Set(tools.map((t) => t.name))].slice(0, 4).join(", ");
@@ -37,7 +37,7 @@ export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { to
       <Collapse open={open}>
         <div className="mt-1 flex flex-col gap-1 pl-3">
           {tools.map((t, i) => (
-            <ToolBlock key={i} name={t.name} status={t.status} ok={t.ok} input={t.input} result={t.result} elapsedSec={t.elapsedSec} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} />
+            <ToolBlock key={i} name={t.name} status={t.status} ok={t.ok} input={t.input} result={t.result} elapsedSec={t.elapsedSec} workflow={t.workflow} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} />
           ))}
         </div>
       </Collapse>

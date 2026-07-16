@@ -872,6 +872,25 @@ describe("Connection v2 routes", () => {
 });
 
 describe("Connection worker chat routes", () => {
+  it("serves workflow snapshots and selected-agent history through the injected provider", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const snapshot = { taskId: "task-1", workflowName: "audit", summary: "Audit", status: "running" as const, visibility: "live" as const, startedAt: 1, lastActivityAt: 2, counts: { started: 1, active: 1, completed: 0, stopped: 0 }, agents: [] };
+    const workflows = {
+      list: vi.fn(() => [snapshot]),
+      agentHistory: vi.fn(async () => [{ data: { kind: "message" as const, role: "assistant", content: "agent detail" }, createdAt: "2026-07-16T00:00:00.000Z" }]),
+    };
+    const conn = new Connection(socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, workflows);
+
+    await conn.handleRaw(JSON.stringify({ type: "workflow.list", reqId: "wf1", workerId: "a1" }));
+    await conn.handleRaw(JSON.stringify({ type: "workflow.agent.history", reqId: "wf2", workerId: "a1", taskId: "task-1", agentId: "agent-1" }));
+
+    expect(parsed(sent).at(-2)).toMatchObject({ type: "workflow.list.result", reqId: "wf1", workerId: "a1", runs: [snapshot] });
+    expect(parsed(sent).at(-1)).toMatchObject({ type: "workflow.agent.history.result", reqId: "wf2", workerId: "a1", taskId: "task-1", agentId: "agent-1", events: [{ data: { content: "agent detail" } }] });
+    expect(workflows.agentHistory).toHaveBeenCalledWith("a1", "task-1", "agent-1");
+  });
+
   it("worker.history returns the transcript with reqId", async () => {
     const sent: any[] = [];
     const fleet: FleetOverride = {
