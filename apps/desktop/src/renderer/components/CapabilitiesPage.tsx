@@ -321,7 +321,9 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                 <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-[15px] font-semibold text-fg">{snapshot.target.label}</h2>
+                      <h2 className="text-[15px] font-semibold text-fg">
+                        {snapshot.target.kind === "rookery" ? t("capabilities.targetRookery") : snapshot.target.label}
+                      </h2>
                       <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : snapshot.target.kind === "worker" ? t("capabilities.targetWorker") : snapshot.target.kind === "repo" ? t("capabilities.targetRepo") : t("capabilities.targetRookery")}</span>
                       {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("capabilities.preview")}</span>}
                       <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-fg-dim">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>

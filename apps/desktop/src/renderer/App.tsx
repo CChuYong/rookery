@@ -245,11 +245,13 @@ export function App(): JSX.Element {
   const closeOverlay = () => navigate({ overlay: null });
   const [capabilityRoute, setCapabilityRoute] = useState<CapabilityCenterRoute>({ tab: "effective" });
   const [capabilityPreviewTarget, setCapabilityPreviewTarget] = useState<CapabilityPreviewTarget | null>(null);
+  const [capabilityOpenEpoch, setCapabilityOpenEpoch] = useState(0);
   const displayCommands = useMemo(() => localizeCommandCandidates(s.commands, t), [s.commands, t]);
   const handleCommandAction = useCallback((action: CommandAction) => {
     const route = capabilityCenterRoute(action);
     if (!route) return;
     setCapabilityPreviewTarget(null);
+    setCapabilityOpenEpoch((value) => value + 1);
     setCapabilityRoute(route);
     navigate({ overlay: "capabilities" });
   }, [navigate]);
@@ -259,26 +261,31 @@ export function App(): JSX.Element {
       return;
     }
     setCapabilityPreviewTarget(null);
+    setCapabilityOpenEpoch((value) => value + 1);
     setCapabilityRoute({ tab: "effective" });
     navigate({ overlay: "capabilities" });
   }, [navigate, overlay]);
   const openCapabilityCatalog = useCallback(() => {
     setCapabilityPreviewTarget(null);
+    setCapabilityOpenEpoch((value) => value + 1);
     setCapabilityRoute({ tab: "library" });
     navigate({ overlay: "capabilities" });
   }, [navigate]);
   const openAdvancedCapabilityAssignments = useCallback(() => {
     setCapabilityPreviewTarget(null);
+    setCapabilityOpenEpoch((value) => value + 1);
     setCapabilityRoute({ tab: "assignments" });
     navigate({ overlay: "capabilities" });
   }, [navigate]);
   const openRookeryCapabilityPreview = useCallback(() => {
     setCapabilityPreviewTarget({ kind: "rookery", provider: "claude", agent: "master" });
+    setCapabilityOpenEpoch((value) => value + 1);
     setCapabilityRoute({ tab: "effective" });
     navigate({ overlay: "capabilities" });
   }, [navigate]);
   const openRepoCapabilityPreview = useCallback((repoId: string) => {
     setCapabilityPreviewTarget({ kind: "repo", id: repoId, provider: "claude", agent: "master" });
+    setCapabilityOpenEpoch((value) => value + 1);
     setCapabilityRoute({ tab: "effective" });
     navigate({ overlay: "capabilities" });
   }, [navigate]);
@@ -1285,6 +1292,7 @@ export function App(): JSX.Element {
           <div className="flex flex-1 items-center justify-center gap-2 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
         ) : overlay === "capabilities" ? (
           <CapabilitiesPage
+            key={capabilityOpenEpoch}
             target={capabilityPreviewTarget ?? capabilityTarget}
             api={capabilityApi}
             targets={capabilityTargetOptions}

@@ -126,7 +126,7 @@ describe("CapabilitiesPage", () => {
     const rookeryTarget = { kind: "rookery", provider: "claude", agent: "master" } as const;
     const loadSnapshot = vi.fn(async () => ({ ...snapshot, target: { ...rookeryTarget, label: "Rookery defaults", cwd: null }, appliedRevision: undefined }));
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
-    expect(await screen.findByText("Rookery defaults")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Rookery 기본값" })).toBeInTheDocument();
     expect(loadSnapshot).toHaveBeenCalledWith(rookeryTarget);
     expect(screen.getByText((content) => content.includes("범위 설정만 보여줍니다"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "유효 상태" })).toBeInTheDocument();
@@ -184,7 +184,7 @@ describe("CapabilitiesPage", () => {
       return snapshot;
     });
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
-    await screen.findByText("Rookery defaults");
+    await screen.findByRole("heading", { name: "Rookery 기본값" });
 
     const targetSelect = screen.getByLabelText("Effective 대상");
     expect(within(targetSelect).getByRole("option", { name: "Rookery 기본값" })).toBeInTheDocument();
