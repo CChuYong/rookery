@@ -64,7 +64,7 @@ import { startSlack } from "../slack/app.js";
 import { SlackInteractionBridge, makeSlackCanUseTool, parseSlackThreadKey } from "../slack/interaction.js";
 import { makeSlackCapabilities } from "../slack/capabilities.js";
 import { makeHolder } from "../slack/holder.js";
-import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
+import type { SlackReadOps } from "../tools/slack-tools.js";
 import type { SlackRefResolver } from "../slack/name-resolver.js";
 import { InteractionRegistry } from "../core/interaction-registry.js";
 import { scheduleToolDefs, SCHEDULE_SERVER_NAME, SCHEDULE_TOOL_NAMES } from "../tools/schedule-tools.js";
@@ -322,10 +322,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     new Set(repos.listSessions().map((s) => s.id)),
     new Set(repos.listAllWorkers().map((worker) => worker.id)),
   );
-  // Slack holders (bridge / thread reader / reporter-ensure) — installed by startSlack on connect, released
+  // Slack holders (bridge / read ops / reporter-ensure) — installed by startSlack on connect, released
   // owner-scoped on stop (clearIf) so a stale connection's late stop can't clobber the live one's holders.
   const bridgeHolder = makeHolder<SlackInteractionBridge>();
-  const threadReaderHolder = makeHolder<SlackThreadReader>();
+  const slackReadOpsHolder = makeHolder<SlackReadOps>();
   const reporterHolder = makeHolder<(sessionId: string, externalKey: string) => void>();
   const nameResolverHolder = makeHolder<SlackRefResolver>();
   // For non-Slack (desktop/UI) sessions, canUseTool routes through a registry that surfaces it via EventBus→WS (Connection handles the respond).
@@ -361,7 +361,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     makeManagedCapabilities: (sessionId) => () => capabilityService.resolveManaged({ kind: "session", id: sessionId }),
     capabilityRuntime: capabilityRuntimeState,
     // Source-scoped dynamic capabilities: schedule_* tools for every master session (self-wakeup, backed by the daemon Scheduler) +
-    // additionally compose the read_thread tool/hint into slack thread sessions.
+    // additionally compose the slack read tools/hint into slack thread sessions.
     // Schedule travels the toolDefs channel (not mcpServers): codex ignores opts.mcpServers (it has no
     // in-process MCP concept — see agent-backend.ts), so an opaque SDK server here would silently never
     // reach a codex master. toolDefs is the provider-neutral twin — master-agent.ts's doTurn merges it
@@ -369,7 +369,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // wraps with createSdkMcpServer (same factory chain, same version "0.0.1", byte-equivalent server)
     // and the Codex adapter flattens onto the daemon MCP bridge, so codex masters now get schedule_* too.
     makeCapabilities: (externalKey, sessionId) => {
-      const slackCaps = makeSlackCapabilities(externalKey, () => threadReaderHolder.get());
+      const slackCaps = makeSlackCapabilities(externalKey, () => slackReadOpsHolder.get());
       return () => {
         const s = slackCaps?.() ?? {};
         return {
@@ -609,8 +609,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     start: () => startSlack({ sessions, bus, slackConfig, home: config.home,
       setBridge: (b) => { if (b) bridgeHolder.set(b); },
       clearBridge: (b) => bridgeHolder.clearIf(b),
-      setThreadReader: (r) => { if (r) threadReaderHolder.set(r); },
-      clearThreadReader: (r) => threadReaderHolder.clearIf(r),
+      setSlackReadOps: (r) => { if (r) slackReadOpsHolder.set(r); },
+      clearSlackReadOps: (r) => slackReadOpsHolder.clearIf(r),
       setReporterFor: (fn) => { if (fn) reporterHolder.set(fn); },
       clearReporterFor: (fn) => reporterHolder.clearIf(fn),
       setNameResolver: (r) => { if (r) nameResolverHolder.set(r); },

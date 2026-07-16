@@ -3,7 +3,7 @@ import type { EventBus } from "../core/events.js";
 import type { SlackClient, SlackFile, ThreadTarget } from "./types.js";
 import type { FileDownloader } from "./file-download.js";
 import type { SlackInteractionBridge } from "./interaction.js";
-import type { SlackThreadReader } from "../tools/slack-thread-tools.js";
+import type { SlackReadOps } from "../tools/slack-tools.js";
 import type { SlackRefResolver } from "./name-resolver.js";
 import { ThreadRegistry } from "./thread-registry.js";
 import { SlackThreadReporter } from "./reporter.js";
@@ -31,8 +31,9 @@ export interface SlackDeps {
   home: string; // base of the slack-files directory (config.home)
   // Register the interaction bridge created at connection time into the daemon holder (null when disconnected). For master canUseTool routing.
   setBridge?: (b: SlackInteractionBridge | null) => void;
-  // Register the thread reader (conversations.replies) into the daemon holder at connection time (null when disconnected). For the master read_thread capability.
-  setThreadReader?: (r: SlackThreadReader | null) => void;
+  // Register the slack read ops (conversations.replies/history/list, users.info, chat.getPermalink) into the
+  // daemon holder at connection time (null when disconnected). Backs the master's slack read-tool capability.
+  setSlackReadOps?: (r: SlackReadOps | null) => void;
   // Register reporter-ensure (sessionId+external_key → guarantee that thread's reporter) into the daemon holder at connection time (null when disconnected).
   // Called by the dispatcher right before firing → headless turns (wakeup, etc.) of Slack sessions are also delivered to the thread without a human message.
   setReporterFor?: (fn: ((sessionId: string, externalKey: string) => void) | null) => void;
@@ -43,7 +44,7 @@ export interface SlackDeps {
   // clears the holder only if it still points at that instance. Without this, a late stop() from a superseded
   // connection (start-timeout → retry succeeded → stale start resolves late) nulls the LIVE connection's holders.
   clearBridge?: (b: SlackInteractionBridge) => void;
-  clearThreadReader?: (r: SlackThreadReader) => void;
+  clearSlackReadOps?: (r: SlackReadOps) => void;
   clearReporterFor?: (fn: (sessionId: string, externalKey: string) => void) => void;
   clearNameResolver?: (r: SlackRefResolver) => void;
   // Slack message trigger source handler — routes app.message events to the automation dispatcher.

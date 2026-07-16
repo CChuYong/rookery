@@ -7,7 +7,7 @@ import type { SlackClient, SlackFile, ThreadTarget } from "./types.js";
 import { makeFileDownloader } from "./file-download.js";
 import { SlackInteractionBridge, INTERACTION_ACTION_RE } from "./interaction.js";
 import { redactOnReaction } from "./redaction.js";
-import { makeSlackThreadReader } from "./thread-reader.js";
+import { makeSlackReadOps, type SlackReadClient } from "./read-ops.js";
 import { makeSlackRefResolver } from "./name-resolver.js";
 import { WorkerSlackRelay } from "./worker-slack-relay.js";
 import { FLEET_CHANNEL } from "../core/events.js";
@@ -171,9 +171,10 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
     await deps.onMessage?.({ channel: m.channel, userId: m.user, text, ts: m.ts, threadTs: m.thread_ts ?? m.ts, team: context.teamId });
   });
 
-  // Register the thread-context reader (conversations.replies) on the daemon holder → used by the master's read_thread capability.
-  const threadReader = makeSlackThreadReader(app.client as unknown as Parameters<typeof makeSlackThreadReader>[0]);
-  deps.setThreadReader?.(threadReader);
+  // Register the slack read ops (replies/history/list/users.info/getPermalink) on the daemon holder →
+  // used by the master's slack read-tool capability (read_thread/read_channel/...).
+  const readOps = makeSlackReadOps(app.client as unknown as SlackReadClient);
+  deps.setSlackReadOps?.(readOps);
 
   // Register the channel/user name resolver (conversations.info/users.info) on the daemon holder → backs
   // automation.resolveSlackRefs (audit #51). Its cache lives for this connection only (reconnect → fresh resolver).
@@ -211,7 +212,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       // Owner-scoped release: a late stop() from a superseded connection must not null holders a newer
       // connection re-installed. Fall back to unconditional set*(null) only when clear* isn't wired (tests).
       if (deps.clearBridge) deps.clearBridge(bridge); else deps.setBridge?.(null);
-      if (deps.clearThreadReader) deps.clearThreadReader(threadReader); else deps.setThreadReader?.(null);
+      if (deps.clearSlackReadOps) deps.clearSlackReadOps(readOps); else deps.setSlackReadOps?.(null);
       if (deps.clearReporterFor) deps.clearReporterFor(reporterFor); else deps.setReporterFor?.(null);
       if (deps.clearNameResolver) deps.clearNameResolver(nameResolver); else deps.setNameResolver?.(null);
       unsubWorkerRelay();
