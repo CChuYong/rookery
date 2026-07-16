@@ -1,4 +1,6 @@
-import type { SlackReadOps, ThreadMsg, ChannelInfo, SlackUserInfo } from "../tools/slack-tools.js";
+import type { SlackReadOps, ThreadMsg, ThreadMsgFile, ChannelInfo, SlackUserInfo } from "../tools/slack-tools.js";
+import type { FileDownloader } from "./file-download.js";
+import { extractSlackText } from "./message-text.js";
 
 // A single message from a conversations.replies/history response (only the fields we need). Bot messages have a bot_id.
 export interface RawReply {
@@ -7,6 +9,9 @@ export interface RawReply {
   text?: string;
   ts?: string;
   subtype?: string;
+  blocks?: unknown[]; // Block Kit — melted into text via extractSlackText
+  attachments?: unknown[]; // legacy attachments — same
+  files?: { id?: string; name?: string; mimetype?: string }[];
 }
 interface RawChannel {
   id?: string;
@@ -23,13 +28,21 @@ interface RawUser {
 }
 
 // Slack replies/history → ThreadMsg[]. If bot_id is present, mark it as a bot message (for labeling).
+// Text is melted with extractSlackText (m.text + Block Kit blocks + legacy attachments, rich_text
+// deduped) so blocks-only bot cards are visible; attached files ride along as marker metadata.
 export function repliesToThreadMsgs(raw: RawReply[]): ThreadMsg[] {
-  return raw.map((m) => ({
-    user: m.user ?? m.bot_id ?? "?",
-    text: m.text ?? "",
-    isBot: !!m.bot_id,
-    ts: m.ts ?? "",
-  }));
+  return raw.map((m) => {
+    const files = (m.files ?? [])
+      .filter((f): f is { id: string; name?: string; mimetype?: string } => typeof f.id === "string")
+      .map((f): ThreadMsgFile => ({ id: f.id, name: f.name, mimetype: f.mimetype }));
+    return {
+      user: m.user ?? m.bot_id ?? "?",
+      text: extractSlackText({ text: m.text, blocks: m.blocks, attachments: m.attachments }),
+      isBot: !!m.bot_id,
+      ts: m.ts ?? "",
+      ...(files.length ? { files } : {}),
+    };
+  });
 }
 
 // Narrow shape of the bolt WebClient methods we call — kept small so tests can fake it without a real bolt App.
@@ -42,6 +55,7 @@ export interface SlackReadClient {
   };
   users: { info(a: { user: string }): Promise<{ user?: RawUser }> };
   chat: { getPermalink(a: { channel: string; message_ts: string }): Promise<{ permalink?: string }> };
+  files: { info(a: { file: string }): Promise<{ file?: { id?: string; name?: string; mimetype?: string; url_private_download?: string; url_private?: string } }> };
 }
 
 const LIST_PAGE = 200;
@@ -49,7 +63,9 @@ const LIST_MAX = 1000; // hard cap on member channels collected (runaway-workspa
 
 // The SlackReadOps implementation the daemon installs on its holder at connect time (src/slack/app.ts).
 // Errors are NOT caught here — the tool impls in src/tools/slack-tools.ts own the guidance-string mapping.
-export function makeSlackReadOps(client: SlackReadClient): SlackReadOps {
+// `download` is the same FileDownloader instance the incoming-message path uses (Bearer bot token →
+// ~/.rookery/slack-files/); absent (tests/misconfig) → downloadFile degrades to null.
+export function makeSlackReadOps(client: SlackReadClient, download?: FileDownloader): SlackReadOps {
   return {
     async readThread(channel, threadTs) {
       const res = await client.conversations.replies({ channel, ts: threadTs, limit: 100 });
@@ -88,6 +104,13 @@ export function makeSlackReadOps(client: SlackReadClient): SlackReadOps {
     async permalink(channel, ts) {
       const res = await client.chat.getPermalink({ channel, message_ts: ts });
       return res.permalink ?? null;
+    },
+    async downloadFile(fileId) {
+      if (!download) return null;
+      const res = await client.files.info({ file: fileId });
+      const f = res.file;
+      if (!f?.id) return null;
+      return download({ id: f.id, name: f.name, mimetype: f.mimetype, urlPrivateDownload: f.url_private_download ?? f.url_private });
     },
   };
 }

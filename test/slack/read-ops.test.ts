@@ -19,13 +19,36 @@ describe("repliesToThreadMsgs", () => {
     expect(out[0]).toMatchObject({ text: "", isBot: false, ts: "3.0" });
     expect(typeof out[0]!.user).toBe("string");
   });
+
+  it("melts Block Kit blocks/attachments into the text (blocks-only bot card becomes visible)", () => {
+    const out = repliesToThreadMsgs([
+      {
+        bot_id: "B1",
+        ts: "1.0",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "*Build failed* on main" } }],
+        attachments: [{ pretext: "CI alert", text: "job #42 exited 1" }],
+      },
+    ]);
+    expect(out[0]!.text).toContain("*Build failed* on main");
+    expect(out[0]!.text).toContain("job #42 exited 1");
+  });
+
+  it("maps message files to ThreadMsg.files (id required, name/mimetype through)", () => {
+    const out = repliesToThreadMsgs([
+      { user: "U1", text: "screenshot", ts: "1.0", files: [
+        { id: "F1", name: "shot.png", mimetype: "image/png" },
+        { name: "no-id.txt" },
+      ] },
+    ]);
+    expect(out[0]!.files).toEqual([{ id: "F1", name: "shot.png", mimetype: "image/png" }]);
+  });
 });
 
 // Minimal fake WebClient: records calls, returns scripted responses.
 function fakeClient(script: {
-  replies?: unknown; history?: unknown; list?: unknown[]; user?: unknown; permalink?: string;
+  replies?: unknown; history?: unknown; list?: unknown[]; user?: unknown; permalink?: string; fileInfo?: unknown;
 }): { client: SlackReadClient; calls: Record<string, unknown[]> } {
-  const calls: Record<string, unknown[]> = { replies: [], history: [], list: [], userInfo: [], permalink: [] };
+  const calls: Record<string, unknown[]> = { replies: [], history: [], list: [], userInfo: [], permalink: [], fileInfo: [] };
   const listPages = [...(script.list ?? [])];
   const client: SlackReadClient = {
     conversations: {
@@ -35,6 +58,7 @@ function fakeClient(script: {
     },
     users: { info: async (a) => { calls.userInfo!.push(a); return script.user as never; } },
     chat: { getPermalink: async (a) => { calls.permalink!.push(a); return { permalink: script.permalink } as never; } },
+    files: { info: async (a) => { calls.fileInfo!.push(a); return (script.fileInfo ?? {}) as never; } },
   };
   return { client, calls };
 }
@@ -91,5 +115,32 @@ describe("makeSlackReadOps", () => {
     const out = await makeSlackReadOps(client).permalink("C1", "1.0");
     expect(calls.permalink).toEqual([{ channel: "C1", message_ts: "1.0" }]);
     expect(out).toBe("https://x.slack.com/p1");
+  });
+
+  it("downloadFile resolves files.info then hands the SlackFile to the injected downloader", async () => {
+    const { client, calls } = fakeClient({ fileInfo: { file: {
+      id: "F1", name: "shot.png", mimetype: "image/png",
+      url_private_download: "https://files.slack.com/dl/F1", url_private: "https://files.slack.com/v/F1",
+    } } });
+    const downloaded: unknown[] = [];
+    const download = async (f: unknown) => { downloaded.push(f); return "/tmp/rookery/F1/shot.png"; };
+    const out = await makeSlackReadOps(client, download).downloadFile("F1");
+    expect(calls.fileInfo).toEqual([{ file: "F1" }]);
+    expect(downloaded).toEqual([{ id: "F1", name: "shot.png", mimetype: "image/png", urlPrivateDownload: "https://files.slack.com/dl/F1" }]);
+    expect(out).toBe("/tmp/rookery/F1/shot.png");
+  });
+
+  it("downloadFile falls back to url_private when url_private_download is absent", async () => {
+    const { client } = fakeClient({ fileInfo: { file: { id: "F2", url_private: "https://files.slack.com/v/F2" } } });
+    const download = async (f: { urlPrivateDownload?: string }) => f.urlPrivateDownload ?? null;
+    const out = await makeSlackReadOps(client, download).downloadFile("F2");
+    expect(out).toBe("https://files.slack.com/v/F2");
+  });
+
+  it("downloadFile returns null when files.info has no file or no downloader is injected", async () => {
+    const { client } = fakeClient({ fileInfo: {} });
+    expect(await makeSlackReadOps(client, async () => "/x").downloadFile("F404")).toBeNull();
+    const { client: c2 } = fakeClient({ fileInfo: { file: { id: "F1", url_private: "u" } } });
+    expect(await makeSlackReadOps(c2).downloadFile("F1")).toBeNull();
   });
 });
