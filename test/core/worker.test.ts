@@ -58,6 +58,44 @@ describe("Worker cross-provider handoff seed", () => {
 });
 
 describe("Worker", () => {
+  it("forwards workflow lifecycle to the optional sink without persisting duplicate transcript events", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/repo/a", label: "task" });
+    const workflowActivity = { launched: vi.fn(), taskUpdated: vi.fn(), stopWorker: vi.fn() };
+    const agent = new Worker({
+      id: "a1",
+      sessionId: "s1",
+      repoPath: "/repo/a",
+      label: "task",
+      deps: {
+        repos,
+        bus: new EventBus(),
+        model: "m",
+        workflowActivity,
+        backend: fakeBackend([
+          { type: "system", text: "init", sessionId: "sdk-1" },
+          { type: "workflow_launch", id: "tool-1", taskId: "task-1", runId: "run-1", workflowName: "audit", transcriptDir: "/tmp/sdk-1/subagents/workflows/run-1" },
+          { type: "task_started", id: "task-1", taskType: "local_workflow", workflowName: "audit" },
+          { type: "task_progress", id: "task-1", summary: "reviewing", lastToolName: "Read" },
+          { type: "task_notification", id: "task-1", status: "completed", summary: "done" },
+          { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+        ]),
+      },
+    });
+
+    agent.start("go");
+    await agent.waitUntilSettled();
+
+    expect(workflowActivity.launched).toHaveBeenCalledWith(
+      { sessionId: "s1", workerId: "a1", sdkSessionId: "sdk-1" },
+      expect.objectContaining({ taskId: "task-1", toolUseId: "tool-1" }),
+    );
+    expect(workflowActivity.taskUpdated).toHaveBeenCalledTimes(3);
+    expect(workflowActivity.stopWorker).toHaveBeenCalledTimes(1);
+    expect(repos.listWorkerEvents("a1").some((event) => event.type.includes("workflow"))).toBe(false);
+  });
+
   it("runs, persists events, emits to bus, and settles to stopped on natural stream end", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });

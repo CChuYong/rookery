@@ -10,12 +10,12 @@ export interface NestedPanel {
 
 // Renders the nested agents a worker spawned via Task as a read-only list of panels (live only).
 // The outer wrapper/resize/scroll is provided by the host (the Worker segment in RightSidebar).
-export function NestedAgents({ panels }: { panels: NestedPanel[] }): JSX.Element {
+export function NestedAgents({ panels, title }: { panels: NestedPanel[]; title?: string }): JSX.Element {
   const t = useT();
   return (
     <div className="flex flex-col gap-2 p-2">
       <div className="eyebrow px-1 pt-1 eyebrow-sm font-medium uppercase text-muted">
-        {t("nestedAgents.title")} · {panels.length}
+        {title ?? t("nestedAgents.title")} · {panels.length}
       </div>
       {panels.map((p) => (
         <div key={p.id} className="rise-in flex max-h-[45vh] min-h-[120px] flex-col overflow-hidden rounded-lg border border-line bg-ink/40">

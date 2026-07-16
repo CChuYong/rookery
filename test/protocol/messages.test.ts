@@ -210,6 +210,9 @@ describe("protocol v2 client messages", () => {
     expect(parseClientMessage(JSON.stringify({ type: "fleet.subscribe" }))).toMatchObject({ type: "fleet.subscribe" });
     expect(parseClientMessage(JSON.stringify({ type: "repos.register", reqId: "r4", name: "p", path: "/p", description: "d" }))).toMatchObject({ type: "repos.register", name: "p" });
     expect(parseClientMessage(JSON.stringify({ type: "session.history", reqId: "r5", sessionId: "s1" }))).toMatchObject({ type: "session.history", sessionId: "s1" });
+    expect(parseClientMessage(JSON.stringify({ type: "workflow.list", reqId: "r6", workerId: "w1" }))).toMatchObject({ type: "workflow.list", workerId: "w1" });
+    expect(parseClientMessage(JSON.stringify({ type: "workflow.agent.history", reqId: "r7", workerId: "w1", taskId: "task-1", agentId: "a1" }))).toMatchObject({ type: "workflow.agent.history", taskId: "task-1", agentId: "a1" });
+    expect(() => parseClientMessage(JSON.stringify({ type: "workflow.agent.history", reqId: "r8", workerId: "w1", taskId: "task-1" }))).toThrow();
   });
   it("parses worker.interrupt (id required, reqId optional)", () => {
     expect(parseClientMessage(JSON.stringify({ type: "worker.interrupt", id: "a1" }))).toMatchObject({ type: "worker.interrupt", id: "a1" });

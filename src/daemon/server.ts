@@ -80,6 +80,8 @@ import { startWorkerTriggerSource } from "../core/worker-trigger-source.js";
 import type { AutomationProvider } from "./connection.js";
 import type { AutomationInput } from "../persistence/repositories.js";
 import { SideConversationManager, type SideSource } from "../core/side-conversation.js";
+import { realClaudeWorkflowFiles } from "./claude-workflow-files.js";
+import { ClaudeWorkflowRegistry } from "./claude-workflow-registry.js";
 
 export interface DaemonHandle {
   port: number;
@@ -257,6 +259,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     removeCodexHome(config.home, id);
   };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
+  const workflows = new ClaudeWorkflowRegistry({ files: realClaudeWorkflowFiles, bus });
   const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; costBudgetUsd?: number; provider?: string; handoffSeed?: string; handoffFromProvider?: string }): WorkerLike =>
     new Worker({
       id: o.id,
@@ -275,6 +278,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
         managedCapabilities: () => capabilityService.resolveManaged({ kind: "worker", id: o.id }),
         capabilityRuntime: capabilityRuntimeState,
+        workflowActivity: (o.provider ?? "claude") === "claude" ? workflows : undefined,
       },
       sdkSessionId: o.sdkSessionId ?? null,
       handoffSeed: o.handoffSeed, // cross-provider fork: seed the first turn's backend text
@@ -675,7 +679,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides, capabilityService);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides, capabilityService, workflows);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });
@@ -724,6 +728,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // its idle watchdog until the drain times out, and its late persistence then races db.close(). A Claude
     // master turn (in-process SDK MCP) doesn't need the http server, so this only helps.
     await fleet.close(5000);
+    await workflows.close();
     await sessions.drain(5000);
     capabilityRepoWatcher.close();
     // Drain done → tear down the http server (and with it the now-idle MCP bridge), then close the DB last.

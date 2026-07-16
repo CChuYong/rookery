@@ -26,6 +26,7 @@ import type { ModelInfo } from "../core/models-provider.js";
 import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
 import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
+import type { WorkflowActivityProvider } from "../core/workflow-activity.js";
 import type { SideSourceKind } from "../core/side-conversation.js";
 import type {
   CapabilityBinding,
@@ -165,6 +166,7 @@ export class Connection {
     private readonly externalMcp?: ExternalMcpController,
     private readonly sides?: SideConversationController,
     private readonly capabilities?: CapabilityProvider,
+    private readonly workflows?: WorkflowActivityProvider,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -476,6 +478,16 @@ export class Connection {
       }
       case "worker.history": {
         this.reply({ type: "worker.history.result", reqId: msg.reqId, id: msg.id, events: this.fleet.transcript(msg.id) });
+        return;
+      }
+      case "workflow.list": {
+        this.reply({ type: "workflow.list.result", reqId: msg.reqId, workerId: msg.workerId, runs: this.workflows?.list(msg.workerId) ?? [] });
+        return;
+      }
+      case "workflow.agent.history": {
+        if (!this.workflows) throw new Error("workflow activity is unavailable");
+        const events = await this.workflows.agentHistory(msg.workerId, msg.taskId, msg.agentId);
+        this.reply({ type: "workflow.agent.history.result", reqId: msg.reqId, workerId: msg.workerId, taskId: msg.taskId, agentId: msg.agentId, events });
         return;
       }
       case "worker.fork": {

@@ -437,3 +437,80 @@ describe("ClaudeBackend — background_task translation", () => {
     expect("terminalReason" in (events2.find((e) => e.kind === "turn_end") as object)).toBe(false);
   });
 });
+
+describe("ClaudeBackend — Dynamic Workflow activity", () => {
+  it("emits the generic tool result before a structured workflow launch", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      {
+        type: "workflow_launch",
+        id: "tool-wf",
+        taskId: "task-wf",
+        runId: "wf-run-1",
+        workflowName: "logic-audit",
+        summary: "Audit core logic",
+        transcriptDir: "/claude/sdk-1/subagents/workflows/wf-run-1",
+        scriptPath: "/claude/sdk-1/workflows/scripts/logic-audit.js",
+      },
+    ]));
+    const events = await collect(backend.startTurn("go", baseOpts()));
+    expect(events).toEqual([
+      { kind: "tool_result", toolUseId: "tool-wf", isError: false, content: "Workflow launched", parentToolUseId: null },
+      {
+        kind: "workflow_launched",
+        launch: {
+          taskId: "task-wf",
+          toolUseId: "tool-wf",
+          runId: "wf-run-1",
+          workflowName: "logic-audit",
+          summary: "Audit core logic",
+          transcriptDir: "/claude/sdk-1/subagents/workflows/wf-run-1",
+          scriptPath: "/claude/sdk-1/workflows/scripts/logic-audit.js",
+        },
+      },
+    ]);
+  });
+
+  it("maps only known workflow progress and preserves terminal outcome", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      { type: "task_started", id: "shell-1", taskType: "local_bash" },
+      { type: "task_progress", id: "shell-1", summary: "not a workflow" },
+      { type: "task_started", id: "task-wf", taskType: "local_workflow", toolUseId: "tool-wf", workflowName: "logic-audit", description: "Audit" },
+      {
+        type: "task_progress",
+        id: "task-wf",
+        description: "Reviewing",
+        summary: "Checking persistence",
+        lastToolName: "Read",
+        workflowProgress: [
+          { type: "workflow_phase", index: 1, title: "Recon" },
+          { type: "workflow_agent", agentId: "a1", label: "code:core", phaseIndex: 1, phaseTitle: "Recon", model: "claude-opus-4-8", promptPreview: "do not forward" },
+        ],
+        usage: { total_tokens: 50, tool_uses: 3, duration_ms: 1200 },
+      },
+      { type: "task_updated", id: "task-wf", status: "failed" },
+      { type: "task_notification", id: "task-wf", status: "failed", summary: "Agent failed", usage: { total_tokens: 60, tool_uses: 4, duration_ms: 1500 } },
+      { type: "task_progress", id: "task-wf", summary: "late heartbeat" },
+    ]));
+    const events = await collect(backend.startTurn("go", baseOpts()));
+    expect(events.filter((event) => event.kind === "workflow_task")).toEqual([
+      { kind: "workflow_task", update: { taskId: "task-wf", phase: "started", workflowName: "logic-audit", description: "Audit" } },
+      {
+        kind: "workflow_task",
+        update: {
+          taskId: "task-wf",
+          phase: "progress",
+          description: "Reviewing",
+          summary: "Checking persistence",
+          lastToolName: "Read",
+          usage: { totalTokens: 50, toolUses: 3, durationMs: 1200 },
+          progress: {
+            phases: [{ index: 1, title: "Recon" }],
+            agents: [{ agentId: "a1", label: "code:core", phaseIndex: 1, phaseTitle: "Recon", model: "claude-opus-4-8" }],
+          },
+        },
+      },
+      { kind: "workflow_task", update: { taskId: "task-wf", phase: "settled", outcome: "failed" } },
+      { kind: "workflow_task", update: { taskId: "task-wf", phase: "settled", summary: "Agent failed", usage: { totalTokens: 60, toolUses: 4, durationMs: 1500 }, outcome: "failed" } },
+    ]);
+  });
+});

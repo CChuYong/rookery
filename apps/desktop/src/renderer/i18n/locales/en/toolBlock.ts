@@ -5,6 +5,7 @@ export default {
   "toolBlock.goToWorkerView": "Go to this worker view",
   "toolBlock.viewWorker": "View worker",
   "toolBlock.inProgress": "running",
+  "toolBlock.background": "background",
   "toolBlock.complete": "done",
   "toolBlock.error": "error",
 } satisfies Catalog;

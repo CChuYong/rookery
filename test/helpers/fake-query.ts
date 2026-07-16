@@ -8,18 +8,19 @@ export type FakeStep =
   | { type: "assistant"; text: string; parentToolUseId?: string; parent_tool_use_id?: string | null }
   // Text block carried in a user-type message — not typed by a human but text injected by the SDK (skill body/context). For bug reproduction.
   | { type: "user_text"; text: string; parentToolUseId?: string }
-  | { type: "system"; text: string }
+  | { type: "system"; text: string; sessionId?: string }
   // stream_event(thinking_delta): a thinking-summary delta. Streams live and is persisted coalesced at step boundaries.
   | { type: "thinking"; text: string }
   // stream_event(message_start): per-request usage for a single model call. The source for computing context %.
   | { type: "message_start"; usage: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }
   | { type: "tool_use"; id: string; name: string; input?: unknown; parentToolUseId?: string }
   | { type: "tool_result"; id: string; isError?: boolean; content?: string; parentToolUseId?: string }
+  | { type: "workflow_launch"; id: string; taskId: string; runId: string; workflowName: string; summary?: string; transcriptDir: string; scriptPath?: string }
   // Background-task lifecycle frames (system subtype task_* — live-verified shapes, probe-turn-lifecycle.mjs 2026-07-11).
-  | { type: "task_started"; id: string; taskType?: string }
+  | { type: "task_started"; id: string; taskType?: string; toolUseId?: string; description?: string; workflowName?: string }
   | { type: "task_updated"; id: string; status: string } // patch.status: completed/failed/killed settle; running/paused ignored
-  | { type: "task_notification"; id: string; status?: string }
-  | { type: "task_progress"; id: string }
+  | { type: "task_notification"; id: string; status?: string; summary?: string; outputFile?: string; usage?: { total_tokens: number; tool_uses: number; duration_ms: number } }
+  | { type: "task_progress"; id: string; description?: string; summary?: string; lastToolName?: string; workflowProgress?: unknown; usage?: { total_tokens: number; tool_uses: number; duration_ms: number } }
   // background_tasks_changed level frame (SDK ≥0.3.203): the full live set, REPLACE semantics.
   | { type: "bg_tasks"; ids: Array<{ id: string; taskType?: string }> }
   | {
@@ -41,7 +42,7 @@ function stepToMessage(step: FakeStep): unknown {
   } else if (step.type === "user_text") {
     return { type: "user", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "user", content: [{ type: "text", text: step.text }] } };
   } else if (step.type === "system") {
-    return { type: "system", subtype: "init", text: step.text };
+    return { type: "system", subtype: "init", text: step.text, ...(step.sessionId ? { session_id: step.sessionId } : {}) };
   } else if (step.type === "thinking") {
     return { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: step.text } } };
   } else if (step.type === "message_start") {
@@ -50,14 +51,30 @@ function stepToMessage(step: FakeStep): unknown {
     return { type: "assistant", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "assistant", content: [{ type: "tool_use", id: step.id, name: step.name, input: step.input ?? {} }] } };
   } else if (step.type === "tool_result") {
     return { type: "user", parent_tool_use_id: step.parentToolUseId ?? null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.id, is_error: step.isError ?? false, ...(step.content !== undefined ? { content: step.content } : {}) }] } };
+  } else if (step.type === "workflow_launch") {
+    return {
+      type: "user",
+      parent_tool_use_id: null,
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.id, is_error: false, content: "Workflow launched" }] },
+      tool_use_result: {
+        status: "async_launched",
+        taskId: step.taskId,
+        taskType: "local_workflow",
+        workflowName: step.workflowName,
+        runId: step.runId,
+        summary: step.summary ?? "",
+        transcriptDir: step.transcriptDir,
+        ...(step.scriptPath ? { scriptPath: step.scriptPath } : {}),
+      },
+    };
   } else if (step.type === "task_started") {
-    return { type: "system", subtype: "task_started", task_id: step.id, ...(step.taskType ? { task_type: step.taskType } : {}) };
+    return { type: "system", subtype: "task_started", task_id: step.id, ...(step.taskType ? { task_type: step.taskType } : {}), ...(step.toolUseId ? { tool_use_id: step.toolUseId } : {}), ...(step.description ? { description: step.description } : {}), ...(step.workflowName ? { workflow_name: step.workflowName } : {}) };
   } else if (step.type === "task_updated") {
     return { type: "system", subtype: "task_updated", task_id: step.id, patch: { status: step.status } };
   } else if (step.type === "task_notification") {
-    return { type: "system", subtype: "task_notification", task_id: step.id, status: step.status ?? "completed" };
+    return { type: "system", subtype: "task_notification", task_id: step.id, status: step.status ?? "completed", summary: step.summary ?? "", output_file: step.outputFile ?? "", ...(step.usage ? { usage: step.usage } : {}) };
   } else if (step.type === "task_progress") {
-    return { type: "system", subtype: "task_progress", task_id: step.id };
+    return { type: "system", subtype: "task_progress", task_id: step.id, description: step.description ?? "", ...(step.summary ? { summary: step.summary } : {}), ...(step.lastToolName ? { last_tool_name: step.lastToolName } : {}), ...(step.workflowProgress !== undefined ? { workflow_progress: step.workflowProgress } : {}), usage: step.usage ?? { total_tokens: 0, tool_uses: 0, duration_ms: 0 } };
   } else if (step.type === "bg_tasks") {
     return { type: "system", subtype: "background_tasks_changed", tasks: step.ids.map((t) => ({ task_id: t.id, task_type: t.taskType ?? "task", description: "" })) };
   }

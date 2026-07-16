@@ -12,6 +12,7 @@ export interface WorkspaceRender {
   terminal: () => ReactNode;
   files: () => ReactNode;
   git: () => ReactNode;
+  // Persisted name kept for saved-layout compatibility; this now hosts Activity (workflows + nested agents).
   nested: () => ReactNode;
 }
 

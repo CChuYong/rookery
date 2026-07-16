@@ -115,3 +115,33 @@ describe("ToolBlock worker chip on other fleet cards (audit #47)", () => {
     expect(screen.queryByRole("button", { name: /워커 보기/ })).toBeNull();
   });
 });
+
+describe("ToolBlock Dynamic Workflow state", () => {
+  const workflow = {
+    taskId: "task-1",
+    toolUseId: "tool-1",
+    workflowName: "logic-audit",
+    summary: "Audit core logic",
+    status: "running" as const,
+    visibility: "live" as const,
+    startedAt: 1,
+    lastActivityAt: 2,
+    counts: { started: 12, active: 6, completed: 6, stopped: 0 },
+  };
+
+  it("shows the real background state and exact workflow counts", () => {
+    render(<ToolBlock name="Workflow" status="background" input='{"name":"logic-audit"}' result="Workflow launched" workflow={workflow} />);
+    expect(screen.getByText("logic-audit")).toBeInTheDocument();
+    expect(screen.getByText("활성 6 · 완료 6 · 시작 12")).toBeInTheDocument();
+    expect(screen.getByText("실행 중")).toBeInTheDocument();
+  });
+
+  it("shows a failed terminal outcome and keeps raw launch details behind disclosure", () => {
+    render(<ToolBlock name="Workflow" status="complete" ok={false} input='{"name":"logic-audit"}' result="Workflow launched" workflow={{ ...workflow, status: "failed" }} />);
+    expect(screen.getByText("실패")).toBeInTheDocument();
+    expect(screen.queryByText("result")).toBeNull();
+    fireEvent.click(screen.getByText("logic-audit"));
+    expect(screen.getByText("result")).toBeInTheDocument();
+    expect(screen.getByText("Workflow launched")).toBeInTheDocument();
+  });
+});

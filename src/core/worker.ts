@@ -7,6 +7,7 @@ import { truncateBytes } from "./truncate.js";
 import type { SlashCommandInfo } from "./agent-backend.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 import type { CapabilityRuntimeReporter, CapabilityRuntimeTarget } from "./capabilities/runtime-state.js";
+import type { WorkflowActivitySink, WorkflowOwner } from "./workflow-activity.js";
 
 // Instruction injected into every worker turn so it treats fenced <untrusted-...> content as data, not instructions.
 export const WORKER_FENCE_INSTRUCTION =
@@ -50,6 +51,7 @@ export interface WorkerDeps {
   // later desired changes are surfaced as pending-reload until an explicit immediate/when-idle reload.
   managedCapabilities?: () => ResolvedAgentCapabilities;
   capabilityRuntime?: CapabilityRuntimeReporter;
+  workflowActivity?: WorkflowActivitySink;
 }
 
 interface WorkerOpts {
@@ -118,6 +120,10 @@ export class Worker {
     this.handoffSeed = opts.handoffSeed;
     this.currentModel = opts.deps.model;
     this.currentPermissionMode = opts.deps.permissionMode ?? "bypassPermissions";
+  }
+
+  private workflowOwner(): WorkflowOwner {
+    return { sessionId: this.opts.sessionId, workerId: this.opts.id, sdkSessionId: this.sdkSessionId };
   }
 
   // One-shot: prepend the cross-provider handoff seed to the FIRST turn's backend-bound text (NOT the recorded/
@@ -399,6 +405,7 @@ export class Worker {
     if (status === "idle") this.beginPendingCapabilityReload();
     if ((status === "stopped" || status === "done" || status === "error") && !this.lifetimeSettled) {
       this.lifetimeSettled = true;
+      this.opts.deps.workflowActivity?.stopWorker(this.opts.id);
       this.resolveLifetime();
       const pending = this.pendingCapabilityReload;
       if (pending && !this.reloadingCapabilities) {
@@ -567,6 +574,10 @@ export class Worker {
           this.record({ kind: "system", text: ev.text });
         } else if (ev.kind === "tool_progress") {
           this.emit({ kind: "tool_progress", id: ev.toolUseId, elapsedSec: ev.elapsedSec }); // live only (no persistence)
+        } else if (ev.kind === "workflow_launched") {
+          this.opts.deps.workflowActivity?.launched(this.workflowOwner(), ev.launch);
+        } else if (ev.kind === "workflow_task") {
+          this.opts.deps.workflowActivity?.taskUpdated(this.workflowOwner(), ev.update);
         } else if (ev.kind === "background_task") {
           // Harness-tracked background task lifecycle (claude only). No transcript record: the SDK's own
           // "Command running in background with ID: …" tool_result already documents it there. The Map
