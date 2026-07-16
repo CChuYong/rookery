@@ -30,7 +30,7 @@ function errorText(t: string) {
 
 // Format a worker transcript for re-injection into the master's context. CRITICAL: fill the byte budget from the NEWEST
 // event backward (then restore chronological order) so an overflowing transcript surfaces the worker's CURRENT state,
-// not ancient history — the reverse of a leading byte-truncation, and matching the newest-first fill in slack-thread-tools.
+// not ancient history — the reverse of a leading byte-truncation, and matching the newest-first fill in slack-tools.
 export function formatTranscript(events: Array<{ seq: number; type: string; payload: unknown }>, maxBytes: number): string {
   if (events.length === 0) return "No events.";
   const lines = events.map((e) => `#${e.seq} ${e.type}: ${JSON.stringify(e.payload)}`);
