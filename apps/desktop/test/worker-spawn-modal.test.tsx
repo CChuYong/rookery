@@ -41,6 +41,17 @@ async function openGithubResults() {
 }
 
 describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
+  it("Escape closes only the source-results popup and leaves the spawn dialog mounted", async () => {
+    const { onClose } = renderModal();
+    const input = await openGithubResults();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("ArrowDown highlights the first result and Enter selects it (same handler as a result's onClick)", async () => {
     renderModal();
     const input = await openGithubResults();
@@ -239,21 +250,13 @@ describe("WorkerSpawnModal cost budget (cost budget guard Task 3)", () => {
     expect(onSpawn.mock.calls[0]![8]).toBe(5);
   });
 
-  it("non-numeric, zero, or negative cost budget → onSpawn's trailing arg is undefined", () => {
+  it.each(["abc", "0", "-3"])("invalid cost budget %s → onSpawn's trailing arg is undefined", (value) => {
     const { onSpawn } = renderModal();
     const input = screen.getByTitle("비용 예산 (USD, 이 워커)");
 
-    fireEvent.change(input, { target: { value: "abc" } });
+    fireEvent.change(input, { target: { value } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "t1" } });
     fireEvent.click(screen.getByText("spawn"));
     expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
-
-    fireEvent.change(input, { target: { value: "0" } });
-    fireEvent.click(screen.getByText("spawn"));
-    expect(onSpawn.mock.calls[1]![8]).toBeUndefined();
-
-    fireEvent.change(input, { target: { value: "-3" } });
-    fireEvent.click(screen.getByText("spawn"));
-    expect(onSpawn.mock.calls[2]![8]).toBeUndefined();
   });
 });

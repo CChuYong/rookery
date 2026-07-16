@@ -35,7 +35,7 @@ export function ConfirmDialog({
   const panelRef = useRef<HTMLDivElement>(null);
   const { closing, dismiss } = useDismissTransition(onCancel);
   const confirmAndClose = (): void => { onConfirm(); dismiss(); };
-  useModalKeys(dismiss, confirmAndClose);
+  useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: confirmAndClose });
   useFocusTrap(panelRef);
   return createPortal(
     <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>

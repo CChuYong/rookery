@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, AppWindow, Folder, SquareTerminal, Code, Check } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
@@ -7,6 +8,20 @@ import { toast } from "../store/toasts.js";
 import type { DetectedApp } from "../types/rookery.js";
 
 const LS_KEY = "rookery.openInApp"; // id of the last selected app
+const MENU_MAX_HEIGHT = 320;
+const MENU_GAP = 4;
+const VIEWPORT_GUTTER = 8;
+
+export type OpenInMenuPosition = { top: number; right: number; maxHeight: number };
+
+export function openInMenuPosition(rect: Pick<DOMRect, "bottom" | "right">, viewport: { width: number; height: number }): OpenInMenuPosition {
+  const top = rect.bottom + MENU_GAP;
+  return {
+    top,
+    right: Math.max(VIEWPORT_GUTTER, viewport.width - rect.right),
+    maxHeight: Math.max(0, Math.min(MENU_MAX_HEIGHT, viewport.height - top - VIEWPORT_GUTTER)),
+  };
+}
 
 // Per-kind fallback icon (when the app icon dataURL is missing). The real app icon comes from main's app.getFileIcon.
 function FallbackIcon({ kind, size = 15 }: { kind: DetectedApp["kind"]; size?: number }): JSX.Element {
@@ -29,7 +44,19 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
   const [open, setOpen] = useState(false);
   const [apps, setApps] = useState<DetectedApp[] | null>(null);
   const [selId, setSelId] = useState<string | null>(() => localStorage.getItem(LS_KEY));
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState<OpenInMenuPosition>({ top: 0, right: VIEWPORT_GUTTER, maxHeight: MENU_MAX_HEIGHT });
+
+  const updateMenuPosition = (): void => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPosition(openInMenuPosition(rect, { width: window.innerWidth, height: window.innerHeight }));
+  };
+  const toggleMenu = (): void => {
+    if (!open) updateMenuPosition();
+    setOpen((value) => !value);
+  };
 
   // Detect the app list once on mount (so the left button icon renders right away). Install state rarely changes.
   useEffect(() => { void window.rookery.apps.list().then(setApps).catch(() => setApps([])); }, []);
@@ -37,8 +64,13 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
   useEffect(() => {
     if (!open) return;
     const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    const reposition = (): void => updateMenuPosition();
     window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("keydown", esc);
+      window.removeEventListener("resize", reposition);
+    };
   }, [open]);
   // Focus the first app on open (audit #60 — reuses ContextMenu's precedent). `apps` is already fetched on mount
   // in the common case, but this also covers opening before that fetch resolves.
@@ -88,7 +120,8 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
           {selected ? <AppGlyph app={selected} size={16} /> : <AppWindow size={14} />}
         </button>
         <button
-          onClick={() => setOpen((v) => !v)}
+          ref={triggerRef}
+          onClick={toggleMenu}
           aria-label={t("openInAppMenu.selectOtherApp")}
           aria-haspopup="menu"
           aria-expanded={open}
@@ -100,10 +133,16 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
           <ChevronDown size={11} />
         </button>
       </div>
-      {open && (
+      {open && createPortal(
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 top-7 z-40 max-h-80 w-52 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl">
+          <div
+            ref={menuRef}
+            onKeyDown={onMenuKeyDown}
+            role="menu"
+            style={menuPosition}
+            className="menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl"
+          >
             {apps === null && <div className="px-2 py-1.5 text-[12px] text-muted">{t("openInAppMenu.detectingApps")}</div>}
             {apps?.map((a) => (
               <button
@@ -119,7 +158,8 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );

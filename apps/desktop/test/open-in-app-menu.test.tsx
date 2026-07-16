@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { OpenInAppMenu } from "../src/renderer/components/OpenInAppMenu.js";
+import { OpenInAppMenu, openInMenuPosition } from "../src/renderer/components/OpenInAppMenu.js";
 import { useToastStore } from "../src/renderer/store/toasts.js";
 
 function stub(over: Record<string, unknown> = {}) {
@@ -51,6 +51,23 @@ describe("OpenInAppMenu (split button)", () => {
     expect(screen.getByText("Finder")).toBeInTheDocument();
   });
 
+  it("portals the dropdown outside the clipping workspace header and positions it below the trigger", async () => {
+    const { container } = render(<div className="workspace-header"><OpenInAppMenu /></div>);
+    const trigger = screen.getByLabelText("다른 앱 선택");
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      x: 780, y: 20, left: 780, top: 20, right: 900, bottom: 44, width: 120, height: 24,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(trigger);
+    const menu = await screen.findByRole("menu");
+
+    expect(menu.parentElement).toBe(document.body);
+    expect(container).not.toContainElement(menu);
+    expect(menu).toHaveClass("fixed");
+    expect(menu).toHaveStyle({ top: "48px", right: `${window.innerWidth - 900}px` });
+  });
+
   it("picking from the dropdown persists the choice to localStorage and launches it", async () => {
     const { apps } = stub();
     render(<OpenInAppMenu cwd="/sess/cwd" />);
@@ -75,6 +92,17 @@ describe("OpenInAppMenu (split button)", () => {
     void apps;
     const { container } = render(<OpenInAppMenu />);
     await waitFor(() => expect(container.querySelector("button")).toBeNull());
+  });
+});
+
+describe("openInMenuPosition", () => {
+  it("keeps the menu inside the viewport gutter and caps its available height", () => {
+    expect(openInMenuPosition({ bottom: 44, right: 1190 }, { width: 1200, height: 180 })).toEqual({
+      top: 48,
+      right: 10,
+      maxHeight: 124,
+    });
+    expect(openInMenuPosition({ bottom: 44, right: 1300 }, { width: 1200, height: 800 }).right).toBe(8);
   });
 });
 

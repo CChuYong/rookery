@@ -47,12 +47,15 @@ describe("ForkDialog", () => {
     expect(screen.getByRole("button", { name: /fork|포크/i })).toBeDisabled();
   });
 
-  it("Esc triggers onClose", async () => {
-    // onClose is deferred behind the exit animation (useDismissTransition), so poll for it.
+  it("keeps the selected fork options open on Escape and closes from Cancel", async () => {
     useStore.getState().setCodexAuthStatus({ method: "chatgpt", ready: true, hint: null });
     const onClose = vi.fn();
     render(<ForkDialog kind="master" sourceProvider="claude" onFork={() => {}} onClose={onClose} />);
     fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });

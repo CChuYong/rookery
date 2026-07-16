@@ -36,7 +36,7 @@ export interface AttentionInputs {
   active: { sessionId: string | null; workerId: string | null; overlay: string | null };
 }
 
-const WORKER_FAILURE = new Set(["error", "failed", "orphaned"]);
+const WORKER_FAILURE = new Set(["error", "failed"]);
 
 export function buildAttentionItems(
   inputs: AttentionInputs,
@@ -94,6 +94,9 @@ export function buildAttentionItems(
     if (!unread || failedWorkers.has(workerId)) continue;
     const w = inputs.fleet[workerId];
     if (!w) continue;
+    // Orphaned is recovery metadata, not actionable attention. A stale unread bit from an earlier
+    // idle transition must not re-introduce it as a review item after excluding it from failures.
+    if (w.status === "orphaned") continue;
     if (viewingWorker(workerId)) continue;
     items.push({ key: `wrev:${workerId}`, tier: 2, kind: "worker-review", label: w.label, detail: w.status, nav: { workerId }, dismissible: true });
   }

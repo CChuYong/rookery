@@ -24,7 +24,7 @@ export function WorkerSpawnModal(p: {
   branches?: string[]; // base branch candidates (picker hidden if absent)
   integrations?: IntegrationsStatus; // only connected integrations enable GitHub/Linear modes
   searchSource?: (provider: SourceProviderId, query: string) => Promise<SourceItem[]>; // search issues/tickets
-  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => void;
+  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => void | Promise<void>;
   onClose: () => void;
 }): JSX.Element {
   const t = useT();
@@ -52,6 +52,8 @@ export function WorkerSpawnModal(p: {
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<SourceItem | null>(null);
   const [focused, setFocused] = useState(false); // show results dropdown only when the search box is focused
+  const [spawning, setSpawning] = useState(false);
+  const spawningRef = useRef(false);
   // -1 = nothing highlighted yet, so the first ArrowDown press lands cleanly on index 0.
   const [highlight, setHighlight] = useState(-1);
   const seq = useRef(0);
@@ -106,25 +108,38 @@ export function WorkerSpawnModal(p: {
   // never renders blank and spawn() never submits a level the model lacks (finding [23]). The raw `effort`
   // state keeps the user's last explicit choice untouched (so switching provider back to claude restores it).
   const currentEffort = effectiveEffort(provider, effortModel, effort, codexModels);
-  const spawn = () => {
+  const spawn = async (): Promise<void> => {
+    if (spawningRef.current) return;
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
     const cb = costBudget.trim() ? Number(costBudget) : undefined;
     const costBudgetUsd = cb != null && Number.isFinite(cb) && cb > 0 ? cb : undefined;
-    p.onSpawn(
-      task.trim(),
-      label.trim(),
-      spawnModel,
-      effortSupported(effectiveModel) ? currentEffort : undefined,
-      base || undefined,
-      selected ? { key: selected.identifier, url: selected.url } : undefined,
-      permissionMode,
-      provider === "claude" ? undefined : provider, // wire-minimal: absent means claude
-      costBudgetUsd,
-    );
-    dismiss();
+    spawningRef.current = true;
+    setSpawning(true);
+    try {
+      const result = p.onSpawn(
+        task.trim(),
+        label.trim(),
+        spawnModel,
+        effortSupported(effectiveModel) ? currentEffort : undefined,
+        base || undefined,
+        selected ? { key: selected.identifier, url: selected.url } : undefined,
+        permissionMode,
+        provider === "claude" ? undefined : provider, // wire-minimal: absent means claude
+        costBudgetUsd,
+      );
+      // Preserve the synchronous callback behavior used by local/test callers while awaiting the real
+      // renderer request contract. Avoiding an unconditional `await undefined` also keeps state updates in
+      // the originating click batch for synchronous consumers.
+      if (result) await result;
+      dismiss();
+    } catch {
+      // App owns the localized error toast. Keep this modal and every local draft field mounted for retry.
+      spawningRef.current = false;
+      setSpawning(false);
+    }
   };
-  useModalKeys(dismiss, spawn);
+  useModalKeys({ escape: "ignore", onSubmit: spawn });
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
 
@@ -307,8 +322,8 @@ export function WorkerSpawnModal(p: {
           <p className="mt-2 text-[11.5px] text-muted">{t("workerSpawnModal.footerNote")}</p>
         </div>
         <div data-dialog-footer className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-4">
-          <Button variant="outline" onClick={dismiss}>{t("common.cancel")}</Button>
-          <Button variant="primary" onClick={spawn}>{t("workerSpawnModal.spawn")}</Button>
+          <Button variant="outline" disabled={spawning} onClick={dismiss}>{t("common.cancel")}</Button>
+          <Button variant="primary" loading={spawning} onClick={() => void spawn()}>{t("workerSpawnModal.spawn")}</Button>
         </div>
       </div>
     </div>

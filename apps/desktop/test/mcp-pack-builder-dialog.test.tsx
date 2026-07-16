@@ -64,7 +64,7 @@ describe("McpPackBuilderDialog", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it("shows localized validation, preserves the draft after rejection, and closes on Escape", async () => {
+  it("shows localized validation, preserves the draft after rejection and Escape, and closes from Cancel", async () => {
     const create = vi.fn().mockRejectedValue(new Error("daemon unavailable"));
     const onClose = vi.fn();
     render(<McpPackBuilderDialog
@@ -88,7 +88,11 @@ describe("McpPackBuilderDialog", () => {
     expect(screen.getByLabelText("Pack 이름")).toHaveValue("Docs");
 
     fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Pack 이름")).toHaveValue("Docs");
+
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it("can remove a second server but always keeps at least one", () => {

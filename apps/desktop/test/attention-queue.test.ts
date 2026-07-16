@@ -84,13 +84,22 @@ describe("buildAttentionItems", () => {
       inputs({
         logsBySession: { s1: [interaction("r1")] },
         liveInteractionIds: new Set(["r1"]),
-        fleet: { w1: worker("w1", "orphaned") },
+        fleet: { w1: worker("w1", "failed") },
         attention: { w9: true }, // w9 not in fleet → no item, no key
         automations: [{ id: "a1", name: "n", lastStatus: "error", lastRunAt: "t1" } as never],
       }),
       new Set(),
     );
-    expect([...candidateKeys].sort()).toEqual(["afail:a1:t1", "wfail:w1:orphaned"]);
+    expect([...candidateKeys].sort()).toEqual(["afail:a1:t1", "wfail:w1:failed"]);
+  });
+
+  it("excludes orphaned workers even when a stale review flag remains", () => {
+    const { items, candidateKeys } = buildAttentionItems(
+      inputs({ fleet: { w1: worker("w1", "orphaned") }, attention: { w1: true } }),
+      new Set(),
+    );
+    expect(items).toEqual([]);
+    expect(candidateKeys).toEqual(new Set());
   });
 
   it("archived failed workers are excluded", () => {

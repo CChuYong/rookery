@@ -12,7 +12,7 @@ export function RestartDaemonDialog({ onConfirm, onClose, busy }: { onConfirm: (
   // so useDismissTransition/useFocusTrap state resets per open.
   const panelRef = useRef<HTMLDivElement>(null);
   const { closing, dismiss } = useDismissTransition(onClose);
-  useModalKeys(dismiss, onConfirm);
+  useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: onConfirm });
   useFocusTrap(panelRef);
   return (
     <div

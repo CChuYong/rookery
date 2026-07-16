@@ -587,7 +587,7 @@ function UnsavedChangesConfirm({ onCancel, onDiscard, onSave }: { onCancel: () =
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
   const { closing, dismiss } = useDismissTransition(onCancel);
-  useModalKeys(dismiss, onSave);
+  useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: onSave });
   useFocusTrap(panelRef);
   return (
     <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
