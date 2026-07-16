@@ -28,6 +28,7 @@
     "smoke:capabilities:codex": "node scripts/smoke-capability-center-codex.mjs",
     "smoke:capabilities:slice5": "node scripts/smoke-capability-center-slice5.mjs",
     "smoke:capabilities:slice8": "node scripts/smoke-capability-catalog.mjs",
+    "smoke:capabilities:slice9": "node scripts/smoke-capability-scope-previews.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

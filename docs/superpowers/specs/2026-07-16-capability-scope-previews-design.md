@@ -1,6 +1,6 @@
 # Capability Scope Defaults and Previews Design
 
-Status: accepted for Slice 9 implementation
+Status: implemented on 2026-07-16
 
 ## Goal
 
