@@ -265,10 +265,22 @@ describe("CapabilityLibraryTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "스킬 가져오기" }));
     const dialog = screen.getByRole("dialog", { name: "스킬 가져오기" });
-    fireEvent.change(within(dialog).getByLabelText("이름"), { target: { value: "Review" } });
-    fireEvent.change(within(dialog).getByLabelText("설명"), { target: { value: "Review skill" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "디렉터리 선택" }));
-    await waitFor(() => expect(within(dialog).getByLabelText("스킬 디렉터리")).toHaveValue("/skills/review"));
+    const nameInput = within(dialog).getByLabelText("이름");
+    const idInput = within(dialog).getByLabelText("ID");
+    const descriptionInput = within(dialog).getByLabelText("설명");
+    const directoryInput = within(dialog).getByLabelText("스킬 디렉터리");
+    const directoryButton = within(dialog).getByRole("button", { name: "디렉터리 선택" });
+    expect(nameInput).toHaveClass("w-full");
+    expect(nameInput.closest("label")).toHaveClass("flex", "flex-col");
+    expect(idInput).toHaveClass("w-full");
+    expect(idInput.closest("label")).toHaveClass("flex", "flex-col");
+    expect(descriptionInput).toHaveClass("w-full");
+    expect(directoryInput).toHaveClass("min-w-0", "flex-1");
+    expect(directoryButton).toHaveClass("shrink-0");
+    fireEvent.change(nameInput, { target: { value: "Review" } });
+    fireEvent.change(descriptionInput, { target: { value: "Review skill" } });
+    fireEvent.click(directoryButton);
+    await waitFor(() => expect(directoryInput).toHaveValue("/skills/review"));
     fireEvent.click(within(dialog).getByRole("button", { name: "스킬 가져오기" }));
 
     await waitFor(() => expect(createSkill).toHaveBeenCalledWith({ id: "review", displayName: "Review", description: "Review skill", sourcePath: "/skills/review" }));
