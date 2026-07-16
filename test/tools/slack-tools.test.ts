@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  readThreadImpl, readChannelImpl, listChannelsImpl, userInfoImpl, permalinkImpl,
+  readThreadImpl, readChannelImpl, listChannelsImpl, userInfoImpl, permalinkImpl, downloadFileImpl,
   SLACK_TOOL_NAMES, SLACK_SERVER_NAME, slackToolDefs, createSlackToolsServer,
 } from "../../src/tools/slack-tools.js";
 import type { ThreadMsg, SlackReadOps } from "../../src/tools/slack-tools.js";
@@ -14,6 +14,7 @@ function fakeOps(over: Partial<SlackReadOps>): SlackReadOps {
     listChannels: over.listChannels ?? nope("listChannels"),
     userInfo: over.userInfo ?? nope("userInfo"),
     permalink: over.permalink ?? nope("permalink"),
+    downloadFile: over.downloadFile ?? nope("downloadFile"),
   };
 }
 const msgs = (m: ThreadMsg[]) => async () => m;
@@ -49,6 +50,55 @@ describe("readThreadImpl", () => {
     expect(out.text).toContain("msg 199");
     expect(out.text).not.toContain("msg 0 ");
     expect(out.text.length).toBeLessThan(12000);
+  });
+
+  it("renders attachment markers after the message text", async () => {
+    const ops = fakeOps({ readThread: msgs([
+      { user: "U1", text: "여기 스크린샷", isBot: false, ts: "1.0", files: [{ id: "F1", name: "shot.png", mimetype: "image/png" }] },
+    ]) });
+    const out = await readThreadImpl(() => ops, "C1", "1.0");
+    expect(out.text).toContain("<@U1>: 여기 스크린샷 [file: shot.png (image/png) id=F1]");
+  });
+
+  it("keeps a file-only message (empty text) instead of skipping it", async () => {
+    const ops = fakeOps({ readThread: msgs([
+      { user: "U1", text: "", isBot: false, ts: "1.0", files: [{ id: "F2", name: "log.txt" }] },
+      { user: "U2", text: "본문", isBot: false, ts: "2.0" },
+    ]) });
+    const out = await readThreadImpl(() => ops, "C1", "1.0");
+    expect(out.text).toContain("<@U1>: [file: log.txt id=F2]");
+    expect(out.text).toContain("<@U2>: 본문");
+  });
+});
+
+describe("downloadFileImpl", () => {
+  it("returns the local path with a Read hint on success", async () => {
+    const ops = fakeOps({ downloadFile: async (id) => {
+      expect(id).toBe("F1");
+      return "/home/x/.rookery/slack-files/F1/shot.png";
+    } });
+    const out = await downloadFileImpl(() => ops, "F1");
+    expect(out.isError).toBeFalsy();
+    expect(out.text).toContain("/home/x/.rookery/slack-files/F1/shot.png");
+    expect(out.text).toMatch(/Read/);
+  });
+
+  it("returns DISCONNECTED when the holder is empty", async () => {
+    const out = await downloadFileImpl(() => null, "F1");
+    expect(out.isError).toBe(true);
+    expect(out.text).toMatch(/Slack/);
+  });
+
+  it("guides on a null result (unknown id or missing files:read)", async () => {
+    const out = await downloadFileImpl(() => fakeOps({ downloadFile: async () => null }), "F404");
+    expect(out.isError).toBe(true);
+    expect(out.text).toContain("files:read");
+  });
+
+  it("maps thrown errors through the guidance mapper", async () => {
+    const out = await downloadFileImpl(() => fakeOps({ downloadFile: async () => { throw new Error("missing_scope"); } }), "F1");
+    expect(out.isError).toBe(true);
+    expect(out.text).toContain("missing_scope");
   });
 });
 
@@ -171,10 +221,10 @@ describe("permalinkImpl", () => {
 });
 
 describe("slackToolDefs", () => {
-  it("returns five defs whose names stay in sync with SLACK_TOOL_NAMES (exposure-gate convention)", () => {
+  it("returns six defs whose names stay in sync with SLACK_TOOL_NAMES (exposure-gate convention)", () => {
     const defs = slackToolDefs(() => null, "C1", "1.0");
     expect(defs.map((d) => `mcp__${SLACK_SERVER_NAME}__${d.name}`)).toEqual([...SLACK_TOOL_NAMES]);
-    expect(defs.map((d) => d.name)).toEqual(["read_thread", "read_channel", "list_channels", "get_user_info", "get_permalink"]);
+    expect(defs.map((d) => d.name)).toEqual(["read_thread", "read_channel", "list_channels", "get_user_info", "get_permalink", "download_file"]);
   });
 
   it("read_thread handler is bound to the thread and calls through", async () => {
@@ -188,7 +238,7 @@ describe("slackToolDefs", () => {
   it("handlers surface isError on failure (disconnected)", async () => {
     const defs = slackToolDefs(() => null, "C1", "1.0");
     for (const def of defs) {
-      const input = def.name === "read_channel" ? { channel: "C1" } : def.name === "get_user_info" ? { user: "U1" } : def.name === "get_permalink" ? { ts: "1.0" } : {};
+      const input = def.name === "read_channel" ? { channel: "C1" } : def.name === "get_user_info" ? { user: "U1" } : def.name === "get_permalink" ? { ts: "1.0" } : def.name === "download_file" ? { file_id: "F1" } : {};
       const out = await def.handler(input, undefined);
       expect(out.isError, def.name).toBe(true);
     }

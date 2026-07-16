@@ -5,11 +5,17 @@ import { truncateBytes } from "../core/truncate.js";
 
 // Port that the slack read tools depend on. Slack-agnostic — src/slack implements this contract
 // (src/slack/read-ops.ts) and the daemon injects it via a holder (prevents core→slack imports).
+export interface ThreadMsgFile {
+  id: string;
+  name?: string;
+  mimetype?: string;
+}
 export interface ThreadMsg {
   user: string; // author's Slack user id
   text: string;
   isBot: boolean; // whether our bot wrote the message
   ts: string;
+  files?: ThreadMsgFile[]; // attachments, rendered as [file: … id=…] markers (download via download_file)
 }
 export interface ChannelInfo {
   id: string;
@@ -33,6 +39,7 @@ export interface SlackReadOps {
   listChannels(): Promise<ChannelInfo[]>; // conversations.list, bot-member channels only
   userInfo(user: string): Promise<SlackUserInfo | null>; // users.info
   permalink(channel: string, ts: string): Promise<string | null>; // chat.getPermalink
+  downloadFile(fileId: string): Promise<string | null>; // files.info + Bearer download → local absolute path
 }
 
 export const SLACK_SERVER_NAME = "slack";
@@ -42,6 +49,7 @@ export const SLACK_TOOL_NAMES = [
   `mcp__${SLACK_SERVER_NAME}__list_channels`,
   `mcp__${SLACK_SERVER_NAME}__get_user_info`,
   `mcp__${SLACK_SERVER_NAME}__get_permalink`,
+  `mcp__${SLACK_SERVER_NAME}__download_file`,
 ] as const;
 
 const MAX_MSGS = 50; // only this many most-recent ones (older ones dropped)
@@ -51,12 +59,23 @@ const PER_MSG_BYTES = 1000; // text cap for a single message
 type ToolText = { text: string; isError?: boolean };
 const DISCONNECTED: ToolText = { text: "Slack is not connected right now — try again later.", isError: true };
 
+// Attachment markers appended to a message's line — the id is what download_file takes.
+function fileMarkers(files: ThreadMsgFile[] | undefined): string {
+  if (!files?.length) return "";
+  return files.map((f) => `[file: ${f.name ?? f.id}${f.mimetype ? ` (${f.mimetype})` : ""} id=${f.id}]`).join(" ");
+}
+
 // Format messages as an author-labeled transcript: fill the byte budget from the most recent
-// message, then reverse back to chronological order (preserves newest first).
+// message, then reverse back to chronological order (preserves newest first). A message with
+// attachments but no text is kept (label + markers) — it used to be silently skipped.
 function formatTranscript(msgs: ThreadMsg[], emptyText: string): ToolText {
   const lines = msgs
-    .filter((m) => m.text.trim().length > 0)
-    .map((m) => `${m.isBot ? "rookery(bot)" : `<@${m.user}>`}: ${truncateBytes(m.text.trim(), PER_MSG_BYTES)}`);
+    .filter((m) => m.text.trim().length > 0 || m.files?.length)
+    .map((m) => {
+      const label = m.isBot ? "rookery(bot)" : `<@${m.user}>`;
+      const body = [m.text.trim(), fileMarkers(m.files)].filter(Boolean).join(" ");
+      return `${label}: ${truncateBytes(body, PER_MSG_BYTES)}`;
+    });
   if (lines.length === 0) return { text: emptyText };
   const kept: string[] = [];
   let bytes = 0;
@@ -171,6 +190,18 @@ export async function permalinkImpl(
   }
 }
 
+export async function downloadFileImpl(getOps: () => SlackReadOps | null, fileId: string): Promise<ToolText> {
+  const ops = getOps();
+  if (!ops) return DISCONNECTED;
+  try {
+    const path = await ops.downloadFile(fileId.trim());
+    if (!path) return { text: "Couldn't download that file — check the file id (from the [file: … id=…] marker) and that the Slack app has the files:read scope.", isError: true };
+    return { text: `Downloaded to ${path} — use the Read tool to view it (images too).` };
+  } catch (err) {
+    return guideError(err, `file ${fileId}`);
+  }
+}
+
 const asResult = ({ text, isError }: ToolText) => ({ content: [{ type: "text" as const, text }], ...(isError ? { isError: true } : {}) });
 
 // Raw tool defs travelling the provider-neutral port (see agent-backend.ts's ProviderToolDef and
@@ -224,7 +255,14 @@ export function slackToolDefs(
     async (input) => asResult(await permalinkImpl(getOps, channel, input)),
     { annotations: { readOnlyHint: true } },
   );
-  return [readThread, readChannel, listChannels, getUserInfo, getPermalink];
+  const downloadFile = tool(
+    "download_file",
+    "Download a file attached to a Slack message (the [file: … id=…] markers in read_thread/read_channel output) to a local path, then use Read to view it. Works for images.",
+    { file_id: z.string().describe("Slack file id from a [file: … id=F…] marker") },
+    async (input) => asResult(await downloadFileImpl(getOps, input.file_id)),
+    { annotations: { readOnlyHint: true } },
+  );
+  return [readThread, readChannel, listChannels, getUserInfo, getPermalink, downloadFile];
 }
 
 export function createSlackToolsServer(
