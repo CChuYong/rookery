@@ -130,6 +130,28 @@ describe("Connection", () => {
     expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.snapshot.result", reqId: "cap-1", snapshot });
   });
 
+  it("routes a capability repository preview without adding client authority", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const target = { kind: "repo" as const, id: "repo-1", provider: "claude" as const, agent: "master" as const };
+    const snapshot = {
+      target: { ...target, label: "Repo One", cwd: "/repo" },
+      generatedAt: "2026-07-16T00:00:00.000Z",
+      entries: [],
+      diagnostics: [],
+    };
+    const capabilities = { snapshot: vi.fn(async () => snapshot) };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities,
+    );
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.snapshot", reqId: "preview-1", target }));
+
+    expect(capabilities.snapshot).toHaveBeenCalledWith(target);
+    expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.snapshot.result", reqId: "preview-1", snapshot });
+  });
+
   it("returns a correlated error when capability snapshot resolution fails", async () => {
     const { sent, repos, bus, fleet, sm, socket } = setup();
     const capabilities = { snapshot: vi.fn(async () => { throw new Error("unknown capability target: worker:missing"); }) };
@@ -164,6 +186,7 @@ describe("Connection", () => {
       addPack: vi.fn(() => pack),
       removePack: vi.fn(),
       setBinding: vi.fn(() => binding),
+      quickSetBinding: vi.fn(() => binding),
       deleteBinding: vi.fn(),
       setTrust: vi.fn(() => pack),
       setSecret: vi.fn(() => ({ key: "token", configured: true })),
@@ -183,6 +206,7 @@ describe("Connection", () => {
       { type: "capabilities.library", reqId: "cap-lib" },
       { type: "capabilities.pack.add", reqId: "cap-add", path: "/pack" },
       { type: "capabilities.binding.set", reqId: "cap-bind", id: "binding-1", binding: bindingInput },
+      { type: "capabilities.binding.quickSet", reqId: "cap-quick", input: { packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master"] } },
       { type: "capabilities.trust.set", reqId: "cap-trust", instanceId: "pack-1", digest: "a".repeat(64), trusted: true },
       { type: "capabilities.secret.set", reqId: "cap-secret", instanceId: "pack-1", key: "token", value: "actual-secret-value" },
       { type: "capabilities.secret.delete", reqId: "cap-secret-delete", instanceId: "pack-1", key: "token" },
@@ -197,6 +221,7 @@ describe("Connection", () => {
       ["capabilities.library.result", "cap-lib"],
       ["capabilities.pack.result", "cap-add"],
       ["capabilities.binding.result", "cap-bind"],
+      ["capabilities.binding.quickSet.result", "cap-quick"],
       ["capabilities.pack.result", "cap-trust"],
       ["capabilities.secret.result", "cap-secret"],
       ["capabilities.secret.result", "cap-secret-delete"],
@@ -206,6 +231,7 @@ describe("Connection", () => {
     ]);
     expect(JSON.stringify(replies)).not.toContain("actual-secret-value");
     expect(capabilities.setSecret).toHaveBeenCalledWith("pack-1", "token", "actual-secret-value");
+    expect(capabilities.quickSetBinding).toHaveBeenCalledWith({ packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master"] });
     expect(replies.at(-1)).toMatchObject({ pack: null });
   });
 
@@ -273,6 +299,56 @@ describe("Connection", () => {
     expect(capabilities.createMcpPack).toHaveBeenCalledWith(input);
     expect(parsed(sent).at(-1)).toEqual({ type: "capabilities.mcpPack.result", reqId: "cap-create", ...result });
     expect(sent.join("\n")).not.toContain("uniquely-sensitive-mcp-secret");
+  });
+
+  it("creates lightweight MCP and Skill catalog entries without exposing write-only values", async () => {
+    const { sent, repos, bus, fleet, sm, socket } = setup();
+    const pack = {
+      instanceId: "pack-1",
+      sourceKind: "rookery-generated",
+      status: "untrusted",
+      manifest: { id: "docs" },
+      secrets: [{ key: "docs-token", configured: true }],
+    };
+    const capabilities = {
+      snapshot: vi.fn(),
+      createMcp: vi.fn(() => ({ pack })),
+      createSkill: vi.fn(() => ({ pack: { ...pack, instanceId: "pack-2", manifest: { id: "review" }, secrets: [] } })),
+    };
+    const conn = new Connection(
+      socket, sm, bus, fleet, repos,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, capabilities as never,
+    );
+    const mcpInput = {
+      id: "docs",
+      displayName: "Docs MCP",
+      description: "Documentation tools",
+      mcpServer: {
+        id: "docs",
+        transport: "streamable-http",
+        url: "https://example.test/mcp",
+        auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+      },
+      secretValues: { "docs-token": "uniquely-sensitive-single-mcp-secret" },
+    };
+    const skillInput = {
+      id: "review",
+      displayName: "Review Skill",
+      description: "Review changes",
+      sourcePath: "/skills/review",
+    };
+
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.mcp.create", reqId: "mcp-create", input: mcpInput }));
+    await conn.handleRaw(JSON.stringify({ type: "capabilities.skill.create", reqId: "skill-create", input: skillInput }));
+
+    expect(capabilities.createMcp).toHaveBeenCalledWith(mcpInput);
+    expect(capabilities.createSkill).toHaveBeenCalledWith(skillInput);
+    expect(parsed(sent).slice(-2)).toEqual([
+      { type: "capabilities.catalog.create.result", reqId: "mcp-create", pack },
+      { type: "capabilities.catalog.create.result", reqId: "skill-create", pack: { ...pack, instanceId: "pack-2", manifest: { id: "review" }, secrets: [] } },
+    ]);
+    expect(sent.join("\n")).not.toContain("uniquely-sensitive-single-mcp-secret");
   });
 
   it("redacts MCP write-only values from correlated creation errors", async () => {

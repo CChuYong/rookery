@@ -13,15 +13,23 @@ describe("protocol v2 client messages", () => {
     expect(() => parseClientMessage(JSON.stringify({ type: "commands.list", reqId: "c3", sessionId: "s1", workerId: "w1" }))).toThrow();
   });
 
-  it("parses capability snapshots for session and worker targets and rejects invalid targets", () => {
+  it("parses live and preview capability targets and rejects injected preview authority", () => {
     expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" } }))).toEqual({
       type: "capabilities.snapshot", reqId: "c1", target: { kind: "session", id: "s1" },
     });
     expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" } }))).toEqual({
       type: "capabilities.snapshot", reqId: "c2", target: { kind: "worker", id: "w1" },
     });
-    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c3", target: { kind: "repo", id: "r1" } }))).toThrow();
-    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c4", target: { kind: "session", id: "" } }))).toThrow();
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c3", target: { kind: "rookery", provider: "claude", agent: "master" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c3", target: { kind: "rookery", provider: "claude", agent: "master" },
+    });
+    expect(parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c4", target: { kind: "repo", id: "r1", provider: "codex", agent: "worker" } }))).toEqual({
+      type: "capabilities.snapshot", reqId: "c4", target: { kind: "repo", id: "r1", provider: "codex", agent: "worker" },
+    });
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c5", target: { kind: "repo", id: "r1" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c6", target: { kind: "repo", id: "r1", provider: "claude", agent: "master", cwd: "/tmp/injected" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c7", target: { kind: "rookery", provider: "codex", agent: "worker", origin: "slack" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", reqId: "c8", target: { kind: "session", id: "" } }))).toThrow();
     expect(() => parseClientMessage(JSON.stringify({ type: "capabilities.snapshot", target: { kind: "session", id: "s1" } }))).toThrow();
   });
 
@@ -133,6 +141,57 @@ describe("protocol v2 client messages", () => {
     for (const message of invalid) {
       expect(clientMessageSchema.safeParse(message).success).toBe(false);
     }
+  });
+
+  it("parses lightweight MCP, Skill, and quick binding requests strictly", () => {
+    const mcp = {
+      type: "capabilities.mcp.create",
+      reqId: "mcp-1",
+      input: {
+        id: "docs",
+        displayName: "Docs MCP",
+        description: "Documentation tools",
+        mcpServer: {
+          id: "docs",
+          transport: "streamable-http",
+          url: "https://example.test/mcp",
+          auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
+        },
+        secretValues: { "docs-token": "secret" },
+      },
+    };
+    const skill = {
+      type: "capabilities.skill.create",
+      reqId: "skill-1",
+      input: {
+        id: "review",
+        displayName: "Review Skill",
+        description: "Review changes",
+        sourcePath: "/skills/review",
+      },
+    };
+    const quick = {
+      type: "capabilities.binding.quickSet",
+      reqId: "quick-1",
+      input: {
+        packInstanceId: "pack-1",
+        scopeKind: "repo-local",
+        scopeRef: "repo-1",
+        mode: "disabled",
+        agents: ["master", "worker"],
+      },
+    };
+
+    expect(clientMessageSchema.parse(mcp)).toEqual(mcp);
+    expect(clientMessageSchema.parse(skill)).toEqual(skill);
+    expect(clientMessageSchema.parse(quick)).toEqual(quick);
+    expect(clientMessageSchema.safeParse({ ...mcp, input: { ...mcp.input, secretValues: { undeclared: "secret" } } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...skill, input: { ...skill.input, sourcePath: "" } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...skill, input: { ...skill.input, unexpected: true } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, scopeKind: "session" } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, scopeKind: "rookery", scopeRef: "repo-1" } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, mode: "enabled", agents: [] } }).success).toBe(false);
+    expect(clientMessageSchema.safeParse({ ...quick, input: { ...quick.input, mode: "inherit", agents: [] } }).success).toBe(true);
   });
 
   it("settings.set: accepts null (reset-to-default) and validates effort against the enum", () => {

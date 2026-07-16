@@ -41,6 +41,8 @@ function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi 
   return {
     loadSnapshot: async () => { throw new Error("unused"); },
     loadLibrary: async () => library,
+    createMcp: async () => { throw new Error("unused"); },
+    createSkill: async () => { throw new Error("unused"); },
     createMcpPack: async () => { throw new Error("unused"); },
     addPack: async () => pack,
     removePack: async () => {},
@@ -50,6 +52,7 @@ function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi 
     refresh: async () => library,
     reloadWorker: async (workerId) => ({ workerId, mode: "reloading" }),
     setBinding: async () => { throw new Error("unused"); },
+    quickSetBinding: async () => { throw new Error("unused"); },
     deleteBinding: async () => {},
     ...overrides,
   };
@@ -64,12 +67,12 @@ describe("CapabilityLibraryTab", () => {
     const { rerender } = render(<CapabilityLibraryTab api={subject} generation={0} repos={[]} pickDirectory={async () => null} />);
     expect(screen.getByText("불러오는 중…")).toBeInTheDocument();
     resolve({ generation: 0, packs: [], bindings: [], diagnostics: [] });
-    expect(await screen.findByText("아직 등록된 capability pack이 없어요.")).toBeInTheDocument();
+    expect(await screen.findByText("아직 등록된 capability가 없어요.")).toBeInTheDocument();
 
     rerender(<CapabilityLibraryTab api={subject} generation={1} repos={[]} pickDirectory={async () => null} />);
     expect(await screen.findByText("offline")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-    expect(await screen.findByText("아직 등록된 capability pack이 없어요.")).toBeInTheDocument();
+    expect(await screen.findByText("아직 등록된 capability가 없어요.")).toBeInTheDocument();
   });
 
   it("requires review before trust and shows safe pack, file, MCP, and compatibility details", async () => {
@@ -114,7 +117,7 @@ describe("CapabilityLibraryTab", () => {
     const subject = api({ addPack, refresh, removePack });
     render(<CapabilityLibraryTab api={subject} generation={0} repos={[]} pickDirectory={async () => "/picked/pack"} />);
     await screen.findByText("Team Pack");
-    fireEvent.click(screen.getByRole("button", { name: "디렉터리 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pack 가져오기" }));
     await waitFor(() => expect(addPack).toHaveBeenCalledWith("/picked/pack"));
     const card = screen.getByTestId("capability-pack-pack-1");
     fireEvent.click(within(card).getByRole("button", { name: "새로고침" }));
@@ -209,5 +212,66 @@ describe("CapabilityLibraryTab", () => {
     await screen.findByText("Team Pack");
     expect(screen.getByRole("button", { name: "MCP pack 만들기" })).toBeDisabled();
     expect(screen.getByText(/먼저 왼쪽 레포 목록에 대상 레포를 등록/)).toBeInTheDocument();
+  });
+
+  it("registers a single MCP without requiring a repository binding", async () => {
+    const generated: CapabilityLibraryEntry = {
+      ...pack,
+      instanceId: "catalog-mcp",
+      sourceKind: "rookery-generated",
+      manifest: {
+        schemaVersion: 1,
+        id: "docs",
+        displayName: "Docs",
+        version: "1.0.0",
+        description: "",
+        mcpServers: [{ id: "docs", transport: "streamable-http", url: "https://example.test/mcp" }],
+      },
+    };
+    const createMcp = vi.fn(async () => ({ pack: generated }));
+    const loadLibrary = vi.fn().mockResolvedValueOnce(library).mockResolvedValue({ ...library, generation: 2, packs: [generated] });
+    render(<CapabilityLibraryTab api={api({ createMcp, loadLibrary })} generation={0} repos={[]} pickDirectory={async () => null} />);
+    await screen.findByText("Team Pack");
+
+    fireEvent.click(screen.getByRole("button", { name: "MCP 추가" }));
+    const dialog = screen.getByRole("dialog", { name: "MCP 서버 추가" });
+    fireEvent.change(within(dialog).getByLabelText("Pack 이름"), { target: { value: "Docs" } });
+    fireEvent.change(within(dialog).getByLabelText("HTTP URL"), { target: { value: "https://example.test/mcp" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "MCP 등록" }));
+
+    await waitFor(() => expect(createMcp).toHaveBeenCalledWith(expect.objectContaining({ id: "docs", mcpServer: expect.objectContaining({ id: "docs" }) })));
+    expect(await screen.findByText("Capability를 카탈로그에 등록했어요.")).toBeInTheDocument();
+    expect(await screen.findByTestId("capability-pack-catalog-mcp")).toHaveTextContent("MCP");
+  });
+
+  it("imports a skill snapshot into the Catalog", async () => {
+    const generated: CapabilityLibraryEntry = {
+      ...pack,
+      instanceId: "catalog-skill",
+      sourceKind: "rookery-generated",
+      manifest: {
+        schemaVersion: 1,
+        id: "review",
+        displayName: "Review",
+        version: "1.0.0",
+        description: "Review skill",
+        skills: [{ id: "review", path: "skills/review" }],
+      },
+    };
+    const createSkill = vi.fn(async () => ({ pack: generated }));
+    const loadLibrary = vi.fn().mockResolvedValueOnce(library).mockResolvedValue({ ...library, generation: 2, packs: [generated] });
+    render(<CapabilityLibraryTab api={api({ createSkill, loadLibrary })} generation={0} repos={[]} pickDirectory={async () => "/skills/review"} />);
+    await screen.findByText("Team Pack");
+
+    fireEvent.click(screen.getByRole("button", { name: "스킬 가져오기" }));
+    const dialog = screen.getByRole("dialog", { name: "스킬 가져오기" });
+    fireEvent.change(within(dialog).getByLabelText("이름"), { target: { value: "Review" } });
+    fireEvent.change(within(dialog).getByLabelText("설명"), { target: { value: "Review skill" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "디렉터리 선택" }));
+    await waitFor(() => expect(within(dialog).getByLabelText("스킬 디렉터리")).toHaveValue("/skills/review"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "스킬 가져오기" }));
+
+    await waitFor(() => expect(createSkill).toHaveBeenCalledWith({ id: "review", displayName: "Review", description: "Review skill", sourcePath: "/skills/review" }));
+    expect(await screen.findByTestId("capability-pack-catalog-skill")).toHaveTextContent("스킬");
   });
 });

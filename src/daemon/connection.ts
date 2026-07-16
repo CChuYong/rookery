@@ -30,11 +30,15 @@ import type { SideSourceKind } from "../core/side-conversation.js";
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
+  CapabilityCatalogCreateResult,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpCreateInput,
   CapabilityMcpPackCreateInput,
   CapabilityMcpPackCreateResult,
+  CapabilityQuickBindingInput,
   CapabilitySecretStatus,
+  CapabilitySkillCreateInput,
   CapabilitySnapshot,
   CapabilityTarget,
 } from "../core/capabilities/types.js";
@@ -77,9 +81,12 @@ export interface CapabilitySnapshotProvider {
 export interface CapabilityProvider extends CapabilitySnapshotProvider {
   library(): CapabilityLibrarySnapshot;
   createMcpPack(input: CapabilityMcpPackCreateInput): CapabilityMcpPackCreateResult;
+  createMcp(input: CapabilityMcpCreateInput): CapabilityCatalogCreateResult;
+  createSkill(input: CapabilitySkillCreateInput): CapabilityCatalogCreateResult;
   addPack(sourcePath: string): CapabilityLibraryEntry;
   removePack(instanceId: string): void;
   setBinding(id: string, input: CapabilityBindingInput): CapabilityBinding;
+  quickSetBinding(input: CapabilityQuickBindingInput): CapabilityBinding | null;
   deleteBinding(id: string): void;
   setTrust(instanceId: string, digest: string, trusted: boolean): CapabilityLibraryEntry;
   setSecret(instanceId: string, key: string, value: string): CapabilitySecretStatus;
@@ -567,6 +574,22 @@ export class Connection {
         }
         return;
       }
+      case "capabilities.mcp.create": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        try {
+          const result = this.capabilities.createMcp(msg.input);
+          this.reply({ type: "capabilities.catalog.create.result", reqId: msg.reqId, ...result });
+        } catch (error) {
+          this.reply({ type: "error", reqId: msg.reqId, message: redactWriteOnlyValues(error, msg.input.secretValues) });
+        }
+        return;
+      }
+      case "capabilities.skill.create": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        const result = this.capabilities.createSkill(msg.input);
+        this.reply({ type: "capabilities.catalog.create.result", reqId: msg.reqId, ...result });
+        return;
+      }
       case "capabilities.pack.add": {
         if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
         this.reply({ type: "capabilities.pack.result", reqId: msg.reqId, pack: this.capabilities.addPack(msg.path) });
@@ -581,6 +604,15 @@ export class Connection {
       case "capabilities.binding.set": {
         if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
         this.reply({ type: "capabilities.binding.result", reqId: msg.reqId, binding: this.capabilities.setBinding(msg.id, msg.binding) });
+        return;
+      }
+      case "capabilities.binding.quickSet": {
+        if (!this.capabilities) return this.reply({ type: "error", message: "capability registry unavailable", reqId: msg.reqId });
+        this.reply({
+          type: "capabilities.binding.quickSet.result",
+          reqId: msg.reqId,
+          binding: this.capabilities.quickSetBinding(msg.input),
+        });
         return;
       }
       case "capabilities.binding.delete": {

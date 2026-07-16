@@ -133,6 +133,69 @@ describe("Repositories", () => {
     expect(repos.getCapabilityBinding("binding-2")).toBeUndefined();
   });
 
+  it("atomically replaces simple UI bindings and refuses custom overlaps", () => {
+    createCapabilityPack();
+    repos.setCapabilityBinding("ui-master", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui"] }, enabled: true,
+    });
+    repos.setCapabilityBinding("ui-worker", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["worker"], origins: ["ui"] }, enabled: false,
+    });
+    repos.setCapabilityBinding("slack-master", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["master"], origins: ["slack"] }, enabled: true,
+    });
+    repos.setCapabilityBinding("ui-side", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["side"], origins: ["ui"] }, enabled: true,
+    });
+
+    expect(repos.replaceCapabilityUiBinding("canonical", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      mode: "enabled", agents: ["worker", "master", "worker"],
+    })).toMatchObject({
+      id: "canonical", enabled: true,
+      audience: { agents: ["master", "worker"], origins: ["ui"] },
+    });
+    expect(repos.listCapabilityBindings().map((binding) => binding.id)).toEqual([
+      "canonical", "slack-master", "ui-side",
+    ]);
+
+    expect(repos.replaceCapabilityUiBinding("disabled", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      mode: "disabled", agents: ["worker"],
+    })).toMatchObject({ id: "disabled", enabled: false, audience: { agents: ["worker"], origins: ["ui"] } });
+
+    expect(repos.replaceCapabilityUiBinding("unused", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      mode: "inherit", agents: [],
+    })).toBeNull();
+    expect(repos.listCapabilityBindings().map((binding) => binding.id)).toEqual(["slack-master", "ui-side"]);
+
+    repos.deleteCapabilityBinding("slack-master");
+    repos.setCapabilityBinding("custom", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui", "slack"] }, enabled: true,
+    });
+    const before = repos.listCapabilityBindings();
+    expect(() => repos.replaceCapabilityUiBinding("replacement", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      mode: "enabled", agents: ["master", "worker"],
+    })).toThrow(/custom capability assignment/i);
+    expect(repos.listCapabilityBindings()).toEqual(before);
+  });
+
+  it("rejects an explicit quick binding with no agents without mutating rows", () => {
+    createCapabilityPack();
+    expect(() => repos.replaceCapabilityUiBinding("empty", {
+      packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "",
+      mode: "enabled", agents: [],
+    })).toThrow(/agent/i);
+    expect(repos.listCapabilityBindings()).toEqual([]);
+  });
+
   it("rejects capability children for unknown packs", () => {
     expect(() => repos.setCapabilityBinding("binding-1", {
       packInstanceId: "missing",

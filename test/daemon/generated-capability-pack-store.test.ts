@@ -35,6 +35,17 @@ function manifest(id = "repo-tools"): CapabilityPackManifest {
   };
 }
 
+function skillManifest(id = "review-skill"): CapabilityPackManifest {
+  return {
+    schemaVersion: 1,
+    id,
+    displayName: "Review Skill",
+    version: "1.0.0",
+    description: "Review repository changes",
+    skills: [{ id: "review", path: "skill" }],
+  };
+}
+
 describe("GeneratedCapabilityPackStore", () => {
   it("atomically creates a validated private manifest without secret values", () => {
     const home = temp("rk-generated-home-");
@@ -74,6 +85,53 @@ describe("GeneratedCapabilityPackStore", () => {
     const second = store.create(manifest());
     expect(first).not.toBe(second);
     expect(fs.readdirSync(root).sort()).toEqual(["repo-tools-one", "repo-tools-two"]);
+  });
+
+  it("imports one Skill directory into a validated private generated pack", () => {
+    const home = temp("rk-generated-home-");
+    const root = path.join(home, "capability-packs");
+    const source = path.join(temp("rk-skill-source-"), "review");
+    fs.mkdirSync(path.join(source, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(source, "SKILL.md"), "---\nname: review\ndescription: Review changes\n---\n\nReview carefully.\n");
+    fs.writeFileSync(path.join(source, "scripts", "check.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const store = new GeneratedCapabilityPackStore(root, { id: () => "one" });
+
+    const created = store.createSkill(skillManifest(), source);
+
+    expect(created).toBe(path.join(fs.realpathSync.native(root), "review-skill-one"));
+    expect(JSON.parse(fs.readFileSync(path.join(created, "capability.json"), "utf8"))).toEqual(skillManifest());
+    expect(fs.readFileSync(path.join(created, "skill", "SKILL.md"), "utf8")).toContain("Review carefully.");
+    expect(fs.readFileSync(path.join(created, "skill", "scripts", "check.sh"), "utf8")).toContain("exit 0");
+    if (process.platform !== "win32") {
+      expect(fs.statSync(created).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(path.join(created, "skill")).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(path.join(created, "capability.json")).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(path.join(created, "skill", "scripts", "check.sh")).mode & 0o111).not.toBe(0);
+    }
+    expect(fs.readdirSync(root)).toEqual(["review-skill-one"]);
+  });
+
+  it("rejects invalid or escaping Skill imports before rename and cleans staging", () => {
+    const root = path.join(temp("rk-generated-home-"), "capability-packs");
+    const invalid = path.join(temp("rk-skill-invalid-"), "missing-skill-md");
+    fs.mkdirSync(invalid, { recursive: true });
+    fs.writeFileSync(path.join(invalid, "README.md"), "not a skill");
+    const store = new GeneratedCapabilityPackStore(root, { id: () => "one" });
+
+    expect(() => store.createSkill(skillManifest(), invalid)).toThrow("SKILL.md");
+    expect(fs.readdirSync(root)).toEqual([]);
+
+    if (process.platform !== "win32") {
+      const source = path.join(temp("rk-skill-escape-"), "skill");
+      const outside = path.join(temp("rk-skill-outside-"), "secret.txt");
+      fs.mkdirSync(source, { recursive: true });
+      fs.writeFileSync(path.join(source, "SKILL.md"), "---\nname: review\ndescription: Review changes\n---\n");
+      fs.writeFileSync(outside, "outside");
+      fs.symlinkSync(outside, path.join(source, "escape.txt"));
+
+      expect(() => store.createSkill(skillManifest(), source)).toThrow("outside the pack root");
+      expect(fs.readdirSync(root)).toEqual([]);
+    }
   });
 
   it("removes only direct generated children and never follows replacement symlinks", () => {

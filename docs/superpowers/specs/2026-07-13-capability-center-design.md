@@ -1,7 +1,7 @@
 # Capability Center and Managed Capabilities — Design
 
 Date: 2026-07-13
-Status: accepted; Slices 1–7 implemented
+Status: accepted; Slices 1–8 implemented
 Branch: `feat/capability-center-spec`
 
 Implementation status (2026-07-15): Slices 1–7 ship Effective inventory, the persisted
@@ -813,8 +813,8 @@ They are opposite directions and never share one status label.
 
 ```ts
 { type: "capabilities.snapshot", reqId, target:
-    | { kind: "rookery" }
-    | { kind: "repo"; repo: string; provider?: "claude" | "codex"; agent?: "master" | "worker" }
+    | { kind: "rookery"; provider: "claude" | "codex"; agent: "master" | "worker" }
+    | { kind: "repo"; id: string; provider: "claude" | "codex"; agent: "master" | "worker" }
     | { kind: "session"; id: string }
     | { kind: "worker"; id: string }
 }
@@ -822,8 +822,11 @@ They are opposite directions and never share one status label.
 { type: "capabilities.snapshot.result", reqId, snapshot: CapabilitySnapshot }
 ```
 
-For session/worker targets the daemon ignores any client-supplied provider/cwd and reads
-authoritative rows. Repo/global targets are previews and may take provider/agent hints.
+The discriminated union is strict. Session/worker targets accept only their persisted id;
+the daemon derives provider, cwd, origin, and repository from authoritative rows. Preview
+targets require provider and agent. Repo previews resolve cwd and label from the exact
+registered id; Rookery previews have no cwd and skip provider-native inventory. No preview
+reads applied/runtime state, returns executable invocation metadata, or materializes files.
 
 ### Library and bindings
 
@@ -1343,6 +1346,39 @@ The managed-capability milestone is complete when all of the following are true:
 - `docs/architecture/master-worker-turn.md`: resolution/application points.
 - `README.md`: concise Capability Center and repo/Rookery scope usage.
 - Example pack under `docs/examples/capability-pack/` after Slice 2, validated by tests.
+
+## Implemented Slice 8: Catalog and Repository Settings
+
+Implemented on 2026-07-16. Capability Center's Library is now the capability-first
+Catalog. Users can register one MCP server or copy one Skill snapshot as an untrusted,
+unbound singleton generated pack, while the multi-server pack builder remains the
+advanced bundle flow. Each registered repository exposes a full-page settings route whose
+section registry currently contains Capabilities and can later grow Worktrees, Hooks, or
+branch policy without replacing the shell.
+
+Repository capability rows manage only repo-local/UI Master and Worker assignments with
+explicit `inherit`, `enabled`, and `disabled` semantics. The daemon canonicalizes the
+simple rows in one SQLite transaction and rejects mixed-origin or Side overlaps so the
+advanced Assignments editor remains lossless. No schema migration was required. Protocol,
+generated-pack containment, Catalog/Repository Settings UI, navigation, Korean/English
+catalogs, and an isolated production-daemon WebSocket lifecycle are covered by automated
+verification.
+
+## Implemented Slice 9: Scope Defaults and Effective Previews
+
+Implemented on 2026-07-16. Settings now exposes a Rookery-wide Capabilities scope using
+the same Catalog-backed Master/Worker quick-binding editor as Repository Settings. Each
+surface shows inheritance context and deep-links to an exact Effective preview. Effective
+can switch among Rookery defaults, every registered repository, live master sessions, and
+live workers; Rookery/repository previews also select Claude or Codex and Master or Worker.
+
+Preview requests use a strict target union. Repository identity, path, and label remain
+daemon-authoritative, while Rookery previews are explicitly scope-only and do not pretend
+to expose provider-native global inventory. Previews project deterministic desired state
+without runtime/applied state or invocation metadata and cannot materialize provider files.
+The implementation reused existing bindings and required no database migration. Core,
+protocol, renderer, navigation, Korean/English catalogs, and an isolated production-daemon
+WebSocket preview-boundary smoke are covered by automated verification.
 
 ## Source notes
 

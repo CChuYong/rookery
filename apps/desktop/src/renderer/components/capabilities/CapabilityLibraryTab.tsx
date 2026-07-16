@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
-import { Cable, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FolderPlus, Loader2, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
-import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot, CapabilityMcpPackCreateResult, McpServerSpec } from "@daemon/core/capabilities/types.js";
+import { Boxes, Cable, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FolderPlus, Loader2, RefreshCw, Search, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
+import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot, McpServerSpec } from "@daemon/core/capabilities/types.js";
 import { useT } from "../../i18n/provider.js";
 import { cn } from "../../lib/cn.js";
 import { Button } from "../../ui/button.js";
+import { Input, Select } from "../../ui/input.js";
+import { catalogKind, catalogSearchText, type CapabilityCatalogKind } from "./catalog.js";
+import { McpCapabilityDialog } from "./McpCapabilityDialog.js";
 import { McpPackBuilderDialog } from "./McpPackBuilderDialog.js";
+import { SkillImportDialog } from "./SkillImportDialog.js";
 import type { CapabilityCenterApi } from "./types.js";
 
 export interface CapabilityLibraryTabProps {
@@ -101,6 +105,7 @@ function PackCard({ pack, api, reload, highlighted = false }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const statusKey = `capabilities.packStatus.${pack.status}`;
+  const kind = catalogKind(pack);
   const sourceLabel = pack.sourceKind === "repo-shared"
     ? t("capabilities.packSource.repoShared", { repo: pack.ownerRepoId ?? "—" })
     : pack.sourceKind === "rookery-generated"
@@ -123,6 +128,7 @@ function PackCard({ pack, api, reload, highlighted = false }: {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[13px] font-semibold text-fg">{pack.manifest.displayName}</h3>
+            <span className="rounded border border-pr/30 bg-pr/5 px-1.5 py-0.5 text-[10px] font-medium text-pr">{t(`capabilityCatalog.kind.${kind}`)}</span>
             <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-muted">v{pack.manifest.version}</span>
             <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-fg-dim">{t(statusKey)}</span>
             <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{sourceLabel}</span>
@@ -208,8 +214,12 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
-  const [created, setCreated] = useState<CapabilityMcpPackCreateResult | null>(null);
+  const [created, setCreated] = useState<{ pack: CapabilityLibraryEntry; repoId?: string } | null>(null);
+  const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<"all" | CapabilityCatalogKind>("all");
 
   const reload = async (): Promise<void> => {
     const next = await api.loadLibrary();
@@ -230,21 +240,35 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
   if (loading) return <div className="flex justify-center gap-2 py-24 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
   if (error) return <div className="flex flex-col items-center gap-3 py-20 text-center"><CircleAlert size={26} className="text-fail" /><p className="text-[12px] text-fail">{t("capabilities.libraryLoadFailed")}</p><p className="font-mono text-[10.5px] text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadKey((value) => value + 1)}>{t("common.retry")}</Button></div>;
 
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visiblePacks = (library?.packs ?? []).filter((pack) =>
+    (kindFilter === "all" || catalogKind(pack) === kindFilter)
+    && (!normalizedQuery || catalogSearchText(pack).includes(normalizedQuery)),
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1"><h2 className="text-[14px] font-semibold text-fg">{t("capabilities.library")}</h2><p className="mt-1 text-[11px] text-muted">{t("capabilities.libraryDescription")}</p></div>
-        <Button variant="primary" size="sm" disabled={repos.length === 0} onClick={() => setBuilderOpen(true)}><Cable size={13} /> {t("capabilities.createMcpPack")}</Button>
-        <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setError(message(cause))) : undefined); }}><FolderPlus size={13} /> {t("capabilities.addDirectory")}</Button>
+        <Button variant="primary" size="sm" onClick={() => setMcpOpen(true)}><Cable size={13} /> {t("capabilityCatalog.addMcp")}</Button>
+        <Button variant="outline" size="sm" onClick={() => setSkillOpen(true)}><Sparkles size={13} /> {t("capabilityCatalog.importSkill")}</Button>
+        <Button variant="outline" size="sm" disabled={repos.length === 0} onClick={() => setBuilderOpen(true)}><Boxes size={13} /> {t("capabilityCatalog.buildPack")}</Button>
+        <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setError(message(cause))) : undefined); }}><FolderPlus size={13} /> {t("capabilityCatalog.importPack")}</Button>
         <Button variant="ghost" size="sm" onClick={() => { setLoading(true); void api.refresh().then((next) => { setLibrary(next); setLoading(false); }).catch((cause) => { setError(message(cause)); setLoading(false); }); }}><RefreshCw size={13} /> {t("common.refresh")}</Button>
       </div>
       {repos.length === 0 && <p className="rounded-md border border-run/25 bg-run/5 px-3 py-2 text-[10.5px] text-run">{t("capabilities.createMcpPackNeedsRepo")}</p>}
       {created && (
         <section role="status" className="flex items-start gap-2 rounded-[var(--radius)] border border-pr/30 bg-pr/5 px-3.5 py-3">
           <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-pr" />
-          <div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-pr">{t("capabilities.createMcpPackSuccess")}</p><p className="mt-1 text-[10.5px] text-fg-dim">{t("capabilities.createMcpPackNext", { repo: repos.find((repo) => repo.id === created.binding.scopeRef)?.label ?? created.binding.scopeRef })}</p></div>
+          <div className="min-w-0 flex-1"><p className="text-[12px] font-medium text-pr">{t(created.repoId ? "capabilities.createMcpPackSuccess" : "capabilityCatalog.createdTitle")}</p><p className="mt-1 text-[10.5px] text-fg-dim">{created.repoId ? t("capabilities.createMcpPackNext", { repo: repos.find((repo) => repo.id === created.repoId)?.label ?? created.repoId }) : t("capabilityCatalog.createdNext")}</p></div>
           <Button variant="ghost" size="iconSm" aria-label={t("common.close")} onClick={() => setCreated(null)}><X size={13} /></Button>
         </section>
+      )}
+      {(library?.packs.length ?? 0) > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-base/20 p-2.5">
+          <div className="relative min-w-52 flex-1"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><Input size="sm" className="pl-8" aria-label={t("capabilityCatalog.search")} placeholder={t("capabilityCatalog.search")} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+          <Select size="sm" className="w-36" aria-label={t("capabilityCatalog.filterAll")} value={kindFilter} onChange={(event) => setKindFilter(event.target.value as "all" | CapabilityCatalogKind)}><option value="all">{t("capabilityCatalog.filterAll")}</option><option value="mcp">{t("capabilityCatalog.filterMcp")}</option><option value="skill">{t("capabilityCatalog.filterSkill")}</option><option value="bundle">{t("capabilityCatalog.filterBundle")}</option></Select>
+        </div>
       )}
       {library && library.diagnostics.length > 0 && (
         <section data-testid="capability-library-diagnostics" className="rounded-[var(--radius)] border border-fail/30 bg-fail/5 px-3.5 py-3">
@@ -254,8 +278,10 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
           </div>
         </section>
       )}
-      {library?.packs.length ? <div className="space-y-3">{library.packs.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} highlighted={created?.pack.instanceId === pack.instanceId} />)}</div> : <div className="flex flex-col items-center gap-2 py-20 text-center text-muted"><FolderPlus size={26} className="opacity-40" /><p className="text-[12px]">{t("capabilities.libraryEmpty")}</p></div>}
-      {builderOpen && <McpPackBuilderDialog repos={repos} create={(input) => api.createMcpPack(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setBuilderOpen(false)} />}
+      {library?.packs.length ? visiblePacks.length ? <div className="space-y-3">{visiblePacks.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} highlighted={created?.pack.instanceId === pack.instanceId} />)}</div> : <div className="py-16 text-center text-[12px] text-muted">{t("capabilityCatalog.noMatches")}</div> : <div className="flex flex-col items-center gap-2 py-20 text-center text-muted"><FolderPlus size={26} className="opacity-40" /><p className="text-[12px]">{t("capabilities.libraryEmpty")}</p></div>}
+      {mcpOpen && <McpCapabilityDialog create={(input) => api.createMcp(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setMcpOpen(false)} />}
+      {skillOpen && <SkillImportDialog pickDirectory={pickDirectory} create={(input) => api.createSkill(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setSkillOpen(false)} />}
+      {builderOpen && <McpPackBuilderDialog repos={repos} create={(input) => api.createMcpPack(input)} onCreated={(result) => { setCreated({ pack: result.pack, repoId: result.binding.scopeRef }); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setBuilderOpen(false)} />}
     </div>
   );
 }

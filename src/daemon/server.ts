@@ -491,7 +491,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         homeSessionId: row.session_id,
       } : undefined;
     },
-    listRepos: () => repos.listRepos().map((repo) => ({ id: repo.id, path: repo.path })),
+    listRepos: () => repos.listRepos().map((repo) => ({ id: repo.id, path: repo.path, name: repo.name })),
     listClaudeCommands: async ({ target, cwd }) => {
       if (target.kind === "worker") {
         const live = await fleet.listCommands(target.id);

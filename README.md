@@ -54,9 +54,13 @@ all of Rookery or to a repository, session, or worker. Audience filters target m
 worker, or Side agents and UI, Slack, automation, or external origins. More specific
 assignments override broader ones, including disabled assignments used as tombstones.
 
-The **Library** tab handles validation, trust, refresh, removal, and write-only secrets;
+The **Catalog** tab handles registration, validation, trust, refresh, removal, and write-only secrets;
 **Assignments** manages scope and audience; **Effective** shows native inventory plus the
-deterministic desired and applied revisions for the selected master or worker. Trusted
+deterministic desired state for a Rookery or registered-repository preview, or desired and
+applied revisions for a live master or worker. Preview targets let you choose Claude or
+Codex and Master or Worker before starting a conversation. A Rookery preview is intentionally
+scope-only: provider-native global inventory requires a concrete repository or live target.
+Trusted
 packs apply to both **Claude and Codex** without changing the user's `~/.claude`,
 `~/.codex/config.toml`, or repository provider files. Instructions append to the turn
 prompt. Claude loads skills and MCP through generated local plugins; Codex loads them from
@@ -67,15 +71,23 @@ while idle or schedule a reload for the current turn boundary. Reload preserves 
 row, worktree, transcript, provider-native conversation, model, effort, permission mode,
 and lifetime budgets.
 
-To add MCP servers without hand-writing a manifest, use **Library → Create MCP pack**.
+For the common path, use **Catalog → Add MCP** or **Import Skill**. Each action creates an
+untrusted singleton generated pack without enabling it anywhere. Review and trust the
+entry, then use **Settings → Capabilities** for broad Rookery defaults or
+**Repos → repository settings → Capabilities** for repository overrides. Each row chooses
+`Inherit`, `Enabled`, or `Disabled` independently for UI-started Master and Worker agents,
+and can open the matching Effective preview without creating a session or worktree. Custom audiences that
+mix UI with Slack/automation/external or Side remain editable only in advanced Assignments.
+
+To add several MCP servers as one atomic bundle, use **Catalog → Build MCP pack**.
 Choose a registered repository and add any number of stdio or Streamable HTTP servers,
 including argument boundaries, public env/header values, write-only secret env/header
 values, bearer auth, tool allow/deny lists, and required-server behavior. Rookery writes a
 private public-only manifest under `~/.rookery/capability-packs/`, stores secret values
 separately, and creates an enabled repo-local UI binding for the selected Master/Worker
-audience. The new pack remains untrusted until you expand its highlighted Library card,
+audience. The new pack remains untrusted until you expand its highlighted Catalog card,
 review it, and trust the exact digest. This flow creates and deletes generated packs; edit
-an existing generated pack by deleting and recreating it in this first UI version.
+an existing generated pack by deleting and recreating it in this UI version.
 
 In an active master or worker chat, slash autocomplete is resolved from that exact
 conversation's capability snapshot. `/capabilities`, `/skills`, `/hooks`, and `/mcp` open
@@ -89,15 +101,21 @@ Registered repositories may check in an opt-in shared index at
 `.rookery/capabilities/`. Rookery discovers and watches those packs, but never trusts or
 binds them automatically. A content change invalidates the exact-digest trust decision
 until the new digest is reviewed. Removing, disabling, or deleting an index entry is an
-authoritative tombstone for that repo-owned Library row.
+authoritative tombstone for that repo-owned Catalog row.
 
 Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
 
-1. Open Capability Center → Library and add the example directory.
+1. Open Capability Center → Catalog and import the example pack directory.
 2. Review the files and public MCP configuration, then trust the displayed digest.
 3. Save the declared secret if needed; secret values are never returned to the UI.
 4. Create an assignment, run the next Claude or Codex turn (or start/resume a matching
    worker), and inspect the matching desired/applied revision in Effective.
+
+Run the isolated Slice 9 preview boundary smoke with:
+
+```bash
+npm run build && npm run smoke:capabilities:slice9
+```
 
 Rookery copies trusted bytes into an immutable
 `~/.rookery/capability-runtime/<revision>/` directory at launch. Generated files contain

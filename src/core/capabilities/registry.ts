@@ -18,6 +18,7 @@ import type {
   CapabilityPackFile,
   CapabilityPackManifest,
   CapabilityPackSourceKind,
+  CapabilityQuickBindingInput,
   CapabilityScopeRef,
   CapabilitySecretStatus,
 } from "./types.js";
@@ -508,6 +509,19 @@ export class CapabilityRegistry {
       ...(previous ? [{ scopeKind: previous.scopeKind, scopeRef: previous.scopeRef }] : []),
       { scopeKind: binding.scopeKind, scopeRef: binding.scopeRef },
     ]);
+    return binding;
+  }
+
+  quickSetBinding(input: CapabilityQuickBindingInput): CapabilityBinding | null {
+    this.assertScopeAuthority({
+      packInstanceId: input.packInstanceId,
+      scopeKind: input.scopeKind,
+      scopeRef: input.scopeRef,
+      audience: { agents: input.agents.length > 0 ? input.agents : ["master"], origins: ["ui"] },
+      enabled: input.mode === "enabled",
+    });
+    const binding = this.repos.replaceCapabilityUiBinding(this.createId(), input);
+    this.emit([{ scopeKind: input.scopeKind, scopeRef: input.scopeRef }]);
     return binding;
   }
 

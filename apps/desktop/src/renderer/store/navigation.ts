@@ -5,13 +5,14 @@
 //  a ref stack + a 4-axis diff effect, which made back/forward and selection highlighting get out of sync —
 //  this model is the single source.)
 
-export type Overlay = "settings" | "newSession" | "automation" | "capabilities" | null;
+export type Overlay = "settings" | "newSession" | "automation" | "capabilities" | "repoSettings" | null;
 
 export interface Location {
   overlay: Overlay;
   showRepos: boolean;
   sessionId: string | null;
   subId: string | null;
+  repoId: string | null;
 }
 
 // Navigation state including the history stacks. back=past (the end is the most recent), forward=undone future (the front is next).
@@ -21,16 +22,17 @@ export interface NavState {
   forward: Location[];
 }
 
-export const initialLocation: Location = { overlay: null, showRepos: false, sessionId: null, subId: null };
+export const initialLocation: Location = { overlay: null, showRepos: false, sessionId: null, subId: null, repoId: null };
 export const initialNav: NavState = { loc: initialLocation, back: [], forward: [] };
 
 export function sameLoc(a: Location, b: Location): boolean {
-  return a.overlay === b.overlay && a.showRepos === b.showRepos && a.sessionId === b.sessionId && a.subId === b.subId;
+  return a.overlay === b.overlay && a.showRepos === b.showRepos && a.sessionId === b.sessionId && a.subId === b.subId && a.repoId === b.repoId;
 }
 
 // Update the current location with a patch. If the location actually changes, push the current one onto back and clear forward (browser-style).
 export function navigate(st: NavState, patch: Partial<Location>): NavState {
   const next: Location = { ...st.loc, ...patch };
+  if (patch.overlay !== undefined && patch.overlay !== "repoSettings" && patch.repoId === undefined) next.repoId = null;
   if (sameLoc(next, st.loc)) return st; // same location → no-op (avoids polluting history)
   return { loc: next, back: [...st.back, st.loc], forward: [] }; // new transition → discard forward (the future we had undone)
 }

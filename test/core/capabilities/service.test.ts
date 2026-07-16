@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { CapabilityService } from "../../../src/core/capabilities/service.js";
 import type {
+  CapabilityMcpCreateInput,
   CapabilityContribution,
   CapabilityLibraryEntry,
   CapabilityMcpPackCreateInput,
+  CapabilitySkillCreateInput,
 } from "../../../src/core/capabilities/types.js";
 import { CapabilityRuntimeState } from "../../../src/core/capabilities/runtime-state.js";
 import { EventBus } from "../../../src/core/events.js";
@@ -79,6 +81,21 @@ const createInput: CapabilityMcpPackCreateInput = {
     auth: { bearerToken: { source: "rookery-secret", key: "docs-token" } },
   }],
   secretValues: { "docs-token": "actual-secret-value" },
+};
+
+const singleMcpInput: CapabilityMcpCreateInput = {
+  id: "docs",
+  displayName: "Docs MCP",
+  description: "Repository documentation tools",
+  mcpServer: createInput.mcpServers[0]!,
+  secretValues: { "docs-token": "actual-secret-value" },
+};
+
+const skillInput: CapabilitySkillCreateInput = {
+  id: "review",
+  displayName: "Review Skill",
+  description: "Review repository changes",
+  sourcePath: "/skills/review",
 };
 
 describe("CapabilityService", () => {
@@ -194,6 +211,111 @@ describe("CapabilityService", () => {
     await expect(service({
       getWorker: () => ({ id: "w1", worktreePath: null, repoPath: "/repo", label: "W", provider: "future" }),
     }).snapshot({ kind: "worker", id: "w1" })).rejects.toThrow("unsupported capability provider: future");
+  });
+
+  it("resolves a scope-only Rookery preview without provider probes or runtime access", async () => {
+    const listClaudeCommands = vi.fn(async () => ({ commands: [] }));
+    const listCodexCapabilities = vi.fn(async () => codexContribution);
+    const codexEnvForTarget = vi.fn(() => ({ CODEX_HOME: "/must-not-be-used" }));
+    const resolve = vi.fn(() => ({
+      revision: "preview-revision",
+      blocked: false,
+      runtime: { revision: "preview-revision", blocked: false, instructions: [], skills: [], mcpServers: [] },
+      entries: [{
+        id: "managed:pack:skill:review",
+        kind: "skill" as const,
+        name: "review",
+        provider: "rookery" as const,
+        source: "Review Pack",
+        scope: "system" as const,
+        state: "desired" as const,
+        evidence: "declared" as const,
+        invocation: { type: "prompt" as const, name: "$review" },
+      }],
+      diagnostics: [],
+    }));
+    const inspect = vi.fn();
+    const capabilities = service({
+      listClaudeCommands,
+      listCodexCapabilities,
+      codexEnvForTarget,
+      resolver: { resolve } as never,
+      runtimeState: { inspect } as never,
+    });
+
+    const target = { kind: "rookery", provider: "codex", agent: "worker" } as const;
+    const snapshot = await capabilities.snapshot(target);
+
+    expect(snapshot.target).toEqual({ ...target, label: "Rookery defaults", cwd: null });
+    expect(resolve).toHaveBeenCalledWith({
+      kind: "worker",
+      id: "preview:rookery:codex:worker",
+      provider: "codex",
+      origin: "ui",
+      cwd: "",
+    });
+    expect(listClaudeCommands).not.toHaveBeenCalled();
+    expect(listCodexCapabilities).not.toHaveBeenCalled();
+    expect(codexEnvForTarget).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
+    expect(snapshot.appliedRevision).toBeUndefined();
+    expect(snapshot.entries.find((entry) => entry.id === "managed:pack:skill:review")).toMatchObject({ state: "desired" });
+    expect(snapshot.entries.every((entry) => entry.invocation === undefined)).toBe(true);
+  });
+
+  it("previews a registered repository at its authoritative path without target Codex env or runtime", async () => {
+    const providerEntry = {
+      ...codexContribution.entries[0]!,
+      invocation: { type: "prompt" as const, name: "$ship" },
+    };
+    const listCodexCapabilities = vi.fn(async () => ({ entries: [providerEntry], diagnostics: [] }));
+    const codexEnvForTarget = vi.fn(() => ({ CODEX_HOME: "/must-not-be-used" }));
+    const resolve = vi.fn(() => ({
+      revision: "repo-preview-revision",
+      blocked: false,
+      runtime: { revision: "repo-preview-revision", blocked: false, instructions: [], skills: [], mcpServers: [] },
+      entries: [],
+      diagnostics: [],
+    }));
+    const inspect = vi.fn();
+    const capabilities = service({
+      listRepos: () => [{ id: "repo-1", path: "/repos/one", name: "One" }],
+      listCodexCapabilities,
+      codexEnvForTarget,
+      resolver: { resolve } as never,
+      runtimeState: { inspect } as never,
+    });
+    const target = { kind: "repo", id: "repo-1", provider: "codex", agent: "master" } as const;
+
+    const snapshot = await capabilities.snapshot(target);
+
+    expect(snapshot.target).toEqual({ ...target, label: "One", cwd: "/repos/one" });
+    expect(listCodexCapabilities).toHaveBeenCalledWith({ target, cwd: "/repos/one" });
+    expect(codexEnvForTarget).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledWith({
+      kind: "master",
+      id: "preview:repo:repo-1:codex:master",
+      provider: "codex",
+      origin: "ui",
+      cwd: "/repos/one",
+      repoId: "repo-1",
+    });
+    expect(inspect).not.toHaveBeenCalled();
+    expect(snapshot.appliedRevision).toBeUndefined();
+    expect(snapshot.entries.find((entry) => entry.id === "codex.skill.ship")).toMatchObject({
+      state: "desired",
+      evidence: "declared",
+    });
+    expect(snapshot.entries.every((entry) => entry.invocation === undefined)).toBe(true);
+  });
+
+  it("rejects unknown repository previews", async () => {
+    await expect(service({ listRepos: () => [] }).snapshot({
+      kind: "repo",
+      id: "missing",
+      provider: "claude",
+      agent: "worker",
+    })).rejects.toThrow("unknown capability target: repo:missing");
   });
 
   it("resolves desired state from authoritative session origin and longest registered repo", async () => {
@@ -442,6 +564,118 @@ describe("CapabilityService", () => {
     expect(JSON.stringify(result)).not.toContain("actual-secret-value");
   });
 
+  it("registers a lightweight MCP as an unbound untrusted singleton pack", () => {
+    let configured = false;
+    const registry = {
+      add: vi.fn(() => generatedPack({
+        manifest: {
+          schemaVersion: 1,
+          id: "docs",
+          displayName: "Docs MCP",
+          version: "1.0.0",
+          description: "Repository documentation tools",
+          mcpServers: [singleMcpInput.mcpServer],
+        },
+      })),
+      setSecret: vi.fn(() => {
+        configured = true;
+        return { key: "docs-token", configured: true };
+      }),
+      get: vi.fn(() => generatedPack({
+        manifest: {
+          schemaVersion: 1,
+          id: "docs",
+          displayName: "Docs MCP",
+          version: "1.0.0",
+          description: "Repository documentation tools",
+          mcpServers: [singleMcpInput.mcpServer],
+        },
+        secrets: [{ key: "docs-token", configured }],
+      })),
+      remove: vi.fn(),
+      setBinding: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(() => "/generated/docs-one"),
+      createSkill: vi.fn(),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    const result = capabilities.createMcp(singleMcpInput);
+
+    expect(generatedPacks.create).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      id: "docs",
+      displayName: "Docs MCP",
+      version: "1.0.0",
+      description: "Repository documentation tools",
+      mcpServers: [singleMcpInput.mcpServer],
+    });
+    expect(registry.setSecret).toHaveBeenCalledWith("pack-1", "docs-token", "actual-secret-value");
+    expect(registry.setBinding).not.toHaveBeenCalled();
+    expect(result.pack).toMatchObject({ status: "untrusted", secrets: [{ key: "docs-token", configured: true }] });
+    expect(JSON.stringify(result)).not.toContain("actual-secret-value");
+  });
+
+  it("imports a lightweight Skill as an unbound untrusted singleton pack", () => {
+    const pack = generatedPack({
+      manifest: {
+        schemaVersion: 1,
+        id: "review",
+        displayName: "Review Skill",
+        version: "1.0.0",
+        description: "Review repository changes",
+        skills: [{ id: "review", path: "skill" }],
+      },
+      sourcePath: "/generated/review-one",
+      secrets: [],
+    });
+    const registry = {
+      add: vi.fn(() => pack),
+      get: vi.fn(() => pack),
+      remove: vi.fn(),
+      setBinding: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(),
+      createSkill: vi.fn(() => "/generated/review-one"),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    const result = capabilities.createSkill(skillInput);
+
+    expect(generatedPacks.createSkill).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      id: "review",
+      displayName: "Review Skill",
+      version: "1.0.0",
+      description: "Review repository changes",
+      skills: [{ id: "review", path: "skill" }],
+    }, "/skills/review");
+    expect(registry.add).toHaveBeenCalledWith("/generated/review-one", { sourceKind: "rookery-generated" });
+    expect(registry.setBinding).not.toHaveBeenCalled();
+    expect(result).toEqual({ pack });
+  });
+
+  it.each(["mcp", "skill"] as const)("rolls back a failed lightweight %s registration", (kind) => {
+    const registry = {
+      add: vi.fn(() => { throw new Error("registration failed"); }),
+      remove: vi.fn(),
+    };
+    const generatedPacks = {
+      create: vi.fn(() => "/generated/docs-one"),
+      createSkill: vi.fn(() => "/generated/review-one"),
+      remove: vi.fn(),
+    };
+    const capabilities = service({ registry: registry as never, generatedPacks });
+
+    expect(() => kind === "mcp" ? capabilities.createMcp(singleMcpInput) : capabilities.createSkill(skillInput)).toThrow("registration failed");
+    expect(generatedPacks.remove).toHaveBeenCalledWith(kind === "mcp" ? "/generated/docs-one" : "/generated/review-one");
+    expect(registry.remove).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["registration", "add"],
     ["secret storage", "setSecret"],
@@ -507,6 +741,7 @@ describe("CapabilityService", () => {
       get: vi.fn(() => ({ instanceId: "pack-1", sourceKind: "local-directory" })),
       remove: vi.fn(),
       setBinding: vi.fn(() => ({ id: "binding-1" })),
+      quickSetBinding: vi.fn(() => ({ id: "quick-binding" })),
       deleteBinding: vi.fn(),
       setTrust: vi.fn(() => ({ instanceId: "pack-1", status: "trusted" })),
       setSecret: vi.fn(() => ({ key: "token", configured: true })),
@@ -523,6 +758,7 @@ describe("CapabilityService", () => {
     capabilities.addPack("/pack");
     capabilities.removePack("pack-1");
     capabilities.setBinding("binding-1", binding);
+    capabilities.quickSetBinding({ packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master"] });
     capabilities.deleteBinding("binding-1");
     capabilities.setTrust("pack-1", "a".repeat(64), true);
     expect(capabilities.setSecret("pack-1", "token", "actual-secret-value")).toEqual({ key: "token", configured: true });
@@ -530,6 +766,7 @@ describe("CapabilityService", () => {
     capabilities.refresh("pack-1");
 
     expect(registry.setSecret).toHaveBeenCalledWith("pack-1", "token", "actual-secret-value");
+    expect(registry.quickSetBinding).toHaveBeenCalledWith({ packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master"] });
     expect(JSON.stringify(capabilities.library())).not.toContain("actual-secret-value");
   });
 });

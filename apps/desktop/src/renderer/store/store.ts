@@ -21,6 +21,7 @@ interface Store extends AppState {
   showRepos: boolean; // Sessions ↔ Repos
   activeSessionId: string | null;
   activeWorkerId: string | null;
+  repoSettingsId: string | null;
   navBack: Location[];
   navFwd: Location[];
   navigate: (patch: Partial<Location>) => void;
@@ -147,8 +148,8 @@ function saveOverrides(o: Overrides): void {
 }
 
 // Reconstruct the current location from the store's flat fields / spread a NavState into flat fields.
-const locOf = (s: Store): Location => ({ overlay: s.overlay, showRepos: s.showRepos, sessionId: s.activeSessionId, subId: s.activeWorkerId });
-const spreadNav = (nav: NavState) => ({ overlay: nav.loc.overlay, showRepos: nav.loc.showRepos, activeSessionId: nav.loc.sessionId, activeWorkerId: nav.loc.subId, navBack: nav.back, navFwd: nav.forward });
+const locOf = (s: Store): Location => ({ overlay: s.overlay, showRepos: s.showRepos, sessionId: s.activeSessionId, subId: s.activeWorkerId, repoId: s.repoSettingsId });
+const spreadNav = (nav: NavState) => ({ overlay: nav.loc.overlay, showRepos: nav.loc.showRepos, activeSessionId: nav.loc.sessionId, activeWorkerId: nav.loc.subId, repoSettingsId: nav.loc.repoId, navBack: nav.back, navFwd: nav.forward });
 
 function applyWorkerDeletionState(
   state: Store,
@@ -164,7 +165,7 @@ function applyWorkerDeletionState(
 
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
-  sessions: [], activeSessionId: null, activeWorkerId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
+  sessions: [], activeSessionId: null, activeWorkerId: null, repoSettingsId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
   historyLoaded: {}, historyLoadFailed: {},
   overlay: null, showRepos: false, navBack: [], navFwd: [],
   navigate: (patch) => set((s) => {

@@ -500,8 +500,8 @@ describe("store navigation (single location model)", () => {
   });
 
   it("restoreLocation sets location with empty history (restore entry)", () => {
-    useStore.setState({ navBack: [{ overlay: null, showRepos: false, sessionId: "old", subId: null }], navFwd: [] });
-    useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId: "a9" });
+    useStore.setState({ navBack: [{ overlay: null, showRepos: false, sessionId: "old", subId: null, repoId: null }], navFwd: [] });
+    useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId: "a9", repoId: null });
     expect([useStore.getState().activeWorkerId, useStore.getState().showRepos, useStore.getState().navBack.length]).toEqual(["a9", true, 0]);
   });
 });

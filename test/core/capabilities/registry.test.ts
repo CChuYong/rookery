@@ -159,6 +159,89 @@ describe("CapabilityRegistry", () => {
     expect(subject.setBinding("ok", { ...base, scopeKind: "session", scopeRef: "session-1" }).id).toBe("ok");
   });
 
+  it("quick-sets authoritative simple bindings and emits one exact-scope change", () => {
+    const packRoot = path.join(root, "pack");
+    writePack(packRoot);
+    const changes: Array<{ generation: number; affected: unknown[] }> = [];
+    const subject = registry((change) => changes.push(change));
+    const added = subject.add(packRoot);
+    repos.createRepo({ id: "repo-1", name: "app", path: "/repo", description: "" });
+
+    expect(subject.quickSetBinding({
+      packInstanceId: added.instanceId,
+      scopeKind: "repo-local",
+      scopeRef: "repo-1",
+      mode: "enabled",
+      agents: ["master", "worker"],
+    })).toMatchObject({
+      enabled: true,
+      scopeKind: "repo-local",
+      scopeRef: "repo-1",
+      audience: { agents: ["master", "worker"], origins: ["ui"] },
+    });
+    expect(changes.at(-1)?.affected).toEqual([{ scopeKind: "repo-local", scopeRef: "repo-1" }]);
+
+    expect(subject.quickSetBinding({
+      packInstanceId: added.instanceId,
+      scopeKind: "repo-local",
+      scopeRef: "repo-1",
+      mode: "disabled",
+      agents: ["worker"],
+    })).toMatchObject({ enabled: false, audience: { agents: ["worker"], origins: ["ui"] } });
+    expect(repos.listCapabilityBindings(added.instanceId)).toHaveLength(1);
+
+    expect(subject.quickSetBinding({
+      packInstanceId: added.instanceId,
+      scopeKind: "repo-local",
+      scopeRef: "repo-1",
+      mode: "inherit",
+      agents: [],
+    })).toBeNull();
+    expect(repos.listCapabilityBindings(added.instanceId)).toEqual([]);
+
+    expect(() => subject.quickSetBinding({
+      packInstanceId: added.instanceId,
+      scopeKind: "repo-local",
+      scopeRef: "missing",
+      mode: "enabled",
+      agents: ["master"],
+    })).toThrow(/unknown repo/i);
+    expect(() => subject.quickSetBinding({
+      packInstanceId: "missing",
+      scopeKind: "rookery",
+      scopeRef: "",
+      mode: "enabled",
+      agents: ["master"],
+    })).toThrow(/unknown capability pack/i);
+  });
+
+  it("does not emit or mutate when a custom assignment blocks quick editing", () => {
+    const packRoot = path.join(root, "pack");
+    writePack(packRoot);
+    const changes: Array<{ generation: number; affected: unknown[] }> = [];
+    const subject = registry((change) => changes.push(change));
+    const added = subject.add(packRoot);
+    subject.setBinding("custom", {
+      packInstanceId: added.instanceId,
+      scopeKind: "rookery",
+      scopeRef: "",
+      audience: { agents: ["master"], origins: ["ui", "slack"] },
+      enabled: true,
+    });
+    const before = repos.listCapabilityBindings();
+    const generationBefore = changes.length;
+
+    expect(() => subject.quickSetBinding({
+      packInstanceId: added.instanceId,
+      scopeKind: "rookery",
+      scopeRef: "",
+      mode: "disabled",
+      agents: ["master", "worker"],
+    })).toThrow(/custom capability assignment/i);
+    expect(repos.listCapabilityBindings()).toEqual(before);
+    expect(changes).toHaveLength(generationBefore);
+  });
+
   it("increments generation and reports affected scopes for every successful mutation", () => {
     const packRoot = path.join(root, "pack");
     writePack(packRoot, { secretKey: "issue-token" });

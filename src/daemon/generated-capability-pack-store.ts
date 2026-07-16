@@ -19,10 +19,27 @@ export class GeneratedCapabilityPackStore {
     this.id = options.id ?? randomUUID;
   }
 
-  create(manifest: CapabilityPackManifest): string {
+  private hardenTree(root: string): void {
+    fs.chmodSync(root, 0o700);
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const candidate = path.join(root, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        this.hardenTree(candidate);
+        continue;
+      }
+      if (entry.isFile()) {
+        const executable = (fs.statSync(candidate).mode & 0o111) !== 0;
+        fs.chmodSync(candidate, executable ? 0o700 : 0o600);
+      }
+    }
+  }
+
+  private createStaged(manifest: CapabilityPackManifest, populate?: (staging: string) => void): string {
     const staging = fs.mkdtempSync(path.join(this.root, ".staging-"));
     try {
       fs.chmodSync(staging, 0o700);
+      populate?.(staging);
       const manifestPath = path.join(staging, "capability.json");
       fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
         encoding: "utf8",
@@ -31,6 +48,7 @@ export class GeneratedCapabilityPackStore {
       });
       fs.chmodSync(manifestPath, 0o600);
       validateCapabilityPack(staging);
+      this.hardenTree(staging);
 
       const instanceToken = this.id();
       if (!/^[A-Za-z0-9_-]+$/.test(instanceToken)) {
@@ -46,6 +64,26 @@ export class GeneratedCapabilityPackStore {
       fs.rmSync(staging, { recursive: true, force: true });
       throw error;
     }
+  }
+
+  create(manifest: CapabilityPackManifest): string {
+    return this.createStaged(manifest);
+  }
+
+  createSkill(manifest: CapabilityPackManifest, sourcePath: string): string {
+    const source = path.resolve(sourcePath);
+    const stat = fs.lstatSync(source);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error("Skill source must be a directory, not a symlink");
+    }
+    return this.createStaged(manifest, (staging) => {
+      fs.cpSync(source, path.join(staging, "skill"), {
+        recursive: true,
+        dereference: false,
+        errorOnExist: true,
+        force: false,
+      });
+    });
   }
 
   remove(sourcePath: string): void {

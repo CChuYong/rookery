@@ -12,6 +12,24 @@ const worker = { id: "w1", label: "worker1", repoPath: "/code/app", status: "idl
 const fallbackWorker = { id: "w2", label: "app", repoPath: "/code/app", status: "idle", branch: "rookery/w2", model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null };
 
 describe("RepoTree repo-header affordances (audit #3, #19)", () => {
+  it("opens repository settings with the authoritative repository id", () => {
+    const onRepoSettings = vi.fn();
+    render(
+      <RepoTree
+        repos={[{ ...repo, id: "repo-1" }]}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+        onRepoSettings={onRepoSettings}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "app 설정" }));
+    expect(onRepoSettings).toHaveBeenCalledWith("repo-1");
+  });
+
   it("spawn (+) and remove (trash) buttons are always visible and expose their aria-labels", () => {
     render(
       <RepoTree

@@ -4,6 +4,7 @@ import type {
   CapabilityAudience,
   CapabilityBinding,
   CapabilityBindingInput,
+  CapabilityQuickBindingInput,
   CapabilityOrigin,
   CapabilityPackSourceKind,
   CapabilityScopeRef,
@@ -336,6 +337,40 @@ export class Repositories {
 
   deleteCapabilityBinding(id: string): void {
     this.db.prepare("DELETE FROM capability_bindings WHERE id = ?").run(id);
+  }
+
+  replaceCapabilityUiBinding(id: string, input: CapabilityQuickBindingInput): CapabilityBinding | null {
+    const agents = [...new Set(input.agents)].sort() as Array<"master" | "worker">;
+    if (input.mode !== "inherit" && agents.length === 0) {
+      throw new Error("quick capability binding requires at least one master or worker agent");
+    }
+
+    const exact = this.listCapabilityBindings(input.packInstanceId).filter((binding) =>
+      binding.scopeKind === input.scopeKind && binding.scopeRef === input.scopeRef);
+    const touchesManagedAudience = (binding: CapabilityBinding): boolean =>
+      binding.audience.origins.includes("ui")
+      && binding.audience.agents.some((agent) => agent === "master" || agent === "worker");
+    const isSimple = (binding: CapabilityBinding): boolean =>
+      binding.audience.origins.length === 1
+      && binding.audience.origins[0] === "ui"
+      && binding.audience.agents.every((agent) => agent === "master" || agent === "worker");
+    const custom = exact.find((binding) => touchesManagedAudience(binding) && !isSimple(binding));
+    if (custom) {
+      throw new Error(`custom capability assignment ${custom.id} overlaps the quick UI audience`);
+    }
+    const removable = exact.filter(isSimple);
+
+    return this.db.transaction(() => {
+      for (const binding of removable) this.deleteCapabilityBinding(binding.id);
+      if (input.mode === "inherit") return null;
+      return this.setCapabilityBinding(id, {
+        packInstanceId: input.packInstanceId,
+        scopeKind: input.scopeKind,
+        scopeRef: input.scopeRef,
+        audience: { agents, origins: ["ui"] },
+        enabled: input.mode === "enabled",
+      });
+    })();
   }
 
   setCapabilityTrust(instanceId: string, digest: string, trusted: boolean): void {

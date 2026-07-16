@@ -1,6 +1,12 @@
-export type CapabilityTarget =
+export type CapabilityLiveTarget =
   | { kind: "session"; id: string }
   | { kind: "worker"; id: string };
+
+export type CapabilityPreviewTarget =
+  | { kind: "rookery"; provider: "claude" | "codex"; agent: "master" | "worker" }
+  | { kind: "repo"; id: string; provider: "claude" | "codex"; agent: "master" | "worker" };
+
+export type CapabilityTarget = CapabilityLiveTarget | CapabilityPreviewTarget;
 
 export type CapabilityProvider = "rookery" | "claude" | "codex";
 
@@ -172,6 +178,35 @@ export interface CapabilityMcpPackCreateResult {
   binding: CapabilityBinding;
 }
 
+export interface CapabilityMcpCreateInput {
+  id: string;
+  displayName: string;
+  description: string;
+  mcpServer: McpServerSpec;
+  secretValues?: Record<string, string>;
+}
+
+export interface CapabilitySkillCreateInput {
+  id: string;
+  displayName: string;
+  description: string;
+  sourcePath: string;
+}
+
+export interface CapabilityCatalogCreateResult {
+  pack: CapabilityLibraryEntry;
+}
+
+export type CapabilityQuickBindingMode = "inherit" | "enabled" | "disabled";
+
+export interface CapabilityQuickBindingInput {
+  packInstanceId: string;
+  scopeKind: "rookery" | "repo-local";
+  scopeRef: string;
+  mode: CapabilityQuickBindingMode;
+  agents: Array<"master" | "worker">;
+}
+
 export interface ResolvedCapabilitySource {
   packInstanceId: string;
   packId: string;
@@ -244,7 +279,7 @@ export interface CapabilitySnapshot {
   target: CapabilityTarget & {
     label: string;
     provider: "claude" | "codex";
-    cwd: string;
+    cwd: string | null;
   };
   generatedAt: string;
   desiredRevision?: string;

@@ -1,11 +1,15 @@
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
+  CapabilityCatalogCreateResult,
   CapabilityLibraryEntry,
   CapabilityLibrarySnapshot,
+  CapabilityMcpCreateInput,
   CapabilityMcpPackCreateInput,
   CapabilityMcpPackCreateResult,
+  CapabilityQuickBindingInput,
   CapabilitySecretStatus,
+  CapabilitySkillCreateInput,
   CapabilitySnapshot,
   CapabilityTarget,
 } from "@daemon/core/capabilities/types.js";
@@ -13,6 +17,8 @@ import type {
 export interface CapabilityCenterApi {
   loadSnapshot(target: CapabilityTarget): Promise<CapabilitySnapshot>;
   loadLibrary(): Promise<CapabilityLibrarySnapshot>;
+  createMcp(input: CapabilityMcpCreateInput): Promise<CapabilityCatalogCreateResult>;
+  createSkill(input: CapabilitySkillCreateInput): Promise<CapabilityCatalogCreateResult>;
   createMcpPack(input: CapabilityMcpPackCreateInput): Promise<CapabilityMcpPackCreateResult>;
   addPack(sourcePath: string): Promise<CapabilityLibraryEntry>;
   removePack(instanceId: string): Promise<void>;
@@ -22,6 +28,7 @@ export interface CapabilityCenterApi {
   refresh(instanceId?: string): Promise<CapabilityLibrarySnapshot>;
   reloadWorker(workerId: string, whenIdle: boolean): Promise<{ workerId: string; mode: "reloading" | "scheduled" | "next-start" }>;
   setBinding(id: string, input: CapabilityBindingInput): Promise<CapabilityBinding>;
+  quickSetBinding(input: CapabilityQuickBindingInput): Promise<CapabilityBinding | null>;
   deleteBinding(id: string): Promise<void>;
 }
 
