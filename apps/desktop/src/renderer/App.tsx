@@ -862,18 +862,27 @@ export function App(): JSX.Element {
   const closeSide = useCallback((sideId: string) => {
     void client?.request({ type: "side.close", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
   }, []);
-  const spawnSub = (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => {
+  const spawnSub = async (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number): Promise<void> => {
     const c = client;
-    if (!c || !spawnRepo) return;
-    void c
-      .request({ type: "fleet.spawn", repo: spawnRepo, task, label: label || spawnRepo, model, effort, base, ticketKey: ticket?.key, ticketUrl: ticket?.url, permissionMode: permissionMode as "bypassPermissions" | "plan" | undefined, provider: provider as "claude" | "codex" | undefined, costBudgetUsd })
-      .then((r) =>
-        c.request({ type: "fleet.list" }).then((lr) => {
-          useStore.getState().setFleet(lr.fleet ?? []);
-          if (r.id) { selectSub(r.id); toast.success(tRef.current("toast.workerSpawned")); }
-        }),
-      )
-      .catch((e) => toast.error(tRef.current("toast.spawnFailed"), String(e)));
+    const repo = spawnRepo;
+    if (!c || !repo) {
+      const error = new Error("not connected");
+      toast.error(tRef.current("toast.spawnFailed"), String(error));
+      throw error;
+    }
+    const result = await c.request({ type: "fleet.spawn", repo, task, label: label || repo, model, effort, base, ticketKey: ticket?.key, ticketUrl: ticket?.url, permissionMode: permissionMode as "bypassPermissions" | "plan" | undefined, provider: provider as "claude" | "codex" | undefined, costBudgetUsd }).catch((error) => {
+      toast.error(tRef.current("toast.spawnFailed"), String(error));
+      throw error;
+    });
+    // Spawn has already succeeded at this point. Refresh in the background so a secondary list failure
+    // cannot keep the form open and tempt the user into creating a duplicate worker.
+    void c.request({ type: "fleet.list" })
+      .then((response) => useStore.getState().setFleet(response.fleet ?? []))
+      .catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
+    if (result.id) {
+      selectSub(result.id);
+      toast.success(tRef.current("toast.workerSpawned"));
+    }
   };
 
   const onRegister = useCallback((r: { name: string; path: string; description: string }) => {

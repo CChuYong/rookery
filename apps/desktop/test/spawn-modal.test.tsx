@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
@@ -12,6 +12,62 @@ describe("WorkerSpawnModal", () => {
     expect(dialog).toHaveClass("max-h-[calc(100vh-2rem)]", "overflow-hidden");
     expect(dialog.querySelector("[data-dialog-scroll-body]")).toHaveClass("overflow-y-auto");
     expect(dialog.querySelector("[data-dialog-footer]")).toBeInTheDocument();
+  });
+
+  it("keeps the prompt and dialog open on Escape, then closes only from Cancel", async () => {
+    const onClose = vi.fn();
+    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={onClose} />);
+    const prompt = screen.getByPlaceholderText(/Ctrl\+Enter/);
+    fireEvent.change(prompt, { target: { value: "keep this worktree prompt" } });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(prompt).toHaveValue("keep this worktree prompt");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("stays open and blocks duplicate submits while spawn is pending, then closes on success", async () => {
+    let resolveSpawn!: () => void;
+    const pending = new Promise<void>((resolve) => { resolveSpawn = resolve; });
+    const onSpawn = vi.fn(() => pending);
+    const onClose = vi.fn();
+    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "spawn once" } });
+    const spawnButton = screen.getByRole("button", { name: "spawn" });
+
+    fireEvent.click(spawnButton);
+
+    expect(onSpawn).toHaveBeenCalledTimes(1);
+    expect(spawnButton).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    expect(onSpawn).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSpawn();
+      await pending;
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the complete prompt available for retry when spawn rejects", async () => {
+    const onSpawn = vi.fn().mockRejectedValue(new Error("daemon unavailable"));
+    const onClose = vi.fn();
+    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
+    const prompt = screen.getByPlaceholderText(/Ctrl\+Enter/);
+    fireEvent.change(prompt, { target: { value: "preserve this after failure" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "spawn" })).not.toHaveAttribute("aria-busy"));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(prompt).toHaveValue("preserve this after failure");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("defaults to direct-write mode (no search box) and passes base through onSpawn", () => {

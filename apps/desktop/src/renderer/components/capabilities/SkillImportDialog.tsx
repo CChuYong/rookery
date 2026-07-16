@@ -46,7 +46,7 @@ export function SkillImportDialog(props: SkillImportDialogProps): JSX.Element {
       .catch((cause) => setError(errorMessage(cause)))
       .finally(() => setBusy(false));
   };
-  useModalKeys(busy ? () => {} : dismiss, submit);
+  useModalKeys({ escape: "ignore", onSubmit: submit });
   useFocusTrap(panelRef);
 
   return (

@@ -29,7 +29,7 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
     for (const n of names) (vars as Record<string, string>)[n] = vals[n] ?? "";
     onRun(vars);
   };
-  useModalKeys(dismiss, submit);
+  useModalKeys({ escape: "ignore", onSubmit: submit });
   useFocusTrap(panelRef);
   return (
     <div

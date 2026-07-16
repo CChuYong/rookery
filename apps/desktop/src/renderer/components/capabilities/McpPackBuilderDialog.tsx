@@ -106,7 +106,7 @@ export function McpPackBuilderDialog(props: McpPackBuilderDialogProps): JSX.Elem
     void props.create(compiled.input).then((result) => { props.onCreated(result); dismiss(); })
       .catch((cause) => setError(errorMessage(cause))).finally(() => setBusy(false));
   };
-  useModalKeys(busy ? () => {} : dismiss, submit);
+  useModalKeys({ escape: "ignore", onSubmit: submit });
   useFocusTrap(panelRef);
 
   return (

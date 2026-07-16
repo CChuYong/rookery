@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { RookeryTab } from "../src/renderer/workspace/RookeryTab.js";
 import { useWsStore, emptyWsState, openFile, setDirty } from "../src/renderer/store/workspace.js";
@@ -81,7 +81,7 @@ describe("RookeryTab dirty-tab close confirm (audit #44)", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("Cancel in the confirm dialog leaves api.close() uncalled", () => {
+  it("Cancel in the confirm dialog leaves api.close() uncalled", async () => {
     useWsStore.setState({
       byPage: { p1: { tabs: [{ id: "file:/x.ts", kind: "file", path: "/x.ts", title: "x.ts", dirty: true }], activeTabId: "file:/x.ts" } },
     });
@@ -89,6 +89,9 @@ describe("RookeryTab dirty-tab close confirm (audit #44)", () => {
     fireEvent.click(screen.getByRole("button", { name: "탭 닫기" }));
     fireEvent.click(screen.getByText("취소"));
     expect(close).not.toHaveBeenCalled();
+    // Let the shared dialog's exit transition settle before this test tears down jsdom. Otherwise the
+    // delayed onCancel can race environment teardown when the full suite runs in parallel.
+    await waitFor(() => expect(screen.queryByText("저장 안 된 변경이 있어요")).toBeNull());
   });
 });
 

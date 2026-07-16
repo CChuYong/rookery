@@ -78,7 +78,7 @@ export function ForkDialog(p: {
     });
     dismiss();
   };
-  useModalKeys(dismiss, doFork);
+  useModalKeys({ escape: "ignore", onSubmit: doFork });
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
 

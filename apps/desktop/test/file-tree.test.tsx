@@ -108,6 +108,23 @@ describe("FileTree", () => {
     await waitFor(() => expect((window as any).rookery.ws.rename).toHaveBeenCalledWith("/r/a.ts", "/r/renamed.ts"));
   });
 
+  it("keeps an edited file name on Escape and closes the prompt from Cancel", async () => {
+    render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+    fireEvent.contextMenu(await screen.findByText("a.ts"));
+    fireEvent.click(await screen.findByText("이름 변경"));
+    const dialog = await screen.findByRole("dialog");
+    const input = within(dialog).getByRole("textbox");
+    fireEvent.change(input, { target: { value: "keep-name.ts" } });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(input).toHaveValue("keep-name.ts");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("filter input shows fuzzy walk results and opens on click", async () => {
     render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
     await screen.findByText("src");

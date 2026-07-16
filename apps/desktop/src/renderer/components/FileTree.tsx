@@ -290,7 +290,7 @@ function NameDialog({ title, initial, onSubmit, onCancel }: { title: string; ini
   const [value, setValue] = useState(initial);
   const { closing, dismiss } = useDismissTransition(onCancel);
   const submit = (): void => { const v = value.trim(); if (v) onSubmit(v); dismiss(); };
-  useModalKeys(dismiss, submit);
+  useModalKeys({ escape: "ignore", onSubmit: submit });
   useFocusTrap(panelRef);
   return (
     <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>

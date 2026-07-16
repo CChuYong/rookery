@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import { RunAutomationDialog } from "../src/renderer/components/RunAutomationDialog.js";
 
@@ -35,5 +35,20 @@ describe("RunAutomationDialog viewport containment", () => {
     expect(dialog.querySelector("[data-dialog-scroll-body]")).toHaveClass("overflow-y-auto");
     expect(dialog.querySelector("[data-dialog-footer]")).toBeInTheDocument();
     expect(screen.getByText("{{tail}}")).toBeInTheDocument();
+  });
+
+  it("preserves manually entered variables on Escape and closes from Cancel", async () => {
+    const onClose = vi.fn();
+    render(<RunAutomationDialog automation={automation} onClose={onClose} onRun={vi.fn()} />);
+    const message = screen.getAllByRole("textbox")[0]!;
+    fireEvent.change(message, { target: { value: "keep this manual payload" } });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(message).toHaveValue("keep this manual payload");
+
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });

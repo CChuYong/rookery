@@ -23,7 +23,7 @@ export function RepoModal(p: {
   const nameTaken = name !== "" && p.repos.some((r) => r.name === name);
   const pathTaken = path !== "" && p.repos.some((r) => r.path === path);
   const register = () => { if (name && path && !nameTaken && !pathTaken) { p.onRegister({ name, path, description: f.description.trim() }); dismiss(); } };
-  useModalKeys(dismiss, register);
+  useModalKeys({ escape: "ignore", onSubmit: register });
   useFocusTrap(panelRef);
   return (
     <div
