@@ -11,9 +11,11 @@ export interface ThreadMsgFile {
   mimetype?: string;
 }
 export interface ThreadMsg {
-  user: string; // author's Slack user id
+  user: string; // author's Slack user id (bot id for bot messages)
   text: string;
-  isBot: boolean; // whether our bot wrote the message
+  isBot: boolean; // whether ANY bot wrote the message (bot_id present)
+  isSelf?: boolean; // whether OUR bot wrote it (labeled with the configured masterName)
+  name?: string; // author display name — humans via the name resolver, bots via bot_profile/username
   ts: string;
   files?: ThreadMsgFile[]; // attachments, rendered as [file: … id=…] markers (download via download_file)
 }
@@ -65,15 +67,25 @@ function fileMarkers(files: ThreadMsgFile[] | undefined): string {
   return files.map((f) => `[file: ${f.name ?? f.id}${f.mimetype ? ` (${f.mimetype})` : ""} id=${f.id}]`).join(" ");
 }
 
+// Author display names are user-controlled — flatten to one line + byte-cap so a crafted name can
+// never break the one-line-per-message transcript structure (same rule as the [Slack] context header).
+const cleanName = (s: string): string => truncateBytes(s.replace(/\s+/g, " ").trim(), 80);
+
 // Format messages as an author-labeled transcript: fill the byte budget from the most recent
 // message, then reverse back to chronological order (preserves newest first). A message with
 // attachments but no text is kept (label + markers) — it used to be silently skipped.
-// botName labels our own bot's messages (the configured masterName; default keeps legacy output).
+// Labels: our own bot (isSelf) → `<masterName>(bot)`; other bots → their own profile name (raw bot
+// id fallback) so CI/monitoring messages are never misattributed to us; humans → `name (Uid)` when
+// resolved, `<@Uid>` mention form otherwise.
 function formatTranscript(msgs: ThreadMsg[], emptyText: string, botName = "rookery"): ToolText {
   const lines = msgs
     .filter((m) => m.text.trim().length > 0 || m.files?.length)
     .map((m) => {
-      const label = m.isBot ? `${botName}(bot)` : `<@${m.user}>`;
+      const label = m.isBot
+        ? `${m.isSelf ? botName : m.name ? cleanName(m.name) : m.user}(bot)`
+        : m.name
+          ? `${cleanName(m.name)} (${m.user})`
+          : `<@${m.user}>`;
       const body = [m.text.trim(), fileMarkers(m.files)].filter(Boolean).join(" ");
       return `${label}: ${truncateBytes(body, PER_MSG_BYTES)}`;
     });

@@ -23,7 +23,7 @@ describe("makeSlackCapabilities", () => {
 
   it("threads getName through to the defs (bot label uses the configured agent name)", async () => {
     const ops = {
-      readThread: async () => [{ user: "B1", text: "hello from bot", isBot: true, ts: "1.0" }],
+      readThread: async () => [{ user: "B1", text: "hello from bot", isBot: true, isSelf: true, ts: "1.0" }],
       readChannel: async () => [], listChannels: async () => [], userInfo: async () => null,
       permalink: async () => null, downloadFile: async () => null,
     };

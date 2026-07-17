@@ -1,5 +1,6 @@
 import type { SlackReadOps, ThreadMsg, ThreadMsgFile, ChannelInfo, SlackUserInfo } from "../tools/slack-tools.js";
 import type { FileDownloader } from "./file-download.js";
+import type { SlackRefResolver } from "./name-resolver.js";
 import { extractSlackText } from "./message-text.js";
 
 // A single message from a conversations.replies/history response (only the fields we need). Bot messages have a bot_id.
@@ -12,6 +13,8 @@ export interface RawReply {
   blocks?: unknown[]; // Block Kit — melted into text via extractSlackText
   attachments?: unknown[]; // legacy attachments — same
   files?: { id?: string; name?: string; mimetype?: string }[];
+  bot_profile?: { name?: string }; // bot author's display name (rides the payload — no extra API call)
+  username?: string; // legacy bot_message display name fallback
 }
 interface RawChannel {
   id?: string;
@@ -30,19 +33,38 @@ interface RawUser {
 // Slack replies/history → ThreadMsg[]. If bot_id is present, mark it as a bot message (for labeling).
 // Text is melted with extractSlackText (m.text + Block Kit blocks + legacy attachments, rich_text
 // deduped) so blocks-only bot cards are visible; attached files ride along as marker metadata.
-export function repliesToThreadMsgs(raw: RawReply[]): ThreadMsg[] {
+// Bot identity: name from bot_profile/username (payload-carried), isSelf when bot_id matches our own
+// (auth.test id) — so other bots' messages are never labeled as ours downstream.
+export function repliesToThreadMsgs(raw: RawReply[], selfBotId?: string): ThreadMsg[] {
   return raw.map((m) => {
     const files = (m.files ?? [])
       .filter((f): f is { id: string; name?: string; mimetype?: string } => typeof f.id === "string")
       .map((f): ThreadMsgFile => ({ id: f.id, name: f.name, mimetype: f.mimetype }));
+    const botName = m.bot_id ? (m.bot_profile?.name ?? m.username) : undefined;
     return {
       user: m.user ?? m.bot_id ?? "?",
       text: extractSlackText({ text: m.text, blocks: m.blocks, attachments: m.attachments }),
       isBot: !!m.bot_id,
       ts: m.ts ?? "",
       ...(files.length ? { files } : {}),
+      ...(botName ? { name: botName } : {}),
+      ...(m.bot_id && selfBotId && m.bot_id === selfBotId ? { isSelf: true } : {}),
     };
   });
+}
+
+// Best-effort human author names: one resolver call over the distinct user ids (connection-lifetime
+// cache behind it). Failure or no resolver → authors stay unnamed (mention-form fallback downstream).
+async function enrichHumanNames(msgs: ThreadMsg[], resolver?: SlackRefResolver): Promise<ThreadMsg[]> {
+  if (!resolver) return msgs;
+  const ids = [...new Set(msgs.filter((m) => !m.isBot && m.user !== "?").map((m) => m.user))];
+  if (ids.length === 0) return msgs;
+  try {
+    const r = await resolver.resolve([], ids);
+    return msgs.map((m) => (!m.isBot && r.users[m.user] ? { ...m, name: r.users[m.user] } : m));
+  } catch {
+    return msgs;
+  }
 }
 
 // Narrow shape of the bolt WebClient methods we call — kept small so tests can fake it without a real bolt App.
@@ -65,17 +87,22 @@ const LIST_MAX = 1000; // hard cap on member channels collected (runaway-workspa
 // Errors are NOT caught here — the tool impls in src/tools/slack-tools.ts own the guidance-string mapping.
 // `download` is the same FileDownloader instance the incoming-message path uses (Bearer bot token →
 // ~/.rookery/slack-files/); absent (tests/misconfig) → downloadFile degrades to null.
-export function makeSlackReadOps(client: SlackReadClient, download?: FileDownloader): SlackReadOps {
+// `opts.selfBotId` (auth.test, resolved live) marks our own messages; `opts.resolver` names human authors.
+export function makeSlackReadOps(
+  client: SlackReadClient,
+  download?: FileDownloader,
+  opts?: { selfBotId?: () => string | undefined; resolver?: SlackRefResolver },
+): SlackReadOps {
   return {
     async readThread(channel, threadTs) {
       const res = await client.conversations.replies({ channel, ts: threadTs, limit: 100 });
-      return repliesToThreadMsgs(res.messages ?? []);
+      return enrichHumanNames(repliesToThreadMsgs(res.messages ?? [], opts?.selfBotId?.()), opts?.resolver);
     },
     async readChannel(channel, limit) {
       const res = await client.conversations.history({ channel, limit: limit ?? 30 });
       // history returns newest first — reverse to chronological so the shared transcript formatter
       // (newest-first budget fill, then chronological output) treats it like a replies response.
-      return repliesToThreadMsgs(res.messages ?? []).reverse();
+      return enrichHumanNames(repliesToThreadMsgs(res.messages ?? [], opts?.selfBotId?.()).reverse(), opts?.resolver);
     },
     async listChannels() {
       const out: ChannelInfo[] = [];

@@ -184,8 +184,12 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
 
   // Register the slack read ops (replies/history/list/users.info/getPermalink/files.info) on the daemon
   // holder → used by the master's slack read-tool capability (read_thread/read_channel/download_file/...).
-  // Shares the incoming-message FileDownloader, so download_file lands in the same slack-files dir.
-  const readOps = makeSlackReadOps(app.client as unknown as SlackReadClient, download);
+  // Shares the incoming-message FileDownloader (same slack-files dir), the trigger-source selfBotId
+  // (labels only OUR messages as the master), and the name resolver (human author names).
+  const readOps = makeSlackReadOps(app.client as unknown as SlackReadClient, download, {
+    selfBotId: () => selfBotId,
+    resolver: nameResolver,
+  });
   deps.setSlackReadOps?.(readOps);
 
   // Register the name resolver (created above, shared with the [Slack] context header) on the daemon

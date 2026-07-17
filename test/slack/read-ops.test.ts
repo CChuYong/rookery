@@ -33,6 +33,20 @@ describe("repliesToThreadMsgs", () => {
     expect(out[0]!.text).toContain("job #42 exited 1");
   });
 
+  it("maps bot identity: bot_profile.name (username fallback) + isSelf via selfBotId", () => {
+    const out = repliesToThreadMsgs([
+      { bot_id: "B_SELF", text: "mine", ts: "1.0", bot_profile: { name: "rookery-app" } },
+      { bot_id: "B_GH", text: "build failed", ts: "2.0", bot_profile: { name: "GitHub" } },
+      { bot_id: "B_LEGACY", text: "alert", ts: "3.0", username: "nagios" },
+      { bot_id: "B_BARE", text: "?", ts: "4.0" },
+    ], "B_SELF");
+    expect(out[0]).toMatchObject({ isBot: true, isSelf: true, name: "rookery-app" });
+    expect(out[1]).toMatchObject({ isBot: true, name: "GitHub" });
+    expect(out[1]!.isSelf).toBeUndefined();
+    expect(out[2]).toMatchObject({ name: "nagios" });
+    expect(out[3]!.name).toBeUndefined();
+  });
+
   it("maps message files to ThreadMsg.files (id required, name/mimetype through)", () => {
     const out = repliesToThreadMsgs([
       { user: "U1", text: "screenshot", ts: "1.0", files: [
@@ -115,6 +129,28 @@ describe("makeSlackReadOps", () => {
     const out = await makeSlackReadOps(client).permalink("C1", "1.0");
     expect(calls.permalink).toEqual([{ channel: "C1", message_ts: "1.0" }]);
     expect(out).toBe("https://x.slack.com/p1");
+  });
+
+  it("readThread enriches human author names via the resolver (one call, distinct ids) and marks self", async () => {
+    const { client } = fakeClient({ replies: { messages: [
+      { user: "U1", text: "hi", ts: "1.0" },
+      { user: "U1", text: "again", ts: "2.0" },
+      { bot_id: "B_SELF", text: "reply", ts: "3.0" },
+    ] } });
+    const resolveCalls: string[][] = [];
+    const resolver = { resolve: async (_c: string[], users: string[]) => { resolveCalls.push(users); return { channels: {}, users: { U1: "clover" } }; } };
+    const ops = makeSlackReadOps(client, undefined, { selfBotId: () => "B_SELF", resolver });
+    const out = await ops.readThread("C1", "1.0");
+    expect(resolveCalls).toEqual([["U1"]]); // distinct ids, single call
+    expect(out[0]).toMatchObject({ user: "U1", name: "clover" });
+    expect(out[2]).toMatchObject({ isBot: true, isSelf: true });
+  });
+
+  it("resolver failure leaves authors unnamed (best-effort)", async () => {
+    const { client } = fakeClient({ history: { messages: [{ user: "U1", text: "hi", ts: "1.0" }] } });
+    const resolver = { resolve: async () => { throw new Error("rate_limited"); } };
+    const out = await makeSlackReadOps(client, undefined, { resolver }).readChannel("C1");
+    expect(out[0]!.name).toBeUndefined();
   });
 
   it("downloadFile resolves files.info then hands the SlackFile to the injected downloader", async () => {

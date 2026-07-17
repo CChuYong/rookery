@@ -20,15 +20,39 @@ function fakeOps(over: Partial<SlackReadOps>): SlackReadOps {
 const msgs = (m: ThreadMsg[]) => async () => m;
 
 describe("readThreadImpl", () => {
-  it("formats the thread with author labels (user vs bot)", async () => {
+  it("formats the thread with author labels (user vs our own bot)", async () => {
     const ops = fakeOps({ readThread: msgs([
       { user: "U1", text: "배포가 실패해요", isBot: false, ts: "1.0" },
-      { user: "UBOT", text: "원인을 찾아볼게요", isBot: true, ts: "2.0" },
+      { user: "UBOT", text: "원인을 찾아볼게요", isBot: true, isSelf: true, ts: "2.0" },
     ]) });
     const out = await readThreadImpl(() => ops, "C1", "1.0");
     expect(out.isError).toBeFalsy();
     expect(out.text).toContain("<@U1>: 배포가 실패해요");
     expect(out.text).toContain("rookery(bot): 원인을 찾아볼게요");
+  });
+
+  it("labels other bots by their own profile name, never as our bot", async () => {
+    const ops = fakeOps({ readThread: msgs([
+      { user: "B9", text: "Build #42 failed", isBot: true, name: "GitHub", ts: "1.0" },
+      { user: "B8", text: "cpu high", isBot: true, ts: "2.0" }, // unnamed other bot → raw id
+    ]) });
+    const out = await readThreadImpl(() => ops, "C1", "1.0", "제니");
+    expect(out.text).toContain("GitHub(bot): Build #42 failed");
+    expect(out.text).toContain("B8(bot): cpu high");
+    expect(out.text).not.toContain("제니(bot)");
+  });
+
+  it("labels humans with their resolved name (id kept) and sanitizes user-controlled names", async () => {
+    const ops = fakeOps({ readThread: msgs([
+      { user: "U1", text: "안녕", isBot: false, name: "clover", ts: "1.0" },
+      { user: "U2", text: "hi", isBot: false, ts: "2.0" }, // unresolved → mention form
+      { user: "U3", text: "yo", isBot: false, name: "evil\nname", ts: "3.0" },
+    ]) });
+    const out = await readThreadImpl(() => ops, "C1", "1.0");
+    expect(out.text).toContain("clover (U1): 안녕");
+    expect(out.text).toContain("<@U2>: hi");
+    expect(out.text).toContain("evil name (U3): yo");
+    expect(out.text.split("\n")).toHaveLength(3); // sanitized names never break the line structure
   });
 
   it("returns an unavailable message when the ops holder is empty (Slack disconnected)", async () => {
@@ -52,8 +76,8 @@ describe("readThreadImpl", () => {
     expect(out.text.length).toBeLessThan(12000);
   });
 
-  it("labels bot messages with the injected agent name (masterName surfaces)", async () => {
-    const ops = fakeOps({ readThread: msgs([{ user: "UBOT", text: "안내드립니다", isBot: true, ts: "1.0" }]) });
+  it("labels our own bot messages with the injected agent name (masterName surfaces)", async () => {
+    const ops = fakeOps({ readThread: msgs([{ user: "UBOT", text: "안내드립니다", isBot: true, isSelf: true, ts: "1.0" }]) });
     const out = await readThreadImpl(() => ops, "C1", "1.0", "제니");
     expect(out.text).toContain("제니(bot): 안내드립니다");
     const def = await readThreadImpl(() => ops, "C1", "1.0"); // absent → default label
