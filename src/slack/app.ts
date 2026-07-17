@@ -96,6 +96,11 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
     );
   });
 
+  // Channel/user name resolver (conversations.info/users.info, cached for this connection) — created
+  // before the event handlers so both IncomingCtx literals can carry it (powers the [Slack] context
+  // header) and registered on the daemon holder below for automation.resolveSlackRefs (audit #51).
+  const nameResolver = makeSlackRefResolver(app.client as unknown as Parameters<typeof makeSlackRefResolver>[0]);
+
   const assistant = new Assistant({
     threadStarted: async ({ setTitle, setStatus, say }) => {
       await setTitle("rookery");
@@ -112,6 +117,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
         userId: m.user,
         text: (m.text ?? "").trim(),
         files: toSlackFiles(m.files),
+        nameResolver,
         setStatus: async (s) => {
           await setStatus(s);
         },
@@ -134,6 +140,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       userId: e.user,
       text,
       files: toSlackFiles(e.files),
+      nameResolver,
       setStatus: async (status) => {
         try {
           await (
@@ -177,9 +184,8 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
   const readOps = makeSlackReadOps(app.client as unknown as SlackReadClient, download);
   deps.setSlackReadOps?.(readOps);
 
-  // Register the channel/user name resolver (conversations.info/users.info) on the daemon holder → backs
-  // automation.resolveSlackRefs (audit #51). Its cache lives for this connection only (reconnect → fresh resolver).
-  const nameResolver = makeSlackRefResolver(app.client as unknown as Parameters<typeof makeSlackRefResolver>[0]);
+  // Register the name resolver (created above, shared with the [Slack] context header) on the daemon
+  // holder → backs automation.resolveSlackRefs (audit #51). Cache lives for this connection only.
   deps.setNameResolver?.(nameResolver);
 
   // Register reporter-ensure on the daemon holder → the dispatcher calls it right before firing, so that headless turns of a Slack session (wakeup, etc.)
