@@ -21,6 +21,18 @@ describe("makeSlackCapabilities", () => {
     expect(caps.systemPromptAppend).toBe(SLACK_THREAD_HINT);
   });
 
+  it("threads getName through to the defs (bot label uses the configured agent name)", async () => {
+    const ops = {
+      readThread: async () => [{ user: "B1", text: "hello from bot", isBot: true, ts: "1.0" }],
+      readChannel: async () => [], listChannels: async () => [], userInfo: async () => null,
+      permalink: async () => null, downloadFile: async () => null,
+    };
+    const resolve = makeSlackCapabilities("slack:T1:C1:1700.1", () => ops, () => "제니")!;
+    const readThread = resolve().toolDefs?.[SLACK_SERVER_NAME]?.[0];
+    const out = await readThread!.handler({}, undefined);
+    expect((out.content as { text: string }[])[0]!.text).toContain("제니(bot): hello from bot");
+  });
+
   it("returns undefined for non-slack sessions", () => {
     expect(makeSlackCapabilities(null, noOps)).toBeUndefined();
     expect(makeSlackCapabilities("thread-1", noOps)).toBeUndefined();

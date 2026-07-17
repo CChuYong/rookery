@@ -21,11 +21,12 @@ export const SLACK_THREAD_HINT =
 export function makeSlackCapabilities(
   externalKey: string | null,
   getOps: () => SlackReadOps | null,
+  getName?: () => string, // configured masterName resolver — labels our bot in transcripts (default "rookery")
 ): (() => TurnCapabilities) | undefined {
   const target = parseSlackThreadKey(externalKey);
   if (!target) return undefined;
   return () => ({
-    toolDefs: { [SLACK_SERVER_NAME]: slackToolDefs(getOps, target.channel, target.threadTs) },
+    toolDefs: { [SLACK_SERVER_NAME]: slackToolDefs(getOps, target.channel, target.threadTs, getName) },
     allowedTools: [...SLACK_TOOL_NAMES],
     systemPromptAppend: SLACK_THREAD_HINT,
   });

@@ -22,6 +22,7 @@ export interface SlackConfig {
   locale: Locale; // Slack output language (resolved from settings.slackLocale())
   workerRelayEnabled: boolean; // mirror Slack-origin masters' worker activity into workerRelayChannel
   workerRelayChannel: string; // Slack channel ID for the worker relay ("" = off)
+  name?: string; // configured agent name (settings.masterName) — thread title + greeting; absent → "rookery"
   provider?: string; // AgentBackend for newly-created slack-origin sessions ("claude"/"codex", from settings.slackProvider()). Absent → getOrCreateByKey/repos.createSession default to "claude". Only applies at first creation of a thread's session (fixed thereafter).
 }
 

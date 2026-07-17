@@ -68,11 +68,12 @@ function fileMarkers(files: ThreadMsgFile[] | undefined): string {
 // Format messages as an author-labeled transcript: fill the byte budget from the most recent
 // message, then reverse back to chronological order (preserves newest first). A message with
 // attachments but no text is kept (label + markers) — it used to be silently skipped.
-function formatTranscript(msgs: ThreadMsg[], emptyText: string): ToolText {
+// botName labels our own bot's messages (the configured masterName; default keeps legacy output).
+function formatTranscript(msgs: ThreadMsg[], emptyText: string, botName = "rookery"): ToolText {
   const lines = msgs
     .filter((m) => m.text.trim().length > 0 || m.files?.length)
     .map((m) => {
-      const label = m.isBot ? "rookery(bot)" : `<@${m.user}>`;
+      const label = m.isBot ? `${botName}(bot)` : `<@${m.user}>`;
       const body = [m.text.trim(), fileMarkers(m.files)].filter(Boolean).join(" ");
       return `${label}: ${truncateBytes(body, PER_MSG_BYTES)}`;
     });
@@ -104,11 +105,12 @@ export async function readThreadImpl(
   getOps: () => SlackReadOps | null,
   channel: string,
   threadTs: string,
+  botName?: string,
 ): Promise<ToolText> {
   const ops = getOps();
   if (!ops) return DISCONNECTED;
   try {
-    return formatTranscript(await ops.readThread(channel, threadTs), "The thread has no messages.");
+    return formatTranscript(await ops.readThread(channel, threadTs), "The thread has no messages.", botName);
   } catch (err) {
     return { text: `Failed to read thread: ${String(err)}`, isError: true };
   }
@@ -117,6 +119,7 @@ export async function readThreadImpl(
 export async function readChannelImpl(
   getOps: () => SlackReadOps | null,
   input: { channel: string; thread_ts?: string; limit?: number },
+  botName?: string,
 ): Promise<ToolText> {
   const ops = getOps();
   if (!ops) return DISCONNECTED;
@@ -132,7 +135,7 @@ export async function readChannelImpl(
     const msgs = input.thread_ts
       ? await ops.readThread(id, input.thread_ts)
       : await ops.readChannel(id, Math.min(Math.max(input.limit ?? 30, 1), MAX_MSGS));
-    return formatTranscript(msgs, "The channel has no messages.");
+    return formatTranscript(msgs, "The channel has no messages.", botName);
   } catch (err) {
     return guideError(err, `channel ${input.channel}`);
   }
@@ -212,12 +215,14 @@ export function slackToolDefs(
   getOps: () => SlackReadOps | null,
   channel: string,
   threadTs: string,
+  getName?: () => string, // configured masterName resolver (live per call); absent → "rookery"
 ): SdkMcpToolDefinition<any>[] {
+  const botName = () => getName?.() || undefined;
   const readThread = tool(
     "read_thread",
     "Read the surrounding messages of the current Slack thread (the discussion before and after the message that triggered you). Call this when the user's request seems to depend on earlier context you cannot see.",
     {},
-    async () => asResult(await readThreadImpl(getOps, channel, threadTs)),
+    async () => asResult(await readThreadImpl(getOps, channel, threadTs, botName())),
     { annotations: { readOnlyHint: true } },
   );
   const readChannel = tool(
@@ -228,7 +233,7 @@ export function slackToolDefs(
       thread_ts: z.string().optional().describe("Read this specific thread instead of the channel's recent history"),
       limit: z.number().int().min(1).max(50).optional().describe("Max messages to return (default 30)"),
     },
-    async (input) => asResult(await readChannelImpl(getOps, input)),
+    async (input) => asResult(await readChannelImpl(getOps, input, botName())),
     { annotations: { readOnlyHint: true } },
   );
   const listChannels = tool(

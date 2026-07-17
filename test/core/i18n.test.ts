@@ -20,6 +20,11 @@ describe("daemon i18n", () => {
     expect(resolveLocale(null)).toBe("ko");
   });
 
+  it("slack greeting interpolates the agent name (masterName surfaces)", () => {
+    expect(t("ko", "slack.greeting", { name: "제니" })).toBe("안녕하세요! 제니입니다. 무엇을 도와드릴까요?");
+    expect(t("en", "slack.greeting", { name: "Jenny" })).toBe("Hi! I'm Jenny. How can I help?");
+  });
+
   it("t interpolates {param} and leaves unknown params as literal", () => {
     expect(t("ko", "notice.memoryRecall", { count: 2 })).toBe("🧠 기억 2개 참조");
     expect(t("en", "notice.memoryRecall", { count: 2 })).toBe("🧠 Recalled 2 memories");

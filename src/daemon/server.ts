@@ -369,7 +369,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // wraps with createSdkMcpServer (same factory chain, same version "0.0.1", byte-equivalent server)
     // and the Codex adapter flattens onto the daemon MCP bridge, so codex masters now get schedule_* too.
     makeCapabilities: (externalKey, sessionId) => {
-      const slackCaps = makeSlackCapabilities(externalKey, () => slackReadOpsHolder.get());
+      const slackCaps = makeSlackCapabilities(externalKey, () => slackReadOpsHolder.get(), () => settings.masterName());
       return () => {
         const s = slackCaps?.() ?? {};
         return {
@@ -559,6 +559,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     locale: settings.slackLocale() as Locale,
     workerRelayEnabled: settings.workerSlackRelayEnabled() === "1",
     workerRelayChannel: settings.workerSlackRelayChannel(),
+    name: settings.masterName(), // Slack thread title + greeting (masterName surfaces)
     // P2.5 Track C: which AgentBackend newly-created slack-origin sessions run on ("claude"/"codex",
     // default "claude" — opt-in). A codex slack session is bypassPermissions-only (P2 guard); a
     // non-bypass slack permission config would fail the turn at start.

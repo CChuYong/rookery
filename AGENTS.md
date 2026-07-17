@@ -162,7 +162,7 @@ An automation rule = a **trigger** (`cron` | `interval` | `slack` | `worker`) + 
 
 **Removed env vars (now settings-only, DB):** `ROOKERY_MAX_WORKERS` (the concurrent-worker-cap concept is gone — spawns are never rejected); `ROOKERY_SLACK_CWD` / `ROOKERY_SLACK_ALLOWED_USERS` / `ROOKERY_SLACK_ALLOW_ALL` / `ROOKERY_USAGE_REFRESH_MS` → `Settings.slackCwd/slackAllowedUsers/slackAllowAll/usageRefreshMs`, edited on the UI settings page (usageRefreshMs is applied at boot).
 
-**Settings-only (DB) values worth knowing:** `slackRefuseReply` / `slackRefusalMessage` / `slackLocale` (Slack output language ko/en), `masterName`, `hasAcceptedDataNotice` (first-run data-transmission consent), `mcpExposure` (External MCP server tier `off`/`readonly`/`full`, fail-closed default off — see below), plus the write-only secrets `slackBotToken`/`slackAppToken`/`linearApiKey`/`anthropicApiKey` (never echoed back through `settings.get`).
+**Settings-only (DB) values worth knowing:** `slackRefuseReply` / `slackRefusalMessage` / `slackLocale` (Slack output language ko/en), `masterName` (the agent's name — master system prompt + Slack thread title/greeting/transcript bot label), `hasAcceptedDataNotice` (first-run data-transmission consent), `mcpExposure` (External MCP server tier `off`/`readonly`/`full`, fail-closed default off — see below), plus the write-only secrets `slackBotToken`/`slackAppToken`/`linearApiKey`/`anthropicApiKey` (never echoed back through `settings.get`).
 
 ## Fragile conventions / pitfalls
 

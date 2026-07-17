@@ -52,6 +52,14 @@ describe("readThreadImpl", () => {
     expect(out.text.length).toBeLessThan(12000);
   });
 
+  it("labels bot messages with the injected agent name (masterName surfaces)", async () => {
+    const ops = fakeOps({ readThread: msgs([{ user: "UBOT", text: "안내드립니다", isBot: true, ts: "1.0" }]) });
+    const out = await readThreadImpl(() => ops, "C1", "1.0", "제니");
+    expect(out.text).toContain("제니(bot): 안내드립니다");
+    const def = await readThreadImpl(() => ops, "C1", "1.0"); // absent → default label
+    expect(def.text).toContain("rookery(bot): 안내드립니다");
+  });
+
   it("renders attachment markers after the message text", async () => {
     const ops = fakeOps({ readThread: msgs([
       { user: "U1", text: "여기 스크린샷", isBot: false, ts: "1.0", files: [{ id: "F1", name: "shot.png", mimetype: "image/png" }] },

@@ -103,9 +103,13 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
 
   const assistant = new Assistant({
     threadStarted: async ({ setTitle, setStatus, say }) => {
-      await setTitle("rookery");
+      // Live-resolved (not the connect-time cfg): renaming the agent or switching locale in settings
+      // shows up on the next thread without a reconnect.
+      const live = deps.slackConfig();
+      const name = live.name?.trim() || "rookery";
+      await setTitle(name);
       await setStatus("");
-      await say(t(cfg.locale, "slack.greeting"));
+      await say(t(live.locale, "slack.greeting", { name }));
     },
     userMessage: async ({ message, client, setStatus, context }) => {
       const m = message as { text?: string; thread_ts?: string; ts: string; channel: string; user?: string; files?: RawFile[] };
