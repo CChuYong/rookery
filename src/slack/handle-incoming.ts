@@ -8,6 +8,7 @@ import type { SlackRefResolver } from "./name-resolver.js";
 import { ThreadRegistry } from "./thread-registry.js";
 import { SlackThreadReporter } from "./reporter.js";
 import { t, type Locale } from "../core/i18n.js";
+import { truncateBytes } from "../core/truncate.js";
 
 // Slack runtime config — resolved from Settings(DB) on every call (live). Tokens are read at connection time, the rest per message.
 export interface SlackConfig {
@@ -63,6 +64,36 @@ export interface IncomingCtx {
   text: string;
   files?: SlackFile[]; // attached files (if any, download and append to the turn as @paths)
   setStatus: (s: string) => Promise<void>;
+  // Connection-scoped name resolver (conversations.info/users.info, cached) — powers the [Slack]
+  // context header's human-readable names. Absent/failed → raw ids only (best-effort).
+  nameResolver?: SlackRefResolver;
+}
+
+// One-line origin header prepended to every Slack turn so the model knows who asked and where
+// (address the sender, feed thread ts to get_permalink, reason about "this channel"). Display and
+// channel names are user-controlled, so they are flattened to one line and byte-capped — the header
+// must stay structurally a single line ahead of the untrusted message body.
+const cleanName = (s: string): string => truncateBytes(s.replace(/\s+/g, " ").trim(), 80);
+export async function buildSlackContextPrefix(
+  ctx: Pick<IncomingCtx, "channel" | "threadTs" | "userId" | "nameResolver">,
+): Promise<string> {
+  let channelName: string | undefined;
+  let userName: string | undefined;
+  if (ctx.nameResolver) {
+    try {
+      const r = await ctx.nameResolver.resolve([ctx.channel], ctx.userId ? [ctx.userId] : []);
+      channelName = r.channels[ctx.channel];
+      if (ctx.userId) userName = r.users[ctx.userId];
+    } catch {
+      /* best-effort — fall back to raw ids */
+    }
+  }
+  const parts = [
+    ctx.userId ? `sender: ${userName ? `${cleanName(userName)} (${ctx.userId})` : ctx.userId}` : null,
+    `channel: ${channelName ? `#${cleanName(channelName)} (${ctx.channel})` : ctx.channel}`,
+    `thread: ${ctx.threadTs}`,
+  ].filter((p): p is string => !!p);
+  return `[Slack] ${parts.join(" · ")}`;
 }
 
 const NO_FILE = (loc: Locale): string => t(loc, "slack.noFile");
@@ -168,7 +199,8 @@ export async function handleIncoming(
   // Periodically refresh status during a long turn so it doesn't disappear on the 2-minute timeout (UX-14).
   const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void setStatus("thinking…"); }, HEARTBEAT_MS);
   try {
-    await session.master.runTurn(turnText);
+    // The empty-turn guard above ran on the raw composition — the header alone never makes a turn.
+    await session.master.runTurn(`${await buildSlackContextPrefix(ctx)}\n\n${turnText}`);
   } catch {
     // A turn failure is already surfaced to the thread by the reporter via the EventBus 'error' event → posting again here would be a duplicate (MS-2).
   } finally {

@@ -7,8 +7,9 @@ import { FleetOrchestrator } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { ThreadRegistry } from "../../src/slack/thread-registry.js";
-import { handleIncoming, threadKey, parseThreadKey, ensureSlackReporter } from "../../src/slack/handle-incoming.js";
+import { handleIncoming, threadKey, parseThreadKey, ensureSlackReporter, buildSlackContextPrefix } from "../../src/slack/handle-incoming.js";
 import type { IncomingCtx } from "../../src/slack/handle-incoming.js";
+import type { SlackRefResolver } from "../../src/slack/name-resolver.js";
 import type { SlackClient, ChatStreamArgs, ChatStreamerLike, AppendPayload } from "../../src/slack/types.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
@@ -193,8 +194,43 @@ describe("handleIncoming", () => {
     const s = setup({ allowAll: true, queryFn: capturing(prompts) });
     const ctx = { ...s.ctx("", "710.1"), files: [{ id: "F2", name: "diagram.png", urlPrivateDownload: "u" }] };
     await handleIncoming(ctx, { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home }, s.registry, async (f) => `/dl/${f.id}/diagram.png`);
-    expect(prompts[0]).toBe("@/dl/F2/diagram.png");
+    expect(prompts[0]).toBe("[Slack] sender: U1 · channel: C1 · thread: 710.1\n\n@/dl/F2/diagram.png");
     expect(s.appends).toContain("ok"); // the turn actually ran
+  });
+
+  // Origin header: every slack turn starts with sender/channel/thread so the model knows who asked and where.
+  it("prepends the [Slack] context header with resolved names to the turn", async () => {
+    const prompts: string[] = [];
+    const s = setup({ allowAll: true, queryFn: capturing(prompts) });
+    const resolver: SlackRefResolver = {
+      resolve: async (channels, users) => ({
+        channels: Object.fromEntries(channels.map((c) => [c, "general"])),
+        users: Object.fromEntries(users.map((u) => [u, "clover"])),
+      }),
+    };
+    await handleIncoming({ ...s.ctx("hello", "800.1"), nameResolver: resolver }, { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home }, s.registry);
+    expect(prompts[0]).toBe("[Slack] sender: clover (U1) · channel: #general (C1) · thread: 800.1\n\nhello");
+  });
+
+  it("falls back to raw ids when the resolver fails or is absent", async () => {
+    const prompts: string[] = [];
+    const s = setup({ allowAll: true, queryFn: capturing(prompts) });
+    const failing: SlackRefResolver = { resolve: async () => { throw new Error("rate_limited"); } };
+    await handleIncoming({ ...s.ctx("hi", "810.1"), nameResolver: failing }, { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home }, s.registry);
+    expect(prompts[0]).toBe("[Slack] sender: U1 · channel: C1 · thread: 810.1\n\nhi");
+  });
+
+  it("omits the sender segment when there is no userId (allowAll path)", async () => {
+    expect(await buildSlackContextPrefix({ channel: "C9", threadTs: "1.2", userId: undefined })).toBe("[Slack] channel: C9 · thread: 1.2");
+  });
+
+  it("sanitizes multiline/user-controlled names into a single line", async () => {
+    const resolver: SlackRefResolver = {
+      resolve: async () => ({ channels: { C1: "ops  team" }, users: { U1: "evil\nname" } }),
+    };
+    const prefix = await buildSlackContextPrefix({ channel: "C1", threadTs: "1.0", userId: "U1", nameResolver: resolver });
+    expect(prefix).toBe("[Slack] sender: evil name (U1) · channel: #ops team (C1) · thread: 1.0");
+    expect(prefix).not.toContain("\n");
   });
 
   it("notices instead of running an empty turn when a file-only message can't be downloaded", async () => {
