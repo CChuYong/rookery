@@ -110,7 +110,10 @@ function RepoTreeImpl(p: {
   // Fleet-at-scale filter — by label + an "only active" toggle. Groups auto-open while filtering so matches surface.
   const query = q.trim().toLowerCase();
   const filtering = query.length > 0 || onlyActive;
-  const isActiveWorker = (f: FleetRow): boolean => f.status === "running" || f.status === "idle" || f.status === "provisioning" || !!p.attention?.[f.id];
+  // "Active" = not settled for good. `background` (bg tasks still running) is the most active state there is —
+  // excluding it made a worker vanish from the tree in the middle of a Dynamic Workflow run.
+  const isActiveWorker = (f: FleetRow): boolean =>
+    f.status === "running" || f.status === "background" || f.status === "idle" || f.status === "provisioning" || !!p.attention?.[f.id];
   const matchWorker = (f: FleetRow): boolean => (!query || f.label.toLowerCase().includes(query)) && (!onlyActive || isActiveWorker(f));
   const shown = filtering ? live.filter(matchWorker) : live;
   const orphans = shown.filter((f) => !knownPaths.has(f.repoPath));
@@ -299,8 +302,13 @@ function RepoTreeImpl(p: {
           items={[
             { label: t("repoTree.menuRename"), onClick: () => setRenaming({ id: menu.id, value: menuSub.label }) },
             { label: t("repoTree.menuFork"), onClick: () => p.onForkSub?.(menu.id) },
-            // stop: only when in progress (running/idle) — keeps the worktree and pauses (resumable).
-            ...(menuSub.status === "running" || menuSub.status === "idle" ? [{ label: t("repoTree.menuStop"), onClick: () => p.onStopSub?.(menu.id) }] : []),
+            // stop: whenever the worker is not terminal (running/background/idle) — keeps the worktree and pauses
+            // (resumable). `background` especially: fleet.stop tears down the subprocess tree and is the ONLY way
+            // to kill background tasks (interrupt aborts a turn and deliberately leaves them alive), so hiding it
+            // here left a background worker with no stop path at all.
+            ...(menuSub.status === "running" || menuSub.status === "background" || menuSub.status === "idle"
+              ? [{ label: t("repoTree.menuStop"), onClick: () => p.onStopSub?.(menu.id) }]
+              : []),
             { label: menuSub.archived ? t("repoTree.menuUnarchive") : t("repoTree.menuArchive"), onClick: () => p.onArchiveSub?.(menu.id, !menuSub.archived) },
             { label: t("repoTree.menuDelete"), danger: true, onClick: () => setConfirm({ id: menu.id, name: menuSub.label }) },
           ]}
