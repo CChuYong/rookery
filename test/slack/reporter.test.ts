@@ -293,6 +293,33 @@ describe("SlackThreadReporter (plan card)", () => {
     expect(rec.posts).toEqual([]);
   });
 
+  // The state graph retired `done` from live writes, so keying the icon off it meant every live terminal
+  // transition — failures included — posted the same neutral robot.
+  it("flags a failure transition with a warning icon instead of the neutral robot", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), target);
+    r.onEvent(ev.status("error"));
+    await r.idle();
+    expect(rec.posts.some((p) => p.includes("⚠️") && p.includes("a1"))).toBe(true);
+  });
+
+  it("posts a neutral icon for stopped — Slack cannot tell a natural end from a user stop", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), target);
+    r.onEvent(ev.status("stopped"));
+    await r.idle();
+    expect(rec.posts.some((p) => p.includes("🤖") && p.includes("a1"))).toBe(true);
+    expect(rec.posts.some((p) => p.includes("⚠️"))).toBe(false);
+  });
+
+  it("does NOT post background status — the worker is mid-work, not settled", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), target);
+    r.onEvent(ev.status("background"));
+    await r.idle();
+    expect(rec.posts).toEqual([]);
+  });
+
   it("posts a worker's terminal status only once even if emitted twice (two-writer dedup)", async () => {
     const rec: Rec = { streams: [], posts: [] };
     const r = new SlackThreadReporter(fakeClient(rec), target);
