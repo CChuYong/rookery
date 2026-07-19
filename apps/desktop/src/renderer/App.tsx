@@ -21,6 +21,7 @@ import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, shouldCompactDock
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
+import { workerComposerState } from "./lib/worker-composer.js";
 import { capabilityCenterRoute, localizeCommandCandidates } from "./lib/command-actions.js";
 import type { CapabilityCenterRoute } from "./lib/command-actions.js";
 import { useT } from "./i18n/provider.js";
@@ -1046,24 +1047,14 @@ export function App(): JSX.Element {
             controls={{
               provider: activeSub.provider,
               model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
-              editable: activeSub.status === "running" || activeSub.status === "idle",
+              editable: workerComposerState(activeSub.status).controlsEditable,
               onModel: (m) => subSetModel(activeSub.id, m),
               permissionMode: activeSub.permissionMode ?? "bypassPermissions",
               onPermissionMode: (m) => subSetPermissionMode(activeSub.id, m),
               permissionModes: ["bypassPermissions", "plan"] as const,
             }}
-            disabled={activeSub.status !== "running" && activeSub.status !== "idle"}
-            placeholder={
-              activeSub.status === "provisioning"
-                ? t("app.creatingWorktree")
-                : activeSub.status === "running"
-                  ? t("app.busyAddable")
-                  : activeSub.status === "idle"
-                    ? t("app.instructWorker")
-                    : activeSub.status === "orphaned"
-                      ? t("app.sessionEndedRestart")
-                      : t("app.agentEndedReadonly")
-            }
+            disabled={workerComposerState(activeSub.status).disabled}
+            placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
           />
         ),
         editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} />,
@@ -1494,24 +1485,14 @@ export function App(): JSX.Element {
                         // while running, the model + permission mode can be changed live (query.setModel / query.setPermissionMode). effort can't → omitted.
                         provider: activeSub.provider,
                         model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
-                        editable: activeSub.status === "running" || activeSub.status === "idle",
+                        editable: workerComposerState(activeSub.status).controlsEditable,
                         onModel: (m) => subSetModel(activeSub.id, m),
                         permissionMode: activeSub.permissionMode ?? "bypassPermissions",
                         onPermissionMode: (m) => subSetPermissionMode(activeSub.id, m),
                         permissionModes: ["bypassPermissions", "plan"] as const, // workers: only bypass + plan (no default/acceptEdits)
                       }}
-                      disabled={activeSub.status !== "running" && activeSub.status !== "idle"}
-                      placeholder={
-                        activeSub.status === "provisioning"
-                          ? t("app.creatingWorktree")
-                          : activeSub.status === "running"
-                            ? t("app.busyAddable")
-                            : activeSub.status === "idle"
-                              ? t("app.instructWorker")
-                              : activeSub.status === "orphaned"
-                                ? t("app.sessionEndedRestart")
-                                : t("app.agentEndedReadonly")
-                      }
+                      disabled={workerComposerState(activeSub.status).disabled}
+                      placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
                     />
                   ) : (
                     <WorkspaceTab activeTab={activeTab} pageKey={termPageKey!} root={wsRoot} />

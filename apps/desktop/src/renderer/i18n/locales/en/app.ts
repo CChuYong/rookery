@@ -21,6 +21,7 @@ export default {
   "app.worker": "Worker",
   "app.master": "Master",
   "app.busyAddable": "Working… (you can add messages)",
+  "app.backgroundAddable": "Background tasks running… (you can add messages)",
   "app.instructWorker": "Instruct the worker…",
   "app.creatingWorktree": "Creating the worktree…",
   "app.reconnecting": "Connecting to the daemon…",
