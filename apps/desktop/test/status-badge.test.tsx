@@ -42,6 +42,25 @@ describe("StatusBadge status-flash (falling-edge)", () => {
   });
 });
 
+// The worker state graph added `background` (turn ended, harness-tracked background tasks still running). It is
+// still WORKING, so the badge must keep the live signature and must NOT play the "just finished" flash.
+describe("StatusBadge background state", () => {
+  it("keeps the live LED while background tasks run, and does not fire the end-flash on running→background", () => {
+    const { container, rerender } = render(<StatusBadge status="running" />);
+    rerender(<StatusBadge status="background" />);
+    const dot = container.querySelector("span > span")!;
+    expect(dot.className).toContain("led-live");
+    expect(dot.className).not.toContain("status-flash");
+  });
+
+  it("fires the end-flash when background settles to a terminal state", () => {
+    const { container, rerender } = render(<StatusBadge status="background" />);
+    rerender(<StatusBadge status="stopped" />);
+    const dot = container.querySelector("span > span")!;
+    expect(dot.className).toContain("status-flash");
+  });
+});
+
 // Audit #50: the header badge used to render the raw machine token (e.g. "orphaned") while the tree tag showed a
 // cryptic abbreviation ("ORPH") — inconsistent AND untranslated. StatusBadge must now go through the shared
 // statusLabelKey label source instead of echoing the raw status prop.

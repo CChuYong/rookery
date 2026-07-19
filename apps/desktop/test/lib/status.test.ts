@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { statusLabelKey } from "../../src/renderer/lib/status.js";
+import { statusLabelKey, isLive } from "../../src/renderer/lib/status.js";
 import { catalogs } from "../../src/renderer/i18n/catalog.js";
 
 // The worker state union (src/core, mirrored in the renderer) plus the DB-only "provisioning" state.
@@ -23,5 +23,20 @@ describe("statusLabelKey (audit #50)", () => {
 
   it("falls back to a status.<raw> key for an unrecognized state (never throws)", () => {
     expect(statusLabelKey("bogus")).toBe("status.bogus");
+  });
+});
+
+// background = the turn ended but harness-tracked background tasks (bg shells, Dynamic Workflow runs) still run.
+// The SDK auto-wakes the worker when they settle, so it is working — it must carry running's live signature.
+describe("isLive (worker-state-graph: background is live)", () => {
+  it("treats running and background as live", () => {
+    expect(isLive("running")).toBe(true);
+    expect(isLive("background")).toBe(true);
+  });
+
+  it("does not treat settled or terminal states as live", () => {
+    for (const s of ["idle", "stopped", "done", "error", "failed", "orphaned", "provisioning"]) {
+      expect(isLive(s)).toBe(false);
+    }
   });
 });
