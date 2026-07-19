@@ -175,6 +175,14 @@ describe("worker pending reconcile (mid-turn message ordering)", () => {
     expect(next.pendingByWorker.w1).toEqual([{ clientMsgId: "c1", text: "msg" }]);
   });
 
+  // Live-event twin of the setFleet retention rule: `background` still consumes queued messages (the send is
+  // released at the next turn boundary), so a running→background transition must not wipe the waiting bubble.
+  it("keeps worker pending across a running→background transition", () => {
+    const s = { ...emptyState(), pendingByWorker: { w1: [{ clientMsgId: "c1", text: "msg" }] } };
+    const next = reduceEvent(s, { type: "worker.status", sessionId: "s1", workerId: "w1", status: "background" });
+    expect(next.pendingByWorker.w1).toEqual([{ clientMsgId: "c1", text: "msg" }]);
+  });
+
   it("setFleet prunes pendingByWorker for workers no longer in the fleet (discard/delete)", () => {
     useStore.setState({ pendingByWorker: { wKeep: [{ clientMsgId: "c1", text: "a" }], wGone: [{ clientMsgId: "c2", text: "b" }] } });
     useStore.getState().setFleet([{ id: "wKeep", label: "k", repoPath: "/r", status: "running", branch: null, model: null }]);

@@ -380,8 +380,11 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       // Membership belongs to worker.spawned/fleet.list. A late stop/error event from a permanent delete must not
       // invent a fallback row, and an event racing a tombstone must not resurrect one either.
       const prev = state.fleet[e.workerId];
-      // Once it leaves running (stopped/error/done), any remaining "pending" bubbles get no boundary echo, so clean them up — prevents ghost bubbles.
-      const pendingByWorker = e.status !== "running" && state.pendingByWorker[e.workerId]?.length
+      // Once it can no longer consume a queued message (stopped/error/idle…), any remaining "pending" bubbles get no
+      // boundary echo, so clean them up — prevents ghost bubbles. `background` is NOT such a state: the turn ended but
+      // the stream is open, the send is accepted and released at the next boundary, so its bubble must survive.
+      const consumesQueued = e.status === "running" || e.status === "background";
+      const pendingByWorker = !consumesQueued && state.pendingByWorker[e.workerId]?.length
         ? { ...state.pendingByWorker, [e.workerId]: [] }
         : state.pendingByWorker;
       if (!prev || state.deletingWorkers[e.workerId]) {
