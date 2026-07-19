@@ -24,3 +24,20 @@ describe("notifyFor", () => {
     expect(notifyFor("running", "running", "x", ko)).toBeNull();
   });
 });
+
+// Coverage across the worker state graph: `error` (written by Worker.transition) is the live sibling of
+// `failed` (written by FleetOrchestrator.setStatus) and was silently unnotified.
+describe("notifyFor across the worker state graph", () => {
+  it("notifies on error, the live sibling of failed", () => {
+    expect(notifyFor("running", "error", "app", ko)?.body).toMatch(/실패|에러/);
+    expect(notifyFor("running", "error", "app", en)?.body).toBe("Failed — an error occurred");
+  });
+
+  it("does NOT notify on entering background — the worker is still working", () => {
+    expect(notifyFor("running", "background", "app", ko)).toBeNull();
+  });
+
+  it("notifies on stopped, the live replacement for the retired done state", () => {
+    expect(notifyFor("background", "stopped", "app", ko)?.body).toMatch(/중지/);
+  });
+});
