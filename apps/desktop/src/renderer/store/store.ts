@@ -259,7 +259,11 @@ export const useStore = create<Store>((set, get) => ({
         if (!s.fleet[e.workerId] || s.deletingWorkers[e.workerId]) return {};
         const base = reduceEvent(s, e, now);
         if (e.workerId === s.activeWorkerId) return base; // The worker currently being viewed isn't unread
-        if (e.status === "idle" || e.status === "done" || e.status === "error" || e.status === "failed") {
+        // Settled and worth a look. `stopped` is included because the worker state graph retired `done` from live
+        // writes: a natural stream end now lands on `stopped` (+ a notice), so leaving it out meant a finished
+        // worker produced no unread dot and no attention-bell entry. `background` is excluded on purpose — the
+        // turn ended but the work has not, so there is nothing to review yet.
+        if (e.status === "idle" || e.status === "stopped" || e.status === "done" || e.status === "error" || e.status === "failed") {
           return { ...base, attention: { ...s.attention, [e.workerId]: true } };
         }
         if (e.status === "running") return { ...base, attention: { ...s.attention, [e.workerId]: false } };

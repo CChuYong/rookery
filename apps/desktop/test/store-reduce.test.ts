@@ -598,6 +598,20 @@ describe("store.applyEvent", () => {
     expect(useStore.getState().attention.a3).toBeUndefined();
   });
 
+  // The worker state graph retired `done` from live writes: a natural stream end now lands on `stopped`.
+  // Marking only idle/done/error/failed therefore left a finished worker with no unread dot at all.
+  it("attention: marks unread when a worker ends naturally (stopped), but not while it is in background", () => {
+    useStore.getState().setFleet(["b1", "b2"].map((id) => ({
+      id, label: id, repoPath: "/r", status: "running", branch: null, model: null,
+    })));
+    useStore.setState({ attention: {}, activeWorkerId: null });
+    useStore.getState().applyEvent({ type: "worker.status", sessionId: "x", workerId: "b1", status: "stopped" });
+    expect(useStore.getState().attention.b1).toBe(true);
+    // background = the turn ended but the work has not — there is nothing to review yet.
+    useStore.getState().applyEvent({ type: "worker.status", sessionId: "x", workerId: "b2", status: "background" });
+    expect(useStore.getState().attention.b2).toBeFalsy();
+  });
+
   it("running: agent.status running/idle drives the per-session running map", () => {
     useStore.setState({ running: {} });
     useStore.getState().applyEvent({ type: "master.status", sessionId: "s1", status: "running" });
