@@ -85,3 +85,38 @@ describe("pendingByWorker (optimistic worker bubbles)", () => {
     expect(useStore.getState().pendingByWorker["w1"]).toEqual([{ clientMsgId: "c2", text: "b" }]);
   });
 });
+
+// setFleet prunes bubbles for workers that can no longer consume the queued message. `background` can:
+// the send is accepted and released at the next turn boundary, so pruning it would erase a live "waiting"
+// bubble before the daemon's deferred echo arrives.
+describe("setFleet pending retention across the worker state graph", () => {
+  const row = (id: string, status: string) => ({
+    id, label: id, repoPath: "/code/app", status, branch: `rookery/${id}`,
+    model: null, permissionMode: "bypassPermissions", ticketKey: null, ticketUrl: null,
+  });
+
+  beforeEach(() => {
+    useStore.setState({ pendingByWorker: {}, fleet: {}, deletingWorkers: {}, attention: {} } as never);
+  });
+
+  it("keeps the pending bubble for a background worker", () => {
+    useStore.getState().pushWorkerPending("w1", { clientMsgId: "c1", text: "also check the logs" });
+    useStore.getState().setFleet([row("w1", "background")] as never);
+    expect(useStore.getState().pendingByWorker["w1"]).toHaveLength(1);
+  });
+
+  it("keeps the pending bubble for a running worker", () => {
+    useStore.getState().pushWorkerPending("w1", { clientMsgId: "c1", text: "hi" });
+    useStore.getState().setFleet([row("w1", "running")] as never);
+    expect(useStore.getState().pendingByWorker["w1"]).toHaveLength(1);
+  });
+
+  it("still drops ghost bubbles for settled and terminal workers", () => {
+    for (const status of ["idle", "stopped", "error"]) {
+      useStore.setState({ pendingByWorker: {} } as never);
+      useStore.getState().pushWorkerPending("w1", { clientMsgId: "c1", text: "hi" });
+      useStore.getState().setFleet([row("w1", status)] as never);
+      expect(useStore.getState().pendingByWorker["w1"] ?? []).toHaveLength(0);
+    }
+  });
+});

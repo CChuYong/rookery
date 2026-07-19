@@ -291,7 +291,7 @@ export const useStore = create<Store>((set, get) => ({
   failWorkerDeletion: (id) => set((state) => applyWorkerDeletionState(state, id, "failed")),
   resetWorkerDeletions: () => set({ deletingWorkers: {} }),
   // Clean up unread entries for workers that vanished (so a tab badge doesn't stay lit after delete/discard).
-  // Prune vanished workers. Even for those that remain, if non-running, clear pending (A6: prevent ghost "pending" bubbles for settled workers on reconnect) — preserved only while running.
+  // Prune vanished workers. Even for those that remain, if the worker can no longer consume a queued message, clear pending (A6: prevent ghost "pending" bubbles for settled workers on reconnect) — preserved only while running/background.
   setFleet: (rows) => set((s) => {
     const visible = rows.filter((row) => !s.deletingWorkers[row.id]);
     const ids = new Set(visible.map((row) => row.id));
@@ -301,7 +301,14 @@ export const useStore = create<Store>((set, get) => ({
       fleetLoaded: true,
       fleetLoadFailed: false,
       attention: Object.fromEntries(Object.entries(s.attention).filter(([id]) => ids.has(id))),
-      pendingByWorker: Object.fromEntries(Object.entries(s.pendingByWorker).filter(([id]) => rowsById.get(id)?.status === "running")),
+      // `background` counts as retainable: the send is accepted and released at the next turn boundary, so
+      // pruning here would erase a live "waiting" bubble before the daemon's deferred echo arrives.
+      pendingByWorker: Object.fromEntries(
+        Object.entries(s.pendingByWorker).filter(([id]) => {
+          const status = rowsById.get(id)?.status;
+          return status === "running" || status === "background";
+        }),
+      ),
     };
   }),
   setFleetLoadFailed: (v) => set({ fleetLoadFailed: v }),
