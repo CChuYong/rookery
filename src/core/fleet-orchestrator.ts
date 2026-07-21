@@ -297,7 +297,7 @@ export class FleetOrchestrator {
         maxTurns: src.max_turns ?? undefined, costBudgetUsd: src.cost_budget_usd ?? undefined, effort, provider,
         resumeSessionId: forkedUuid ?? undefined, handoffFromProvider: handoff ? srcProvider : undefined,
       });
-      this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", ticketKey: null, ticketUrl: null });
+      this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", provider, ticketKey: null, ticketUrl: null });
       return { id: newId };
     } catch (err) {
       // The fork's snapshot-ref (and possibly its worktree/branch) were already created — reclaim them, or they
@@ -346,7 +346,7 @@ export class FleetOrchestrator {
       // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
       // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
       // The agent's boot below reconciles it to running/idle; a failed worktree-create flips it to failed via the catch.
-      bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
+      bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", provider: input.provider, ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
       // launch: resolve base → addWorktree → factory(cwd=worktree) → start → reconcile status.
       // base resolution: explicit choice > remote default branch (refreshed via best-effort fetch) > current HEAD (fallback).
       let baseStale = false; // a best-effort fetch failed → branched from a possibly-stale ref (surfaced as a worker notice after boot)

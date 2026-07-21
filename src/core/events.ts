@@ -45,7 +45,9 @@ export type CoreEvent =
   | { type: "session.label"; sessionId: string; label: string }
   // status: the worker's initial state — "provisioning" while its worktree is still being created (emitted up-front so the UI
   // shows the row immediately), reconciled to running/idle once the agent boots. Omitted (back-compat) ⇒ treated as "running".
-  | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; task?: string; branch?: string; status?: string; ticketKey?: string | null; ticketUrl?: string | null }
+  // provider: the AgentBackend the worker runs on ('claude' | 'codex'). Carried on the live spawn event so the desktop shows the
+  // Codex badge for the worker's whole run — without it the badge only appeared once fleet.list reconciled (reconnect/terminal). Omitted ⇒ claude.
+  | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; task?: string; branch?: string; status?: string; provider?: string; ticketKey?: string | null; ticketUrl?: string | null }
   // clientMsgId: a live-only correlation key carried only on the user echo — used to reconcile the desktop pending bubble (absent from the persisted payload).
   | { type: "worker.event"; sessionId: string; workerId: string; seq: number; data: WorkerEventData; clientMsgId?: string }
   // Native nested subagent (SDK subagent spawned by a worker via Task) activity — live only (not persisted), grouped by parentToolUseId.

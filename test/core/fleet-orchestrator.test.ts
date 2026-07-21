@@ -105,9 +105,13 @@ describe("FleetOrchestrator", () => {
     const forkCalls: unknown[] = [];
     const forkSession = async (provider: string, sdkSessionId: string) => { forkCalls.push({ provider, sdkSessionId }); return { sessionId: "forked-uuid" }; };
     const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", forkSession, exists: () => true, idgen: () => "fk0" });
+    const events: CoreEvent[] = [];
+    bus.subscribe("home", (e: CoreEvent) => events.push(e));
 
     const { id } = await fleet.fork("src", { provider: "codex" });
 
+    const spawned = events.find((e) => e.type === "worker.spawned") as { provider?: string } | undefined;
+    expect(spawned?.provider).toBe("codex"); // the fork's badge shows live, not only after reconnect
     const w = repos.getWorker(id)!;
     expect(w.provider).toBe("codex");
     expect(w.handoff_from_provider).toBe("claude");
@@ -394,6 +398,26 @@ describe("FleetOrchestrator", () => {
     expect(row?.branch).toBe("rookery/a0");
     expect(s.started).toEqual(["a0:/wt/a0:do it"]); // worker runs in the worktree
     expect(events).toContain("worker.spawned");
+  });
+
+  it("carries provider into the up-front worker.spawned event so a codex worker shows its badge for its whole live run", async () => {
+    const s = setup();
+    const events: CoreEvent[] = [];
+    s.bus.subscribe("sA", (e: CoreEvent) => events.push(e));
+    await s.fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t", provider: "codex" });
+    await s.fleet.waitAllSettled();
+    const spawned = events.find((e) => e.type === "worker.spawned") as { provider?: string } | undefined;
+    expect(spawned?.provider).toBe("codex");
+  });
+
+  it("omits provider on the spawn event for a default (claude) worker → ProviderBadge stays hidden", async () => {
+    const s = setup();
+    const events: CoreEvent[] = [];
+    s.bus.subscribe("sA", (e: CoreEvent) => events.push(e));
+    await s.fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
+    await s.fleet.waitAllSettled();
+    const spawned = events.find((e) => e.type === "worker.spawned") as { provider?: string } | undefined;
+    expect(spawned?.provider).toBeUndefined();
   });
 
   it("base unset + origin/HEAD present → fetches default branch and bases on origin/main", async () => {

@@ -348,7 +348,8 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       // while the worktree is created, then a worker.status reconciles it to running/idle.
       const status = e.status ?? "running";
       // the worker.spawned event doesn't carry permissionMode → default it; a later fleet.list (setFleet) reconciles the real value.
-      const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
+      // provider carried on the event so a codex worker shows its badge live; a later fleet.list (setFleet) reconciles the authoritative value.
+      const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, provider: e.provider, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
       return { ...state, fleet: { ...state.fleet, [e.workerId]: row }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status }) } };
     }
     case "worker.deletion": {
