@@ -176,7 +176,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[12.5px] text-fg-dim">{it.label}</span>
                             <span className="block truncate text-[11px] text-muted">
-                              {t(`attentionBell.kind_${it.kind}`)}{it.detail ? ` · ${it.detail}` : ""}
+                              {t(`attentionBell.kind_${it.kind}`)}{(() => { const d = it.detailKey ? t(it.detailKey) : it.detail; return d ? ` · ${d}` : ""; })()}
                             </span>
                           </span>
                         </button>

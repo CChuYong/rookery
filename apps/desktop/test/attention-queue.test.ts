@@ -102,6 +102,21 @@ describe("buildAttentionItems", () => {
     expect(candidateKeys).toEqual(new Set());
   });
 
+  it("worker rows carry the status as a translatable label key, not the raw union token", () => {
+    // detailKey routes through the same status.* catalog as StatusBadge (audit #50) so the bell never leaks a raw
+    // English status word (e.g. "error"/"stopped") into the Korean-default UI. Free-text details stay on `detail`.
+    const { items } = buildAttentionItems(
+      inputs({ fleet: { w1: worker("w1", "error"), w2: worker("w2", "stopped") }, attention: { w2: true } }),
+      new Set(),
+    );
+    const fail = items.find((i) => i.kind === "worker-failure")!;
+    const review = items.find((i) => i.kind === "worker-review")!;
+    expect(fail.detailKey).toBe("status.error");
+    expect(fail.detail).toBeUndefined(); // no raw token
+    expect(review.detailKey).toBe("status.stopped");
+    expect(review.detail).toBeUndefined();
+  });
+
   it("archived failed workers are excluded", () => {
     const { items } = buildAttentionItems(inputs({ fleet: { w1: worker("w1", "error", { archived: true }) } }), new Set());
     expect(items).toEqual([]);

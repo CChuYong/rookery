@@ -1,5 +1,6 @@
 import type { LogItem, FleetRow } from "../store/reduce.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
+import { statusLabelKey } from "./status.js";
 
 // Attention queue derivation (docs/superpowers/specs/2026-07-11-attention-queue-design.md): a pure
 // function that ranks "what needs the human NOW" from state the store already tracks. Tier IS the
@@ -18,7 +19,8 @@ export interface AttentionItem {
   tier: 0 | 1 | 2;
   kind: AttentionKind;
   label: string; // entity display name (session/worker label, automation name)
-  detail?: string; // secondary context (tool name / question / status)
+  detail?: string; // secondary context as literal text (tool name / question / automation error) — rendered verbatim
+  detailKey?: string; // secondary context as an i18n key (worker status) — rendered through t() so it localizes; mutually exclusive with detail
   nav: AttentionNav;
   dismissible: boolean; // tier 0 resolves itself (answer the card) — no X
 }
@@ -77,7 +79,7 @@ export function buildAttentionItems(
     const key = `wfail:${w.id}:${w.status}`;
     candidateKeys.add(key);
     if (acked.has(key) || viewingWorker(w.id)) continue;
-    items.push({ key, tier: 1, kind: "worker-failure", label: w.label, detail: w.status, nav: { workerId: w.id }, dismissible: true });
+    items.push({ key, tier: 1, kind: "worker-failure", label: w.label, detailKey: statusLabelKey(w.status), nav: { workerId: w.id }, dismissible: true });
   }
 
   // ── tier 1: automation failures — lastRunAt in the key so a NEW failure re-surfaces past an old dismissal.
@@ -98,7 +100,7 @@ export function buildAttentionItems(
     // idle transition must not re-introduce it as a review item after excluding it from failures.
     if (w.status === "orphaned") continue;
     if (viewingWorker(workerId)) continue;
-    items.push({ key: `wrev:${workerId}`, tier: 2, kind: "worker-review", label: w.label, detail: w.status, nav: { workerId }, dismissible: true });
+    items.push({ key: `wrev:${workerId}`, tier: 2, kind: "worker-review", label: w.label, detailKey: statusLabelKey(w.status), nav: { workerId }, dismissible: true });
   }
   for (const [sessionId, unread] of Object.entries(inputs.sessionAttention)) {
     if (!unread) continue;
