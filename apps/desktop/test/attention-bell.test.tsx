@@ -50,6 +50,16 @@ describe("AttentionBell", () => {
     expect(screen.queryByText("실패")).toBeNull(); // popover closed
   });
 
+  it("shows the worker status as a translated word, not the raw English token (Korean-default UI)", () => {
+    useStore.setState({ fleet: { w1: w("w1", "error"), w2: w("w2", "stopped") }, attention: { w2: true } } as never);
+    render(<AttentionBell onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    expect(screen.getByText(/워커 실패 · 오류/)).toBeInTheDocument(); // not "· error"
+    expect(screen.getByText(/· 중지됨/)).toBeInTheDocument(); // not "· stopped"
+    expect(screen.queryByText(/· error/)).toBeNull();
+    expect(screen.queryByText(/· stopped/)).toBeNull();
+  });
+
   it("dismissing a failure persists the ack (item gone after reopen)", () => {
     useStore.setState({ fleet: { w1: w("w1", "failed") } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);

@@ -197,6 +197,14 @@ describe("worker pending reconcile (mid-turn message ordering)", () => {
     expect(legacy.fleet.w2.status).toBe("running"); // older daemon omits status → defaults to running
   });
 
+  it("worker.spawned carries provider onto the fleet row so a codex worker shows its badge live (not only after reconnect)", () => {
+    const codex = reduceEvent(emptyState(), { type: "worker.spawned", sessionId: "s1", workerId: "w1", repoPath: "/r", label: "app", status: "provisioning", provider: "codex" });
+    expect(codex.fleet.w1.provider).toBe("codex");
+    // absent provider ⇒ undefined (claude default; ProviderBadge renders nothing) — back-compat with older daemons.
+    const legacy = reduceEvent(emptyState(), { type: "worker.spawned", sessionId: "s1", workerId: "w2", repoPath: "/r", label: "app", status: "provisioning" });
+    expect(legacy.fleet.w2.provider).toBeUndefined();
+  });
+
   it("worker.status reconciles a provisioning row to running once the agent boots", () => {
     const prov = reduceEvent(emptyState(), { type: "worker.spawned", sessionId: "s1", workerId: "w1", repoPath: "/r", label: "app", status: "provisioning" });
     const running = reduceEvent(prov, { type: "worker.status", sessionId: "s1", workerId: "w1", status: "running" });
