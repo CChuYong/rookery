@@ -228,7 +228,9 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       durationMs: r.duration_ms ?? 0,
       contextTokens,
       contextWindow,
-      ...(r.terminal_reason ? { terminalReason: r.terminal_reason } : {}),
+      // `completed` is the normal-finish sentinel, not a diagnostic — drop it so it never surfaces
+      // as a header warning or a dead-turn notice. Only non-completed reasons are carried downstream.
+      ...(r.terminal_reason && r.terminal_reason !== "completed" ? { terminalReason: r.terminal_reason } : {}),
     };
   }
 }

@@ -424,17 +424,25 @@ describe("ClaudeBackend — background_task translation", () => {
 
   it("carries result.terminal_reason on turn_end as an opaque diagnostic (absent when the SDK omits it)", async () => {
     const backend = new ClaudeBackend(fakeQuery([
-      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s", terminal_reason: "completed" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s", terminal_reason: "model_error" },
     ]));
     const events = await collect(backend.startTurn("hi", baseOpts()));
     const end = events.find((e) => e.kind === "turn_end")!;
-    expect(end).toMatchObject({ kind: "turn_end", terminalReason: "completed" });
+    expect(end).toMatchObject({ kind: "turn_end", terminalReason: "model_error" });
 
     const noReason = new ClaudeBackend(fakeQuery([
       { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
     ]));
     const events2 = await collect(noReason.startTurn("hi", baseOpts()));
     expect("terminalReason" in (events2.find((e) => e.kind === "turn_end") as object)).toBe(false);
+  });
+
+  it("drops the `completed` sentinel — a normal finish is not a diagnostic", async () => {
+    const backend = new ClaudeBackend(fakeQuery([
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s", terminal_reason: "completed" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect("terminalReason" in (events.find((e) => e.kind === "turn_end") as object)).toBe(false);
   });
 });
 

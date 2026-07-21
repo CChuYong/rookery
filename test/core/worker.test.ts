@@ -752,7 +752,7 @@ describe("Worker", () => {
         model: "test-model",
         backend: fakeBackend([
           { type: "assistant", text: "x" },
-          { type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "s", terminal_reason: "api_error" },
+          { type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "s", terminal_reason: "model_error" },
         ]),
       },
     });
@@ -762,12 +762,43 @@ describe("Worker", () => {
 
     const persisted = repos.listWorkerEvents("a1");
     const resultEvent = persisted.find((e) => e.type === "result");
-    expect((JSON.parse(resultEvent!.payload_json) as { terminalReason?: string }).terminalReason).toBe("api_error");
+    expect((JSON.parse(resultEvent!.payload_json) as { terminalReason?: string }).terminalReason).toBe("model_error");
     const notices = persisted.filter((e) => e.type === "notice");
-    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text === "Turn ended abnormally (api_error).")).toBe(true);
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text === "Turn ended abnormally (model_error).")).toBe(true);
   });
 
   it("does not notice benign terminal reasons", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({
+      id: "a1",
+      sessionId: "s1",
+      repoPath: "/r",
+      label: "t",
+      deps: {
+        repos,
+        bus: new EventBus(),
+        model: "test-model",
+        backend: fakeBackend([
+          { type: "assistant", text: "x" },
+          { type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "s", terminal_reason: "aborted_streaming" },
+        ]),
+      },
+    });
+
+    agent.start("do the task");
+    await agent.waitUntilSettled();
+
+    const persisted = repos.listWorkerEvents("a1");
+    const resultEvent = persisted.find((e) => e.type === "result");
+    // aborted_streaming is an intentional interrupt: carried for display, but never a dead-turn notice.
+    expect((JSON.parse(resultEvent!.payload_json) as { terminalReason?: string }).terminalReason).toBe("aborted_streaming");
+    const notices = persisted.filter((e) => e.type === "notice");
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.startsWith("Turn ended abnormally"))).toBe(false);
+  });
+
+  it("filters the `completed` sentinel so it never reaches the transcript", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
@@ -792,9 +823,7 @@ describe("Worker", () => {
 
     const persisted = repos.listWorkerEvents("a1");
     const resultEvent = persisted.find((e) => e.type === "result");
-    expect((JSON.parse(resultEvent!.payload_json) as { terminalReason?: string }).terminalReason).toBe("completed");
-    const notices = persisted.filter((e) => e.type === "notice");
-    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.startsWith("Turn ended abnormally"))).toBe(false);
+    expect("terminalReason" in (JSON.parse(resultEvent!.payload_json) as object)).toBe(false);
   });
 
   it("passes systemPrompt with preset=claude_code and fence instruction append to query() (preserves claude_code preset + append)", async () => {
