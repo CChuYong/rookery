@@ -175,6 +175,14 @@ describe("worker pending reconcile (mid-turn message ordering)", () => {
     expect(next.pendingByWorker.w1).toEqual([{ clientMsgId: "c1", text: "msg" }]);
   });
 
+  // Live-event twin of the setFleet retention rule: `background` still consumes queued messages (the send is
+  // released at the next turn boundary), so a running→background transition must not wipe the waiting bubble.
+  it("keeps worker pending across a running→background transition", () => {
+    const s = { ...emptyState(), pendingByWorker: { w1: [{ clientMsgId: "c1", text: "msg" }] } };
+    const next = reduceEvent(s, { type: "worker.status", sessionId: "s1", workerId: "w1", status: "background" });
+    expect(next.pendingByWorker.w1).toEqual([{ clientMsgId: "c1", text: "msg" }]);
+  });
+
   it("setFleet prunes pendingByWorker for workers no longer in the fleet (discard/delete)", () => {
     useStore.setState({ pendingByWorker: { wKeep: [{ clientMsgId: "c1", text: "a" }], wGone: [{ clientMsgId: "c2", text: "b" }] } });
     useStore.getState().setFleet([{ id: "wKeep", label: "k", repoPath: "/r", status: "running", branch: null, model: null }]);
@@ -596,6 +604,20 @@ describe("store.applyEvent", () => {
     expect(useStore.getState().attention.a3).toBe(true);
     useStore.getState().setFleet([]);
     expect(useStore.getState().attention.a3).toBeUndefined();
+  });
+
+  // The worker state graph retired `done` from live writes: a natural stream end now lands on `stopped`.
+  // Marking only idle/done/error/failed therefore left a finished worker with no unread dot at all.
+  it("attention: marks unread when a worker ends naturally (stopped), but not while it is in background", () => {
+    useStore.getState().setFleet(["b1", "b2"].map((id) => ({
+      id, label: id, repoPath: "/r", status: "running", branch: null, model: null,
+    })));
+    useStore.setState({ attention: {}, activeWorkerId: null });
+    useStore.getState().applyEvent({ type: "worker.status", sessionId: "x", workerId: "b1", status: "stopped" });
+    expect(useStore.getState().attention.b1).toBe(true);
+    // background = the turn ended but the work has not — there is nothing to review yet.
+    useStore.getState().applyEvent({ type: "worker.status", sessionId: "x", workerId: "b2", status: "background" });
+    expect(useStore.getState().attention.b2).toBeFalsy();
   });
 
   it("running: agent.status running/idle drives the per-session running map", () => {

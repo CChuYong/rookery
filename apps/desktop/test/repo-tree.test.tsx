@@ -409,3 +409,42 @@ describe("RepoTree fleet-provided cost (no open needed)", () => {
     expect(screen.getByText("$3.75")).toBeInTheDocument();
   });
 });
+
+// The worker state graph added `background` (turn ended, harness-tracked background tasks still running).
+// Both affordances below were gated to running/idle and silently excluded it.
+describe("RepoTree background-state affordances", () => {
+  const bgWorker = { ...worker, id: "wbg", label: "workflow worker", status: "background", branch: "rookery/wbg" };
+
+  it("offers Stop for a background worker — fleet.stop is the only control that kills background tasks", () => {
+    const onStopSub = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[bgWorker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+        onStopSub={onStopSub}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByText("workflow worker"));
+    fireEvent.click(screen.getByText("중단")); // repoTree.menuStop (tests run under the ko fallback catalog)
+    expect(onStopSub).toHaveBeenCalledWith("wbg");
+  });
+
+  it("keeps a background worker visible under the active/live filter", () => {
+    // The filter bar only renders past 4 non-archived rows, so pad with settled workers — which also lets this
+    // assert the filter still does its job (the stopped ones go away, the background one stays).
+    const settled = [0, 1, 2, 3].map((i) => ({ ...worker, id: `ws${i}`, label: `settled ${i}`, status: "stopped" }));
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[bgWorker, ...settled] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("활성")); // repoTree.onlyActive — rendered as "live" in the en catalog
+    expect(screen.getByText("workflow worker")).toBeInTheDocument();
+    expect(screen.queryByText("settled 0")).not.toBeInTheDocument();
+  });
+});

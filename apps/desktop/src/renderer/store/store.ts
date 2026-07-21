@@ -259,7 +259,11 @@ export const useStore = create<Store>((set, get) => ({
         if (!s.fleet[e.workerId] || s.deletingWorkers[e.workerId]) return {};
         const base = reduceEvent(s, e, now);
         if (e.workerId === s.activeWorkerId) return base; // The worker currently being viewed isn't unread
-        if (e.status === "idle" || e.status === "done" || e.status === "error" || e.status === "failed") {
+        // Settled and worth a look. `stopped` is included because the worker state graph retired `done` from live
+        // writes: a natural stream end now lands on `stopped` (+ a notice), so leaving it out meant a finished
+        // worker produced no unread dot and no attention-bell entry. `background` is excluded on purpose — the
+        // turn ended but the work has not, so there is nothing to review yet.
+        if (e.status === "idle" || e.status === "stopped" || e.status === "done" || e.status === "error" || e.status === "failed") {
           return { ...base, attention: { ...s.attention, [e.workerId]: true } };
         }
         if (e.status === "running") return { ...base, attention: { ...s.attention, [e.workerId]: false } };
@@ -291,7 +295,7 @@ export const useStore = create<Store>((set, get) => ({
   failWorkerDeletion: (id) => set((state) => applyWorkerDeletionState(state, id, "failed")),
   resetWorkerDeletions: () => set({ deletingWorkers: {} }),
   // Clean up unread entries for workers that vanished (so a tab badge doesn't stay lit after delete/discard).
-  // Prune vanished workers. Even for those that remain, if non-running, clear pending (A6: prevent ghost "pending" bubbles for settled workers on reconnect) — preserved only while running.
+  // Prune vanished workers. Even for those that remain, if the worker can no longer consume a queued message, clear pending (A6: prevent ghost "pending" bubbles for settled workers on reconnect) — preserved only while running/background.
   setFleet: (rows) => set((s) => {
     const visible = rows.filter((row) => !s.deletingWorkers[row.id]);
     const ids = new Set(visible.map((row) => row.id));
@@ -301,7 +305,14 @@ export const useStore = create<Store>((set, get) => ({
       fleetLoaded: true,
       fleetLoadFailed: false,
       attention: Object.fromEntries(Object.entries(s.attention).filter(([id]) => ids.has(id))),
-      pendingByWorker: Object.fromEntries(Object.entries(s.pendingByWorker).filter(([id]) => rowsById.get(id)?.status === "running")),
+      // `background` counts as retainable: the send is accepted and released at the next turn boundary, so
+      // pruning here would erase a live "waiting" bubble before the daemon's deferred echo arrives.
+      pendingByWorker: Object.fromEntries(
+        Object.entries(s.pendingByWorker).filter(([id]) => {
+          const status = rowsById.get(id)?.status;
+          return status === "running" || status === "background";
+        }),
+      ),
     };
   }),
   setFleetLoadFailed: (v) => set({ fleetLoadFailed: v }),

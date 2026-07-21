@@ -6,9 +6,10 @@ import { useT } from "../i18n/provider.js";
 
 export function StatusBadge({ status }: { status: string }): JSX.Element {
   const t = useT();
-  // status-flash fires once only on the running→terminal transition. It does not fire on history
-  // replay where the component mounts already in a terminal state (useJustEnded is false at mount).
-  const justEnded = useJustEnded(status === "running");
+  // status-flash fires once only on the live→settled transition. Keyed off isLive (not "running") so the
+  // running→background hand-off — where work continues — does not flash a false "finished" cue. It does not
+  // fire on history replay where the component mounts already settled (useJustEnded is false at mount).
+  const justEnded = useJustEnded(isLive(status));
   return (
     <span
       role="status"

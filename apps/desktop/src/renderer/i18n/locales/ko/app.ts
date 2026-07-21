@@ -21,6 +21,7 @@ export default {
   "app.worker": "워커",
   "app.master": "마스터",
   "app.busyAddable": "작업 중… (메시지 추가 가능)",
+  "app.backgroundAddable": "백그라운드 작업 중… (메시지 추가 가능)",
   "app.instructWorker": "워커에 지시…",
   "app.creatingWorktree": "워크트리 생성 중…",
   "app.reconnecting": "데몬에 연결하는 중…",

@@ -122,3 +122,30 @@ Estimated size: **M**. No codex-side changes beyond none (its adapter simply nev
 - Surfacing individual task rows in the desktop (a tasks panel) — v1 carries count+types only.
 - `background_requested` semantics (unreproduced; opaque diagnostic).
 - The worker-settled automation trigger itself (separate roadmap item; this design is its prerequisite).
+
+## Follow-up: 2026-07-19 desktop interaction-gate gaps
+
+This design updated the renderer's *display* channels (`lib/status.ts` RAIL/TAG/TONE, `WorkspaceHeaders`) but not
+its *interaction gates*, so a worker in `background` was rendered correctly and yet could not be typed to, stopped,
+or filtered for. Reported from a live Dynamic Workflow run whose worker showed "Worker ended — view only". Fixed:
+
+- `lib/worker-composer.ts` (new) — the single worker composer gate, replacing a chain duplicated across App.tsx's
+  dockable and static render paths (that duplicate is why `background` was missed in both at once). `background`
+  is writable, matching `Worker.send()`, which accepts sends while running/background/idle.
+- `store.ts setFleet` **and** `reduce.ts worker.status` — optimistic bubbles retained for `background`, not just
+  `running`. Two independent code paths had the same running-only predicate.
+- `RepoTree` — context-menu Stop and the "active/live" filter include `background`. Stop matters most:
+  `fleet.stop` is the only control that kills background tasks; `interrupt` deliberately does not, so gating it
+  out left a background worker with no stop path at all.
+- `store.ts worker.status` unread marking — includes `stopped`, since `done` no longer occurs live and a natural
+  stream end therefore produced no unread dot and no attention-bell entry.
+- `lib/notify.ts` — `error` notifies (previously only its orchestrator-written sibling `failed` did).
+- `lib/status.ts isLive` / `StatusBadge` — `background` keeps the live LED and does not fire the end-flash.
+- `slack/reporter.ts` — terminal icon flags failures (`error`/`failed`/`orphaned`) rather than depending on the
+  retired `done` for its only non-neutral case.
+
+Deliberately unchanged: `WorkerNotifier` still excludes `background` from SETTLED (no premature master wake), and
+`ConversationPane`'s composer stop button stays keyed to `running` — during `background` there is no turn to
+interrupt, and offering a stop that cannot kill background tasks would be misleading. The real stop lives in the
+fleet tree's context menu. Remaining `"done"` references are legacy-read paths (terminal-state sets, the union
+type, the notifier's legacy-row parse fallback) and are correct as-is.

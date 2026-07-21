@@ -16,6 +16,9 @@ const PROSE_FLUSH = 40;
 const THINK_ID = "__thinking__";
 const THINK_FLUSH = 120; // Refresh the card details once accumulated reasoning grows by this much more
 const DETAIL_MAX = 200; // task card details string cap (safety margin under the chunk ~256 limit)
+// Terminal worker statuses that mean the work did NOT complete. `error` is written by Worker.transition,
+// `failed`/`orphaned` by the orchestrator — Slack surfaces all three with the same warning icon.
+const TERMINAL_FAILURE_STATUSES = new Set(["error", "failed", "orphaned"]);
 
 function slackErrorCode(err: unknown): string | undefined {
   const e = err as { data?: { error?: string } };
@@ -290,7 +293,10 @@ export class SlackThreadReporter {
         // post the same terminal state for the same worker only once (prevents duplicate messages). Desktop/CLI overwrite the status field so they're idempotent (no effect).
         if (this.lastWorkerStatus.get(e.workerId) === e.status) return;
         this.lastWorkerStatus.set(e.workerId, e.status);
-        const icon = e.status === "done" ? "✅" : "🤖";
+        // Failure is the only terminal outcome Slack can identify from status alone: `stopped` now covers both a
+        // natural stream end and a user-requested stop (the state graph retired `done` from live writes), so a
+        // success mark there would be fabricated. `done` keeps its check for legacy rows replayed from the DB.
+        const icon = TERMINAL_FAILURE_STATUSES.has(e.status) ? "⚠️" : e.status === "done" ? "✅" : "🤖";
         await this.post(`${icon} \`${e.workerId}\` → ${e.status}`);
         return;
       }

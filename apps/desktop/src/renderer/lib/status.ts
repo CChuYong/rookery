@@ -36,7 +36,10 @@ export const railClass = (s: string): string => RAIL[s] ?? "bg-stop";
 export const toneClass = (s: string): string => TONE[s] ?? "text-muted bg-raised border-line";
 export const statusTag = (s: string): string => TAG[s] ?? s.slice(0, 5).toUpperCase();
 export const statusLabelKey = (s: string): string => LABEL_KEY[s] ?? `status.${s}`;
-export const isLive = (s: string): boolean => s === "running";
+// Live = the worker is still working. `background` is a turn that ended while harness-tracked background
+// tasks (run_in_background shells, Dynamic Workflow runs) keep going — the SDK auto-wakes it when they
+// settle, so it is working, not settled. Leaving it out made an actively-working worker look dormant.
+export const isLive = (s: string): boolean => s === "running" || s === "background";
 // Spawn in flight — its worktree is still being created. Rendered with a spinner instead of the LED dot.
 export const isProvisioning = (s: string): boolean => s === "provisioning";
 // A worker in one of these states will never resume running — its worktree may already be gone (stopped/discarded)
