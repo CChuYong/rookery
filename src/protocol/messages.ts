@@ -307,6 +307,8 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.setPermissionMode"), id: z.string(), permissionMode: z.enum(["bypassPermissions", "plan"]), reqId: z.string().optional() }),
   // Interrupt the worker's current turn (query.interrupt) — keeps the session alive, further instructions possible. The worker-side counterpart of the master's session.stop.
   z.object({ type: z.literal("worker.interrupt"), id: z.string(), reqId: z.string().optional() }),
+  // Recover a wedged worker: hard-kill the stuck subprocess and re-arm a lazy resume of the same session (→ idle, still usable). Unlike fleet.stop, non-terminal.
+  z.object({ type: z.literal("worker.recover"), id: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("worker.checkpoints"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("worker.restore"), reqId: z.string(), id: z.string(), seq: z.number() }),
   // provider set & different from the source = cross-provider handoff; workers persist model/effort (columns),
@@ -561,6 +563,7 @@ export interface RequestResultMap {
   "fleet.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
   "fleet.discard": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.interrupt": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "worker.recover": Extract<ServerMessage, { type: "fleet.ack" }>;
   "fleet.spawn": Extract<ServerMessage, { type: "fleet.spawn.result" }>;
   "repos.list": Extract<ServerMessage, { type: "repos.list.result" }>;
   "repo.branches": Extract<ServerMessage, { type: "repo.branches.result" }>;

@@ -529,6 +529,12 @@ export class Connection {
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "interrupt", id: msg.id });
         return;
       }
+      case "worker.recover": {
+        // Hard-recover a wedged worker: kill the stuck subprocess and re-arm a lazy resume of the same session (→ idle).
+        try { await this.fleet.recover(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "recover", id: msg.id });
+        return;
+      }
       case "worker.checkpoints": {
         const checkpoints = this.repos.listCheckpoints(msg.id).map((c) => ({ seq: c.seq, sha: c.sha, createdAt: c.created_at }));
         this.reply({ type: "worker.checkpoints.result", reqId: msg.reqId, id: msg.id, checkpoints });

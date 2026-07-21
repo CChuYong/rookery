@@ -303,6 +303,54 @@ describe("FleetOrchestrator", () => {
     expect(calls).toContain("bypassPermissions");                 // routed to the live agent
   });
 
+  it("recover() hard-kills a wedged worker and re-arms it as a lazy resume of the same session (idle, still usable)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const abandonCalls: string[] = [];
+    const resumeCalls: string[] = [];
+    let factoryCount = 0;
+    let lastSdkSessionId: string | null | undefined;
+    const factory = (o: { id: string; sdkSessionId?: string | null }): WorkerLike => {
+      factoryCount++;
+      lastSdkSessionId = o.sdkSessionId;
+      return {
+        start: () => {}, resume: () => { resumeCalls.push(o.id); }, send: () => {}, stop: async () => {},
+        status: () => "running", waitUntilSettled: () => new Promise<void>(() => {}), // never settles → the wedged "running" state
+        abandon: async () => { abandonCalls.push(o.id); },
+      };
+    };
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ headValue: "b" }), factory, worktreesDir: "/wt", idgen: () => "a0", exists: () => true });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
+    repos.setWorkerSdkSessionId(id, "sdk-1"); // the worker captured its SDK session while running
+    expect(factoryCount).toBe(1);
+
+    const statuses: string[] = [];
+    bus.subscribe("sA", (e: CoreEvent) => { if (e.type === "worker.status") statuses.push(e.status); });
+
+    await fleet.recover(id);
+
+    expect(abandonCalls).toEqual([id]);               // the wedged subprocess is killed (abandon, NOT stop → no terminal)
+    expect(repos.getWorker(id)?.status).toBe("idle"); // re-armed to idle, NOT terminal — the worker stays usable
+    expect(statuses.at(-1)).toBe("idle");             // worker.status idle emitted → the UI unlocks
+
+    // The next send materializes a fresh worker RESUMING the same session (conversation preserved, not a fresh start).
+    fleet.send(id, "continue");
+    expect(factoryCount).toBe(2);
+    expect(resumeCalls).toContain(id);
+    expect(lastSdkSessionId).toBe("sdk-1");
+  });
+
+  it("recover() rejects a worker with no resumable session yet (nothing to resume → use stop/discard)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const factory = (): WorkerLike => ({ start: () => {}, resume: () => {}, send: () => {}, stop: async () => {}, status: () => "running", waitUntilSettled: () => new Promise<void>(() => {}), abandon: async () => {} });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps({ headValue: "b" }), factory, worktreesDir: "/wt", idgen: () => "a0", exists: () => true });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
+    // no setWorkerSdkSessionId → no resumable session handle
+    await expect(fleet.recover(id)).rejects.toThrow(/recover/i);
+  });
+
   it("passes spawn-time permissionMode and maxTurns to the factory", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "sA", cwd: "/x" });
