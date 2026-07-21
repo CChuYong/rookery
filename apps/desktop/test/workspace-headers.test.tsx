@@ -64,6 +64,17 @@ describe("WorkerHeader provider badge (Codex)", () => {
   });
 });
 
+describe("WorkerHeader responsive-hide hooks (panel controls must never clip)", () => {
+  it("gives the status badge and the background chip droppable classes so the far-right controls stay reachable on a narrow pane", () => {
+    // jsdom can't evaluate the @container rules; lock the CONTRACT instead — the two newest header items carry the
+    // same responsive-hide hooks the CSS drops, so they can no longer push the ml-auto controls past overflow:hidden.
+    const { container } = render(<WorkerHeader {...baseProps} worker={{ id: "w1", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 1, types: ["local_bash"] } } as never} />);
+    expect(screen.getByText("백그라운드 작업 중").closest(".workspace-header-status")).not.toBeNull();
+    expect(screen.getByText("백그라운드 · 1").closest(".workspace-header-activity")).not.toBeNull();
+    expect(container.querySelector(".workspace-header-controls")).not.toBeNull(); // controls keep their stable hook (never in a hide-set)
+  });
+});
+
 describe("SessionHeader provider badge (Codex) — interop QW1", () => {
   it("renders a 'Codex' badge when the master session's provider is codex", () => {
     render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" provider="codex" />);

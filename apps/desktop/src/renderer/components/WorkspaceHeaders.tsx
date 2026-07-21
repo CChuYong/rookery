@@ -28,10 +28,10 @@ function WorkerActivityReason({ worker }: { worker: FleetRow }): JSX.Element | n
   const t = useT();
   const activeWorkflows = useStore((state) => Object.values(state.workflows[worker.id] ?? {}).filter((run) => run.status === "running").length);
   if (activeWorkflows > 0) {
-    return <span className="shrink-0 rounded border border-run/25 bg-run/10 px-1.5 py-0.5 font-mono text-[10px] text-run">{t("workspaceHeaders.workflowTasks", { count: activeWorkflows })}</span>;
+    return <span className="workspace-header-activity shrink-0 rounded border border-run/25 bg-run/10 px-1.5 py-0.5 font-mono text-[10px] text-run">{t("workspaceHeaders.workflowTasks", { count: activeWorkflows })}</span>;
   }
   if (worker.status === "background" && worker.bg?.count) {
-    return <span className="shrink-0 rounded border border-line bg-ink/40 px-1.5 py-0.5 font-mono text-[10px] text-muted">{t("workspaceHeaders.backgroundTasks", { count: worker.bg.count })}</span>;
+    return <span className="workspace-header-activity shrink-0 rounded border border-line bg-ink/40 px-1.5 py-0.5 font-mono text-[10px] text-muted">{t("workspaceHeaders.backgroundTasks", { count: worker.bg.count })}</span>;
   }
   return null;
 }
@@ -90,7 +90,10 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
   const t = useT();
   return (
     <div className="workspace-header drag flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-5 text-[13px]">
-      <StatusBadge status={worker.status} />
+      {/* status + activity chip carry responsive-hide hooks (globals.css) so they drop before the ml-auto panel
+          controls do — background adds both the widest status label AND the activity chip, which used to push the
+          controls past the header's overflow:hidden edge and make them unclickable. */}
+      <span className="workspace-header-status shrink-0"><StatusBadge status={worker.status} /></span>
       <WorkerActivityReason worker={worker} />
       <span className="workspace-header-provider shrink-0"><ProviderBadge provider={worker.provider} /></span>
       <span className="workspace-header-eyebrow eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60">{t("workspaceHeaders.workerEyebrow")}</span>

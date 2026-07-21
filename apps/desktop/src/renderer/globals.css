@@ -191,7 +191,9 @@ body {
   .workspace-header-eyebrow,
   .workspace-header-metrics,
   .workspace-header-checkpoint,
-  .workspace-header-ticket {
+  .workspace-header-ticket,
+  /* the background/workflow reason chip is supplementary — the status badge already conveys the state */
+  .workspace-header-activity {
     display: none;
   }
   .workspace-header-title {
@@ -201,7 +203,10 @@ body {
 @container (max-width: 520px) {
   .workspace-header-provider,
   .workspace-header-branch,
-  .workspace-header-session-id {
+  .workspace-header-session-id,
+  /* last metadata to go: at this width the pane is too narrow to keep the (widest-in-background) status badge AND
+     guarantee the panel controls stay reachable — the status is still visible on the fleet-tree row */
+  .workspace-header-status {
     display: none;
   }
 }
