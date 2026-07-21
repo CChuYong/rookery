@@ -41,8 +41,16 @@ export async function fetchModels(headers: Record<string, string>, fetchImpl: Fe
 
 // Provider that bundles token reading / auth-header selection + the lookup. **Always returns a non-empty list** (live or static fallback).
 // Auth priority: ANTHROPIC_API_KEY (x-api-key) > Claude Code OAuth token (Bearer + oauth beta, same token reader as usage).
+//
+// Last-good caching: once a live fetch succeeds, the catalog is remembered and served on any subsequent transient
+// failure (network/timeout/non-2xx/momentary auth loss) INSTEAD of the 3-item STATIC list. Without this, a client
+// WS reconnect (laptop sleep/wake, network blip) re-requests models.list, the refetch fails transiently, and the
+// full catalog the picker was showing gets overwritten with the 3 static defaults until an app restart. The daemon
+// process outlives client reconnects, so its cache survives exactly the reconnect that used to trigger the downgrade.
+// (Same spirit as codex-models-provider's cached-first-success; here we advance the cache on every fresh success.)
 export function makeModelsProvider(opts: { reader?: TokenReader; apiKey?: string | (() => string | undefined); fetchImpl?: FetchLike } = {}): () => Promise<ModelInfo[]> {
   const reader = opts.reader ?? defaultTokenReader();
+  let lastGood: ModelInfo[] | null = null; // last successful live catalog; null until the first success
   return async () => {
     try {
       // Resolve per call (audit #30): a boot-time snapshot meant a key saved in Settings never reached the
@@ -53,13 +61,14 @@ export function makeModelsProvider(opts: { reader?: TokenReader; apiKey?: string
         headers = { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION };
       } else {
         const token = await reader.read();
-        if (!token) return STATIC_MODELS; // no auth means → static list
+        if (!token) return lastGood ?? STATIC_MODELS; // no auth → keep the last good catalog if we ever had one (don't downgrade on a momentary token loss)
         headers = { Authorization: `Bearer ${token}`, "anthropic-beta": OAUTH_BETA, "anthropic-version": ANTHROPIC_VERSION };
       }
       const models = await fetchModels(headers, opts.fetchImpl ?? (fetch as unknown as FetchLike));
-      return models.length > 0 ? models : STATIC_MODELS;
+      if (models.length > 0) { lastGood = models; return models; } // fresh success → advance the cache
+      return lastGood ?? STATIC_MODELS; // empty response → serve last good rather than downgrade
     } catch {
-      return STATIC_MODELS; // network/non-2xx/timeout → degrade to static list
+      return lastGood ?? STATIC_MODELS; // network/non-2xx/timeout → serve last good, else static list
     }
   };
 }
