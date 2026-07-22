@@ -322,7 +322,7 @@ export function Composer({
                 <LifeBuoy size={14} />
               </Button>
             ) : (
-              <Button variant="danger" size="icon" disabled={stopping} aria-label={t("composer.stop")} onClick={() => { setStopping(true); onStop(); }}>
+              <Button variant="danger" size="icon" disabled={stopping} aria-label={t("composer.stop")} title={t("composer.stopHint")} onClick={() => { setStopping(true); onStop(); }}>
                 {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
               </Button>
             )

@@ -380,7 +380,9 @@ export class Connection {
         return;
       }
       case "fleet.discard": {
-        try { await this.fleet.discard(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }
+        // discard is unified with delete: remove the worker entirely (worktree + branch + record), not a
+        // worktree-less zombie row. worker.deletion events fire so the desktop drops the row.
+        try { await this.fleet.delete(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }
         this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "discard", id: msg.id });
         return;
       }

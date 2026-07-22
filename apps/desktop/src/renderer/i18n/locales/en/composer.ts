@@ -14,6 +14,7 @@ export default {
   "composer.permAcceptEdits": "Accept Edits",
   "composer.attachFile": "Attach file",
   "composer.stop": "Stop",
+  "composer.stopHint": "Stops just this turn (the worker stays — you can keep instructing it)",
   "composer.recover": "Recover",
   "composer.recoverHint": "Force-end the wedged turn and resume the session (the in-progress turn's live output is lost, but the conversation and worktree are kept)",
   "composer.sideQuestion": "Ask separately",

@@ -427,8 +427,25 @@ describe("RepoTree background-state affordances", () => {
       />,
     );
     fireEvent.contextMenu(screen.getByText("workflow worker"));
-    fireEvent.click(screen.getByText("중단")); // repoTree.menuStop (tests run under the ko fallback catalog)
+    fireEvent.click(screen.getByText("종료")); // repoTree.menuStop, now "End" (ko 종료) — the terminal tree action
     expect(onStopSub).toHaveBeenCalledWith("wbg");
+  });
+
+  it("labels the terminal tree Stop as '종료' (not the soft-sounding '중단') and shows reversibility hints on End + Delete", () => {
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[{ ...worker, id: "wx", label: "legible worker", status: "idle" }] as never}
+        activeSubId={null}
+        onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
+        onStopSub={vi.fn()} onDeleteSub={vi.fn()}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByText("legible worker"));
+    expect(screen.getByText("종료")).toBeInTheDocument();
+    expect(screen.queryByText("중단")).toBeNull(); // the tree's terminal action no longer collides with the composer's soft "중단"
+    expect(screen.getByText(/재시작 시 복구/)).toBeInTheDocument(); // End: reversible
+    expect(screen.getByText(/되돌릴 수 없/)).toBeInTheDocument(); // Delete: irreversible
   });
 
   it("keeps a background worker visible under the active/live filter", () => {
