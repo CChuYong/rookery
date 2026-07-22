@@ -21,6 +21,7 @@ export interface WorkerLike {
   setModel?(model: string): Promise<void>; // hot-swap the model while running (query.setModel)
   setPermissionMode?(mode: string): Promise<void>; // hot-swap the permission mode while running (query.setPermissionMode)
   interruptTurn?(): Promise<InterruptReceipt | undefined>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
+  abandon?(): Promise<void>; // hard-kill the subprocess WITHOUT going terminal (recover tears it down, then re-arms a lazy resume) — unlike stop, no "stopped" transition
   notice?(text: string): void; // surface an out-of-band informational notice in the worker transcript (degraded condition the orchestrator caught)
   requestCapabilityReload?(input: {
     whenIdle: boolean;
@@ -683,6 +684,26 @@ export class FleetOrchestrator {
     if (e.agent) await e.agent.stop(); // if detached/pending there's no process to kill — just clean up the status.
     e.resumeSessionId = undefined; // a user stop is final: drop the lazy-resume ticket so a later send can't resurrect it
     this.setStatus(id, "stopped", true); // user termination — takes precedence over automatic settle (FL-4)
+  }
+
+  // Recover a worker whose turn is WEDGED — deep in a long tool call / Dynamic Workflow that the soft interruptTurn
+  // can't preempt, so it's stuck "running" and the composer's Stop spins forever. Hard-kill its subprocess (abandon,
+  // not stop → no terminal transition), then re-arm it as a lazy resume of the SAME sdk_session so the next send
+  // materializes a fresh worker with the conversation + worktree intact. This is the per-worker equivalent of a
+  // daemon restart's rehydrate: the in-flight turn's live output is lost (same caveat as a restart), but the worker
+  // returns to idle and stays usable — unlike fleet.stop, which ends it. Rejects when there is nothing to resume.
+  async recover(id: string): Promise<void> {
+    const e = this.require(id);
+    const sdk = this.deps.repos.getWorker(id)?.sdk_session_id;
+    if (!sdk || !this.exists(e.worktreePath)) {
+      throw new Error(`Worker ${id} cannot be recovered (no resumable session, or its worktree is gone). Use stop or discard instead.`);
+    }
+    if (e.agent) await (e.agent.abandon?.() ?? e.agent.stop()); // hard-kill the wedged subprocess (fall back to stop() for a WorkerLike without abandon)
+    e.agent = undefined; // detach → the next send/await re-materializes (requireLive)
+    e.resumeSessionId = sdk; // lazy-resume ticket for the same conversation
+    // NB: let setStatus set entry.status — pre-setting it to "idle" here would make setStatus a no-op (its
+    // entry.status===status guard) and skip the DB write + worker.status emit that unlocks the UI.
+    this.setStatus(id, "idle", true); // force over the stuck 'running' (terminal-write chokepoint) → persists + emits worker.status idle, unlocking the UI
   }
 
   transcript(id: string, sinceSeq?: number): Array<{ seq: number; type: string; payload: unknown; createdAt: string }> {

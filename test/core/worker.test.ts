@@ -184,6 +184,36 @@ describe("Worker", () => {
     expect(repos.getWorker("a1")?.status).toBe("stopped");
   });
 
+  it("abandon() aborts the subprocess WITHOUT a terminal transition or notice (recover kills it, then re-arms lazily)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    let aborted = false;
+    const liveQuery = ((input: { prompt?: unknown; options?: { abortController?: AbortController } }) => {
+      input.options?.abortController?.signal.addEventListener("abort", () => { aborted = true; });
+      async function* gen(): AsyncGenerator<unknown> {
+        for await (const _userMsg of input.prompt as AsyncIterable<unknown>) {
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: "ok" }] } };
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(liveQuery) } });
+
+    agent.start("go");
+    await until(() => agent.status() === "idle");
+
+    await agent.abandon();
+    expect(aborted).toBe(true); // the subprocess IS killed (unlike interruptTurn, which only soft-interrupts the turn)
+    expect(agent.status()).not.toBe("stopped"); // but NO terminal transition (unlike stop) — the orchestrator re-arms it
+    expect(agent.status()).not.toBe("error");
+    expect(repos.getWorker("a1")?.status).not.toBe("stopped"); // no terminal DB write
+    expect(repos.getWorker("a1")?.status).not.toBe("error");
+    const notices = repos.listWorkerEvents("a1").filter((e) => e.type === "notice").map((e) => e.payload_json);
+    expect(notices.some((n) => /Stream ended|stopped/i.test(n))).toBe(false); // no "Stream ended — worker stopped." notice
+  });
+
   it("interruptTurn() interrupts the current turn WITHOUT closing the queue or aborting (worker stays alive)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });

@@ -295,6 +295,24 @@ export class Worker {
     }
   }
 
+  // Hard-kill the subprocess WITHOUT marking the worker terminal — the orchestrator's recover() uses this to tear
+  // down a wedged turn (one deep in a long tool call / Dynamic Workflow that soft interruptTurn can't preempt),
+  // then re-arms the SAME sdk_session for a fresh lazy resume. Unlike stop(), it does NOT transition to "stopped":
+  // the consume loop's aborted-return path (both the natural-end and catch branches check abort.signal.aborted)
+  // ends the loop with no terminal transition and no "Stream ended" notice. The in-flight turn's live output is
+  // lost (same as a daemon restart), but the conversation resumes from sdk_session on the next send.
+  async abandon(): Promise<void> {
+    this.deferred.splice(0); // drop deferred instructions — no ghost turns after the kill
+    this.queue.close();
+    this.abort.abort(); // kills the SDK subprocess tree (interrupt can't; abort can) — takes bg tasks/workflow with it
+    try {
+      await this.stream?.interrupt();
+    } catch {
+      /* best-effort */
+    }
+    await this.loop; // ends via the aborted-return path (no terminal transition/notice)
+  }
+
   // interrupt only the current turn (keep the session) — parity with the master stop()'s turn-abort. Does not close the queue, so additional instructions are possible.
   async interruptTurn(): Promise<InterruptReceipt | undefined> {
     // ORDER IS LOAD-BEARING: splice MUST run synchronously BEFORE the await — else the SDK could emit `result`

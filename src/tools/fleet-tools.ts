@@ -186,12 +186,12 @@ export function fleetToolDefs(
 
   const stop = tool(
     "stop_worker",
-    "Stop a running worker (keeps its worktree).",
+    "End a running worker but KEEP its worktree (reversible — resumable after a daemon restart). Use this to pause/end a worker while preserving its work; use discard_worker to throw the work away.",
     { id: z.string() },
     async (args) => {
       try {
         await fleet.stop(args.id);
-        return text(`Stopped ${args.id}.`);
+        return text(`Ended ${args.id} (worktree kept).`);
       } catch (err) {
         return errorText(String(err));
       }
@@ -200,12 +200,12 @@ export function fleetToolDefs(
 
   const discard = tool(
     "discard_worker",
-    "Stop a worker and remove its worktree+branch (discards uncommitted work).",
+    "Remove a worker ENTIRELY — its worktree, branch, AND record (discards uncommitted work; irreversible). This is the full-delete verb; to end a worker while keeping its work, use stop_worker.",
     { id: z.string() },
     async (args) => {
       try {
-        await fleet.discard(args.id);
-        return text(`Discarded ${args.id}.`);
+        await fleet.delete(args.id); // unified with the human "Delete": remove worktree + record (no worktree-less zombie row)
+        return text(`Removed ${args.id} (worktree + record).`);
       } catch (err) {
         return errorText(`discard failed: ${String(err)}`);
       }

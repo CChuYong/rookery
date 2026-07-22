@@ -32,13 +32,13 @@ describe("RepoTree", () => {
     expect(screen.queryByText("arch-sub")).toBeNull(); // archive collapsed → hidden
     fireEvent.click(screen.getByText(/보관함/));
     expect(screen.getByText("arch-sub")).toBeInTheDocument(); // visible when expanded
-    // right-click idle worker → stop shows
+    // right-click idle worker → End (terminal tree stop) shows
     fireEvent.contextMenu(screen.getByText("live-sub"));
-    fireEvent.click(screen.getByText("중단"));
+    fireEvent.click(screen.getByText("종료"));
     expect(onStopSub).toHaveBeenCalledWith("a1");
-    // right-click stopped (archived) worker → no stop
+    // right-click stopped (archived) worker → no End
     fireEvent.contextMenu(screen.getByText("arch-sub"));
-    expect(screen.queryByText("중단")).toBeNull();
+    expect(screen.queryByText("종료")).toBeNull();
     fireEvent.contextMenu(screen.getByText("live-sub"));
     fireEvent.click(screen.getByText("보관"));
     expect(onArchiveSub).toHaveBeenCalledWith("a1", true);

@@ -56,6 +56,15 @@ describe("fleet tools", () => {
     expect(codexText).not.toContain("cw");
   });
 
+  it("discard_worker removes the worker entirely — worktree AND record (unified with delete, no worktree-less zombie row)", async () => {
+    const { repos, fo } = fleet();
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/a", label: "alpha", worktreePath: "/wt/w1", branch: "rookery/w1" });
+    const defs = fleetToolDefs(fo, repos, "s1");
+    const discard = defs.find((d) => d.name === "discard_worker")!;
+    await discard.handler({ id: "w1" } as never, undefined);
+    expect(repos.getWorker("w1")).toBeUndefined(); // the record is gone (full delete), not left behind as a worktree-less row
+  });
+
   it("get_worker_status includes the worker's provider (interop QW2)", async () => {
     const { repos, fo } = fleet();
     repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
