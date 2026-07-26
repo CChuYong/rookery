@@ -6,7 +6,7 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
-import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend } from "../helpers/fake-query.js";
+import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, type FakeStep } from "../helpers/fake-query.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import type { AgentBackend, AgentSessionOptions } from "../../src/core/agent-backend.js";
 import type { ResolvedAgentCapabilities } from "../../src/core/capabilities/types.js";
@@ -212,6 +212,43 @@ describe("Worker", () => {
     expect(repos.getWorker("a1")?.status).not.toBe("error");
     const notices = repos.listWorkerEvents("a1").filter((e) => e.type === "notice").map((e) => e.payload_json);
     expect(notices.some((n) => /Stream ended|stopped/i.test(n))).toBe(false); // no "Stream ended — worker stopped." notice
+  });
+
+  it("circuit breaker: a worker whose turns keep ending non-success (interrupt/model-change loop) is stopped, not left spinning", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // The observed loop: turns keep ending `error_during_execution` (aborted_streaming) back-to-back with no clean
+    // success between them — the SDK auto-restarts after each abort, so a soft interrupt can't break it and the
+    // worker spins "running" forever. Feed 6 such turns; the breaker must stop it well before the stream ends.
+    const script = Array.from({ length: 6 }, () => ({ type: "result", subtype: "error_during_execution", total_cost_usd: 0, num_turns: 1 })) as FakeStep[];
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: fakeBackend(script) } });
+    agent.start("go");
+    await until(() => agent.status() === "stopped");
+    const recorded = repos.listWorkerEvents("a1");
+    const notices = recorded.filter((e) => e.type === "notice").map((e) => e.payload_json);
+    expect(notices.some((n) => /without completing/i.test(n))).toBe(true); // the breaker notice, not just "Stream ended"
+    expect(recorded.filter((e) => e.type === "result").length).toBeLessThan(6); // tripped mid-stream — didn't grind through all 6
+  });
+
+  it("circuit breaker: an aborted turn followed by a clean success does NOT trip (the streak resets on success)", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // abort, success, abort, success, abort — never 3 non-success in a row → no trip; the finite stream just ends.
+    const script = [
+      { type: "result", subtype: "error_during_execution", total_cost_usd: 0, num_turns: 1 },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1 },
+      { type: "result", subtype: "error_during_execution", total_cost_usd: 0, num_turns: 1 },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1 },
+      { type: "result", subtype: "error_during_execution", total_cost_usd: 0, num_turns: 1 },
+    ] as FakeStep[];
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: fakeBackend(script) } });
+    agent.start("go");
+    await until(() => agent.status() === "stopped"); // ends via the natural finite stream-end, not the breaker
+    const recorded = repos.listWorkerEvents("a1");
+    expect(recorded.filter((e) => e.type === "notice").some((e) => /without completing/i.test(e.payload_json))).toBe(false); // breaker did NOT fire
+    expect(recorded.filter((e) => e.type === "result").length).toBe(5); // all 5 turns processed
   });
 
   it("interruptTurn() interrupts the current turn WITHOUT closing the queue or aborting (worker stays alive)", async () => {

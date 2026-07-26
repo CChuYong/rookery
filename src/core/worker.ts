@@ -25,6 +25,13 @@ const DEAD_TURN_REASONS = new Set([
   "blocking_limit", "rapid_refill_breaker", "prompt_too_long", "image_error", "model_error",
 ]);
 
+// Circuit breaker: how many consecutive turns may end WITHOUT a clean success (aborted/errored, back-to-back,
+// with no clean success and no new human send between them) before the worker is stopped. A soft interrupt
+// can't break a turn the SDK immediately auto-restarts, so an interrupt- or model-change-loop otherwise spins
+// "running" forever, burning turns. A single legitimate interrupt (streak 1) never trips; only an autonomous
+// loop reaches the threshold, because a human send() resets the streak.
+const ABORT_LOOP_THRESHOLD = 3;
+
 // Live states are DERIVED (see reconcile()): running = turn in flight · background = turn ended but
 // harness-tracked background tasks still run (claude only) · idle = ALL assigned work complete, awaiting
 // instructions. Terminal: stopped/error (+ orchestrator-only failed/orphaned in the DB). "done" is RETIRED
@@ -92,6 +99,7 @@ export class Worker {
   private state: WorkerStatus = "running";
   // Derived-state inputs (2026-07-11 state-graph redesign): liveStatus = f(turnActive, bgTasks.size).
   private turnActive = true; // a task-spawned worker starts mid-turn; start()/resume() reconcile for the task-less paths
+  private abortLoopStreak = 0; // consecutive non-success turn_ends (circuit breaker; reset on success or a human send)
   private readonly bgTasks = new Map<string, string>(); // running background tasks: taskId → taskType (claude only; codex never emits them)
   private bgLevel = false; // latched on the first background_tasks level frame — edge frames are ignored from then on
   private idleGraceTimer?: ReturnType<typeof setTimeout>; // settle-grace hold (see WorkerDeps.settleGraceMs)
@@ -250,6 +258,7 @@ export class Worker {
     if (this.capabilityReloadFailure) throw new Error(`Worker ${this.opts.id} capability reload failed; retry reload first`);
     // additional instructions are allowed while running (turn in progress), background (bg tasks running), or idle (waiting). Not for a terminated agent.
     if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
+    this.abortLoopStreak = 0; // a human is actively driving → a fresh instruction breaks any prior abort streak (no false circuit-breaker trip on legit interrupt+redirect)
     if (!this.turnActive) {
       // no in-flight turn (idle OR background — the streaming queue is open either way) → enqueue + start a new turn immediately.
       this.queue.push(this.withHandoffSeed(text)); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
@@ -653,6 +662,21 @@ export class Worker {
           });
           if (ev.terminalReason && DEAD_TURN_REASONS.has(ev.terminalReason)) {
             this.record({ kind: "notice", text: `Turn ended abnormally (${ev.terminalReason}).` });
+          }
+          // Circuit breaker: a soft interrupt can't stop a turn the SDK immediately auto-restarts, so an interrupt
+          // or model-change loop (turns ending aborted/errored back-to-back, no clean success or human send between)
+          // spins "running" forever. Count consecutive non-success turn_ends; once too many pile up, stop the worker
+          // so it can be recovered or discarded instead of spinning. A single interrupt never trips (streak 1).
+          if (ev.subtype === "success") {
+            this.abortLoopStreak = 0;
+          } else if (++this.abortLoopStreak >= ABORT_LOOP_THRESHOLD) {
+            this.record({ kind: "notice", text: `Worker stopped: ${this.abortLoopStreak} turns in a row ended without completing (aborted or errored) — likely an interrupt or model-change loop. Recover or discard to continue.` });
+            void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop (mirrors the caps below)
+            queue.close();
+            abort.abort();
+            this.transition("stopped");
+            this.deferred.splice(0);
+            return;
           }
           // maxTurns cap: PER-SEND guard — ev.numTurns is this send's agentic-loop count (per-send, see above),
           // so this caps a single runaway send, NOT the lifetime total. (A lifetime cap would compare cumTurns.)
