@@ -843,6 +843,9 @@ export function App(): JSX.Element {
   }, []);
   // Interrupt the worker's current turn (keep the session) — composer stop button. The worker equivalent of the master's stopMaster.
   const subInterrupt = useCallback((id: string) => { void client?.request({ type: "worker.interrupt", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
+  // Recover a wedged worker whose soft interrupt won't land (stuck in a long tool call / Dynamic Workflow): hard-kill
+  // and resume the session in place → idle, still usable. Surfaced by the composer's Stop escalation (onRecover).
+  const subRecover = useCallback((id: string) => { void client?.request({ type: "worker.recover", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
   const startSide = useCallback(async (sourceKind: "master" | "worker", sourceId: string, text: string, model?: string, effort?: string): Promise<string> => {
     const c = client;
     if (!c) throw new Error("not connected");
@@ -1034,6 +1037,7 @@ export function App(): JSX.Element {
             onRetryHistory={retryHistory}
             onSend={(text) => subSend(activeSub.id, text)}
             onStop={() => subInterrupt(activeSub.id)}
+            onRecover={() => subRecover(activeSub.id)}
             onSideStart={(text) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined)}
             onSideSend={sendSide}
             onSideStop={stopSide}
@@ -1471,6 +1475,7 @@ export function App(): JSX.Element {
                       onRetryHistory={retryHistory}
                       onSend={(t) => subSend(activeSub.id, t)}
                       onStop={() => subInterrupt(activeSub.id)}
+                      onRecover={() => subRecover(activeSub.id)}
                       onSideStart={(text) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined)}
                       onSideSend={sendSide}
                       onSideStop={stopSide}

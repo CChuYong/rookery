@@ -307,10 +307,10 @@ function RepoTreeImpl(p: {
             // to kill background tasks (interrupt aborts a turn and deliberately leaves them alive), so hiding it
             // here left a background worker with no stop path at all.
             ...(menuSub.status === "running" || menuSub.status === "background" || menuSub.status === "idle"
-              ? [{ label: t("repoTree.menuStop"), onClick: () => p.onStopSub?.(menu.id) }]
+              ? [{ label: t("repoTree.menuStop"), hint: t("repoTree.menuStopHint"), onClick: () => p.onStopSub?.(menu.id) }]
               : []),
             { label: menuSub.archived ? t("repoTree.menuUnarchive") : t("repoTree.menuArchive"), onClick: () => p.onArchiveSub?.(menu.id, !menuSub.archived) },
-            { label: t("repoTree.menuDelete"), danger: true, onClick: () => setConfirm({ id: menu.id, name: menuSub.label }) },
+            { label: t("repoTree.menuDelete"), hint: t("repoTree.menuDeleteHint"), danger: true, onClick: () => setConfirm({ id: menu.id, name: menuSub.label }) },
           ]}
         />
       )}

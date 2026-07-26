@@ -194,13 +194,13 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
 
   const discard = tool(
     "discard_worker",
-    "Stop a worker and remove its worktree + branch (discards uncommitted work).",
+    "Remove a worker ENTIRELY — its worktree, branch, and record (discards uncommitted work; irreversible). Full-delete verb; use stop_worker to end a worker while keeping its work.",
     { id: z.string() },
     async (args) => {
       audit("discard_worker");
       try {
-        await fleet.discard(args.id);
-        return text(`Discarded ${args.id}.`);
+        await fleet.delete(args.id); // unified with the human "Delete": remove worktree + record
+        return text(`Removed ${args.id} (worktree + record).`);
       } catch (err) {
         return errorText(`discard failed: ${String(err)}`);
       }

@@ -380,7 +380,9 @@ export class Connection {
         return;
       }
       case "fleet.discard": {
-        try { await this.fleet.discard(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }
+        // discard is unified with delete: remove the worker entirely (worktree + branch + record), not a
+        // worktree-less zombie row. worker.deletion events fire so the desktop drops the row.
+        try { await this.fleet.delete(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }
         this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "discard", id: msg.id });
         return;
       }
@@ -527,6 +529,12 @@ export class Connection {
         // Interrupt the worker's current turn (session preserved). Throws if the agent is terminated/unknown → the global catch responds with error+reqId.
         await this.fleet.interrupt(msg.id);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "interrupt", id: msg.id });
+        return;
+      }
+      case "worker.recover": {
+        // Hard-recover a wedged worker: kill the stuck subprocess and re-arm a lazy resume of the same session (→ idle).
+        try { await this.fleet.recover(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "recover", id: msg.id });
         return;
       }
       case "worker.checkpoints": {

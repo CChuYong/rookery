@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
-import { Send, Paperclip, Square, Loader2, MessageCircleQuestion } from "lucide-react";
+import { Send, Paperclip, Square, Loader2, MessageCircleQuestion, LifeBuoy } from "lucide-react";
 import { baseName as basename } from "../lib/path.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
@@ -12,6 +12,10 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
+
+// After Stop is clicked, how long the worker may stay busy before we surface the "Recover" escalation. A soft
+// interrupt normally lands in ~1-2s; past this, the turn is almost certainly wedged in a long tool call/workflow.
+const STUCK_STOP_MS = 6000;
 
 // Model/effort controls at the bottom of the input box. editable=true means selectable (master session, before spawn),
 // false means a read-only badge (running worker — model is fixed at spawn time).
@@ -70,6 +74,7 @@ export interface ComposerProps {
   onCommandAction?: (action: CommandAction, argument?: string) => void;
   busy?: boolean; // turn in progress → the send button becomes a stop button
   onStop?: () => void;
+  onRecover?: () => void; // worker only: a soft interrupt (onStop) can't stop a turn wedged in a long tool call / Dynamic Workflow. When provided, a "Recover" affordance appears if Stop doesn't settle in time (worker.recover — hard-kill + resume in place).
   leftSlot?: ReactNode; // per-page widget to insert at the left of the controls row (e.g. the new session's folder picker)
   onEscape?: () => void; // Esc when no popup is open (e.g. close the new session). Esc with a popup open only closes the popup.
   allowEmpty?: boolean; // allow sending empty input (new session: empty means start a blank session)
@@ -93,6 +98,7 @@ export function Composer({
   onCommandAction,
   busy = false,
   onStop,
+  onRecover,
   leftSlot,
   onEscape,
   allowEmpty = false,
@@ -128,6 +134,17 @@ export function Composer({
   // actually ends (busy flips false, which also swaps the stop button back to send → resets this).
   const [stopping, setStopping] = useState(false);
   useEffect(() => { if (!busy) setStopping(false); }, [busy]);
+  // Escalation: a soft interrupt (onStop) can't stop a worker wedged in a long tool call / Dynamic Workflow, so
+  // the Stop spinner would spin forever. Once Stop is clicked and the worker is STILL busy STUCK_STOP_MS later,
+  // reveal a "Recover" affordance (onRecover → worker.recover: hard-kill + resume in place). Master has no
+  // onRecover, so this never fires for it (its interrupt lands normally anyway).
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (!busy) { setStuck(false); return; } // turn ended → clear the escalation for the next turn
+    if (!stopping || !onRecover) return; // only after Stop was clicked, and only where recover is available (workers)
+    const timer = setTimeout(() => setStuck(true), STUCK_STOP_MS);
+    return () => clearTimeout(timer);
+  }, [busy, stopping, onRecover]);
 
   // Notify the caller to persist the draft whenever the serialized input changes. Skip the first render (mount) —
   // so we don't write the seed value straight back (in particular, avoid wiping a saved draft with empty input).
@@ -298,9 +315,17 @@ export function Composer({
               something, Send appears alongside Stop (Stop first) so you can either abort the turn or queue the next message. When
               disabled (e.g. Slack readonly), the stop button is hidden. */}
           {busy && onStop && !disabled && (
-            <Button variant="danger" size="icon" disabled={stopping} aria-label={t("composer.stop")} onClick={() => { setStopping(true); onStop(); }}>
-              {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
-            </Button>
+            stuck && onRecover ? (
+              // Interrupt didn't land — the turn is wedged. Turn the dead spinner into an actionable Recover
+              // (worker.recover: hard-kill the stuck subprocess and resume the session in place → back to idle).
+              <Button variant="danger" size="icon" aria-label={t("composer.recover")} title={t("composer.recoverHint")} onClick={onRecover}>
+                <LifeBuoy size={14} />
+              </Button>
+            ) : (
+              <Button variant="danger" size="icon" disabled={stopping} aria-label={t("composer.stop")} title={t("composer.stopHint")} onClick={() => { setStopping(true); onStop(); }}>
+                {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
+              </Button>
+            )
           )}
           {!(busy && onStop && !disabled && !text.trim()) && (
             <Button variant="primary" size="icon" aria-label={sendLabelText} disabled={disabled || (!text.trim() && !allowEmpty)} onClick={submit}>

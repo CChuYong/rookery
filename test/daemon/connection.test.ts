@@ -45,6 +45,7 @@ type FleetOverride = {
   diff?: (id: string) => Promise<string>;
   stop?: (id: string) => Promise<void>;
   discard?: (id: string) => Promise<void>;
+  delete?: (id: string) => Promise<void>;
   interrupt?: (id: string) => Promise<void>;
   setModel?: (id: string, model: string) => Promise<void>;
   setPermissionMode?: (id: string, mode: string) => Promise<void>;
@@ -707,14 +708,14 @@ describe("Connection v2 routes", () => {
     expect(sent.at(-1)).toMatchObject({ type: "fleet.diff.result", reqId: "r2", id: "a1", diff: "diff of a1" });
   });
 
-  it("fleet.stop/discard ack", async () => {
+  it("fleet.stop/discard ack — discard is unified with delete (full removal, not keep-row discard)", async () => {
     const sent: any[] = [];
     const calls: string[] = [];
-    const fleet = { list: () => [], diff: async () => "", stop: async (id: string) => { calls.push("stop:" + id); }, discard: async (id: string) => { calls.push("discard:" + id); } };
+    const fleet = { list: () => [], diff: async () => "", stop: async (id: string) => { calls.push("stop:" + id); }, delete: async (id: string) => { calls.push("delete:" + id); } };
     const conn = makeConn(sent, { fleet });
     await conn.handleRaw(JSON.stringify({ type: "fleet.stop", reqId: "r3", id: "a1" }));
     await conn.handleRaw(JSON.stringify({ type: "fleet.discard", reqId: "r4", id: "a2" }));
-    expect(calls).toEqual(["stop:a1", "discard:a2"]);
+    expect(calls).toEqual(["stop:a1", "delete:a2"]); // fleet.discard now routes to the full delete
     expect(sent.at(-1)).toMatchObject({ type: "fleet.ack", action: "discard", id: "a2", reqId: "r4" });
   });
 
