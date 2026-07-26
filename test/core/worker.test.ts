@@ -184,6 +184,32 @@ describe("Worker", () => {
     expect(repos.getWorker("a1")?.status).toBe("stopped");
   });
 
+  it("wake-watchdog: a spontaneous post-turn frame auto-wakes the worker, but with no turn_end following it settles back to idle (not stuck 'running')", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // The observed bug: after an interrupt, the SDK emits a stray spontaneous frame with NO turn_end after it;
+    // the auto-wake flips turnActive→running and it stays stuck "running" forever. Simulate: a turn completes,
+    // then a stray assistant frame arrives (auto-wake), then silence (the generator awaits the next input).
+    const liveQuery = ((input: { prompt?: unknown }) => {
+      async function* gen(): AsyncGenerator<unknown> {
+        for await (const _msg of input.prompt as AsyncIterable<unknown>) {
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: "stray post-turn frame" }] } };
+          // no turn_end follows → without the watchdog the worker is stuck "running"
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(liveQuery), wakeWatchdogMs: 40 } });
+
+    agent.start("go");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && e.payload_json.includes("stray post-turn"))); // the stray frame was processed → auto-wake fired
+    await new Promise((r) => setTimeout(r, 140)); // wait past wakeWatchdogMs (40ms) of silence
+    expect(agent.status()).toBe("idle"); // the watchdog settled the fizzled wake instead of leaving it stuck "running"
+    await agent.stop();
+  });
+
   it("abandon() aborts the subprocess WITHOUT a terminal transition or notice (recover kills it, then re-arms lazily)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
