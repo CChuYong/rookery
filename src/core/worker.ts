@@ -25,6 +25,21 @@ const DEAD_TURN_REASONS = new Set([
   "blocking_limit", "rapid_refill_breaker", "prompt_too_long", "image_error", "model_error",
 ]);
 
+// Circuit breaker: how many consecutive turns may end WITHOUT a clean success (aborted/errored, back-to-back,
+// with no clean success and no new human send between them) before the worker is stopped. A soft interrupt
+// can't break a turn the SDK immediately auto-restarts, so an interrupt- or model-change-loop otherwise spins
+// "running" forever, burning turns. A single legitimate interrupt (streak 1) never trips; only an autonomous
+// loop reaches the threshold, because a human send() resets the streak.
+const ABORT_LOOP_THRESHOLD = 3;
+
+// Wake-watchdog: after the auto-wake flips a worker back to "running" on a spontaneous (non-send) frame — e.g.
+// the SDK's post-interrupt continuation — a real wake turn produces a turn_end and settles normally. But a
+// FIZZLED wake (a stray frame with no turn_end after it, observed after an interrupt/model-change) leaves the
+// worker stuck "running" forever. So while the current "running" was entered by an auto-wake (not a human
+// send/start), require continued activity: if none arrives for this long, the wake fizzled — settle to idle.
+// Re-armed on every frame, so a genuinely active wake turn never trips; send-driven turns don't arm it at all.
+const WAKE_WATCHDOG_MS = 10000;
+
 // Live states are DERIVED (see reconcile()): running = turn in flight · background = turn ended but
 // harness-tracked background tasks still run (claude only) · idle = ALL assigned work complete, awaiting
 // instructions. Terminal: stopped/error (+ orchestrator-only failed/orphaned in the DB). "done" is RETIRED
@@ -49,6 +64,7 @@ export interface WorkerDeps {
   // beat early). The wake cancels the grace (→ running, no idle ever emitted); expiry means no wake came
   // (→ idle, truthful). Injectable for deterministic tests.
   settleGraceMs?: number;
+  wakeWatchdogMs?: number; // how long an auto-wake "running" may stay silent (no turn_end/activity) before settling to idle — a fizzled wake. Injectable for deterministic tests.
   // Resolved once for each provider stream. A live worker deliberately keeps its original revision;
   // later desired changes are surfaced as pending-reload until an explicit immediate/when-idle reload.
   managedCapabilities?: () => ResolvedAgentCapabilities;
@@ -92,9 +108,11 @@ export class Worker {
   private state: WorkerStatus = "running";
   // Derived-state inputs (2026-07-11 state-graph redesign): liveStatus = f(turnActive, bgTasks.size).
   private turnActive = true; // a task-spawned worker starts mid-turn; start()/resume() reconcile for the task-less paths
+  private abortLoopStreak = 0; // consecutive non-success turn_ends (circuit breaker; reset on success or a human send)
   private readonly bgTasks = new Map<string, string>(); // running background tasks: taskId → taskType (claude only; codex never emits them)
   private bgLevel = false; // latched on the first background_tasks level frame — edge frames are ignored from then on
   private idleGraceTimer?: ReturnType<typeof setTimeout>; // settle-grace hold (see WorkerDeps.settleGraceMs)
+  private wakeWatchdog?: ReturnType<typeof setTimeout>; // armed only while the current "running" was entered by an auto-wake (see WAKE_WATCHDOG_MS)
   private loop: Promise<void> = Promise.resolve();
   private stream?: AgentStream;
   private resolveLifetime!: () => void;
@@ -176,6 +194,29 @@ export class Worker {
     this.idleGraceTimer = t;
   }
 
+  private clearWakeWatchdog(): void {
+    if (this.wakeWatchdog) {
+      clearTimeout(this.wakeWatchdog);
+      this.wakeWatchdog = undefined;
+    }
+  }
+
+  // Arm/re-arm the wake-watchdog: while a "running" that was entered by an auto-wake (not a human send) stays
+  // silent this long, the wake fizzled (no turn_end ever came) → settle to idle so the worker isn't stuck. A real
+  // wake turn keeps producing frames (each re-arms) and ends with a turn_end (which clears it), so it never trips.
+  private armWakeWatchdog(): void {
+    this.clearWakeWatchdog();
+    const t = setTimeout(() => {
+      this.wakeWatchdog = undefined;
+      if (this.turnActive && this.bgTasks.size === 0 && !this.isTerminalState()) {
+        this.turnActive = false; // the fizzled wake produced no turn — settle (reconcile derives idle, or background if bg tasks somehow run)
+        this.reconcile();
+      }
+    }, this.opts.deps.wakeWatchdogMs ?? WAKE_WATCHDOG_MS);
+    t.unref?.();
+    this.wakeWatchdog = t;
+  }
+
   // Surface an out-of-band informational notice in this worker's transcript (a degraded condition the orchestrator caught —
   // e.g. a stale base or a failed checkpoint). Uses the worker's own seq via record(), so it never collides with the live stream.
   notice(text: string): void {
@@ -250,6 +291,8 @@ export class Worker {
     if (this.capabilityReloadFailure) throw new Error(`Worker ${this.opts.id} capability reload failed; retry reload first`);
     // additional instructions are allowed while running (turn in progress), background (bg tasks running), or idle (waiting). Not for a terminated agent.
     if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
+    this.abortLoopStreak = 0; // a human is actively driving → a fresh instruction breaks any prior abort streak (no false circuit-breaker trip on legit interrupt+redirect)
+    this.clearWakeWatchdog(); // a human send takes over → this run is no longer a bare auto-wake (a real turn is coming)
     if (!this.turnActive) {
       // no in-flight turn (idle OR background — the streaming queue is open either way) → enqueue + start a new turn immediately.
       this.queue.push(this.withHandoffSeed(text)); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
@@ -523,6 +566,9 @@ export class Worker {
           this.opts.deps.capabilityRuntime?.setApplied(runtimeTarget, managed.revision);
           managedApplied = true;
         }
+        // While the fizzle-watchdog is armed (this "running" was entered by an auto-wake), any frame proves the
+        // wake turn is still alive → re-arm, so only true silence (no turn_end, no activity) can trip it.
+        if (this.wakeWatchdog) this.armWakeWatchdog();
         // Spontaneous wake (live-verified 2026-07-11, probe-turn-lifecycle.mjs): after a background task
         // settles, the SDK starts a non-human turn with NO send() — including after an interrupt. Any model
         // activity while no turn is tracked means a turn began; without this the wake turn would stream
@@ -546,6 +592,7 @@ export class Worker {
           this.clearIdleGrace();
           this.turnActive = true;
           this.reconcile();
+          this.armWakeWatchdog(); // entered "running" via an auto-wake (no send) → if no turn_end follows, it fizzled; settle instead of sticking
         }
         if (ev.kind === "text_delta") {
           this.emit({ kind: "message_delta", text: ev.text });
@@ -634,6 +681,7 @@ export class Worker {
             this.reconcile();
           }
         } else if (ev.kind === "turn_end") {
+          this.clearWakeWatchdog(); // a real turn_end arrived → the wake (if any) did not fizzle
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
           // ev.costUsd/ev.numTurns are PER-SEND (this query()'s own cost + agentic-loop count), NOT
           // conversation-cumulative — verified empirically against the Claude Agent SDK: a resumed turn's
@@ -653,6 +701,21 @@ export class Worker {
           });
           if (ev.terminalReason && DEAD_TURN_REASONS.has(ev.terminalReason)) {
             this.record({ kind: "notice", text: `Turn ended abnormally (${ev.terminalReason}).` });
+          }
+          // Circuit breaker: a soft interrupt can't stop a turn the SDK immediately auto-restarts, so an interrupt
+          // or model-change loop (turns ending aborted/errored back-to-back, no clean success or human send between)
+          // spins "running" forever. Count consecutive non-success turn_ends; once too many pile up, stop the worker
+          // so it can be recovered or discarded instead of spinning. A single interrupt never trips (streak 1).
+          if (ev.subtype === "success") {
+            this.abortLoopStreak = 0;
+          } else if (++this.abortLoopStreak >= ABORT_LOOP_THRESHOLD) {
+            this.record({ kind: "notice", text: `Worker stopped: ${this.abortLoopStreak} turns in a row ended without completing (aborted or errored) — likely an interrupt or model-change loop. Recover or discard to continue.` });
+            void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop (mirrors the caps below)
+            queue.close();
+            abort.abort();
+            this.transition("stopped");
+            this.deferred.splice(0);
+            return;
           }
           // maxTurns cap: PER-SEND guard — ev.numTurns is this send's agentic-loop count (per-send, see above),
           // so this caps a single runaway send, NOT the lifetime total. (A lifetime cap would compare cumTurns.)
