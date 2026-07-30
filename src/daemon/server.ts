@@ -324,11 +324,6 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P3-remaining Track B #7 (docs/2026-07-06-p3r-codex-hardening-finish.md): sweep orphaned per-session
   // CODEX_HOME dirs (no backing session row — left behind by a crash mid-delete or mid-fork). Boot-only:
   // no in-flight fork/create can race it this early (before any WS connection is accepted).
-  gcOrphanCodexHomes(
-    config.home,
-    new Set(repos.listSessions().map((s) => s.id)),
-    new Set(repos.listAllWorkers().map((worker) => worker.id)),
-  );
   // Codex usage accounting (docs/superpowers/specs/2026-07-30-codex-usage-mirror-design.md): hardlink
   // every codex target's rollouts into the user's real CODEX_HOME so `ccusage codex` can see the spend
   // of masters/workers that run in per-target homes. One line per sweep, and only when something
@@ -336,8 +331,15 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const logUsageMirror = (r: { linked: number; skipped: number; failed: number }): void => {
     if (r.linked > 0 || r.failed > 0) console.log(`codex usage mirror: linked=${r.linked} skipped=${r.skipped} failed=${r.failed}`);
   };
-  // Boot sweep — reconciles homes created by the previous process. Never throws.
+  // Boot sweep — reconciles homes created by the previous process. Never throws. ⚠️ This runs BEFORE
+  // gcOrphanCodexHomes below: the GC deletes homes with no backing row (a crash mid-delete/mid-fork),
+  // and whatever it deletes first can never be accounted for. Mirror first, then collect.
   logUsageMirror(syncCodexUsageMirror(config.home, realCodexHome));
+  gcOrphanCodexHomes(
+    config.home,
+    new Set(repos.listSessions().map((s) => s.id)),
+    new Set(repos.listAllWorkers().map((worker) => worker.id)),
+  );
   // Slack holders (bridge / read ops / reporter-ensure) — installed by startSlack on connect, released
   // owner-scoped on stop (clearIf) so a stale connection's late stop can't clobber the live one's holders.
   const bridgeHolder = makeHolder<SlackInteractionBridge>();

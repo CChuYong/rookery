@@ -428,7 +428,8 @@ and it is declared before every site this task touches (`onSessionDelete` `:257`
 
 - [ ] **Step 3: Sweep at boot**
 
-Immediately after the `gcOrphanCodexHomes(...)` call (`:320-324`), add:
+Immediately **before** the `gcOrphanCodexHomes(...)` call (`:320-324`) — that GC deletes homes with no
+backing session/worker row, and anything it collects first can never be accounted for — add:
 
 ```ts
   // Codex usage accounting (docs/superpowers/specs/2026-07-30-codex-usage-mirror-design.md): hardlink

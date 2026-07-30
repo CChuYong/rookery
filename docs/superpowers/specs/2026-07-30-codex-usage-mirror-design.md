@@ -130,8 +130,12 @@ Rules:
 The real home is resolved exactly as `materializeCodexHome`'s `realCodexHome` is today
 (`process.env.CODEX_HOME || ~/.codex`), so a user who relocates their codex home gets the mirror there.
 
-1. **Boot**, right after `gcOrphanCodexHomes(...)` (`server.ts:320`): one full sync, so a restart
-   reconciles everything including homes created by the previous process.
+1. **Boot**, immediately **before** `gcOrphanCodexHomes(...)` (`server.ts:320`): one full sync, so a
+   restart reconciles everything including homes created by the previous process.
+   ⚠️ The order matters and was found by running the real daemon: `gcOrphanCodexHomes` deletes homes
+   with no backing session/worker row (left by a crash mid-delete or mid-fork), so anything it collects
+   first can never be accounted for. Mirror first, then collect. Verified: with a seeded orphan home the
+   daemon logs `linked=1`, the GC then removes the home, and the mirrored rollout survives.
 2. **Periodic**, a daemon-owned `setInterval` at the already-resolved `usageRefreshMs`
    (`server.ts:444`, default 120 s). It is not folded into `UsageCollector` because `src/core/` is
    transport-agnostic and must not write to the user's home. The timer is registered in the daemon's
