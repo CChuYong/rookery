@@ -19,7 +19,8 @@ const MIRROR_DIR = "archived_sessions";
 
 export interface CodexUsageMirrorResult {
   linked: number; // newly mirrored on this pass
-  skipped: number; // already mirrored (EEXIST) — also the natural dedup for fork-ancestor copies
+  relinked: number; // re-pointed at a longer copy of a rollout already mirrored from another home
+  skipped: number; // already mirrored and already the longest copy — the dedup for fork-ancestor copies
   failed: number; // per-file failure; the sweep continues
 }
 
@@ -27,6 +28,9 @@ export interface CodexUsageMirrorDeps {
   // Defaults to fs.linkSync. Injectable so the cross-device fallback is testable on a single volume.
   link?: (src: string, dest: string) => void;
 }
+
+const EMPTY: CodexUsageMirrorResult = { linked: 0, relinked: 0, skipped: 0, failed: 0 };
+const zero = (): CodexUsageMirrorResult => ({ ...EMPTY });
 
 // Mirrors every rookery codex home. Best-effort and never throws: a missing codex-homes dir, an
 // unreadable home, EACCES on the real home, ENOSPC — all degrade to counters.
@@ -40,10 +44,13 @@ export function syncCodexUsageMirror(
   try {
     names = fs.readdirSync(base);
   } catch {
-    return { linked: 0, skipped: 0, failed: 0 }; // no codex target has ever run
+    return zero(); // no codex target has ever run
   }
-  const total: CodexUsageMirrorResult = { linked: 0, skipped: 0, failed: 0 };
-  for (const name of names) {
+  const total = zero();
+  // Sorted so a sweep is reproducible: with two homes holding copies of one rollout, which is walked
+  // first decides whether a link or a re-point happens. The end state is the same either way, but a
+  // deterministic order keeps the counters (and the log line) stable.
+  for (const name of names.sort()) {
     add(total, mirrorHome(path.join(base, name), realCodexHome, deps));
   }
   return total;
@@ -63,13 +70,14 @@ export function syncCodexUsageMirrorForTarget(
 
 function add(into: CodexUsageMirrorResult, from: CodexUsageMirrorResult): void {
   into.linked += from.linked;
+  into.relinked += from.relinked;
   into.skipped += from.skipped;
   into.failed += from.failed;
 }
 
 function mirrorHome(homeDir: string, realCodexHome: string, deps: CodexUsageMirrorDeps): CodexUsageMirrorResult {
   const sessions = path.join(homeDir, "sessions");
-  const result: CodexUsageMirrorResult = { linked: 0, skipped: 0, failed: 0 };
+  const result = zero();
   const link = deps.link ?? ((src: string, dest: string): void => fs.linkSync(src, dest));
   for (const file of rolloutFiles(sessions)) {
     // path.relative — NOT prefix stripping, which produced an archived_sessions/Users/... tree during
@@ -81,12 +89,46 @@ function mirrorHome(homeDir: string, realCodexHome: string, deps: CodexUsageMirr
       result.linked++;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === "EEXIST") result.skipped++;
+      if (code === "EEXIST") add(result, resolveExisting(file, dest, link));
       else if (code === "EXDEV") add(result, copyAcrossDevices(file, dest));
       else result.failed++;
     }
   }
   return result;
+}
+
+// This rollout path is already mirrored — but not necessarily from the copy that is still growing.
+// A codex fork COPIES the ancestor rollout into the new target's home (codex-home.ts's
+// seedCodexTargetThreadFromHome) and then keeps appending to ITS copy, so one relative path can name a
+// frozen snapshot in one home and the live file in another. Whichever home the sweep walked first won,
+// and a running worker's spend then never reached the report — observed live at 55,301,326 tokens
+// across 3 paths. Rollouts are append-only, so the largest copy is the most complete one: re-point to
+// it. That is also why re-pointing cannot double-count — the mirror still holds exactly one link per
+// rollout path, and ccusage already ignores the fork-inherited prefix the copies share.
+function resolveExisting(
+  file: string,
+  dest: string,
+  link: (src: string, dest: string) => void,
+): CodexUsageMirrorResult {
+  try {
+    const src = fs.statSync(file);
+    const existing = fs.statSync(dest);
+    // Same inode: already the live file. Not longer: the mirror is the better copy. Either way, done.
+    if (existing.ino === src.ino || existing.size >= src.size) return { ...EMPTY, skipped: 1 };
+    // Link to a temp name and rename over the mirror, so ccusage never observes a missing rollout.
+    const tmp = `${dest}.mirror-${process.pid}-${existing.ino}`;
+    try {
+      link(file, tmp);
+      fs.renameSync(tmp, dest);
+      return { ...EMPTY, relinked: 1 };
+    } catch (err) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* best-effort */ }
+      if ((err as NodeJS.ErrnoException).code === "EXDEV") return copyAcrossDevices(file, dest);
+      return { ...EMPTY, failed: 1 };
+    }
+  } catch {
+    return { ...EMPTY, failed: 1 };
+  }
 }
 
 // The mirror root is on another volume, so no inode can be shared. Copy instead, and re-copy whenever
@@ -102,12 +144,12 @@ function copyAcrossDevices(file: string, dest: string): CodexUsageMirrorResult {
     } catch {
       /* destination absent → copy */
     }
-    if (!stale) return { linked: 0, skipped: 1, failed: 0 };
+    if (!stale) return { ...EMPTY, skipped: 1 };
     fs.copyFileSync(file, dest);
     fs.chmodSync(dest, 0o600);
-    return { linked: 1, skipped: 0, failed: 0 };
+    return { ...EMPTY, linked: 1 };
   } catch {
-    return { linked: 0, skipped: 0, failed: 1 };
+    return { ...EMPTY, failed: 1 };
   }
 }
 

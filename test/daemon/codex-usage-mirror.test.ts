@@ -34,7 +34,7 @@ describe("syncCodexUsageMirror", () => {
 
     const result = syncCodexUsageMirror(rookeryHome, realCodexHome);
 
-    expect(result).toEqual({ linked: 2, skipped: 0, failed: 0 });
+    expect(result).toEqual({ linked: 2, relinked: 0, skipped: 0, failed: 0 });
     expect(fs.existsSync(mirrored("2026/07/06/rollout-a.jsonl"))).toBe(true);
     expect(fs.existsSync(mirrored("2026/07/30/rollout-b.jsonl"))).toBe(true);
     // Same inode is what makes a live worker's ongoing appends show up with no re-sync.
@@ -60,7 +60,7 @@ describe("syncCodexUsageMirror", () => {
     writeRollout("worker-abc", "2026/07/30/rollout-b.jsonl");
     syncCodexUsageMirror(rookeryHome, realCodexHome);
 
-    expect(syncCodexUsageMirror(rookeryHome, realCodexHome)).toEqual({ linked: 0, skipped: 1, failed: 0 });
+    expect(syncCodexUsageMirror(rookeryHome, realCodexHome)).toEqual({ linked: 0, relinked: 0, skipped: 1, failed: 0 });
   });
 
   it("reflects appends to an already-mirrored rollout", () => {
@@ -80,22 +80,22 @@ describe("syncCodexUsageMirror", () => {
       throw err;
     };
 
-    expect(syncCodexUsageMirror(rookeryHome, realCodexHome, { link: exdev })).toEqual({ linked: 1, skipped: 0, failed: 0 });
+    expect(syncCodexUsageMirror(rookeryHome, realCodexHome, { link: exdev })).toEqual({ linked: 1, relinked: 0, skipped: 0, failed: 0 });
     const dest = mirrored("2026/07/30/rollout-b.jsonl");
     expect(fs.readFileSync(dest, "utf8")).toBe("first\n");
     expect(fs.statSync(dest).ino).not.toBe(fs.statSync(file).ino); // a copy, not a link
 
     // Unchanged source → nothing to do.
-    expect(syncCodexUsageMirror(rookeryHome, realCodexHome, { link: exdev })).toEqual({ linked: 0, skipped: 1, failed: 0 });
+    expect(syncCodexUsageMirror(rookeryHome, realCodexHome, { link: exdev })).toEqual({ linked: 0, relinked: 0, skipped: 1, failed: 0 });
 
     // A copy cannot follow appends, so a grown source must be re-copied.
     fs.appendFileSync(file, "second\n");
-    expect(syncCodexUsageMirror(rookeryHome, realCodexHome, { link: exdev })).toEqual({ linked: 1, skipped: 0, failed: 0 });
+    expect(syncCodexUsageMirror(rookeryHome, realCodexHome, { link: exdev })).toEqual({ linked: 1, relinked: 0, skipped: 0, failed: 0 });
     expect(fs.readFileSync(dest, "utf8")).toBe("first\nsecond\n");
   });
 
   it("never throws when codex-homes is missing or a home is unreadable", () => {
-    expect(syncCodexUsageMirror(path.join(tmp, "nope"), realCodexHome)).toEqual({ linked: 0, skipped: 0, failed: 0 });
+    expect(syncCodexUsageMirror(path.join(tmp, "nope"), realCodexHome)).toEqual({ linked: 0, relinked: 0, skipped: 0, failed: 0 });
 
     writeRollout("worker-abc", "2026/07/30/rollout-b.jsonl");
     const unreadable = path.join(rookeryHome, "codex-homes", "worker-locked", "sessions");
@@ -121,7 +121,7 @@ describe("syncCodexUsageMirror", () => {
     fs.mkdirSync(home, { recursive: true });
     fs.writeFileSync(path.join(home, "notes.txt"), "x");
 
-    expect(syncCodexUsageMirror(rookeryHome, realCodexHome)).toEqual({ linked: 0, skipped: 0, failed: 0 });
+    expect(syncCodexUsageMirror(rookeryHome, realCodexHome)).toEqual({ linked: 0, relinked: 0, skipped: 0, failed: 0 });
   });
 
   it("mirrors only the named target, resolving the worker- prefix like codexHomeDirFor", () => {
@@ -130,18 +130,59 @@ describe("syncCodexUsageMirror", () => {
 
     const worker = syncCodexUsageMirrorForTarget(rookeryHome, realCodexHome, "abc", "worker");
 
-    expect(worker).toEqual({ linked: 1, skipped: 0, failed: 0 });
+    expect(worker).toEqual({ linked: 1, relinked: 0, skipped: 0, failed: 0 });
     expect(fs.existsSync(mirrored("2026/07/30/rollout-worker.jsonl"))).toBe(true);
     expect(fs.existsSync(mirrored("2026/07/06/rollout-master.jsonl"))).toBe(false);
 
     const master = syncCodexUsageMirrorForTarget(rookeryHome, realCodexHome, "019f-master", "master");
 
-    expect(master).toEqual({ linked: 1, skipped: 0, failed: 0 });
+    expect(master).toEqual({ linked: 1, relinked: 0, skipped: 0, failed: 0 });
     expect(fs.existsSync(mirrored("2026/07/06/rollout-master.jsonl"))).toBe(true);
+  });
+
+  it("re-points the mirror when another home holds a longer copy of the same rollout", () => {
+    // A codex fork COPIES the ancestor rollout into the new target's home and then keeps appending to
+    // its own copy, so the same relative path can name a stale snapshot in one home and the live file
+    // in another. Skipping on EEXIST would pin the mirror to whichever home was walked first — leaving
+    // a running worker's spend permanently unaccounted (observed live: 55,301,326 tokens).
+    writeRollout("worker-a-stale", "2026/08/19/rollout-a.jsonl", "one\ntwo\n"); // walked first
+    writeRollout("worker-b-live", "2026/08/19/rollout-a.jsonl", "one\ntwo\nthree\n");
+
+    const result = syncCodexUsageMirror(rookeryHome, realCodexHome);
+
+    expect(result).toEqual({ linked: 1, relinked: 1, skipped: 0, failed: 0 });
+    const dest = mirrored("2026/08/19/rollout-a.jsonl");
+    expect(fs.readFileSync(dest, "utf8")).toBe("one\ntwo\nthree\n");
+    // The mirror must be a link to the LIVE file, so its later appends still land in the report.
+    const live = path.join(rookeryHome, "codex-homes", "worker-b-live", "sessions", "2026/08/19/rollout-a.jsonl");
+    expect(fs.statSync(dest).ino).toBe(fs.statSync(live).ino);
+  });
+
+  it("keeps the mirror when the already-linked copy is the longest", () => {
+    // Same two homes, opposite walk order: the longest copy is seen first. The outcome must not depend
+    // on readdir order.
+    writeRollout("worker-a-long", "2026/08/19/rollout-a.jsonl", "one\ntwo\nthree\n");
+    writeRollout("worker-b-short", "2026/08/19/rollout-a.jsonl", "one\ntwo\n");
+
+    const result = syncCodexUsageMirror(rookeryHome, realCodexHome);
+
+    expect(result).toEqual({ linked: 1, relinked: 0, skipped: 1, failed: 0 });
+    expect(fs.readFileSync(mirrored("2026/08/19/rollout-a.jsonl"), "utf8")).toBe("one\ntwo\nthree\n");
+  });
+
+  it("re-points a stale mirror entry on a later sweep, once the live copy has grown", () => {
+    const live = writeRollout("worker-fork", "2026/08/19/rollout-a.jsonl", "one\n");
+    writeRollout("worker-source", "2026/08/19/rollout-a.jsonl", "one\ntwo\n");
+    syncCodexUsageMirror(rookeryHome, realCodexHome); // pins the longer (source) copy
+
+    fs.appendFileSync(live, "two\nthree\n"); // the running worker overtakes it
+
+    expect(syncCodexUsageMirror(rookeryHome, realCodexHome)).toEqual({ linked: 0, relinked: 1, skipped: 1, failed: 0 });
+    expect(fs.statSync(mirrored("2026/08/19/rollout-a.jsonl")).ino).toBe(fs.statSync(live).ino);
   });
 
   it("never throws for a target whose home is already gone", () => {
     expect(syncCodexUsageMirrorForTarget(rookeryHome, realCodexHome, "vanished", "worker"))
-      .toEqual({ linked: 0, skipped: 0, failed: 0 });
+      .toEqual({ linked: 0, relinked: 0, skipped: 0, failed: 0 });
   });
 });

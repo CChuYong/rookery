@@ -86,7 +86,7 @@ ccusage scans both trees and sums them, so personal `sessions/` usage and mirror
 Daemon-side, alongside `codex-home.ts`: it touches the user's filesystem, which `src/core/` must not.
 
 ```ts
-export interface CodexUsageMirrorResult { linked: number; skipped: number; failed: number }
+export interface CodexUsageMirrorResult { linked: number; relinked: number; skipped: number; failed: number }
 
 export function syncCodexUsageMirror(
   rookeryHome: string,
@@ -113,9 +113,19 @@ Rules:
   `archived_sessions/Users/clover/…` tree during the PoC.
 - Directories created `0700`, matching `fs-hardening.ts` conventions.
 - `fs.linkSync`, then classify errors:
-  - `EEXIST` → `skipped`. This is also the natural dedup for fork-ancestor rollouts that legitimately
-    exist in two homes; the PoC showed a per-home loop double-counts 1,232,594 tokens that the mirror
-    does not.
+  - `EEXIST` → the path is mirrored, but not necessarily from the copy that is still growing. A codex
+    fork **copies** the ancestor rollout into the new target's home (`seedCodexTargetThreadFromHome`)
+    and the forked worker then keeps appending to *its* copy, so one relative path can name a frozen
+    snapshot in one home and the live file in another. Compare and keep the **longest** copy (rollouts
+    are append-only, so longest = most complete): same inode or destination not shorter → `skipped`;
+    a longer source → link to a temp name and `rename` over the mirror → `relinked`.
+    This still holds exactly one link per rollout path, so it cannot double-count — and ccusage already
+    ignores the fork-inherited prefix that the copies share (verified: a 17,210-line prefix of a forked
+    rollout counts 0 tokens, while the 17,823-line live file counts 17,150,492).
+    Skipping instead, as the first implementation did, pins the mirror to whichever home the sweep
+    walked first and a running forked worker's spend never lands in the report: found live on
+    2026-08-19 with 3 of 167 paths stale, worth **55,301,326 tokens / $44.90**.
+    Home names are walked sorted so a sweep is reproducible.
   - `EXDEV` (mirror on another volume) → `copyFileSync` when the destination is missing or stale
     (`size` differs or destination `mtimeMs` is older), else `skipped`. A copy cannot follow live
     appends, so staleness is re-checked every sync; `0600` on the copy.
@@ -170,6 +180,9 @@ no secrets — rollout *contents* are never read, only linked.
 7. `syncCodexUsageMirrorForTarget` links only the named target's rollouts, and resolves the
    `worker-` prefix through `codexHomeDirFor`.
 8. Destination path uses the `sessions/`-relative layout (regression guard for the PoC path slip).
+9. Two homes holding the same rollout path: the longer copy wins regardless of walk order, the mirror
+   ends up linked to the live file, and a later sweep re-points once the live copy overtakes the
+   snapshot it was seeded from.
 
 Gates: `npm run typecheck` and `npm test`. No shared daemon types the renderer consumes change, so the
 desktop workspace gates are not implicated.

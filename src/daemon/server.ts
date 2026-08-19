@@ -328,8 +328,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // every codex target's rollouts into the user's real CODEX_HOME so `ccusage codex` can see the spend
   // of masters/workers that run in per-target homes. One line per sweep, and only when something
   // changed — rollout CONTENTS are never read, only linked, so nothing sensitive can reach the log.
-  const logUsageMirror = (r: { linked: number; skipped: number; failed: number }): void => {
-    if (r.linked > 0 || r.failed > 0) console.log(`codex usage mirror: linked=${r.linked} skipped=${r.skipped} failed=${r.failed}`);
+  const logUsageMirror = (r: { linked: number; relinked: number; skipped: number; failed: number }): void => {
+    if (r.linked > 0 || r.relinked > 0 || r.failed > 0) {
+      console.log(`codex usage mirror: linked=${r.linked} relinked=${r.relinked} skipped=${r.skipped} failed=${r.failed}`);
+    }
   };
   // Boot sweep — reconciles homes created by the previous process. Never throws. ⚠️ This runs BEFORE
   // gcOrphanCodexHomes below: the GC deletes homes with no backing row (a crash mid-delete/mid-fork),
