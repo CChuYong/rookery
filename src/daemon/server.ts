@@ -57,6 +57,7 @@ import {
   seedCodexWorkerHomeFromSource,
   gcOrphanCodexHomes,
 } from "./codex-home.js";
+import { syncCodexUsageMirror, syncCodexUsageMirrorForTarget } from "./codex-usage-mirror.js";
 import { acquireSingleInstance } from "./lifecycle.js";
 import { loadOrCreateToken, checkUpgradeAuth, tokenMatches } from "./auth.js";
 import { secureHome } from "./fs-hardening.js";
@@ -256,6 +257,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // errors), so this closure itself never throws either.
   const onSessionDelete = (id: string): void => {
     bridge.release(id);
+    // Mirror this session's rollouts for usage accounting BEFORE the home is removed, or its spend
+    // dies with the directory (docs/superpowers/specs/2026-07-30-codex-usage-mirror-design.md).
+    syncCodexUsageMirrorForTarget(config.home, realCodexHome, id, "master");
     removeCodexHome(config.home, id);
   };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
@@ -304,7 +308,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       return result;
     },
     onWorkerDiscard: (id, provider) => {
-      if ((provider ?? repos.getWorker(id)?.provider ?? "claude") === "codex") removeCodexWorkerHome(config.home, id);
+      if ((provider ?? repos.getWorker(id)?.provider ?? "claude") === "codex") {
+        syncCodexUsageMirrorForTarget(config.home, realCodexHome, id, "worker"); // usage accounting, before the rm -rf
+        removeCodexWorkerHome(config.home, id);
+      }
     },
   });
   // Restart recovery: restore the previous process's workers from the DB as detached entries (diff/discard/stop still work) +
@@ -317,6 +324,19 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // P3-remaining Track B #7 (docs/2026-07-06-p3r-codex-hardening-finish.md): sweep orphaned per-session
   // CODEX_HOME dirs (no backing session row — left behind by a crash mid-delete or mid-fork). Boot-only:
   // no in-flight fork/create can race it this early (before any WS connection is accepted).
+  // Codex usage accounting (docs/superpowers/specs/2026-07-30-codex-usage-mirror-design.md): hardlink
+  // every codex target's rollouts into the user's real CODEX_HOME so `ccusage codex` can see the spend
+  // of masters/workers that run in per-target homes. One line per sweep, and only when something
+  // changed — rollout CONTENTS are never read, only linked, so nothing sensitive can reach the log.
+  const logUsageMirror = (r: { linked: number; relinked: number; skipped: number; failed: number }): void => {
+    if (r.linked > 0 || r.relinked > 0 || r.failed > 0) {
+      console.log(`codex usage mirror: linked=${r.linked} relinked=${r.relinked} skipped=${r.skipped} failed=${r.failed}`);
+    }
+  };
+  // Boot sweep — reconciles homes created by the previous process. Never throws. ⚠️ This runs BEFORE
+  // gcOrphanCodexHomes below: the GC deletes homes with no backing row (a crash mid-delete/mid-fork),
+  // and whatever it deletes first can never be accounted for. Mirror first, then collect.
+  logUsageMirror(syncCodexUsageMirror(config.home, realCodexHome));
   gcOrphanCodexHomes(
     config.home,
     new Set(repos.listSessions().map((s) => s.id)),
@@ -442,6 +462,12 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // The refresh interval comes from settings (DB). Applied once at boot (changes take effect on daemon restart). Invalid values fall back to the default.
   const parsedRefresh = Number.parseInt(settings.usageRefreshMs(), 10);
   const usageRefreshMs = Number.isInteger(parsedRefresh) && parsedRefresh > 0 ? parsedRefresh : DEFAULT_USAGE_REFRESH_MS;
+  // Periodic codex usage mirror sweep, on the usage cadence. Deliberately NOT folded into
+  // UsageCollector: src/core is transport-agnostic and must not write to the user's home. Already
+  // mirrored rollouts follow live appends through the shared inode, so this only needs to notice NEW
+  // rollout files (a worker spawned after boot).
+  const usageMirrorTimer = setInterval(() => logUsageMirror(syncCodexUsageMirror(config.home, realCodexHome)), usageRefreshMs);
+  usageMirrorTimer.unref?.();
   // Codex usage for the desktop Usage panel's Codex tab — same spawn/env/apiKey closures as the
   // codex models/auth providers so it authenticates under the account the turns run under.
   const codexUsageProvider = makeCodexUsageProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
@@ -710,6 +736,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     stopNotifier();
     stopWorkerTrigger(); // same rationale: fleet.close's synchronous 'stopped' emits must not fire automations mid-shutdown
     usageCollector.stop();
+    clearInterval(usageMirrorTimer);
     scheduler.stop();
     clearInterval(heartbeat);
     await slack.stop(); // stop accepting new Slack-triggered turns before draining the in-flight ones
