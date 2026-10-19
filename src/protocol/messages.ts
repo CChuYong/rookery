@@ -21,6 +21,12 @@ import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot } from "../core/wor
 // effort validation: allow only valid members (reject invalid values), but keep the inferred type as string (compatible with SettingsValues).
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 const effortField = z.string().refine((v) => EFFORT_LEVELS.includes(v), { message: "invalid effort" }).nullable().optional();
+// Codex-only extra level (model/list advertises it per model). The Claude path never sees it: coerceEffort() drops
+// unknown levels. Only fields whose provider is unknown at schema level (side.start) or checked in a superRefine
+// (automation) accept it; the global Claude defaults (masterEffort/workerEffort) keep the strict vocabulary.
+const CODEX_ONLY_EFFORT = "ultra";
+const effortFieldAnyProvider = z.string().refine((v) => EFFORT_LEVELS.includes(v) || v === CODEX_ONLY_EFFORT, { message: "invalid effort" }).nullable().optional();
+const automationEffortField = z.string().nullable().optional();
 
 const triggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cron"), cron: z.string(), timezone: z.string() }),
@@ -233,7 +239,7 @@ const automationInputSchema = z.object({
   trigger: triggerSchema,
   action: actionSchema,
   model: z.string().nullable().optional(),
-  effort: effortField,
+  effort: automationEffortField, // validated provider-aware in the superRefine below
   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).nullable().optional(),
   maxTurns: z.number().int().positive().nullable().optional(),
   // Lifetime USD cost ceiling — the sibling runaway guard to maxTurns (see workers.cost_budget_usd). NULL = unlimited.
@@ -244,6 +250,10 @@ const automationInputSchema = z.object({
 }).superRefine((v, ctx) => {
   if (v.trigger.kind === "cron" && !isValidCron(v.trigger.cron, v.trigger.timezone)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid cron expression", path: ["trigger", "cron"] });
+  }
+  if (v.effort != null) {
+    const ok = EFFORT_LEVELS.includes(v.effort) || (v.provider === "codex" && v.effort === CODEX_ONLY_EFFORT);
+    if (!ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
   }
 });
 
@@ -260,7 +270,7 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.stop"), sessionId: z.string(), reqId: z.string().optional() }),
   // Ephemeral read-only conversation forked from a master/worker provider session. It reuses the
   // source cwd (including a worker's live worktree) but never creates a session/worker/worktree row.
-  z.object({ type: z.literal("side.start"), sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim().min(1), model: z.string().optional(), effort: effortField, reqId: z.string() }),
+  z.object({ type: z.literal("side.start"), sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim().min(1), model: z.string().optional(), effort: effortFieldAnyProvider, reqId: z.string() }),
   z.object({ type: z.literal("side.send"), sideId: z.string(), text: z.string().trim().min(1), reqId: z.string().optional() }),
   z.object({ type: z.literal("side.stop"), sideId: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("side.close"), sideId: z.string(), reqId: z.string().optional() }),

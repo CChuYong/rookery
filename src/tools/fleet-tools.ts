@@ -87,7 +87,7 @@ export function fleetToolDefs(
       task: z.string(),
       base: z.string().optional(),
       model: z.string().optional().describe("Override the worker model ONLY when the user explicitly requested a specific model; otherwise omit to use the default."),
-      effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max) ONLY when the user explicitly requested it; otherwise omit to use the default."),
+      effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max; codex workers also accept ultra) ONLY when the user explicitly requested it; otherwise omit to use the default."),
       provider: z.enum(["claude", "codex"]).optional().describe("Agent backend for this worker (default claude). codex = OpenAI Codex via app-server."),
       notify: z.boolean().optional().describe("When true, you are notified once this worker finishes this dispatch (goes idle) or fails — your turn can end and you'll be woken with the result. One-shot: re-arm with send_worker notify:true."),
       costBudgetUsd: z.number().positive().optional().describe("Stop the worker once its cumulative cost reaches this many USD (runaway guard). Omit = unlimited."),

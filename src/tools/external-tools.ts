@@ -129,7 +129,7 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
       task: z.string(),
       base: z.string().optional(),
       model: z.string().optional().describe("Override the worker model; omit to use the default."),
-      effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max); omit to use the default."),
+      effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max; codex workers also accept ultra); omit to use the default."),
       provider: z.enum(["claude", "codex"]).optional().describe("Agent backend (default claude)."),
     },
     async (args) => {

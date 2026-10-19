@@ -250,6 +250,21 @@ describe("automation protocol messages", () => {
     expect(() => parseClientMessage(JSON.stringify(ok))).not.toThrow();
   });
 
+  it("effort: ultra is Codex-only (automation requires provider codex; Claude defaults stay strict; side.start tolerates)", () => {
+    const auto = (effort: string, provider?: string) => JSON.stringify({
+      type: "automation.create", reqId: "q",
+      automation: { name: "n", trigger: { kind: "interval", everyMinutes: 5 }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "fresh" }, effort, ...(provider ? { provider } : {}) },
+    });
+    expect(() => parseClientMessage(auto("ultra", "codex"))).not.toThrow();
+    expect(() => parseClientMessage(auto("max", "codex"))).not.toThrow();
+    expect(() => parseClientMessage(auto("ultra", "claude"))).toThrow();
+    expect(() => parseClientMessage(auto("ultra"))).toThrow();
+    expect(() => parseClientMessage(auto("max"))).not.toThrow();
+    expect(() => parseClientMessage(auto("bogus", "codex"))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "settings.set", reqId: "q", settings: { workerEffort: "ultra" } }))).toThrow();
+    expect(() => parseClientMessage(JSON.stringify({ type: "side.start", reqId: "q", sourceKind: "worker", sourceId: "w", text: "hi", effort: "ultra" }))).not.toThrow();
+  });
+
   it("automation.create: invalid cron expression is rejected", () => {
     const invalid = {
       type: "automation.create", reqId: "q",
