@@ -11,6 +11,8 @@ import type { ResolvedAgentCapabilities } from "../capabilities/types.js";
 // Models billed at $0 because they have no pricing entry — warned once per process so the daemon log
 // surfaces the cost/budget blind spot (finding [18]) without spamming a line every turn.
 const warnedUnratedModels = new Set<string>();
+// Same once-per-process logging for efforts dropped because the cached catalog says the model lacks them.
+const warnedUnsupportedEfforts = new Set<string>();
 
 export interface CodexRuntimeProjection {
   codexHome: string;
@@ -31,6 +33,10 @@ export interface CodexBackendDeps {
   spawn: CodexSpawn;
   defaultModel: () => string; // Settings resolver — used when the session has no model (spawn override wins)
   apiKey?: () => string | undefined; // in-app codex API key (Settings resolver). Present → provision auth.json via RPC after handshake.
+  // Sync lookup of a model's supported reasoning efforts from the CACHED model/list catalog; undefined when
+  // the catalog (or the model) is unknown. Lets sendTurn drop an effort the model lacks (e.g. a global
+  // `max` default applied to a model that tops out at xhigh) instead of failing the turn.
+  modelEfforts?: (model: string) => string[] | undefined;
   env?: () => NodeJS.ProcessEnv | undefined; // extra env for the spawned child (Settings resolver, e.g. CODEX_HOME redirection)
   // Daemon MCP bridge (P2 master turns; P2.5 Track A hardening — docs/2026-07-06-p25-codex-hardening.md):
   // registers a rookery session's in-process tool defs and returns the ready-to-use per-session
@@ -528,6 +534,16 @@ abstract class CodexSessionBase implements AgentStream {
   // thread actually ran this turn under.
   protected async sendTurn(client: CodexClient, threadId: string, text: string, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
     const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
+    const turnModel = modelOverride || this.opts.model || this.deps.defaultModel();
+    const supported = effort ? this.deps.modelEfforts?.(turnModel) : undefined;
+    if (effort && supported && supported.length > 0 && !supported.includes(effort)) {
+      const key = `${turnModel}:${effort}`;
+      if (!warnedUnsupportedEfforts.has(key)) {
+        warnedUnsupportedEfforts.add(key);
+        console.warn(`[codex] model "${turnModel}" does not support effort "${effort}" (supports: ${supported.join(", ")}) — omitting it so the model default applies`);
+      }
+      effort = undefined;
+    }
     const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
     // Arm BEFORE the turn/start request (not after it resolves): a child wedged after receiving
     // turn/start but before responding — and before emitting any notification — would otherwise be

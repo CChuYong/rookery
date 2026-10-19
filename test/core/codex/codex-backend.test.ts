@@ -1365,4 +1365,28 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
     await expect(collect(b.openSession(q, baseOpts({ resume: "th-1" })))).rejects.toThrow(/no auth/);
     expect(requests.filter((r) => r.method === "thread/resume")).toHaveLength(1);
   });
+
+  describe("effort guard against the cached model catalog", () => {
+    const run = async (modelEfforts: ((m: string) => string[] | undefined) | undefined, effort: string) => {
+      const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-6.1-sol", ...(modelEfforts ? { modelEfforts } : {}) });
+      const q = new MessageQueue(); q.push("x"); q.close();
+      await collect(b.openSession(q, baseOpts({ model: "gpt-5.4", effort })));
+      return fake.requests.find((r) => r.method === "turn/start")!.params as Record<string, unknown>;
+    };
+    it("omits an effort the model's catalog entry lacks (and logs once)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const seen: string[] = [];
+      const p = await run((m) => { seen.push(m); return ["low", "medium", "high"]; }, "max");
+      expect(p).not.toHaveProperty("effort");
+      expect(seen[0]).toBe("gpt-5.4");
+      expect(warn.mock.calls.some((c) => String(c[0]).includes('does not support effort "max"'))).toBe(true);
+      warn.mockRestore();
+    });
+    it("passes the effort through when supported, when the catalog is missing, or the model is unknown", async () => {
+      expect(await run(() => ["low", "max"], "max")).toMatchObject({ effort: "max" });
+      expect(await run(undefined, "max")).toMatchObject({ effort: "max" });
+      expect(await run(() => undefined, "ultra")).toMatchObject({ effort: "ultra" });
+    });
+  });
 });
