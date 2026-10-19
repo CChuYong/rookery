@@ -35,7 +35,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `master.system` | `text` | uncategorized SDK `system` message | no (live emit only) | from top-level `text`/`subtype` |
 | `master.notice` | `text`, `code?`, `params?` | compaction/retry/fallback push; turn-cap; interrupt | yes | `code`+`params` let clients re-localize (desktop i18n); `text` is the `DEFAULT_LOCALE` pre-render |
 | `commands.changed` | `scopeId`, `commands` | SDK `commands_changed` push | no | refresh `/` candidates; `scopeId` = sessionId (master) or worker id (worker) |
-| `master.result` | `subtype`, `costUsd`, `numTurns`, `durationMs`, `contextTokens`, `contextWindow` | each SDK `result` message | yes | cost/turns cumulative per session; context values are the current turn's |
+| `master.result` | `subtype`, `costUsd`, `numTurns`, `durationMs`, `contextTokens`, `contextWindow`, `providerCostTotalUsd?` | each SDK `result` message | yes | cost/turns cumulative per session (summed per-turn deltas — the adapter differences the SDK's running `total_cost_usd`); context values are the current turn's; `providerCostTotalUsd` = Claude's raw running-total watermark, restored on rebuild and passed back as the resume baseline (absent on Codex) |
 | `master.status` | `status: running\|idle` | turn start (`running`) / turn end (`idle`) | no (live pulse) | UI session-list activity indicator |
 | `session.label` | `label` | auto-label generation fills the session label | no | live refresh of UI session list (the label itself is persisted separately) |
 | `worker.spawned` | `workerId`, `repoPath`, `label`, `branch?`, `status?`, `ticketKey?`, `ticketUrl?` | `fleet.spawn` up front (worktree still provisioning) | (row in `workers`) | `status:"provisioning"` so the row shows immediately; omitted ⇒ treated as `running` |
@@ -69,7 +69,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `tool_use` | `id`, `name`, `input` | `record` (persisted + live) | `input` truncated to 4000 |
 | `tool_result` | `id`, `isError`, `content` | `record` (persisted + live) | `content` truncated to 4000 |
 | `tool_progress` | `id`, `elapsedSec` | `emit` (live only) | elapsed seconds of an in-progress tool |
-| `result` | `subtype`, `costUsd`, `numTurns`, `durationMs?`, `contextTokens?`, `contextWindow?`, `terminalReason?` | `record` (persisted + live) | cost/turns cumulative; drives maxTurns cap + idle/deferred transition; `terminalReason` is the provider's `terminal_reason` (worker only) |
+| `result` | `subtype`, `costUsd`, `numTurns`, `durationMs?`, `contextTokens?`, `contextWindow?`, `terminalReason?`, `providerCostTotalUsd?` | `record` (persisted + live) | cost/turns cumulative (summed per-turn deltas; `providerCostTotalUsd` = Claude running-total watermark, absent on Codex); drives maxTurns cap + idle/deferred transition; `terminalReason` is the provider's `terminal_reason` (worker only) |
 | `notice` | `text` | `record` (persisted + live) | compaction/retry/fallback push, or turn-cap message |
 | `error` | `message` | `record` (persisted + live) | not recorded if the abort came from stop/discard |
 

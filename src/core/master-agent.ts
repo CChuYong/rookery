@@ -14,6 +14,7 @@ import { buildHandoffSeed } from "./handoff.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 import type { CapabilityRuntimeReporter, CapabilityRuntimeTarget } from "./capabilities/runtime-state.js";
+import { providerCostTotalOf } from "./provider-cost.js";
 
 // Structural signature of the SDK's CanUseTool — defined locally (not imported) to keep this module
 // SDK-import-free (neutrality gate; see test/core/provider-neutral.test.ts). The third arg mirrors
@@ -172,10 +173,10 @@ export class MasterAgent {
     try {
       const last = opts.deps.repos.lastSessionEventPayload(opts.sessionId, "master.result");
       if (last) {
-        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number; providerCostTotalUsd?: number };
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
-        this.providerCostTotalUsd = p.providerCostTotalUsd;
+        this.providerCostTotalUsd = providerCostTotalOf(last);
       }
     } catch { /* corrupt row — start from 0 */ }
   }

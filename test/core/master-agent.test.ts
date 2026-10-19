@@ -573,7 +573,7 @@ describe("MasterAgent", () => {
     expect(results[1]).toMatchObject({ costUsd: 1, numTurns: 4 }); // session-cumulative
   });
 
-  it("passes the provider cost watermark as costBaselineUsd on resumed turns and persists it with master.result", async () => {
+  it("differences resumed totals against the persisted watermark (costBaselineUsd stays adapter-only, never in SDK options) and persists it with master.result", async () => {
     const seen: Array<Record<string, unknown>> = [];
     const d = deps(runningTotalQuery([0.5, 1.0, 1.2], seen));
     const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });

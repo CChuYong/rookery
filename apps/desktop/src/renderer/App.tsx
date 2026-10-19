@@ -770,9 +770,9 @@ export function App(): JSX.Element {
     st.pushPending(sid, { clientMsgId, text }); // pending bubble: immediately "in progress" (stop button) → switches to committed when the daemon's user echo arrives
     const ov = st.overrides[sid] ?? {}; // per-session override (backend uses defaults if absent)
     // Send the SAME effort the composer displays, re-derived fresh from the current settings + catalog so a
-    // codex session never sends a level its model lacks. The daemon's mapEffort passes levels through per-PROVIDER, not
-    // per-model, so raw ov.effort=undefined would run the masterEffort default unchanged
-    // at a level the model may not support (e.g. gpt-5.4 has no xhigh) — diverging from the shown effort.
+    // codex session never sends a level its model lacks. The daemon's per-model catalog guard only works once its
+    // model/list cache is warm, so raw ov.effort=undefined could still run the masterEffort default at a level the
+    // model may not support (e.g. gpt-5.4 has no xhigh) — diverging from the shown effort.
     // Re-resolving here (not pinning) keeps live settings changes reflected. Claude passes its choice through.
     const provider = st.sessions.find((x) => x.id === sid)?.provider;
     const sendEffort = st.settings

@@ -244,7 +244,10 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       state.costWatermark = total;
     } else {
       // Total dropped (mid-session /clear, or a transcript with no saved total): the new value restarted
-      // from zero, so it is entirely this turn's (and later) cost.
+      // from zero, so it is entirely this turn's (and later) cost. An explicit conversation_reset already zeroes
+      // the watermark, so reaching here means an UNANNOUNCED drop — warn so an unexpected SDK recompute (which
+      // would re-bill the whole new total) is visible in daemon.log instead of silent.
+      console.warn(`[claude-backend] cost running total dropped without conversation_reset (watermark=${state.costWatermark}, total=${total}); billing the new total`);
       delta = total;
       state.costWatermark = total;
     }

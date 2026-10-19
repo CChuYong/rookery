@@ -496,6 +496,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // Codex model/effort catalog (for the desktop Codex model picker): spawns a short-lived app-server
   // child and caches the first successful result for the daemon's lifetime (see codex-models-provider.ts).
   const codexModelsProvider = makeCodexModelsProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
+  // Warm the catalog at boot (fire-and-forget; list() never rejects and doesn't cache failures) so CodexBackend's
+  // per-model effort guard also works in headless daemons (Slack/automation/external MCP) where no desktop ever
+  // sends codex.models.list.
+  void codexModelsProvider.list();
   // Codex auth-readiness probe (for the desktop Settings Codex sub-tab): spawns a short-lived app-server
   // child and reads its account state. NOT cached (auth changes at runtime) — see codex-auth-provider.ts.
   const codexAuthProvider = makeCodexAuthProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });

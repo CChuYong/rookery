@@ -8,6 +8,7 @@ import type { SlashCommandInfo } from "./agent-backend.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 import type { CapabilityRuntimeReporter, CapabilityRuntimeTarget } from "./capabilities/runtime-state.js";
 import type { WorkflowActivitySink, WorkflowOwner } from "./workflow-activity.js";
+import { providerCostTotalOf } from "./provider-cost.js";
 
 // Instruction injected into every worker turn so it treats fenced <untrusted-...> content as data, not instructions.
 export const WORKER_FENCE_INSTRUCTION =
@@ -254,10 +255,10 @@ export class Worker {
     try {
       const last = this.opts.deps.repos.lastWorkerEventPayload(this.opts.id, "result");
       if (last) {
-        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number; providerCostTotalUsd?: number };
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
-        this.providerCostTotalUsd = p.providerCostTotalUsd;
+        this.providerCostTotalUsd = providerCostTotalOf(last);
       }
     } catch { /* corrupt row — start from 0 */ }
     this.opts.deps.repos.setWorkerModel(this.opts.id, this.currentModel);

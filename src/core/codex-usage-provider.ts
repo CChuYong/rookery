@@ -30,8 +30,8 @@ function mapWindow(w: unknown): CodexRateWindow | null {
 // Which gauge a window belongs to is decided by its windowDurationMins, NOT by primary/secondary
 // position: some plans now return the weekly window as `primary` with `secondary: null` (live-observed
 // 2026-10-19, primary.windowDurationMins 10080), which positional mapping rendered in the 5h gauge.
-// 300 → 5h, 10080 → 7d; any other duration goes to the nearer bucket by log-distance (so < ~1.5 day
-// → 5h, longer → 7d). A window with no usable duration falls back to its position (primary → 5h,
+// 300 → 5h, 10080 → 7d; any other duration goes to the nearer bucket by log-distance (geometric midpoint
+// ≈ 29h: shorter → 5h, longer → 7d). A window with no usable duration falls back to its position (primary → 5h,
 // secondary → 7d, the pre-0.163 behavior). If two windows resolve to the same bucket the first wins.
 const FIVE_HOUR_MINS = 300;
 const SEVEN_DAY_MINS = 10080;
