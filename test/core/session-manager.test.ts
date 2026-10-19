@@ -540,4 +540,27 @@ describe("SessionManager", () => {
     expect(makeManagedCapabilities).toHaveBeenNthCalledWith(2, "s1");
   });
 
+  it("findIdByKey() is a read-only lookup: undefined for unknown keys (nothing created), the id for existing, undefined mid-delete", async () => {
+    const { repos, sm } = manager();
+    expect(sm.findIdByKey("slack:T:C:1.1")).toBeUndefined();
+    expect(repos.getSessionByExternalKey("slack:T:C:1.1")).toBeUndefined(); // lookup did not create
+    const s = sm.getOrCreateByKey("slack:T:C:1.1", "/x");
+    expect(sm.findIdByKey("slack:T:C:1.1")).toBe(s.id);
+    const deleting = sm.delete(s.id);
+    expect(sm.findIdByKey("slack:T:C:1.1")).toBeUndefined(); // tombstoned
+    await deleting;
+  });
+
+  it("stop(id, { cancelQueued }) routes to master.stopAll(); plain stop(id) keeps master.stop()", async () => {
+    const { sm } = manager();
+    const s = sm.create("/x");
+    const stop = vi.spyOn(s.master, "stop").mockResolvedValue();
+    const stopAll = vi.spyOn(s.master, "stopAll").mockResolvedValue();
+    await sm.stop(s.id);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(stopAll).not.toHaveBeenCalled();
+    await sm.stop(s.id, { cancelQueued: true });
+    expect(stopAll).toHaveBeenCalledTimes(1);
+  });
+
 });

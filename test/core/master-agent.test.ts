@@ -197,6 +197,49 @@ describe("MasterAgent", () => {
     await master.stop(); // called when no turn is in flight -> no-op (does not throw)
   });
 
+  it("stopAll() aborts the in-flight turn and skips turns queued BEFORE it; later turns still run", async () => {
+    const base = deps(fakeQuery([]));
+    const prompts: string[] = [];
+    const blocking = ((input: { prompt?: string; options?: { abortController?: AbortController } }) => {
+      prompts.push(String(input.prompt));
+      const signal = input.options?.abortController?.signal;
+      async function* gen(): AsyncGenerator<unknown> {
+        if (input.prompt === "first") {
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) return resolve();
+            signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          throw new Error("aborted");
+        }
+        yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" };
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as typeof base.queryFn;
+    const d = { ...base, queryFn: blocking, backend: new ClaudeBackend(blocking) };
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
+
+    const p1 = master.runTurn("first");
+    const p2 = master.runTurn("queued-before-stop");
+    await new Promise((r) => setTimeout(r, 0));
+    await master.stopAll();
+    const p3 = master.runTurn("after-stop"); // enqueued after the stop -> must run normally
+    await Promise.all([p1, p2, p3]); // none reject: cancelled turns resolve silently
+
+    expect(prompts).toEqual(["first", "after-stop"]);
+    expect(d.repos.listMessages("s1").map((m) => m.content)).not.toContain("queued-before-stop");
+  });
+
+  it("stopAll() does not cancel a pending worker-notification flush (it is not user input)", async () => {
+    const prompts: string[] = [];
+    const { master } = makeMaster({ onPrompt: (p) => prompts.push(p) });
+    const p1 = master.runTurn("user turn");
+    master.notifyWorker({ label: "l", branch: "b", status: "idle", tail: "done" });
+    await master.stopAll();
+    await p1;
+    await master.idle();
+    expect(prompts.some((p) => p.includes("<worker-notification>"))).toBe(true);
+  });
+
   it("treats a blank model/effort override as absent (falls back to the default, never an empty model)", async () => {
     const mkResult = () => fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" }]);
     const a = capture(deps(mkResult()));

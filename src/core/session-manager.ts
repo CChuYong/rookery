@@ -219,8 +219,19 @@ export class SessionManager {
   }
 
   // Aborts the in-progress master turn. Only targets live sessions (a session is always live while a turn is in progress) — otherwise no-op.
-  async stop(id: string): Promise<void> {
-    await this.sessions.get(id)?.master.stop();
+  // cancelQueued (Slack stop button): also drop turns already queued behind the in-flight one. Desktop session.stop omits it.
+  async stop(id: string, opts?: { cancelQueued?: boolean }): Promise<void> {
+    const master = this.sessions.get(id)?.master;
+    if (opts?.cancelQueued) await master?.stopAll();
+    else await master?.stop();
+  }
+
+  // Read-only lookup of an EXISTING keyed session's id — never creates, never materializes a cold session, and treats a
+  // mid-delete (tombstoned) session as gone. For event handlers (Slack stop/rename) that must not resurrect threads.
+  findIdByKey(externalKey: string): string | undefined {
+    const row = this.deps.repos.getSessionByExternalKey(externalKey);
+    if (!row || this.deleting.has(row.id)) return undefined;
+    return row.id;
   }
 
   // Change the session label + live update event (immediately reflected in the UI session list).
