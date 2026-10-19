@@ -599,6 +599,23 @@ describe("MasterAgent", () => {
     expect(results[0]!.costUsd).toBeCloseTo(0.7, 8); // 0.5 (copied) + 0.2 fork turn
   });
 
+  it("an aborted first turn (session id known, no result persisted) is billed on the next resumed turn", async () => {
+    const d = deps(runningTotalQuery([0.3]));
+    const results: Array<{ costUsd: number }> = [];
+    d.bus.subscribe("s1", (e) => { if (e.type === "master.result") results.push(e); });
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: "s", deps: d }).runTurn("again");
+    expect(results[0]!.costUsd).toBeCloseTo(0.3, 8);
+  });
+
+  it("a fresh (no-resume) master drops an inherited watermark from copied events (cross-provider fork target)", async () => {
+    const d = deps(runningTotalQuery([0.2]));
+    d.repos.addSessionEvent({ sessionId: "s1", seq: 0, type: "master.result", payloadJson: JSON.stringify({ type: "master.result", costUsd: 5, numTurns: 1, providerCostTotalUsd: 5 }) });
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d }).runTurn("hi");
+    const p = JSON.parse(d.repos.lastSessionEventPayload("s1", "master.result")!) as { costUsd: number; providerCostTotalUsd: number };
+    expect(p.costUsd).toBeCloseTo(5.2, 8);
+    expect(p.providerCostTotalUsd).toBe(0.2);
+  });
+
   it("emits agent.tool start/end with prettified name and matched id", async () => {
     const d = deps(
       fakeQuery([

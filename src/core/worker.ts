@@ -136,7 +136,7 @@ export class Worker {
   private cumTurns = 0;
   // Provider-reported running cost total last observed (turn_end.costTotalUsd) — the baseline handed back on
   // every resumed stream open so the adapter charges only the new turn. Persisted in the result event
-  // (providerCostTotalUsd) and restored in resume(); undefined = unknown (legacy rows) → adapter adopts it.
+  // (providerCostTotalUsd) and restored in resume(); undefined = unknown → the adapter treats it as 0.
   private providerCostTotalUsd: number | undefined;
 
   constructor(private readonly opts: WorkerOpts) {
@@ -552,6 +552,8 @@ export class Worker {
         this.opts.deps.capabilityRuntime?.setDesired(runtimeTarget, managed.revision, managed.blocked);
         if (managed.blocked) throw new Error("managed capabilities are blocked");
       }
+      // A fresh session (incl. a cross-provider fork target) has no provider cost history: drop any inherited watermark.
+      if (!this.sdkSessionId) this.providerCostTotalUsd = 0;
       const stream = this.opts.deps.backend.openSession(queue, {
         cwd: this.opts.repoPath,
         model: this.currentModel,
@@ -702,7 +704,8 @@ export class Worker {
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
             numTurns: this.cumTurns,
-            ...(this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
+            // Only persisted for turns that reported a provider total (Claude): a Codex turn must not re-persist an inherited value.
+            ...(ev.costTotalUsd !== undefined && this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
             durationMs: ev.durationMs,
             contextTokens: ev.contextTokens,
             contextWindow: ev.contextWindow,

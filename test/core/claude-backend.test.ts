@@ -559,11 +559,20 @@ describe("ClaudeBackend — running-total cost accounting", () => {
     expect(r!.costTotalUsd).toBe(0.03421);
   });
 
-  it("resume with an unknown baseline adopts the total and charges 0 once, then differences", async () => {
+  it("resume with an unknown baseline is billed from 0 (legacy / never-resulted sessions restart the total)", async () => {
     const r = await turnEnds([0.03421, 0.03619], { resume: "sdk-1" });
-    expect(r[0]!.costUsd).toBe(0);
+    expect(r[0]!.costUsd).toBe(0.03421);
     expect(r[0]!.costTotalUsd).toBe(0.03421);
     expect(r[1]!.costUsd).toBeCloseTo(0.00198, 8);
+  });
+
+  it("conversation_reset (/clear, plan-exit, fresh_session) restarts the watermark at 0", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "conversation_reset", new_conversation_id: "u", uuid: "u2", session_id: "s", trigger: "clear" },
+      { type: "result", subtype: "success", total_cost_usd: 2.0, num_turns: 1, session_id: "s" },
+    ]));
+    const evs = await collect(backend.startTurn("hi", baseOpts({ resume: "sdk-1", costBaselineUsd: 0.05 })));
+    expect((evs.find((e) => e.kind === "turn_end") as { costUsd: number }).costUsd).toBe(2.0);
   });
 
   it("ignores a baseline when not resuming (fresh session starts at 0)", async () => {
@@ -594,11 +603,25 @@ describe("ClaudeBackend — running-total cost accounting", () => {
 describe("ClaudeBackend — informational system message", () => {
   it("surfaces content as a notice push; an empty one is dropped (never the literal word)", async () => {
     const backend = new ClaudeBackend(rawQuery([
-      { type: "system", subtype: "informational", content: "Heads up", level: "info" },
-      { type: "system", subtype: "informational", content: "", level: "info" },
+      { type: "system", subtype: "informational", content: "Heads up", level: "warning" },
+      { type: "system", subtype: "informational", content: "", level: "warning" },
     ]));
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: "push", push: { kind: "notice", code: "notice.informational", params: { text: "Heads up" } } });
+  });
+});
+
+describe("ClaudeBackend — informational drop rules", () => {
+  it("drops level info and tool_use_id progress lines; keeps notice/suggestion/warning", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "informational", content: "transcript only", level: "info" },
+      { type: "system", subtype: "informational", content: "tool progress", level: "warning", tool_use_id: "t1" },
+      { type: "system", subtype: "informational", content: "careful", level: "warning" },
+      { type: "system", subtype: "informational", content: "try this", level: "suggestion" },
+      { type: "system", subtype: "informational", content: "gray", level: "notice" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events.map((e) => (e as { push?: { params?: { text: string } } }).push?.params?.text)).toEqual(["careful", "try this", "gray"]);
   });
 });

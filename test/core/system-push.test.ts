@@ -33,8 +33,10 @@ describe("classifySystemPush", () => {
   });
 
   it("informational → notice with trimmed, capped content; empty is skipped", () => {
-    expect(classifySystemPush({ subtype: "informational", content: "  Fast mode is on  ", level: "info" }))
-      .toMatchObject({ kind: "notice", code: "notice.informational", params: { text: "Fast mode is on" }, text: "ℹ Fast mode is on" });
+    expect(classifySystemPush({ subtype: "informational", content: "  Fast mode is on  ", level: "notice" }))
+      .toMatchObject({ kind: "notice", code: "notice.informational", params: { text: "Fast mode is on" }, text: "Fast mode is on" });
+    expect(classifySystemPush({ subtype: "informational", content: "verbose", level: "info" })).toBeNull(); // transcript-mode only
+    expect(classifySystemPush({ subtype: "informational", content: "progress", level: "warning", tool_use_id: "t1" })).toBeNull(); // per-tool progress noise
     const long = classifySystemPush({ subtype: "informational", content: "x".repeat(900) }) as { params: { text: string } };
     expect(long.params.text).toHaveLength(501);
     expect(long.params.text.endsWith("…")).toBe(true);

@@ -47,6 +47,9 @@ export function classifySystemPush(msg: unknown): SystemPush | null {
     }
     case "informational": {
       // SDK >= 0.3.283: human-readable info line carried in `content` (+ `level`), not `text`.
+      // level 'info' is transcript-mode-only noise and tool_use_id marks repeated per-tool progress lines — drop both;
+      // keep notice/suggestion/warning.
+      if (m.level === "info" || typeof m.tool_use_id === "string") return null;
       const content = typeof m.content === "string" ? m.content.trim() : "";
       if (!content) return null;
       return notice("notice.informational", { text: content.length > INFORMATIONAL_MAX_CHARS ? `${content.slice(0, INFORMATIONAL_MAX_CHARS)}…` : content });

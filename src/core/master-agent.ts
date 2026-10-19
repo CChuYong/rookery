@@ -349,6 +349,8 @@ export class MasterAgent {
         this.opts.deps.capabilityRuntime?.setDesired(runtimeTarget, managed.revision, managed.blocked);
         if (managed.blocked) throw new Error("managed capabilities are blocked");
       }
+      // A fresh session (incl. a cross-provider fork target) has no provider cost history: drop any inherited watermark.
+      if (!this.sdkSessionId) this.providerCostTotalUsd = 0;
       const stream = this.opts.deps.backend.startTurn(promptText, {
         cwd: this.opts.cwd,
         model,
@@ -469,7 +471,8 @@ export class MasterAgent {
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
             numTurns: this.cumTurns,
-            ...(this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
+            // Only persisted for turns that reported a provider total (Claude): a Codex turn must not re-persist an inherited value.
+            ...(ev.costTotalUsd !== undefined && this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
             durationMs: ev.durationMs,
             contextTokens: ev.contextTokens,
             contextWindow: ev.contextWindow,

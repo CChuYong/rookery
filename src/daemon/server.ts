@@ -81,15 +81,7 @@ import { startWorkerTriggerSource } from "../core/worker-trigger-source.js";
 import type { AutomationProvider } from "./connection.js";
 import type { AutomationInput } from "../persistence/repositories.js";
 import { SideConversationManager, type SideSource } from "../core/side-conversation.js";
-
-// The provider cost watermark persisted inside the last master.result / worker result payload (undefined when absent/corrupt).
-function providerCostTotalOf(payloadJson: string | undefined | null): number | undefined {
-  if (!payloadJson) return undefined;
-  try {
-    const v = (JSON.parse(payloadJson) as { providerCostTotalUsd?: unknown }).providerCostTotalUsd;
-    return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-  } catch { return undefined; }
-}
+import { providerCostTotalOf } from "../core/provider-cost.js";
 import { realClaudeWorkflowFiles } from "./claude-workflow-files.js";
 import { ClaudeWorkflowRegistry } from "./claude-workflow-registry.js";
 

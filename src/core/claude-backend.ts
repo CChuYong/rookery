@@ -38,11 +38,13 @@ export async function* claudeUserMessages(input: AsyncIterable<string>): AsyncIt
 // costWatermark: SDK result.total_cost_usd is a RUNNING total of the conversation (live-verified on 0.3.303:
 // across resumed turns, across a forkSession — which continues from the SOURCE's total — and across results
 // within one streaming-input query()), so the per-turn cost is the difference from the last observed total.
-// undefined = resumed with an unknown baseline (see translate()).
+// A resume with no known baseline starts at 0: live-verified that a session created on SDK 0.3.259 and resumed
+// on 0.3.303 restarts the running total from 0 (legacy transcripts saved none), and a session whose first turn
+// never produced a result (aborted/killed) likewise carries at most a partial total.
 interface DecodeState {
   lastReqContextTokens: number;
   workflowTaskIds: Set<string>;
-  costWatermark: number | undefined;
+  costWatermark: number;
 }
 
 function workflowUsage(raw: unknown): { totalTokens: number; toolUses: number; durationMs: number } | undefined {
@@ -209,6 +211,12 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     yield { kind: "system_text", text: s.text ?? s.subtype ?? "system" };
     return;
   }
+  if (type === "conversation_reset") {
+    // /clear, plan-mode exit with clear-context, fresh_session, onboarding: the running total restarts at 0.
+    // The frame may arrive for nested sessions too, but only top-level frames reach here (parentId handled above).
+    state.costWatermark = 0;
+    return;
+  }
   if (type === "tool_progress") {
     const tp = msg as { tool_use_id?: string; elapsed_time_seconds?: number };
     if (tp.tool_use_id) yield { kind: "tool_progress", toolUseId: tp.tool_use_id, elapsedSec: Math.round(tp.elapsed_time_seconds ?? 0) };
@@ -231,11 +239,6 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     let delta = 0;
     if (total === 0) {
       // Zeroed crash/startup-error result: no information. Charge nothing and keep the watermark.
-    } else if (state.costWatermark === undefined) {
-      // Resumed/forked with an unknown baseline (state saved before running-total accounting existed): the
-      // total includes the whole prior history, which is already in the persisted cumulative cost. Charging
-      // 0 for this one turn undercounts it slightly but avoids re-billing the entire history.
-      state.costWatermark = total;
     } else if (total >= state.costWatermark) {
       delta = total - state.costWatermark;
       state.costWatermark = total;
@@ -262,8 +265,8 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
 }
 
 class ClaudeStream implements AgentStream {
-  // initialCostWatermark: 0 for a fresh session (no resume); the caller's baseline (possibly undefined = unknown) when resuming.
-  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number | undefined) {}
+  // initialCostWatermark: 0 for a fresh session or a resume with no known baseline; else the caller's baseline.
+  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number) {}
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
     const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set(), costWatermark: this.initialCostWatermark };
@@ -336,7 +339,7 @@ export class ClaudeBackend implements AgentBackend {
         forwardSubagentText: true, // nested subagent text/tool activity → UI panels (streaming sessions only, as before)
       },
     });
-    return new ClaudeStream(q, opts.resume ? opts.costBaselineUsd : 0);
+    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0);
   }
 
   startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
@@ -352,7 +355,7 @@ export class ClaudeBackend implements AgentBackend {
         ...(opts.readOnly ? { disallowedTools: readOnlyDenied } : opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
       },
     });
-    return new ClaudeStream(q, opts.resume ? opts.costBaselineUsd : 0);
+    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0);
   }
 
   // Wraps `opts.toolDefs` groups (the neutral port — see agent-backend.ts) with createSdkMcpServer,

@@ -96,7 +96,8 @@ export interface AgentSessionOptions {
   // Claude only (Codex ignores it): the provider-reported running cost total last observed for the session
   // being resumed/forked (a prior turn_end.costTotalUsd). The SDK's result.total_cost_usd continues from the
   // transcript's saved total, so this lets the adapter report only the NEW turn's cost. Undefined while resuming
-  // = unknown baseline (the first resumed turn is then charged 0 and the watermark adopted). Ignored when not resuming.
+  // = unknown baseline, treated as 0 (exact for legacy transcripts that saved no total, and for sessions whose
+  // first turn never produced a result). Ignored when not resuming.
   costBaselineUsd?: number;
   abortController: AbortController;
   // Stable Rookery target identity. Required whenever managed capabilities are supplied.
