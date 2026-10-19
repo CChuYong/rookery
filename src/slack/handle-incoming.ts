@@ -55,6 +55,8 @@ export interface SlackDeps {
   onMessage?: (e: { channel: string; userId?: string; text: string; ts?: string; threadTs?: string; team?: string }) => Promise<void>;
   // Resolve a session's (master's) Slack thread, or null if the session isn't Slack-origin. For the worker→Slack relay.
   resolveThread?: (sessionId: string) => ThreadTarget | null;
+  // Number of fleet workers homed in the session that are still running — for the stop-button confirmation line. Absent → generic line.
+  activeWorkers?: (sessionId: string) => number;
 }
 
 export interface IncomingCtx {
