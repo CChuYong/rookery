@@ -201,10 +201,15 @@ export function mapMcpResponse(value: unknown): CapabilityContribution {
     const authStatus = stringValue(server.authStatus);
     const toolCount = tools ? Object.keys(tools).length : 0;
     const runtimeStatus = stringValue(server.runtimeStatus);
-    // toolsError = tool discovery failed and no catalog was returned. Only its presence is surfaced:
-    // the raw message can embed endpoint details, so it is not copied into the entry.
+    // toolsError = tool discovery failed and no catalog was returned. DETAIL ONLY, never "unavailable": the
+    // probe is a short-lived child in the master's CODEX_HOME, where a slow stdio server can miss the short
+    // startup timeout and the `rookery` bridge url may hold a token that died with the last daemon restart
+    // (re-registered on the next turn) — both would be false negatives. The raw message can embed endpoint
+    // details, so only its presence is surfaced.
     const toolsFailed = stringValue(server.toolsError) !== undefined;
-    const runtimeBad = runtimeStatus !== undefined && MCP_UNAVAILABLE_RUNTIME.has(runtimeStatus);
+    // Rookery's own bridge entry is never judged from the probe (same stale-token reason).
+    const ownBridge = name.toLowerCase() === "rookery";
+    const runtimeBad = !ownBridge && runtimeStatus !== undefined && MCP_UNAVAILABLE_RUNTIME.has(runtimeStatus);
     entries.push({
       id: `codex.mcp.${name.toLowerCase()}`,
       kind: "mcp",
@@ -218,7 +223,7 @@ export function mapMcpResponse(value: unknown): CapabilityContribution {
       provider: "codex",
       source,
       scope: "session",
-      state: authStatus === "notLoggedIn" || runtimeBad || toolsFailed ? "unavailable" : "applied",
+      state: !ownBridge && (authStatus === "notLoggedIn" || runtimeBad) ? "unavailable" : "applied",
       evidence: "runtime",
     });
   }
