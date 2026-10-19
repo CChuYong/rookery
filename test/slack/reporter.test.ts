@@ -440,9 +440,62 @@ describe("SlackThreadReporter.markStreamsStopped", () => {
     expect(rec.streams).toHaveLength(1);
     r.markStreamsStopped();
     expect(rec.streams[0]!.stopped).toBe(false); // NOT stopped by us — Slack already did
+    r.onEvent({ type: "master.status", sessionId: "s", status: "running" } as CoreEvent); // next turn
     r.onEvent(delta("two"));
     await new Promise((res) => setTimeout(res, 0));
     expect(rec.streams).toHaveLength(2);
     expect(rec.streams[1]!.chunks.some((c) => c.type === "markdown_text" && c.text.includes("two"))).toBe(true);
+  });
+});
+
+describe("SlackThreadReporter after the Stop button", () => {
+  const delta = (d: string) => ({ type: "master.message.delta", sessionId: "s", delta: d.padEnd(60, ".") }) as CoreEvent;
+  const tick = () => new Promise((res) => setTimeout(res, 0));
+
+  it("an append in flight on the dead stream does not reopen a stream or re-post", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const client: SlackClient = {
+      chatStream() {
+        const s: Stream = { args: {} as ChatStreamArgs, chunks: [], stopped: false };
+        rec.streams.push(s);
+        return {
+          async append() {
+            await gate;
+            throw Object.assign(new Error("x"), { data: { error: "message_not_in_streaming_state" } });
+          },
+          async stop() { s.stopped = true; },
+        };
+      },
+      chat: { async postMessage(a) { rec.posts.push(a.text); } },
+    };
+    const r = new SlackThreadReporter(client, { channel: "C", threadTs: "1.1", team: "T" });
+    r.onEvent(delta("one"));
+    await tick();
+    r.markStreamsStopped();
+    release();
+    await tick(); await tick();
+    expect(rec.streams).toHaveLength(1);
+    expect(rec.posts).toEqual([]);
+  });
+
+  it("drops backlog events of the aborted turn, then streams the next turn normally", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), { channel: "C", threadTs: "1.1", team: "T" });
+    r.onEvent(delta("one"));
+    await tick();
+    r.markStreamsStopped();
+    r.onEvent(delta("late"));
+    r.onEvent({ type: "master.notice", sessionId: "s", code: "notice.interrupted", text: "interrupted" } as CoreEvent);
+    r.onEvent({ type: "master.status", sessionId: "s", status: "idle" } as CoreEvent);
+    await tick();
+    expect(rec.streams).toHaveLength(1);
+    expect(rec.posts).toEqual([]);
+    r.onEvent({ type: "master.status", sessionId: "s", status: "running" } as CoreEvent);
+    r.onEvent(delta("next"));
+    await tick();
+    expect(rec.streams).toHaveLength(2);
+    expect(rec.streams[1]!.chunks.some((c) => c.type === "markdown_text" && c.text.includes("next"))).toBe(true);
   });
 });
