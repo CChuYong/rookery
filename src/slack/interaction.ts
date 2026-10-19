@@ -15,9 +15,10 @@ type Pending =
   | { kind: "ask"; target: ThreadTarget; questions: Question[]; answers: Record<string, string>; resolve: (r: PermissionResult) => void };
 
 // Lifecycle hook for the Slack agent-session status: "waiting" = a prompt card was posted (→ suspended), "answered" = the
-// user answered or the post failed and the turn carries on (→ processing again). Cancelled/expired prompts report nothing:
-// the turn is being torn down and the stop/finally paths own the final status.
-export type InteractionWaitState = "waiting" | "answered";
+// user answered or the post failed and the turn carries on (→ processing again), "cancelled" = stop/abort resolved the prompt
+// (the consumer settles the status only if no Slack-started turn will — otherwise that turn's finally owns it). Expired
+// (bridge disposed) prompts report nothing.
+export type InteractionWaitState = "waiting" | "answered" | "cancelled";
 
 // Post a single message with blocks to a thread (injected for tests). In practice a wrapper over Slack chat.postMessage.
 export type PostBlocks = (target: ThreadTarget, msg: { text: string; blocks: unknown[] }) => Promise<unknown>;
@@ -72,9 +73,10 @@ export class SlackInteractionBridge {
     void posted.then((r) => {
       const c = this.cards.get(id);
       const ts = (r as { ts?: string } | undefined)?.ts;
-      if (!c || !ts) return;
+      if (!c) return;
+      if (!ts) { this.cards.delete(id); return; } // no ts to update later → drop the bookkeeping
       if (c.cancelled) { this.cards.delete(id); this.cardCancelled(target, ts); } else c.ts = ts;
-    }, () => {});
+    }, () => { this.cards.delete(id); });
   }
 
   private cardCancelled(target: ThreadTarget, ts: string): void {
@@ -102,6 +104,7 @@ export class SlackInteractionBridge {
       this.pending.delete(id);
       p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") });
       this.markCardCancelled(id);
+      this.notifyWait(p.target, "cancelled");
       n++;
     }
     return n;
@@ -202,7 +205,9 @@ export class SlackInteractionBridge {
   private armAbort(id: string, signal: AbortSignal | undefined, resolve: (r: PermissionResult) => void): void {
     if (!signal) return;
     const onAbort = () => {
+      const p = this.pending.get(id);
       if (this.pending.delete(id)) {
+        if (p) this.notifyWait(p.target, "cancelled");
         resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") });
         this.markCardCancelled(id);
       }

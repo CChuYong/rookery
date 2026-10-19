@@ -167,7 +167,9 @@ export class MasterAgent {
   // while it waited) is skipped instead of run. Notification flushes are NOT generation-gated (not user input).
   private stopGeneration = 0;
   // Turns enqueued via runTurn that have not started yet (the in-flight one is already out of this count).
-  private queuedTurns = 0;
+  // Keyed by the stopGeneration captured at enqueue: a stop cancels only the current generation's turns, so back-to-back
+  // stops don't double-count turns an earlier stop already cancelled.
+  private queuedByGen = new Map<number, number>();
   // Accumulate thinking-summary deltas — persisted as a single coalesced master.thinking when the answer/tool starts (deltas are not persisted). Shared with the worker.
   private readonly thinking = new ThinkingCoalescer();
 
@@ -222,7 +224,7 @@ export class MasterAgent {
   // running — no user echo, no model call). Turns enqueued after this call run normally. A pending worker-notification
   // flush is deliberately unaffected: it is not user input, so it still fires after the stop (as a normal coalesced turn).
   async stopAll(): Promise<void> {
-    const cancelled = this.queuedTurns; // read synchronously: turns enqueued during the awaits below are NOT cancelled
+    const cancelled = this.queuedByGen.get(this.stopGeneration) ?? 0; // read synchronously: turns enqueued during the awaits below are NOT cancelled
     this.stopGeneration++;
     await this.stop();
     // Cancelled turns leave no other trace → one persisted notice per stop (not per turn).
@@ -271,9 +273,10 @@ export class MasterAgent {
   // does not contaminate the chain, but its error is propagated to that caller.
   async runTurn(userText: string, override?: TurnOverride): Promise<void> {
     const gen = this.stopGeneration;
-    this.queuedTurns++;
+    this.queuedByGen.set(gen, (this.queuedByGen.get(gen) ?? 0) + 1);
     const result = this.turnChain.then(() => {
-      this.queuedTurns--;
+      const left = (this.queuedByGen.get(gen) ?? 1) - 1;
+      if (left > 0) this.queuedByGen.set(gen, left); else this.queuedByGen.delete(gen);
       return gen !== this.stopGeneration ? undefined : this.doTurn(userText, override);
     });
     this.turnChain = result.catch(() => {});

@@ -234,6 +234,29 @@ describe("MasterAgent", () => {
     expect(cancelled[0]).toMatchObject({ params: { count: 1 } });
   });
 
+  it("back-to-back stops count each cancelled turn once", async () => {
+    const base = deps(fakeQuery([]));
+    const blocking = ((input: { prompt?: string; options?: { abortController?: AbortController } }) => {
+      const signal = input.options?.abortController?.signal;
+      async function* gen(): AsyncGenerator<unknown> {
+        await new Promise<void>((resolve) => { if (signal?.aborted) return resolve(); signal?.addEventListener("abort", () => resolve(), { once: true }); });
+        throw new Error("aborted");
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as typeof base.queryFn;
+    const d = { ...base, queryFn: blocking, backend: new ClaudeBackend(blocking) };
+    const events: CoreEvent[] = [];
+    d.bus.subscribe("s1", (e) => events.push(e));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
+    const p = [master.runTurn("a"), master.runTurn("b"), master.runTurn("c")];
+    await new Promise((r) => setTimeout(r, 0));
+    await Promise.all([master.stopAll(), master.stopAll()]);
+    await Promise.all(p);
+    const n = events.filter((e) => (e as { code?: string }).code === "notice.queuedCancelled");
+    expect(n).toHaveLength(1);
+    expect(n[0]).toMatchObject({ params: { count: 2 } });
+  });
+
   it("stopAll() does not cancel a pending worker-notification flush (it is not user input)", async () => {
     const prompts: string[] = [];
     const { master } = makeMaster({ onPrompt: (p) => prompts.push(p) });

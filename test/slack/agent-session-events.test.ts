@@ -131,5 +131,7 @@ describe("stop event hardening", () => {
     expect(statusForWait("waiting", 0)).toBe("suspended");
     expect(statusForWait("answered", 1)).toBe("processing");
     expect(statusForWait("answered", 0)).toBe("active");
+    expect(statusForWait("cancelled", 0)).toBe("active"); // non-Slack turn aborted while waiting: don't stay suspended
+    expect(statusForWait("cancelled", 1)).toBeNull(); // a Slack turn's finally owns it
   });
 });

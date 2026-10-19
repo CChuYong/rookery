@@ -173,10 +173,10 @@ describe("SlackInteractionBridge status hooks + cancelThread", () => {
     expect(events).toEqual(["waiting", "waiting"]);
     expect(bridge.cancelThread(target)).toBe(1);
     await expect(p1).resolves.toMatchObject({ behavior: "deny", message: "Cancelled" });
-    expect(events).toEqual(["waiting", "waiting"]); // cancel reports nothing (stop path owns the status)
+    expect(events).toEqual(["waiting", "waiting", "cancelled"]); // consumer decides whether to settle the status
     bridge.handleAction(JSON.stringify({ t: "b", d: "allow" }));
     await expect(p2).resolves.toEqual({ behavior: "allow" });
-    expect(events).toEqual(["waiting", "waiting", "answered"]);
+    expect(events).toEqual(["waiting", "waiting", "cancelled", "answered"]);
   });
 
   it("a throwing status hook never breaks the prompt", async () => {
@@ -230,5 +230,17 @@ describe("SlackInteractionBridge cancelled cards", () => {
     await expect(bridge.prompt(target, "Bash", {}, { toolUseID: "a", signal: ac.signal })).resolves.toMatchObject({ behavior: "deny" });
     expect(posts).toEqual([]);
     expect(events).toEqual([]);
+  });
+});
+
+describe("SlackInteractionBridge abort reporting", () => {
+  it("an abort-resolved prompt reports cancelled", async () => {
+    const events: string[] = [];
+    const bridge = new SlackInteractionBridge(async () => ({}), () => "en", (_t, s) => events.push(s));
+    const ac = new AbortController();
+    const p = bridge.prompt(target, "Bash", {}, { toolUseID: "a", signal: ac.signal });
+    ac.abort();
+    await p;
+    expect(events).toEqual(["waiting", "cancelled"]);
   });
 });

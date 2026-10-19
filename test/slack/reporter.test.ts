@@ -499,3 +499,49 @@ describe("SlackThreadReporter after the Stop button", () => {
     expect(rec.streams[1]!.chunks.some((c) => c.type === "markdown_text" && c.text.includes("next"))).toBe(true);
   });
 });
+
+describe("SlackThreadReporter stop edge cases", () => {
+  const tick = () => new Promise((res) => setTimeout(res, 0));
+  it("a thinking-card append failing because of a stop does not permanently disable reasoning cards", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let first = true;
+    const client: SlackClient = {
+      chatStream() {
+        const s: Stream = { args: {} as ChatStreamArgs, chunks: [], stopped: false };
+        rec.streams.push(s);
+        const mine = first; first = false;
+        return {
+          async append(p) {
+            if (mine) { await gate; throw Object.assign(new Error("x"), { data: { error: "message_not_in_streaming_state" } }); }
+            s.chunks.push(...toChunks(p));
+          },
+          async stop() {},
+        };
+      },
+      chat: { async postMessage(a) { rec.posts.push(a.text); } },
+    };
+    const r = new SlackThreadReporter(client, { channel: "C", threadTs: "1.1", team: "T" });
+    r.onEvent({ type: "master.thinking.delta", sessionId: "s", delta: "x".repeat(200) } as CoreEvent);
+    await tick();
+    r.markStreamsStopped();
+    release();
+    await tick();
+    r.onEvent({ type: "master.status", sessionId: "s", status: "running" } as CoreEvent);
+    r.onEvent({ type: "master.thinking.delta", sessionId: "s", delta: "y".repeat(200) } as CoreEvent);
+    await tick();
+    expect(rec.streams).toHaveLength(2);
+    expect(rec.streams[1]!.chunks.length).toBeGreaterThan(0); // reasoning card still works
+  });
+
+  it("drops worker.spawned of the aborted turn", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), { channel: "C", threadTs: "1.1", team: "T" });
+    r.markStreamsStopped();
+    r.onEvent({ type: "worker.spawned", sessionId: "s", workerId: "w1", repoPath: "/r", label: "l", branch: "b", status: "idle", provider: "claude", ticketKey: null, ticketUrl: null } as CoreEvent);
+    await tick();
+    expect(rec.streams).toHaveLength(0);
+    expect(rec.posts).toEqual([]);
+  });
+});

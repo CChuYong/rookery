@@ -204,9 +204,11 @@ export class SlackThreadReporter {
   private async appendThinkCard(status: "in_progress" | "complete", details: string): Promise<void> {
     if (this.thinkingBroken) return;
     if (!this.streamer) this.streamer = this.openStream();
+    const used = this.streamer;
     try {
-      await this.streamer.append({ chunks: [this.taskChunk(THINK_ID, t(this.getLocale(), "slack.thinking"), status, details)] });
+      await used.append({ chunks: [this.taskChunk(THINK_ID, t(this.getLocale(), "slack.thinking"), status, details)] });
     } catch {
+      if (this.streamer !== used) return; // the stream was dropped (Stop button) mid-append: not a card failure
       this.thinkingBroken = true; // card append failed → give up on the reasoning card for this instance (prevents spam)
     }
   }
@@ -247,6 +249,7 @@ export class SlackThreadReporter {
         case "master.thinking.delta":
         case "master.tool":
         case "master.notice":
+        case "worker.spawned": // the aborted turn's spawn card would open a stream nothing closes
           return; // leftovers of the stopped turn (Slack posts its own "Stopped" confirmation)
         default:
       }

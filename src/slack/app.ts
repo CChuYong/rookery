@@ -68,7 +68,8 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
   // else `active` (a notify flush / desktop turn in a Slack session must not leave the thread stuck in processing).
   (target, state) => {
     const sid = deps.sessions.findIdByKey(threadKey(target.team, target.channel, target.threadTs));
-    void agentStatus.set(statusClient, target, statusForWait(state, sid ? inflightTurns(sid) : 0));
+    const st = statusForWait(state, sid ? inflightTurns(sid) : 0);
+    if (st) void agentStatus.set(statusClient, target, st);
   },
   // Cancelled card → single "Cancelled" line without buttons (mirrors the click handler's update).
   async (target, ts, text) => {

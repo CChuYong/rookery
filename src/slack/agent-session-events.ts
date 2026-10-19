@@ -41,8 +41,10 @@ export function makeDeduper(max = 256): (key: string) => boolean {
 
 // Status after an interaction card is answered: `processing` only if a Slack-started turn is actually in flight. A turn
 // that did not come from Slack (notify flush, desktop turn in a Slack session) must not leave the thread stuck in processing.
-export function statusForWait(state: "waiting" | "answered", inflightTurns: number): AgentSessionStatus {
+// "cancelled" (stop/abort): `active` if no Slack-started turn is in flight, else null — that turn's finally owns the status.
+export function statusForWait(state: "waiting" | "answered" | "cancelled", inflightTurns: number): AgentSessionStatus | null {
   if (state === "waiting") return "suspended";
+  if (state === "cancelled") return inflightTurns > 0 ? null : "active";
   return inflightTurns > 0 ? "processing" : "active";
 }
 
