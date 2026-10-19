@@ -163,6 +163,13 @@ export class MasterAgent {
   // Session teardown in progress (SessionManager.delete). Queued turns must not start (their DB writes would
   // race the row cascade → FK violations) and new worker notifications must not chain ghost SDK turns.
   private closing = false;
+  // Bumped by stopAll(). runTurn captures it at enqueue time; a queued turn whose captured value is stale (a stop happened
+  // while it waited) is skipped instead of run. Notification flushes are NOT generation-gated (not user input).
+  private stopGeneration = 0;
+  // Turns enqueued via runTurn that have not started yet (the in-flight one is already out of this count).
+  // Keyed by the stopGeneration captured at enqueue: a stop cancels only the current generation's turns, so back-to-back
+  // stops don't double-count turns an earlier stop already cancelled.
+  private queuedByGen = new Map<number, number>();
   // Accumulate thinking-summary deltas — persisted as a single coalesced master.thinking when the answer/tool starts (deltas are not persisted). Shared with the worker.
   private readonly thinking = new ThinkingCoalescer();
 
@@ -213,6 +220,19 @@ export class MasterAgent {
     }
   }
 
+  // Stop button semantics: abort the in-flight turn AND cancel every turn already queued behind it (they resolve without
+  // running — no user echo, no model call). Turns enqueued after this call run normally. A pending worker-notification
+  // flush is deliberately unaffected: it is not user input, so it still fires after the stop (as a normal coalesced turn).
+  async stopAll(): Promise<void> {
+    const cancelled = this.queuedByGen.get(this.stopGeneration) ?? 0; // read synchronously: turns enqueued during the awaits below are NOT cancelled
+    this.stopGeneration++;
+    await this.stop();
+    // Cancelled turns leave no other trace → one persisted notice per stop (not per turn).
+    if (cancelled > 0 && !this.closing) {
+      this.recordEvent({ type: "master.notice", sessionId: this.opts.sessionId, code: "notice.queuedCancelled", params: { count: cancelled }, text: t(DEFAULT_LOCALE, "notice.queuedCancelled", { count: cancelled }) });
+    }
+  }
+
   // Deletion lifecycle: abort the in-flight turn, cancel everything queued, drain the chain's DB writes.
   // After this resolves it is safe to cascade-delete the session row.
   async close(): Promise<void> {
@@ -252,7 +272,13 @@ export class MasterAgent {
   // Even if two runTurn calls happen concurrently they run one at a time, and a failed turn
   // does not contaminate the chain, but its error is propagated to that caller.
   async runTurn(userText: string, override?: TurnOverride): Promise<void> {
-    const result = this.turnChain.then(() => this.doTurn(userText, override));
+    const gen = this.stopGeneration;
+    this.queuedByGen.set(gen, (this.queuedByGen.get(gen) ?? 0) + 1);
+    const result = this.turnChain.then(() => {
+      const left = (this.queuedByGen.get(gen) ?? 1) - 1;
+      if (left > 0) this.queuedByGen.set(gen, left); else this.queuedByGen.delete(gen);
+      return gen !== this.stopGeneration ? undefined : this.doTurn(userText, override);
+    });
     this.turnChain = result.catch(() => {});
     // User activity is a natural retry point for stranded notification rows: re-inject them through
     // notifyWorker so they flush as one coalesced notice turn AFTER this user turn.

@@ -5,6 +5,7 @@ import type { FileDownloader } from "./file-download.js";
 import type { SlackInteractionBridge } from "./interaction.js";
 import type { SlackReadOps } from "../tools/slack-tools.js";
 import type { SlackRefResolver } from "./name-resolver.js";
+import type { AgentSessionStatus } from "./agent-status.js";
 import { ThreadRegistry } from "./thread-registry.js";
 import { SlackThreadReporter } from "./reporter.js";
 import { t, type Locale } from "../core/i18n.js";
@@ -54,6 +55,8 @@ export interface SlackDeps {
   onMessage?: (e: { channel: string; userId?: string; text: string; ts?: string; threadTs?: string; team?: string }) => Promise<void>;
   // Resolve a session's (master's) Slack thread, or null if the session isn't Slack-origin. For the worker→Slack relay.
   resolveThread?: (sessionId: string) => ThreadTarget | null;
+  // Number of fleet workers homed in the session that are still running — for the stop-button confirmation line. Absent → generic line.
+  activeWorkers?: (sessionId: string) => number;
 }
 
 export interface IncomingCtx {
@@ -64,7 +67,15 @@ export interface IncomingCtx {
   userId?: string;
   text: string;
   files?: SlackFile[]; // attached files (if any, download and append to the turn as @paths)
-  setStatus: (s: string) => Promise<void>;
+  // Agent-session status for this thread (processing → active; suspended while waiting on the user). Best-effort.
+  setStatus: (s: AgentSessionStatus) => Promise<void>;
+  // Re-send interval for `processing` (it expires: 1h on agents.sessions.setStatus, ~2min on the legacy API). Read after the
+  // first setStatus so the status helper has detected which API is live. Absent → the legacy 90s.
+  heartbeatMs?: () => number;
+  // Heartbeat tick: re-send the thread's CURRENT status (so a heartbeat can't overwrite `suspended`). Absent → setStatus("processing").
+  refreshStatus?: () => Promise<void>;
+  // Slack ts of the incoming message — lets handleIncoming drop a message that was sent before a Stop-button press.
+  messageTs?: string;
   // Connection-scoped name resolver (conversations.info/users.info, cached) — powers the [Slack]
   // context header's human-readable names. Absent/failed → raw ids only (best-effort).
   nameResolver?: SlackRefResolver;
@@ -103,13 +114,48 @@ const EMPTY_MSG = (loc: Locale): string => t(loc, "slack.emptyMsg");
 // from text only and they assume it saw the file.
 const PARTIAL_FILE = (loc: Locale, n: number): string => t(loc, "slack.partialFile", { count: n });
 
-// Long-turn heartbeat: Slack assistant status disappears after 2 minutes of inactivity → keep it alive by periodically re-setting it during progress.
+// Sender allowlist gate (fail-closed): ALLOW_ALL, or a user in the allowlist. Shared by messages, the stop button and title sync.
+export function isPermittedUser(sc: Pick<SlackConfig, "allowedUsers" | "allowAll">, userId?: string): boolean {
+  return sc.allowAll || (sc.allowedUsers.length > 0 && sc.allowedUsers.includes(userId ?? ""));
+}
+
+// Long-turn heartbeat: the processing status expires if not refreshed → keep it alive by periodically re-setting it during progress.
 export type HeartbeatScheduler = (fn: () => void, ms: number) => () => void;
-const HEARTBEAT_MS = 90000; // below the 2-minute timeout
+const HEARTBEAT_MS = 90000; // legacy default: below the 2-minute timeout
 function defaultHeartbeat(fn: () => void, ms: number): () => void {
   const t = setInterval(fn, ms);
   t.unref?.(); // so the heartbeat does not keep the daemon/test process alive
   return () => clearInterval(t);
+}
+
+// Stop-button marks: per session, the Slack event_ts of the latest agent_session_stopped. A message whose own ts is not newer
+// than that was sent BEFORE the stop and must not run, even if it is still busy in handleIncoming's awaits (status call,
+// context prefix, attachment downloads) and would otherwise enqueue its turn after the stop. Bounded (oldest evicted).
+const stopMarks = new Map<string, string>();
+const STOP_MARKS_MAX = 512;
+
+// Numeric compare of Slack ts strings ("seconds.micros"); returns <0, 0, >0.
+export function compareSlackTs(a: string, b: string): number {
+  const [as = "0", af = ""] = a.split(".");
+  const [bs = "0", bf = ""] = b.split(".");
+  const x = BigInt(as || "0") * 1_000_000_000n + BigInt(af.padEnd(9, "0").slice(0, 9) || "0");
+  const y = BigInt(bs || "0") * 1_000_000_000n + BigInt(bf.padEnd(9, "0").slice(0, 9) || "0");
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+export function markSessionStopped(sessionId: string, eventTs: string): void {
+  if (!/^\d+(\.\d+)?$/.test(eventTs)) return;
+  const prev = stopMarks.get(sessionId);
+  if (prev && compareSlackTs(prev, eventTs) >= 0) return;
+  stopMarks.delete(sessionId);
+  stopMarks.set(sessionId, eventTs);
+  while (stopMarks.size > STOP_MARKS_MAX) stopMarks.delete(stopMarks.keys().next().value as string);
+}
+
+function sentBeforeStop(sessionId: string, messageTs?: string): boolean {
+  const mark = stopMarks.get(sessionId);
+  if (!mark || !messageTs || !/^\d+(\.\d+)?$/.test(messageTs)) return false;
+  return compareSlackTs(messageTs, mark) <= 0;
 }
 
 export function threadKey(team: string, channel: string, threadTs: string): string {
@@ -138,6 +184,9 @@ export function ensureSlackReporter(registry: ThreadRegistry, client: SlackClien
 
 // In-flight turn count per session — prevents clearing status early when concurrent messages arrive in the same thread (slack-concurrent-turns-status-race).
 const inflight = new Map<string, number>();
+export function inflightTurns(sessionId: string): number {
+  return inflight.get(sessionId) ?? 0;
+}
 
 export async function handleIncoming(
   ctx: IncomingCtx,
@@ -150,9 +199,7 @@ export async function handleIncoming(
   // Empty allowlist + ALLOW_ALL unset means everyone is denied — so a default deployment is not left wide open.
   // (On refusal, no session/turn is created; only a refusal message is left.)
   const sc = deps.slackConfig();
-  const { allowedUsers, allowAll } = sc;
-  const permitted = allowAll || (allowedUsers.length > 0 && allowedUsers.includes(ctx.userId ?? ""));
-  if (!permitted) {
+  if (!isPermittedUser(sc, ctx.userId)) {
     // Reply only when refusal auto-reply is on and a message is set (silently ignore when off).
     if (sc.refuseReply && sc.refusalMessage.trim()) await safePost(ctx.client, ctx.channel, ctx.threadTs, sc.refusalMessage);
     return;
@@ -191,17 +238,19 @@ export async function handleIncoming(
   );
 
   // Wrap setStatus as best-effort — a failure must not break the turn (slack-setstatus-failure).
-  const setStatus = async (s: string) => {
+  const setStatus = async (s: AgentSessionStatus) => {
     try { await ctx.setStatus(s); } catch { /* best-effort */ }
   };
 
   inflight.set(session.id, (inflight.get(session.id) ?? 0) + 1);
-  await setStatus("thinking…");
-  // Periodically refresh status during a long turn so it doesn't disappear on the 2-minute timeout (UX-14).
-  const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void setStatus("thinking…"); }, HEARTBEAT_MS);
+  await setStatus("processing");
+  // Periodically refresh status during a long turn so it doesn't expire (UX-14).
+  const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void (ctx.refreshStatus ? ctx.refreshStatus().catch(() => {}) : setStatus("processing")); }, ctx.heartbeatMs?.() ?? HEARTBEAT_MS);
   try {
     // The empty-turn guard above ran on the raw composition — the header alone never makes a turn.
-    await session.master.runTurn(`${await buildSlackContextPrefix(ctx)}\n\n${turnText}`);
+    const prefix = await buildSlackContextPrefix(ctx);
+    if (sentBeforeStop(session.id, ctx.messageTs)) return; // sent before the Stop button was pressed → cancelled (finally still runs)
+    await session.master.runTurn(`${prefix}\n\n${turnText}`);
   } catch {
     // A turn failure is already surfaced to the thread by the reporter via the EventBus 'error' event → posting again here would be a duplicate (MS-2).
   } finally {
@@ -209,7 +258,7 @@ export async function handleIncoming(
     const n = (inflight.get(session.id) ?? 1) - 1;
     if (n <= 0) {
       inflight.delete(session.id);
-      await setStatus(""); // clear status only when the last in-flight turn finishes
+      await setStatus("active"); // clear status only when the last in-flight turn finishes
     } else {
       inflight.set(session.id, n);
     }

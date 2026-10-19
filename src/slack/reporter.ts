@@ -64,6 +64,9 @@ export class SlackThreadReporter {
   private thinkingBuf = ""; // accumulated reasoning summary for this turn (card details)
   private thinkingSent = 0; // length of thinkingBuf already sent to the card (only the rest is sent as a delta — prevents append accumulation)
   private thinkingActive = false; // whether the reasoning card is in_progress
+  // Set by markStreamsStopped (Slack Stop button): events of the aborted turn that are still queued behind the network-bound
+  // tail must not open/fill a fresh stream that nothing would ever close. Cleared when the next turn starts (master.status running).
+  private discardUntilNextTurn = false;
   private thinkingBroken = false; // turned off if the reasoning card append has ever failed (silently give up instead of spamming)
 
   constructor(
@@ -117,9 +120,13 @@ export class SlackThreadReporter {
 
   private async append(payload: AppendPayload, depth = 0, opts?: { unfurl?: boolean }): Promise<void> {
     if (!this.streamer) this.streamer = this.openStream();
+    const used = this.streamer;
     try {
-      await this.streamer.append(payload);
+      await used.append(payload);
     } catch (err) {
+      // The stream was swapped/dropped while this append was in flight (Stop button): the failure is the dead stream's, and
+      // the payload belongs to the aborted turn → drop it instead of reopening a stream and re-posting.
+      if (this.streamer !== used) return;
       const code = slackErrorCode(err) ?? "";
       // Diagnostic: stream append failures were previously silent → the reason for a plain-post fallback was invisible.
       process.stderr.write(`[rookery] slack stream append fell back to post (code=${code || String(err)})\n`);
@@ -197,9 +204,11 @@ export class SlackThreadReporter {
   private async appendThinkCard(status: "in_progress" | "complete", details: string): Promise<void> {
     if (this.thinkingBroken) return;
     if (!this.streamer) this.streamer = this.openStream();
+    const used = this.streamer;
     try {
-      await this.streamer.append({ chunks: [this.taskChunk(THINK_ID, t(this.getLocale(), "slack.thinking"), status, details)] });
+      await used.append({ chunks: [this.taskChunk(THINK_ID, t(this.getLocale(), "slack.thinking"), status, details)] });
     } catch {
+      if (this.streamer !== used) return; // the stream was dropped (Stop button) mid-append: not a card failure
       this.thinkingBroken = true; // card append failed → give up on the reasoning card for this instance (prevents spam)
     }
   }
@@ -213,6 +222,16 @@ export class SlackThreadReporter {
     await this.appendThinkCard("complete", rest);
   }
 
+  // Slack stopped our in-progress streaming message(s) itself (agent_session_stopped → streaming_message_ts): forget the
+  // streamer WITHOUT calling stop() on it — it is already dead — so the next append opens a fresh stream instead of
+  // failing with message_not_in_streaming_state. Undelivered buffers/cards belonged to the dead stream and are dropped.
+  markStreamsStopped(): void {
+    this.discardUntilNextTurn = true;
+    this.streamer = null;
+    this.toolTasks.clear();
+    this.resetTurn();
+  }
+
   // Reset turn-boundary state (so the next turn starts clean). thinkingBroken is preserved (once broken, stays off).
   private resetTurn(): void {
     this.proseBuf = "";
@@ -223,7 +242,22 @@ export class SlackThreadReporter {
   }
 
   private async handle(e: CoreEvent): Promise<void> {
+    if (this.discardUntilNextTurn) {
+      switch (e.type) {
+        case "master.message.delta":
+        case "master.message":
+        case "master.thinking.delta":
+        case "master.tool":
+        case "master.notice":
+        case "worker.spawned": // the aborted turn's spawn card would open a stream nothing closes
+          return; // leftovers of the stopped turn (Slack posts its own "Stopped" confirmation)
+        default:
+      }
+    }
     switch (e.type) {
+      case "master.status":
+        if (e.status === "running") this.discardUntilNextTurn = false;
+        return;
       case "master.message.delta":
         await this.closeThinking();
         this.proseBuf += e.delta;

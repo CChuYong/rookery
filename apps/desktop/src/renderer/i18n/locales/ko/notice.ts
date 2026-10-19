@@ -9,6 +9,7 @@ export default {
   "notice.compactFailed": "⚠ 컨텍스트 압축 실패{detail}",
   "notice.requiresAction": "⏸ 입력/승인 필요",
   "notice.interrupted": "⏹ 중단됨",
+  "notice.queuedCancelled": "⏹ 대기 중이던 요청 {count}개를 취소했어요",
   "notice.turnCap": "턴 한도 도달 (maxTurns={max}, num_turns={turns}) — 세션 중단을 고려하세요.",
   "notice.costBudget": "비용 예산 도달 ({spent}/{budget} USD) — 세션 중단을 고려하세요.",
   "notice.workerDone": "✅ 워커 {label} 완료{provider}",

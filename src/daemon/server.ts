@@ -651,7 +651,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       clearReporterFor: (fn) => reporterHolder.clearIf(fn),
       setNameResolver: (r) => { if (r) nameResolverHolder.set(r); },
       clearNameResolver: (r) => nameResolverHolder.clearIf(r),
-      resolveThread: (id) => parseSlackThreadKey(repos.getSession(id)?.external_key ?? null), onMessage: slackTrigger }),
+      resolveThread: (id) => parseSlackThreadKey(repos.getSession(id)?.external_key ?? null), onMessage: slackTrigger,
+      activeWorkers: (id) => repos.listWorkers(id).filter((w) => w.status === "running" || w.status === "background").length }),
     emit: (status) => bus.emit({ type: "slack.status", sessionId: ALL_CHANNEL, status }),
   });
   void slack.boot();
