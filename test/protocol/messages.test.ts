@@ -261,6 +261,10 @@ describe("automation protocol messages", () => {
     expect(() => parseClientMessage(auto("ultra"))).toThrow();
     expect(() => parseClientMessage(auto("max"))).not.toThrow();
     expect(() => parseClientMessage(auto("bogus", "codex"))).toThrow();
+    // update patches may omit provider (stored one applies) → schema accepts ultra, the handler re-validates
+    const patch = (effort: string) => JSON.stringify({ type: "automation.update", reqId: "q", id: "a", patch: { name: "n", trigger: { kind: "interval", everyMinutes: 5 }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "fresh" }, effort } });
+    expect(() => parseClientMessage(patch("ultra"))).not.toThrow();
+    expect(() => parseClientMessage(patch("bogus"))).toThrow();
     expect(() => parseClientMessage(JSON.stringify({ type: "settings.set", reqId: "q", settings: { workerEffort: "ultra" } }))).toThrow();
     expect(() => parseClientMessage(JSON.stringify({ type: "side.start", reqId: "q", sourceKind: "worker", sourceId: "w", text: "hi", effort: "ultra" }))).not.toThrow();
   });

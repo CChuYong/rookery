@@ -233,7 +233,7 @@ const capabilityQuickBindingInputSchema = z.object({
   }
 });
 
-const automationInputSchema = z.object({
+const automationBaseSchema = z.object({
   name: z.string(),
   enabled: z.boolean().optional(),
   trigger: triggerSchema,
@@ -247,14 +247,30 @@ const automationInputSchema = z.object({
   // Which AgentBackend runs sessions/workers created by this automation. Optional; defaults to "claude" on write
   // (see Repositories.createAutomation). Not nullable — an automation always has a definite backend.
   provider: z.enum(["claude", "codex"]).optional(),
-}).superRefine((v, ctx) => {
+});
+
+// Effort validity for an automation given its (effective) provider. `ultra` is Codex-only.
+export function isValidAutomationEffort(effort: string, provider: string | undefined): boolean {
+  return EFFORT_LEVELS.includes(effort) || (provider === "codex" && effort === CODEX_ONLY_EFFORT);
+}
+
+function refineAutomationCron(v: z.infer<typeof automationBaseSchema>, ctx: z.RefinementCtx): void {
   if (v.trigger.kind === "cron" && !isValidCron(v.trigger.cron, v.trigger.timezone)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid cron expression", path: ["trigger", "cron"] });
   }
-  if (v.effort != null) {
-    const ok = EFFORT_LEVELS.includes(v.effort) || (v.provider === "codex" && v.effort === CODEX_ONLY_EFFORT);
-    if (!ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
-  }
+}
+
+// create: the whole row is in the message, so effort is validated against its own provider here.
+const automationInputSchema = automationBaseSchema.superRefine((v, ctx) => {
+  refineAutomationCron(v, ctx);
+  if (v.effort != null && !isValidAutomationEffort(v.effort, v.provider)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
+});
+
+// update: a patch may omit `provider` (keep the stored one), so the schema only accepts the union of valid
+// efforts; the connection handler re-validates against the MERGED row (stored provider fallback).
+const automationPatchSchema = automationBaseSchema.superRefine((v, ctx) => {
+  refineAutomationCron(v, ctx);
+  if (v.effort != null && !isValidAutomationEffort(v.effort, "codex")) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
 });
 
 const clientMessageBaseSchema = z.discriminatedUnion("type", [
@@ -427,7 +443,7 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("mcp.regenerate_token"), reqId: z.string() }),
   z.object({ type: z.literal("automation.list"), reqId: z.string() }),
   z.object({ type: z.literal("automation.create"), reqId: z.string(), automation: automationInputSchema }),
-  z.object({ type: z.literal("automation.update"), reqId: z.string(), id: z.string(), patch: automationInputSchema }),
+  z.object({ type: z.literal("automation.update"), reqId: z.string(), id: z.string(), patch: automationPatchSchema }),
   z.object({ type: z.literal("automation.delete"), reqId: z.string(), id: z.string() }),
   z.object({
     type: z.literal("automation.run"), reqId: z.string(), id: z.string(),
