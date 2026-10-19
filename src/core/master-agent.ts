@@ -14,6 +14,7 @@ import { buildHandoffSeed } from "./handoff.js";
 import { formatNotificationLine, parseNotification, type WorkerNotification } from "./worker-notifier.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 import type { CapabilityRuntimeReporter, CapabilityRuntimeTarget } from "./capabilities/runtime-state.js";
+import { providerCostTotalOf } from "./provider-cost.js";
 
 // Structural signature of the SDK's CanUseTool — defined locally (not imported) to keep this module
 // SDK-import-free (neutrality gate; see test/core/provider-neutral.test.ts). The third arg mirrors
@@ -153,6 +154,9 @@ export class MasterAgent {
   // Session cumulative cost/turns (in-memory). Each turn's result gives only that turn's values, so accumulate for the UI session total.
   private cumCostUsd = 0;
   private cumTurns = 0;
+  // Provider-reported running cost total last observed (see Worker.providerCostTotalUsd). Persisted in
+  // master.result, restored below, and passed as costBaselineUsd on every resumed turn.
+  private providerCostTotalUsd: number | undefined;
   // Abort handle for the in-progress turn (null if none). Same abort + interrupt pattern as the worker.
   private currentAbort: AbortController | null = null;
   private currentQuery: { interrupt(): Promise<InterruptReceipt | undefined>; pauseIdleWatchdog?(): void; resumeIdleWatchdog?(): void } | null = null;
@@ -172,6 +176,7 @@ export class MasterAgent {
         const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
+        this.providerCostTotalUsd = providerCostTotalOf(last);
       }
     } catch { /* corrupt row — start from 0 */ }
   }
@@ -345,6 +350,8 @@ export class MasterAgent {
         this.opts.deps.capabilityRuntime?.setDesired(runtimeTarget, managed.revision, managed.blocked);
         if (managed.blocked) throw new Error("managed capabilities are blocked");
       }
+      // A fresh session (incl. a cross-provider fork target) has no provider cost history: drop any inherited watermark.
+      if (!this.sdkSessionId) this.providerCostTotalUsd = 0;
       const stream = this.opts.deps.backend.startTurn(promptText, {
         cwd: this.opts.cwd,
         model,
@@ -358,6 +365,7 @@ export class MasterAgent {
         // base system prompt + per-source fragment ("+"). The fragment is fixed within a session so it doesn't disturb the cache prefix.
         systemPromptAppend: this.buildSystemPrompt() + (caps.systemPromptAppend ? `\n\n${caps.systemPromptAppend}` : ""),
         resume: this.sdkSessionId,
+        ...(this.sdkSessionId && this.providerCostTotalUsd !== undefined ? { costBaselineUsd: this.providerCostTotalUsd } : {}),
         // Base in-process tool servers as RAW defs, travelling the provider-neutral port (P2 tool-port
         // refactor): the Claude adapter wraps each group with createSdkMcpServer; the Codex adapter
         // registers the same objects on the daemon MCP bridge. sessionKey keys that bridge registration.
@@ -452,7 +460,11 @@ export class MasterAgent {
           bus.emit({ type: "master.tool", sessionId, toolId: ev.toolUseId, name: "", phase: "progress", elapsedSec: ev.elapsedSec });
         } else if (ev.kind === "turn_end") {
           // Carry cumulative cost/turns for the session (context tokens/window are the current turn's values).
+          // ev.costUsd is THIS turn's incremental cost (the Claude SDK reports a running total per result —
+          // probed on 0.3.303: resumed turns $0.03168 → $0.03421 → $0.03619 — which the adapter differences
+          // against costBaselineUsd). The raw total is kept as the next baseline and persisted with the result.
           this.cumCostUsd += ev.costUsd;
+          if (ev.costTotalUsd !== undefined) this.providerCostTotalUsd = ev.costTotalUsd;
           this.cumTurns += ev.numTurns;
           this.recordEvent({
             type: "master.result",
@@ -460,6 +472,8 @@ export class MasterAgent {
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
             numTurns: this.cumTurns,
+            // Only persisted for turns that reported a provider total (Claude): a Codex turn must not re-persist an inherited value.
+            ...(ev.costTotalUsd !== undefined && this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
             durationMs: ev.durationMs,
             contextTokens: ev.contextTokens,
             contextWindow: ev.contextWindow,

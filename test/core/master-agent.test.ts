@@ -22,6 +22,17 @@ function deps(queryFn: ReturnType<typeof fakeQuery>) {
   return { repos, bus, fleet, queryFn, backend: new ClaudeBackend(queryFn), model: () => "m", effort: () => "high", name: () => "rookery" };
 }
 
+// A query fn whose Nth call returns a result carrying the given RUNNING total_cost_usd (Claude SDK semantics).
+// Also records each call's options so tests can assert the cost baseline handed to the adapter.
+function runningTotalQuery(totals: number[], seen?: Array<Record<string, unknown>>): ReturnType<typeof fakeQuery> {
+  let i = 0;
+  return ((input: { options?: Record<string, unknown> }) => {
+    seen?.push(input.options ?? {});
+    const total = totals[Math.min(i++, totals.length - 1)]!;
+    return fakeQuery([{ type: "result", subtype: "success", total_cost_usd: total, num_turns: 2, session_id: "s" }])(input as Parameters<ReturnType<typeof fakeQuery>>[0]);
+  }) as ReturnType<typeof fakeQuery>;
+}
+
 // Option-capturing wrapper: intercepts the options passed to queryFn.
 function capture(d: ReturnType<typeof deps>): { d: ReturnType<typeof deps>; opts: () => { model?: string; effort?: string } } {
   let captured: { model?: string; effort?: string } = {};
@@ -551,7 +562,8 @@ describe("MasterAgent", () => {
   });
 
   it("accumulates cost and turns across turns (session-cumulative metrics)", async () => {
-    const d = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0.5, num_turns: 2, session_id: "s" }]));
+    // SDK total_cost_usd is a RUNNING total across resumed turns (probed on 0.3.303): 0.5 then 1.0 = a 0.5 turn each.
+    const d = deps(runningTotalQuery([0.5, 1.0]));
     const results: Array<Extract<CoreEvent, { type: "master.result" }>> = [];
     d.bus.subscribe("s1", (e) => { if (e.type === "master.result") results.push(e); });
     const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
@@ -559,6 +571,49 @@ describe("MasterAgent", () => {
     await master.runTurn("two");
     expect(results[0]).toMatchObject({ costUsd: 0.5, numTurns: 2 });
     expect(results[1]).toMatchObject({ costUsd: 1, numTurns: 4 }); // session-cumulative
+  });
+
+  it("differences resumed totals against the persisted watermark (costBaselineUsd stays adapter-only, never in SDK options) and persists it with master.result", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const d = deps(runningTotalQuery([0.5, 1.0, 1.2], seen));
+    const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
+    await master.runTurn("one");
+    await master.runTurn("two");
+    await master.runTurn("three");
+    expect(seen.map((o) => o.resume ?? null)).toEqual([null, "s", "s"]);
+    expect(seen.map((o) => o.costBaselineUsd)).toEqual([undefined, undefined, undefined]); // SDK options never carry it
+    const payload = JSON.parse(d.repos.lastSessionEventPayload("s1", "master.result")!) as { costUsd: number; providerCostTotalUsd: number };
+    expect(payload.costUsd).toBeCloseTo(1.2, 8); // 0.5 + 0.5 + 0.2, not 0.5 + 1.0 + 1.2
+    expect(payload.providerCostTotalUsd).toBe(1.2);
+  });
+
+  it("a rebuilt master (restart/fork copy) restores the watermark so the next resumed turn is not re-billed", async () => {
+    const base = deps(runningTotalQuery([0.5, 0.7]));
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: base }).runTurn("a");
+    // Fork: the new session's transcript is a copy of the source's events.
+    base.repos.createSession({ id: "s2", cwd: "/x" });
+    base.repos.copySessionEvents("s1", "s2");
+    const results: Array<{ costUsd: number }> = [];
+    base.bus.subscribe("s2", (e) => { if (e.type === "master.result") results.push(e); });
+    await new MasterAgent({ sessionId: "s2", cwd: "/x", sdkSessionId: "forked", deps: base }).runTurn("b");
+    expect(results[0]!.costUsd).toBeCloseTo(0.7, 8); // 0.5 (copied) + 0.2 fork turn
+  });
+
+  it("an aborted first turn (session id known, no result persisted) is billed on the next resumed turn", async () => {
+    const d = deps(runningTotalQuery([0.3]));
+    const results: Array<{ costUsd: number }> = [];
+    d.bus.subscribe("s1", (e) => { if (e.type === "master.result") results.push(e); });
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: "s", deps: d }).runTurn("again");
+    expect(results[0]!.costUsd).toBeCloseTo(0.3, 8);
+  });
+
+  it("a fresh (no-resume) master drops an inherited watermark from copied events (cross-provider fork target)", async () => {
+    const d = deps(runningTotalQuery([0.2]));
+    d.repos.addSessionEvent({ sessionId: "s1", seq: 0, type: "master.result", payloadJson: JSON.stringify({ type: "master.result", costUsd: 5, numTurns: 1, providerCostTotalUsd: 5 }) });
+    await new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d }).runTurn("hi");
+    const p = JSON.parse(d.repos.lastSessionEventPayload("s1", "master.result")!) as { costUsd: number; providerCostTotalUsd: number };
+    expect(p.costUsd).toBeCloseTo(5.2, 8);
+    expect(p.providerCostTotalUsd).toBe(0.2);
   });
 
   it("emits agent.tool start/end with prettified name and matched id", async () => {
@@ -924,7 +979,7 @@ describe("MasterAgent", () => {
   });
 
   it("cumulative cost/turns survive a rebuild — master.result totals stay monotonic (audit #22)", async () => {
-    const base = deps(fakeQuery([{ type: "result", subtype: "success", total_cost_usd: 0.5, num_turns: 2, session_id: "s" }]));
+    const base = deps(runningTotalQuery([0.5, 1.0]));
     const m1 = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: base });
     await m1.runTurn("a");
     const m2 = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: "s", deps: base }); // "restart" rebuild

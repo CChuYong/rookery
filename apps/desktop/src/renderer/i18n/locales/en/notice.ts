@@ -5,6 +5,7 @@ export default {
   "notice.modelFallback": "↪ Model fallback: {from} → {to} ({reason})",
   "notice.memoryRecall": "🧠 Recalled {count} memories",
   "notice.notification": "🔔 {text}",
+  "notice.informational": "{text}",
   "notice.compactFailed": "⚠ Context compaction failed{detail}",
   "notice.requiresAction": "⏸ Input/approval needed",
   "notice.interrupted": "⏹ Stopped",

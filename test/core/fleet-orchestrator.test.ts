@@ -6,6 +6,9 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { FakeGitOps } from "../../src/core/git-ops.js";
 import { FleetOrchestrator, branchSlug } from "../../src/core/fleet-orchestrator.js";
 import type { WorkerLike } from "../../src/core/fleet-orchestrator.js";
+import { Worker } from "../../src/core/worker.js";
+import { fakeStreamingBackend } from "../helpers/fake-query.js";
+import type { AgentBackend, AgentSessionOptions } from "../../src/core/agent-backend.js";
 import { WorkerNotifier, type WorkerNotification } from "../../src/core/worker-notifier.js";
 
 // Fake Worker that settles immediately. settleStatus mimics done/error.
@@ -91,6 +94,29 @@ describe("FleetOrchestrator", () => {
     expect(fleet.status("fk0")).toBe("idle"); // lazy-resumable, ready
     expect(repos.listWorkerEvents("fk0")).toHaveLength(1); // transcript copied
     expect(repos.getWorker("src")!.sdk_session_id).toBe("src-sdk"); // source untouched
+  });
+
+  it("fork() end-to-end: the forked worker resumes with the source's provider cost watermark and bills only its own turn", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "home", cwd: "/x" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "w", worktreePath: "/wt/src", branch: "rookery/src" });
+    repos.setWorkerSdkSessionId("src", "src-sdk");
+    repos.addWorkerEvent({ workerId: "src", seq: 0, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 0.5, numTurns: 1, providerCostTotalUsd: 0.5 }) });
+    const bus = new EventBus();
+    const opened: AgentSessionOptions[] = [];
+    const inner = fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.58, num_turns: 1, session_id: "forked-uuid" }]);
+    const backend: AgentBackend = { openSession: (i, o) => { opened.push(o); return inner.openSession(i, o); }, startTurn: inner.startTurn.bind(inner) };
+    const factory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null }): WorkerLike =>
+      new Worker({ ...o, deps: { repos, bus, backend, model: "m" } }) as unknown as WorkerLike;
+    const fleet = new FleetOrchestrator({ repos, bus, git: new FakeGitOps({ checkpointSha: "snap0" }), factory, worktreesDir: "/wt", forkSession: async () => ({ sessionId: "forked-uuid" }), exists: () => true, idgen: () => "fk0" });
+    const { id } = await fleet.fork("src");
+    fleet.send(id, "continue");
+    for (let i = 0; i < 100 && !repos.listWorkerEvents(id).some((e) => e.type === "result" && e.seq > 0); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(opened[0]!.resume).toBe("forked-uuid");
+    expect(opened[0]!.costBaselineUsd).toBe(0.5);
+    const last = JSON.parse(repos.listWorkerEvents(id).filter((e) => e.type === "result").at(-1)!.payload_json) as { costUsd: number };
+    expect(last.costUsd).toBeCloseTo(0.58, 8); // 0.5 copied + 0.08 fork turn
+    await fleet.close?.();
   });
 
   it("cross-provider fork() snapshots the worktree, swaps provider, sets the handoff marker, no native fork", async () => {

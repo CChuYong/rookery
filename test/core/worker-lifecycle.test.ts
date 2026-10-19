@@ -47,9 +47,11 @@ describe("Worker lifecycle with a streaming query (real SDK fidelity)", () => {
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/wt", label: "x", worktreePath: "/wt", branch: "rookery/a1" });
     const bus = new EventBus();
+    // The SDK total is a running total that continues across the reload's resume: 0.1 then 0.2 (0.1 per turn).
+    let sdkTurns = 0;
     const delegate = fakeStreamingBackend((text, turn) => [
       { type: "assistant", text: `cycle reply ${turn}: ${text}` },
-      { type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "native-session-1" },
+      { type: "result", subtype: "success", total_cost_usd: 0.1 * ++sdkTurns, num_turns: 1, session_id: "native-session-1" },
     ]);
     const opened: Array<{ input: AsyncIterable<string>; options: AgentSessionOptions }> = [];
     const backend: AgentBackend = {

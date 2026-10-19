@@ -1424,6 +1424,28 @@ describe("Connection automation routes", () => {
     expect(broadcasts).toHaveLength(1);
   });
 
+  it("automation.update validates effort against the MERGED row (stored provider when the patch omits it)", async () => {
+    const mk = (provider: "claude" | "codex"): Automation => ({
+      id: "a1", name: "n", provider,
+      trigger: { kind: "interval", everyMinutes: 5 },
+      action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "fresh" },
+      model: null, effort: null, enabled: true,
+      lastRunAt: null, lastStatus: null, lastError: null, nextRunAt: null, createdAt: "t",
+    } as Automation);
+    const patch = { name: "n", trigger: { kind: "interval", everyMinutes: 5 }, action: { kind: "master", prompt: "p", cwd: "/w", sessionMode: "fresh" }, effort: "ultra" };
+    for (const [stored, ok] of [["codex", true], ["claude", false]] as const) {
+      const sent: any[] = [];
+      const updates: unknown[] = [];
+      const row = mk(stored);
+      const { conn } = makeConnWithAutomations(sent, {
+        list: () => [row], create: () => row, update: (_id, p) => { updates.push(p); return row; }, delete: () => {}, setEnabled: () => undefined, runNow: async () => {},
+      });
+      await conn.handleRaw(JSON.stringify({ type: "automation.update", reqId: "u", id: "a1", patch }));
+      if (ok) { expect(updates).toHaveLength(1); expect(sent.at(-1)).toMatchObject({ type: "automation.result" }); }
+      else { expect(updates).toHaveLength(0); expect(sent.at(-1)).toMatchObject({ type: "error", message: "invalid effort" }); }
+    }
+  });
+
   it("automation.list replies automation.list.result with automations array", async () => {
     const sent: any[] = [];
     const automation: Automation = {

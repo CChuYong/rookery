@@ -515,7 +515,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                         )}
                       </Select>
                     ) : (
-                      <Input value={f.codexWorkerModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
+                      <Input value={f.codexWorkerModel ?? ""} placeholder="gpt-6.1-sol" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
                     )}
                   </Field>
                   <Field label={t("settings.codexMasterModel")} hint={t("settings.codexMasterModelHint")}>
@@ -530,7 +530,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                         )}
                       </Select>
                     ) : (
-                      <Input value={f.codexMasterModel ?? ""} placeholder="gpt-5.5" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
+                      <Input value={f.codexMasterModel ?? ""} placeholder="gpt-6.1-sol" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
                     )}
                   </Field>
                   <Field label={t("settings.codexTurnIdleTimeoutMs")} hint={t("settings.codexTurnIdleTimeoutMsHint")}>

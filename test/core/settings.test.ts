@@ -15,8 +15,8 @@ describe("Settings", () => {
       workerModel: config.workerModel,
       masterEffort: config.masterEffort,
       workerEffort: config.workerEffort,
-      codexWorkerModel: "gpt-5.5",
-      codexMasterModel: "gpt-5.5",
+      codexWorkerModel: "gpt-6.1-sol",
+      codexMasterModel: "gpt-6.1-sol",
       codexBin: "codex",
       codexTurnIdleTimeoutMs: "0",
       codexHandshakeTimeoutMs: "30000",
@@ -52,24 +52,24 @@ describe("Settings", () => {
 
   it("codexWorkerModel/codexBin: settings-only defaults, overridable, clear to default", () => {
     const s = new Settings(new Repositories(openDb(":memory:")), config);
-    expect(s.codexWorkerModel()).toBe("gpt-5.5");
+    expect(s.codexWorkerModel()).toBe("gpt-6.1-sol");
     expect(s.codexBin()).toBe("codex");
     s.apply({ codexWorkerModel: "gpt-5.5-mini", codexBin: "/usr/local/bin/codex" });
     expect(s.codexWorkerModel()).toBe("gpt-5.5-mini");
     expect(s.codexBin()).toBe("/usr/local/bin/codex");
     s.apply({ codexWorkerModel: null, codexBin: null });
-    expect(s.codexWorkerModel()).toBe("gpt-5.5");
+    expect(s.codexWorkerModel()).toBe("gpt-6.1-sol");
     expect(s.codexBin()).toBe("codex");
   });
 
   it("codexMasterModel: settings-only default, overridable, clears to default", () => {
     const s = new Settings(new Repositories(openDb(":memory:")), config);
-    expect(s.codexMasterModel()).toBe("gpt-5.5");
+    expect(s.codexMasterModel()).toBe("gpt-6.1-sol");
     s.apply({ codexMasterModel: "gpt-5.5-mini" });
     expect(s.codexMasterModel()).toBe("gpt-5.5-mini");
     expect(s.all().codexMasterModel).toBe("gpt-5.5-mini");
     s.apply({ codexMasterModel: null });
-    expect(s.codexMasterModel()).toBe("gpt-5.5");
+    expect(s.codexMasterModel()).toBe("gpt-6.1-sol");
   });
 
   it("codexTurnIdleTimeoutMs: settings-only default (parsed number), overridable, 0 is a valid override (not coerced), clears to default", () => {

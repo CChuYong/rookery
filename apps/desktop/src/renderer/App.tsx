@@ -770,9 +770,9 @@ export function App(): JSX.Element {
     st.pushPending(sid, { clientMsgId, text }); // pending bubble: immediately "in progress" (stop button) → switches to committed when the daemon's user echo arrives
     const ov = st.overrides[sid] ?? {}; // per-session override (backend uses defaults if absent)
     // Send the SAME effort the composer displays, re-derived fresh from the current settings + catalog so a
-    // codex session never sends a level its model lacks. The daemon's mapEffort coerces per-PROVIDER, not
-    // per-model ('max'→'xhigh' always), so raw ov.effort=undefined would run the masterEffort default coerced
-    // to a level the model may not support (e.g. gpt-5.4 has no xhigh) — diverging from the shown effort.
+    // codex session never sends a level its model lacks. The daemon's per-model catalog guard only works once its
+    // model/list cache is warm, so raw ov.effort=undefined could still run the masterEffort default at a level the
+    // model may not support (e.g. gpt-5.4 has no xhigh) — diverging from the shown effort.
     // Re-resolving here (not pinning) keeps live settings changes reflected. Claude passes its choice through.
     const provider = st.sessions.find((x) => x.id === sid)?.provider;
     const sendEffort = st.settings
@@ -1379,7 +1379,7 @@ export function App(): JSX.Element {
             }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-5.5"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -1513,7 +1513,7 @@ export function App(): JSX.Element {
           )
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-5.5"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : dockable && masterRender ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <SessionHeader
@@ -1600,7 +1600,7 @@ export function App(): JSX.Element {
           repo={spawnRepo}
           defaultModel={s.settings?.workerModel ?? "claude-opus-4-8"}
           defaultEffort={s.settings?.workerEffort ?? "high"}
-          codexDefaultModel={s.settings?.codexWorkerModel || "gpt-5.5"}
+          codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}
           branches={spawnBranches}
           integrations={s.integrations ?? undefined}
           searchSource={searchSource}

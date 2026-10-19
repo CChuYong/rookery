@@ -17,4 +17,5 @@ export default {
   "common.effortHigh": "높음",
   "common.effortXhigh": "매우 높음",
   "common.effortMax": "최대",
+  "common.effortUltra": "울트라",
 } satisfies Catalog;

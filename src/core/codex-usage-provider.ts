@@ -7,8 +7,8 @@ export interface CodexRateWindow { usedPercent: number; resetsAt: number | null 
 // Codex account usage for the Usage panel's Codex tab. No USD anywhere — codex plan billing has
 // no per-token cost notion (design spec non-goal).
 export interface CodexUsage {
-  fiveHour: CodexRateWindow | null; // rateLimits.primary (observed windowDurationMins 300)
-  sevenDay: CodexRateWindow | null; // rateLimits.secondary (observed 10080)
+  fiveHour: CodexRateWindow | null; // the ~5h window (windowDurationMins 300)
+  sevenDay: CodexRateWindow | null; // the weekly window (windowDurationMins 10080)
   planType: string | null;
   todayTokens: number | null; // dailyUsageBuckets entry with startDate === today (local)
   weeklyTokens: number | null; // sum of buckets in the last 7 days (today inclusive)
@@ -27,13 +27,34 @@ function mapWindow(w: unknown): CodexRateWindow | null {
   return { usedPercent: o.usedPercent, resetsAt: typeof o.resetsAt === "number" ? o.resetsAt : null };
 }
 
+// Which gauge a window belongs to is decided by its windowDurationMins, NOT by primary/secondary
+// position: some plans now return the weekly window as `primary` with `secondary: null` (live-observed
+// 2026-10-19, primary.windowDurationMins 10080), which positional mapping rendered in the 5h gauge.
+// 300 → 5h, 10080 → 7d; any other duration goes to the nearer bucket by log-distance (geometric midpoint
+// ≈ 29h: shorter → 5h, longer → 7d). A window with no usable duration falls back to its position (primary → 5h,
+// secondary → 7d, the pre-0.163 behavior). If two windows resolve to the same bucket the first wins.
+const FIVE_HOUR_MINS = 300;
+const SEVEN_DAY_MINS = 10080;
+
+function bucketFor(w: unknown, position: "fiveHour" | "sevenDay"): "fiveHour" | "sevenDay" {
+  const mins = (w as { windowDurationMins?: unknown } | null | undefined)?.windowDurationMins;
+  if (typeof mins !== "number" || !Number.isFinite(mins) || mins <= 0) return position;
+  return Math.abs(Math.log(mins / FIVE_HOUR_MINS)) <= Math.abs(Math.log(mins / SEVEN_DAY_MINS)) ? "fiveHour" : "sevenDay";
+}
+
 // Pure response→CodexUsage mapping (exported for tests). Tolerant duck-typed decode: each side
 // failing alone still yields the other's data; NOTHING usable → null (the provider treats that
 // as a failed fetch so the collector keeps its previous snapshot).
 export function mapCodexUsage(rateLimitsRes: unknown, usageRes: unknown, now: Date): CodexUsage | null {
   const rl = (rateLimitsRes as { rateLimits?: { primary?: unknown; secondary?: unknown; planType?: unknown } } | null | undefined)?.rateLimits;
-  const fiveHour = mapWindow(rl?.primary);
-  const sevenDay = mapWindow(rl?.secondary);
+  let fiveHour: CodexRateWindow | null = null;
+  let sevenDay: CodexRateWindow | null = null;
+  for (const [raw, position] of [[rl?.primary, "fiveHour"], [rl?.secondary, "sevenDay"]] as const) {
+    const mapped = mapWindow(raw);
+    if (!mapped) continue;
+    if (bucketFor(raw, position) === "fiveHour") fiveHour ??= mapped;
+    else sevenDay ??= mapped;
+  }
   const planType = typeof rl?.planType === "string" ? rl.planType : null;
 
   const buckets = (usageRes as { dailyUsageBuckets?: unknown } | null | undefined)?.dailyUsageBuckets;

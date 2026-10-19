@@ -13,6 +13,9 @@ export interface SideSource {
   provider: string;
   cwd: string;
   sdkSessionId: string | null;
+  // Claude only: the source's last persisted provider cost total. The Side fork continues from the source's
+  // running total, so this baseline keeps the Side's cost display to its own turns.
+  costBaselineUsd?: number;
   model: string;
   effort?: string;
   // Codex master forks use an ephemeral per-Side CODEX_HOME keyed by side id. Workers and Claude omit it.
@@ -31,6 +34,7 @@ interface SideConversation {
   id: string;
   source: SideSource;
   sdkSessionId: string;
+  costBaselineUsd?: number; // running provider total; starts at the source's, advanced per Side turn
   model: string;
   effort?: string;
   running: boolean;
@@ -77,6 +81,7 @@ export class SideConversationManager {
       id,
       source: { ...source, ...(source.provider === "codex" && source.sourceKind === "master" ? { sessionKey: id } : {}) },
       sdkSessionId: forked.sessionId,
+      ...(source.costBaselineUsd !== undefined ? { costBaselineUsd: source.costBaselineUsd } : {}),
       model: input.model?.trim() || source.model,
       effort: input.effort?.trim() || source.effort,
       running: false,
@@ -153,6 +158,7 @@ export class SideConversationManager {
         permissionMode: "plan",
         systemPromptAppend: SIDE_SYSTEM_PROMPT,
         resume: side.sdkSessionId,
+        ...(side.costBaselineUsd !== undefined ? { costBaselineUsd: side.costBaselineUsd } : {}),
         abortController: abort,
         readOnly: true,
         ...(side.source.sessionKey ? { sessionKey: side.source.sessionKey, toolDefs: {} } : {}),
@@ -176,6 +182,7 @@ export class SideConversationManager {
         } else if (event.kind === "push" && event.push.kind !== "commands") {
           this.emitData(side, { kind: "notice", text: event.push.text });
         } else if (event.kind === "turn_end") {
+          if (event.costTotalUsd !== undefined) side.costBaselineUsd = event.costTotalUsd;
           this.emitData(side, { kind: "result", subtype: event.subtype, costUsd: event.costUsd, numTurns: event.numTurns, durationMs: event.durationMs, contextTokens: event.contextTokens, contextWindow: event.contextWindow });
         }
       }

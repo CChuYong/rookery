@@ -351,13 +351,110 @@ describe("Worker", () => {
     expect(Math.max(...seqs)).toBeGreaterThanOrEqual(3); // new events continue from 3 or higher
   });
 
+  it("lazy resume passes the persisted provider cost total as the baseline and charges only the new turn", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    repos.addWorkerEvent({ workerId: "a1", seq: 0, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 0.5, numTurns: 1, providerCostTotalUsd: 0.5 }) });
+    const bus = new EventBus();
+    const opened: AgentSessionOptions[] = [];
+    const inner = fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.62, num_turns: 1, session_id: "sdk-1" }]);
+    const backend: AgentBackend = { openSession: (i, o) => { opened.push(o); return inner.openSession(i, o); }, startTurn: inner.startTurn.bind(inner) };
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", sdkSessionId: "sdk-1", deps: { repos, bus, model: "m", backend } });
+    agent.resume();
+    await until(() => agent.status() === "idle");
+    agent.send("continue");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "result" && e.seq > 0));
+    expect(opened[0]!.costBaselineUsd).toBe(0.5);
+    const last = JSON.parse(repos.listWorkerEvents("a1").filter((e) => e.type === "result").at(-1)!.payload_json) as { costUsd: number; providerCostTotalUsd: number };
+    expect(last.costUsd).toBeCloseTo(0.62, 8); // 0.5 seeded + 0.12 delta, NOT 0.5 + 0.62
+    expect(last.providerCostTotalUsd).toBe(0.62);
+    await agent.stop();
+  });
+
+  it("an aborted/killed first turn (no result, session id known) is billed on the next resumed turn", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", sdkSessionId: "sdk-1", deps: { repos, bus: new EventBus(), model: "m", backend: fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.3, num_turns: 1, session_id: "sdk-1" }]) } });
+    agent.resume();
+    await until(() => agent.status() === "idle");
+    agent.send("go");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "result"));
+    expect((JSON.parse(repos.listWorkerEvents("a1").find((e) => e.type === "result")!.payload_json) as { costUsd: number }).costUsd).toBeCloseTo(0.3, 8);
+    await agent.stop();
+  });
+
+  it("cross-provider chain: a fresh (no-resume) Claude worker drops an inherited watermark; a non-reporting turn never re-persists it", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    // Events copied from a Claude source that had a $5 watermark (Claude A -> Codex B -> Claude C).
+    repos.addWorkerEvent({ workerId: "a1", seq: 0, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 5, numTurns: 1, providerCostTotalUsd: 5 }) });
+    const opened: AgentSessionOptions[] = [];
+    const inner = fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.2, num_turns: 1, session_id: "fresh" }]);
+    const backend: AgentBackend = { openSession: (i, o) => { opened.push(o); return inner.openSession(i, o); }, startTurn: inner.startTurn.bind(inner) };
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend } });
+    agent.resume();
+    await until(() => agent.status() === "idle");
+    agent.send("go");
+    await until(() => repos.listWorkerEvents("a1").filter((e) => e.type === "result").length === 2);
+    expect(opened[0]!.costBaselineUsd).toBeUndefined();
+    const last = JSON.parse(repos.listWorkerEvents("a1").filter((e) => e.type === "result").at(-1)!.payload_json) as { costUsd: number; providerCostTotalUsd: number };
+    expect(last.costUsd).toBeCloseTo(5.2, 8);
+    expect(last.providerCostTotalUsd).toBe(0.2); // C's own total, not 5
+    await agent.stop();
+  });
+
+  it("a turn that reports no provider total (Codex) does not re-persist an inherited watermark", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    repos.addWorkerEvent({ workerId: "a1", seq: 0, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 5, numTurns: 1, providerCostTotalUsd: 5 }) });
+    const codexLike: AgentBackend = {
+      openSession: () => ({
+        async *[Symbol.asyncIterator]() {
+          yield { kind: "turn_end" as const, subtype: "success", costUsd: 0.1, numTurns: 1, durationMs: 1, contextTokens: 0, contextWindow: 0 };
+          await new Promise(() => {});
+        },
+        interrupt: async () => undefined, setModel: async () => {}, setPermissionMode: async () => {}, supportedCommands: async () => [],
+      }),
+      startTurn: () => { throw new Error("unused"); },
+    };
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", sdkSessionId: "thread-1", deps: { repos, bus: new EventBus(), model: "m", backend: codexLike } });
+    agent.resume();
+    agent.send("go");
+    await until(() => repos.listWorkerEvents("a1").filter((e) => e.type === "result").length === 2);
+    const last = JSON.parse(repos.listWorkerEvents("a1").filter((e) => e.type === "result").at(-1)!.payload_json) as Record<string, unknown>;
+    expect(last).not.toHaveProperty("providerCostTotalUsd");
+  });
+
+  it("resume() without a persisted watermark (legacy row / aborted first turn) passes no baseline and bills the resumed total from 0", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    repos.addWorkerEvent({ workerId: "a1", seq: 0, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 0.5, numTurns: 1 }) });
+    const opened: AgentSessionOptions[] = [];
+    const inner = fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.62, num_turns: 1, session_id: "sdk-1" }]);
+    const backend: AgentBackend = { openSession: (i, o) => { opened.push(o); return inner.openSession(i, o); }, startTurn: inner.startTurn.bind(inner) };
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", sdkSessionId: "sdk-1", deps: { repos, bus: new EventBus(), model: "m", backend } });
+    agent.resume();
+    await until(() => agent.status() === "idle");
+    agent.send("continue");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "result" && e.seq > 0));
+    expect(opened[0]!.costBaselineUsd).toBeUndefined();
+    const last = JSON.parse(repos.listWorkerEvents("a1").filter((e) => e.type === "result").at(-1)!.payload_json) as { costUsd: number };
+    expect(last.costUsd).toBeCloseTo(1.12, 8); // 0.5 seeded + 0.62 billed from a 0 baseline
+    await agent.stop();
+  });
+
   it("resume() seeds cumulative cost/turns from the last persisted result — monotonic after restart (audit #28)", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
     // A pre-restart result already persisted the lifetime-cumulative totals (cost 1.2 / turns 3).
     repos.addWorkerEvent({ workerId: "a1", seq: 0, type: "message", payloadJson: '{"kind":"message","role":"user","content":"go"}' });
-    repos.addWorkerEvent({ workerId: "a1", seq: 1, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 1.2, numTurns: 3 }) });
+    repos.addWorkerEvent({ workerId: "a1", seq: 1, type: "result", payloadJson: JSON.stringify({ kind: "result", subtype: "success", costUsd: 1.2, numTurns: 3, providerCostTotalUsd: 1.2 }) });
     const bus = new EventBus();
     const events: CoreEvent[] = [];
     bus.subscribe("s1", (e) => events.push(e));
@@ -368,7 +465,7 @@ describe("Worker", () => {
       label: "t",
       sdkSessionId: "sdk-1",
       // Streaming fake so resume() drops to idle and a later send() drives one more turn (+0.1 cost / +1 turn).
-      deps: { repos, bus, model: "m", backend: fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 0.1, num_turns: 1, session_id: "sdk-1" }]) },
+      deps: { repos, bus, model: "m", backend: fakeStreamingBackend(() => [{ type: "result", subtype: "success", total_cost_usd: 1.3, num_turns: 1, session_id: "sdk-1" }]) },
     });
     agent.resume();
     await until(() => agent.status() === "idle");
@@ -1007,14 +1104,14 @@ describe("Worker", () => {
     const bus = new EventBus();
     const events: CoreEvent[] = [];
     bus.subscribe("s1", (e) => events.push(e));
-    // turn#0 costs 0.4 (cumCostUsd=0.4 < budget 1.0 — passes); turn#1 costs 0.7 (cumCostUsd=1.1 >= 1.0 — stops).
+    // Running SDK totals: turn#0 0.4 (cumCostUsd=0.4 < budget 1.0 — passes); turn#1 total 1.1 = +0.7 (cumCostUsd=1.1 >= 1.0 — stops).
     const agent = new Worker({
       id: "a1", sessionId: "s1", repoPath: "/r", label: "t",
       deps: {
         repos, bus, model: "m",
         backend: fakeStreamingBackend((_text, turn) => [
           { type: "assistant", text: `turn${turn}` },
-          { type: "result", subtype: "success", total_cost_usd: turn === 0 ? 0.4 : 0.7, num_turns: 1, session_id: "sdk-1" },
+          { type: "result", subtype: "success", total_cost_usd: turn === 0 ? 0.4 : 1.1, num_turns: 1, session_id: "sdk-1" },
         ]),
         costBudgetUsd: 1.0,
       },

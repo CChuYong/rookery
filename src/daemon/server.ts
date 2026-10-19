@@ -81,6 +81,7 @@ import { startWorkerTriggerSource } from "../core/worker-trigger-source.js";
 import type { AutomationProvider } from "./connection.js";
 import type { AutomationInput } from "../persistence/repositories.js";
 import { SideConversationManager, type SideSource } from "../core/side-conversation.js";
+import { providerCostTotalOf } from "../core/provider-cost.js";
 import { realClaudeWorkflowFiles } from "./claude-workflow-files.js";
 import { ClaudeWorkflowRegistry } from "./claude-workflow-registry.js";
 
@@ -204,6 +205,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const codexBackend = new CodexBackend({
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
+    // Effort guard: consult the first-success model/list cache (declared below; only read at turn time).
+    modelEfforts: (model) => codexModelsProvider.cached()?.find((m) => m.id === model)?.supportedEfforts,
     apiKey: codexApiKey,
     // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
     // fresh every turn, same as the other settings resolvers on this backend. 0/negative disables it
@@ -409,6 +412,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         const provider = row.provider || "claude";
         return {
           sourceKind, sourceId, sessionId: row.id, provider, cwd: row.cwd, sdkSessionId: row.sdk_session_id,
+          costBaselineUsd: providerCostTotalOf(repos.lastSessionEventPayload(row.id, "master.result")),
           model: provider === "codex" ? settings.codexMasterModel() : settings.masterModel(),
           effort: settings.masterEffort(),
         };
@@ -418,6 +422,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       const provider = row.provider || "claude";
       return {
         sourceKind, sourceId, sessionId: row.session_id, provider, cwd: row.worktree_path, sdkSessionId: row.sdk_session_id,
+        costBaselineUsd: providerCostTotalOf(repos.lastWorkerEventPayload(row.id, "result")),
         model: row.model || (provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
         effort: row.effort || settings.workerEffort(),
       };
@@ -491,6 +496,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   // Codex model/effort catalog (for the desktop Codex model picker): spawns a short-lived app-server
   // child and caches the first successful result for the daemon's lifetime (see codex-models-provider.ts).
   const codexModelsProvider = makeCodexModelsProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });
+  // Warm the catalog at boot (fire-and-forget; list() never rejects and doesn't cache failures) so CodexBackend's
+  // per-model effort guard also works in headless daemons (Slack/automation/external MCP) where no desktop ever
+  // sends codex.models.list.
+  void codexModelsProvider.list();
   // Codex auth-readiness probe (for the desktop Settings Codex sub-tab): spawns a short-lived app-server
   // child and reads its account state. NOT cached (auth changes at runtime) — see codex-auth-provider.ts.
   const codexAuthProvider = makeCodexAuthProvider({ spawn: realCodexSpawn(() => settings.codexBin()), env: codexEnv, apiKey: codexApiKey });

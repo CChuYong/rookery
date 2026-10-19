@@ -34,9 +34,17 @@ export async function* claudeUserMessages(input: AsyncIterable<string>): AsyncIt
 // Per-stream decode state: the last message_start's per-request usage. result.usage accumulates across
 // multiple model calls within a turn (cache re-reads can exceed the window), so turn_end context % is
 // computed from the LAST request's usage, falling back to the cumulative value (turnContext).
+//
+// costWatermark: SDK result.total_cost_usd is a RUNNING total of the conversation (live-verified on 0.3.303:
+// across resumed turns, across a forkSession — which continues from the SOURCE's total — and across results
+// within one streaming-input query()), so the per-turn cost is the difference from the last observed total.
+// A resume with no known baseline starts at 0: live-verified that a session created on SDK 0.3.259 and resumed
+// on 0.3.303 restarts the running total from 0 (legacy transcripts saved none), and a session whose first turn
+// never produced a result (aborted/killed) likewise carries at most a partial total.
 interface DecodeState {
   lastReqContextTokens: number;
   workflowTaskIds: Set<string>;
+  costWatermark: number;
 }
 
 function workflowUsage(raw: unknown): { totalTokens: number; toolUses: number; durationMs: number } | undefined {
@@ -197,9 +205,16 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       yield { kind: "push", push };
       return;
     }
+    if (sub === "informational") return; // empty content: classifySystemPush declined it — drop rather than surface the literal subtype
     // A system message carries info in its top-level text/subtype (extractText can't read it).
     const s = msg as { subtype?: string; text?: string };
     yield { kind: "system_text", text: s.text ?? s.subtype ?? "system" };
+    return;
+  }
+  if (type === "conversation_reset") {
+    // /clear, plan-mode exit with clear-context, fresh_session, onboarding: the running total restarts at 0.
+    // The frame may arrive for nested sessions too, but only top-level frames reach here (parentId handled above).
+    state.costWatermark = 0;
     return;
   }
   if (type === "tool_progress") {
@@ -220,10 +235,27 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     };
     if (r.session_id) yield { kind: "session_id", sessionId: r.session_id };
     const { contextTokens, contextWindow } = turnContext(r, state.lastReqContextTokens);
+    const total = r.total_cost_usd ?? 0;
+    let delta = 0;
+    if (total === 0) {
+      // Zeroed crash/startup-error result: no information. Charge nothing and keep the watermark.
+    } else if (total >= state.costWatermark) {
+      delta = total - state.costWatermark;
+      state.costWatermark = total;
+    } else {
+      // Total dropped (mid-session /clear, or a transcript with no saved total): the new value restarted
+      // from zero, so it is entirely this turn's (and later) cost. An explicit conversation_reset already zeroes
+      // the watermark, so reaching here means an UNANNOUNCED drop — warn so an unexpected SDK recompute (which
+      // would re-bill the whole new total) is visible in daemon.log instead of silent.
+      console.warn(`[claude-backend] cost running total dropped without conversation_reset (watermark=${state.costWatermark}, total=${total}); billing the new total`);
+      delta = total;
+      state.costWatermark = total;
+    }
     yield {
       kind: "turn_end",
       subtype: r.subtype ?? "unknown",
-      costUsd: r.total_cost_usd ?? 0,
+      costUsd: delta,
+      ...(total > 0 ? { costTotalUsd: total } : {}),
       numTurns: r.num_turns ?? 0,
       durationMs: r.duration_ms ?? 0,
       contextTokens,
@@ -236,10 +268,11 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
 }
 
 class ClaudeStream implements AgentStream {
-  constructor(private readonly q: ReturnType<QueryFn>) {}
+  // initialCostWatermark: 0 for a fresh session or a resume with no known baseline; else the caller's baseline.
+  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number) {}
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
-    const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set() };
+    const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set(), costWatermark: this.initialCostWatermark };
     for await (const msg of this.q) yield* translate(msg, state);
   }
 
@@ -288,7 +321,11 @@ export class ClaudeBackend implements AgentBackend {
       ...(effortApplies(opts.model) && coerceEffort(opts.effort) ? { effort: coerceEffort(opts.effort) } : {}),
       ...(effortApplies(opts.model) ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),
       permissionMode: opts.permissionMode as QueryOptions["permissionMode"],
-      systemPrompt: { type: "preset", preset: "claude_code", ...(systemPromptAppend ? { append: systemPromptAppend } : {}) },
+      // snapshot:false — since SDK 0.3.267 the default is to record the system prompt once per conversation and
+      // IGNORE a changed `append` on resume (live-verified on 0.3.303: a resumed turn kept answering from the
+      // first turn's append). Rookery rebuilds the append every master turn (memories, repo catalog, masterName,
+      // managed capability instructions) and on worker stream replacement, so the per-call value must stay authoritative.
+      systemPrompt: { type: "preset", preset: "claude_code", snapshot: false, ...(systemPromptAppend ? { append: systemPromptAppend } : {}) },
       ...(managed?.plugins.length ? { plugins: managed.plugins } : {}),
       ...(managed && Object.keys(managed.env).length > 0 ? { env: { ...process.env, ...managed.env } } : {}),
       includePartialMessages: true,
@@ -305,7 +342,7 @@ export class ClaudeBackend implements AgentBackend {
         forwardSubagentText: true, // nested subagent text/tool activity → UI panels (streaming sessions only, as before)
       },
     });
-    return new ClaudeStream(q);
+    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0);
   }
 
   startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
@@ -321,7 +358,7 @@ export class ClaudeBackend implements AgentBackend {
         ...(opts.readOnly ? { disallowedTools: readOnlyDenied } : opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
       },
     });
-    return new ClaudeStream(q);
+    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0);
   }
 
   // Wraps `opts.toolDefs` groups (the neutral port — see agent-backend.ts) with createSdkMcpServer,

@@ -33,7 +33,7 @@ export function ForkDialog(p: {
   const isMaster = p.kind === "master";
   const claudeDefaultModel = (isMaster ? settings?.masterModel : settings?.workerModel) ?? "claude-opus-4-8";
   const defaultEffort = (isMaster ? settings?.masterEffort : settings?.workerEffort) ?? "high";
-  const codexDefaultModel = (isMaster ? settings?.codexMasterModel : settings?.codexWorkerModel) || "gpt-5.5";
+  const codexDefaultModel = (isMaster ? settings?.codexMasterModel : settings?.codexWorkerModel) || "gpt-6.1-sol";
 
   // Default the target to the OTHER provider (the handoff intent). Same-provider is still selectable (native fork).
   const [provider, setProvider] = useState<Provider>(p.sourceProvider === "claude" ? "codex" : "claude");
