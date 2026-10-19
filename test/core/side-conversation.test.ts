@@ -77,6 +77,20 @@ describe("SideConversationManager", () => {
     expect(h.turns[1]?.opts.resume).toBe("sdk-side-next");
   });
 
+  it("hands the source's cost baseline to the Side fork and advances it per Side turn", async () => {
+    const h = harness([
+      { kind: "turn_end", subtype: "success", costUsd: 0.01, costTotalUsd: 0.51, numTurns: 1, durationMs: 1, contextTokens: 0, contextWindow: 0 },
+    ]);
+    h.source.costBaselineUsd = 0.5;
+    const { id } = await h.manager.create({ sourceKind: "worker", sourceId: "w1" });
+    h.manager.send(id, "q1");
+    await h.manager.idle(id);
+    h.manager.send(id, "q2");
+    await h.manager.idle(id);
+    expect(h.turns[0]!.opts.costBaselineUsd).toBe(0.5);
+    expect(h.turns[1]!.opts.costBaselineUsd).toBe(0.51);
+  });
+
   it("rejects unknown/unforkable sources", async () => {
     const h = harness();
     await expect(h.manager.create({ sourceKind: "master", sourceId: "missing" })).rejects.toThrow(/unknown source/);

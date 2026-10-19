@@ -53,11 +53,15 @@ export type AgentEvent =
   | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string }> }
   | { kind: "workflow_launched"; launch: WorkflowLaunch }
   | { kind: "workflow_task"; update: WorkflowTaskUpdate }
-  // End of one turn. costUsd/numTurns/durationMs are THIS turn's raw values (numTurns is the provider's
+  // End of one turn. costUsd/numTurns/durationMs are THIS turn's values (numTurns is the provider's
   // per-send cumulative agentic turn count) — consumers accumulate their own session totals.
+  // costUsd is THIS turn's incremental cost on both providers. Claude's SDK reports a RUNNING total
+  // (result.total_cost_usd), so the adapter differences it against a watermark; costTotalUsd is that raw
+  // provider total — an opaque value consumers persist and hand back as AgentSessionOptions.costBaselineUsd
+  // when they resume/fork the session. Absent on Codex (it emits per-turn deltas) and on zeroed results.
   // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried
   // for observability only, never branched on (live-verified 2026-07-11: bg detection rests on task frames).
-  | { kind: "turn_end"; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string };
+  | { kind: "turn_end"; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number };
 
 // The SDK's typed interrupt receipt (0.3.205+ Query.interrupt() resolution), neutralized.
 // still_queued: uuids of async user messages that survive the interrupt. [] does NOT mean
@@ -89,6 +93,11 @@ export interface AgentSessionOptions {
   permissionMode: string;
   systemPromptAppend?: string; // appended to the provider's base agent prompt (claude_code preset on Claude)
   resume?: string | null; // provider session id to resume (null/undefined → fresh session)
+  // Claude only (Codex ignores it): the provider-reported running cost total last observed for the session
+  // being resumed/forked (a prior turn_end.costTotalUsd). The SDK's result.total_cost_usd continues from the
+  // transcript's saved total, so this lets the adapter report only the NEW turn's cost. Undefined while resuming
+  // = unknown baseline (the first resumed turn is then charged 0 and the watermark adopted). Ignored when not resuming.
+  costBaselineUsd?: number;
   abortController: AbortController;
   // Stable Rookery target identity. Required whenever managed capabilities are supplied.
   runtimeKey?: string;

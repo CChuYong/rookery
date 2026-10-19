@@ -56,7 +56,7 @@ describe("ClaudeBackend.startTurn — event translation", () => {
       { kind: "tool_use", id: "t1", name: "mcp__fleet__spawn_worker", input: { repo: "r" }, parentToolUseId: null },
       { kind: "tool_result", toolUseId: "t1", isError: false, content: "ok", parentToolUseId: null },
       { kind: "session_id", sessionId: "sdk-1" },
-      { kind: "turn_end", subtype: "success", costUsd: 0.5, numTurns: 2, durationMs: 10, contextTokens: 150, contextWindow: 200000 },
+      { kind: "turn_end", subtype: "success", costUsd: 0.5, costTotalUsd: 0.5, numTurns: 2, durationMs: 10, contextTokens: 150, contextWindow: 200000 },
     ]);
   });
 
@@ -94,7 +94,7 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     expect(events).toEqual([
       { kind: "message", role: "assistant", text: "nested says hi", parentToolUseId: "p1" },
       { kind: "session_id", sessionId: "sdk-1" },
-      { kind: "turn_end", subtype: "success", costUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
+      { kind: "turn_end", subtype: "success", costUsd: 0.1, costTotalUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
     ]);
   });
 
@@ -334,7 +334,7 @@ describe("ClaudeBackend.openSession", () => {
     expect(events).toEqual([
       { kind: "message", role: "assistant", text: "echo:task one", parentToolUseId: null },
       { kind: "session_id", sessionId: "sdk-w" },
-      { kind: "turn_end", subtype: "success", costUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
+      { kind: "turn_end", subtype: "success", costUsd: 0.1, costTotalUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
     ]);
   });
 
@@ -530,5 +530,63 @@ describe("ClaudeBackend — Dynamic Workflow activity", () => {
       { kind: "workflow_task", update: { taskId: "task-wf", phase: "settled", outcome: "failed" } },
       { kind: "workflow_task", update: { taskId: "task-wf", phase: "settled", summary: "Agent failed", usage: { totalTokens: 60, toolUses: 4, durationMs: 1500 }, outcome: "failed" } },
     ]);
+  });
+});
+
+// SDK result.total_cost_usd is a RUNNING total (probed on 0.3.303); turn_end.costUsd must be the per-turn delta.
+describe("ClaudeBackend — running-total cost accounting", () => {
+  const res = (total: number) => ({ type: "result", subtype: "success", total_cost_usd: total, num_turns: 1, session_id: "s" } as const);
+  async function turnEnds(totals: number[], opts: Record<string, unknown>): Promise<Array<{ costUsd: number; costTotalUsd?: number }>> {
+    const backend = new ClaudeBackend(fakeStreamingQuery((_t, turn) => [res(totals[turn]!)]));
+    const q = new MessageQueue();
+    const stream = backend.openSession(q, baseOpts(opts));
+    const out: Array<{ costUsd: number; costTotalUsd?: number }> = [];
+    totals.forEach((_t, i) => q.push(`m${i}`));
+    q.close();
+    for await (const ev of stream) if (ev.kind === "turn_end") out.push({ costUsd: ev.costUsd, costTotalUsd: ev.costTotalUsd });
+    return out;
+  }
+
+  it("fresh session: first result charges the whole total; later results in one stream charge the difference", async () => {
+    const r = await turnEnds([0.00881, 0.01624, 0.01964], {});
+    expect(r.map((x) => x.costUsd)).toEqual([expect.closeTo(0.00881, 8), expect.closeTo(0.00743, 8), expect.closeTo(0.0034, 8)]);
+    expect(r.map((x) => x.costTotalUsd)).toEqual([0.00881, 0.01624, 0.01964]);
+  });
+
+  it("resume with a known baseline charges only the new turn", async () => {
+    const [r] = await turnEnds([0.03421], { resume: "sdk-1", costBaselineUsd: 0.03168 });
+    expect(r!.costUsd).toBeCloseTo(0.00253, 8);
+    expect(r!.costTotalUsd).toBe(0.03421);
+  });
+
+  it("resume with an unknown baseline adopts the total and charges 0 once, then differences", async () => {
+    const r = await turnEnds([0.03421, 0.03619], { resume: "sdk-1" });
+    expect(r[0]!.costUsd).toBe(0);
+    expect(r[0]!.costTotalUsd).toBe(0.03421);
+    expect(r[1]!.costUsd).toBeCloseTo(0.00198, 8);
+  });
+
+  it("ignores a baseline when not resuming (fresh session starts at 0)", async () => {
+    const [r] = await turnEnds([0.5], { costBaselineUsd: 9 });
+    expect(r!.costUsd).toBe(0.5);
+  });
+
+  it("a zeroed (crash/startup-error) result charges nothing and does not move the watermark", async () => {
+    const r = await turnEnds([0, 0.5], { resume: "sdk-1", costBaselineUsd: 0.4 });
+    expect(r[0]).toEqual({ costUsd: 0, costTotalUsd: undefined });
+    expect(r[1]!.costUsd).toBeCloseTo(0.1, 8);
+  });
+
+  it("a total that drops below the watermark (/clear, no saved total) is charged in full and becomes the new watermark", async () => {
+    const r = await turnEnds([0.1, 0.25], { resume: "sdk-1", costBaselineUsd: 0.4 });
+    expect(r[0]!.costUsd).toBe(0.1);
+    expect(r[1]!.costUsd).toBeCloseTo(0.15, 8);
+  });
+
+  it("startTurn (master style) resumes with the baseline too", async () => {
+    const backend = new ClaudeBackend(fakeQuery([res(0.036)]));
+    const evs = await collect(backend.startTurn("hi", baseOpts({ resume: "sdk-1", costBaselineUsd: 0.034 })));
+    const end = evs.find((e) => e.kind === "turn_end") as { costUsd: number };
+    expect(end.costUsd).toBeCloseTo(0.002, 8);
   });
 });

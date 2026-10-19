@@ -81,6 +81,15 @@ import { startWorkerTriggerSource } from "../core/worker-trigger-source.js";
 import type { AutomationProvider } from "./connection.js";
 import type { AutomationInput } from "../persistence/repositories.js";
 import { SideConversationManager, type SideSource } from "../core/side-conversation.js";
+
+// The provider cost watermark persisted inside the last master.result / worker result payload (undefined when absent/corrupt).
+function providerCostTotalOf(payloadJson: string | undefined | null): number | undefined {
+  if (!payloadJson) return undefined;
+  try {
+    const v = (JSON.parse(payloadJson) as { providerCostTotalUsd?: unknown }).providerCostTotalUsd;
+    return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  } catch { return undefined; }
+}
 import { realClaudeWorkflowFiles } from "./claude-workflow-files.js";
 import { ClaudeWorkflowRegistry } from "./claude-workflow-registry.js";
 
@@ -409,6 +418,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         const provider = row.provider || "claude";
         return {
           sourceKind, sourceId, sessionId: row.id, provider, cwd: row.cwd, sdkSessionId: row.sdk_session_id,
+          costBaselineUsd: providerCostTotalOf(repos.lastSessionEventPayload(row.id, "master.result")),
           model: provider === "codex" ? settings.codexMasterModel() : settings.masterModel(),
           effort: settings.masterEffort(),
         };
@@ -418,6 +428,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       const provider = row.provider || "claude";
       return {
         sourceKind, sourceId, sessionId: row.session_id, provider, cwd: row.worktree_path, sdkSessionId: row.sdk_session_id,
+        costBaselineUsd: providerCostTotalOf(repos.lastWorkerEventPayload(row.id, "result")),
         model: row.model || (provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
         effort: row.effort || settings.workerEffort(),
       };

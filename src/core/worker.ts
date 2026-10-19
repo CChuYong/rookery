@@ -134,6 +134,10 @@ export class Worker {
   // even after restart (resume() re-seeds them from the last persisted result — audit #28).
   private cumCostUsd = 0;
   private cumTurns = 0;
+  // Provider-reported running cost total last observed (turn_end.costTotalUsd) — the baseline handed back on
+  // every resumed stream open so the adapter charges only the new turn. Persisted in the result event
+  // (providerCostTotalUsd) and restored in resume(); undefined = unknown (legacy rows) → adapter adopts it.
+  private providerCostTotalUsd: number | undefined;
 
   constructor(private readonly opts: WorkerOpts) {
     this.sdkSessionId = opts.sdkSessionId ?? null;
@@ -250,9 +254,10 @@ export class Worker {
     try {
       const last = this.opts.deps.repos.lastWorkerEventPayload(this.opts.id, "result");
       if (last) {
-        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number; providerCostTotalUsd?: number };
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
+        this.providerCostTotalUsd = p.providerCostTotalUsd;
       }
     } catch { /* corrupt row — start from 0 */ }
     this.opts.deps.repos.setWorkerModel(this.opts.id, this.currentModel);
@@ -554,6 +559,7 @@ export class Worker {
         permissionMode: this.currentPermissionMode,
         systemPromptAppend: WORKER_FENCE_INSTRUCTION,
         resume: this.sdkSessionId,
+        ...(this.sdkSessionId && this.providerCostTotalUsd !== undefined ? { costBaselineUsd: this.providerCostTotalUsd } : {}),
         abortController: abort,
         ...(managed ? { runtimeKey: this.opts.id, capabilities: managed } : {}),
       });
@@ -683,17 +689,20 @@ export class Worker {
         } else if (ev.kind === "turn_end") {
           this.clearWakeWatchdog(); // a real turn_end arrived → the wake (if any) did not fizzle
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
-          // ev.costUsd/ev.numTurns are PER-SEND (this query()'s own cost + agentic-loop count), NOT
-          // conversation-cumulative — verified empirically against the Claude Agent SDK: a resumed turn's
-          // total_cost_usd/num_turns are independent of the prior turn's (t2 cost < t1 cost). So accumulating
-          // them into a lifetime session total is correct (no double-count).
+          // ev.numTurns is PER-SEND (this send's agentic-loop count) — accumulating is correct. ev.costUsd is
+          // THIS turn's incremental cost: the Claude SDK's result.total_cost_usd is a RUNNING total (live-verified
+          // on 0.3.303, resumed turns $0.03168 → $0.03421 → $0.03619; streaming results within one query()
+          // $0.00881 → $0.01624 → $0.01964; a fork continues from the source's total), and the adapter
+          // differences it against the baseline we pass in (costBaselineUsd). Keep the raw total as the next baseline.
           this.cumCostUsd += ev.costUsd;
+          if (ev.costTotalUsd !== undefined) this.providerCostTotalUsd = ev.costTotalUsd;
           this.cumTurns += ev.numTurns;
           this.record({
             kind: "result",
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
             numTurns: this.cumTurns,
+            ...(this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
             durationMs: ev.durationMs,
             contextTokens: ev.contextTokens,
             contextWindow: ev.contextWindow,
