@@ -31,6 +31,21 @@ function erroringTransport(): CodexTransport {
 const erroringSpawn: CodexSpawn = () => erroringTransport();
 
 describe("mapCodexUsage", () => {
+  it("maps gauges by windowDurationMins, not position (weekly-only plan, swapped order, odd durations)", () => {
+    const win = (mins: number | null | undefined, pct: number) => ({ usedPercent: pct, windowDurationMins: mins, resetsAt: 1 });
+    const g = (primary: unknown, secondary: unknown) => mapCodexUsage({ rateLimits: { primary, secondary } }, null, NOW)!;
+    // live 0.163.0 shape: weekly window as primary, secondary null
+    expect(g(win(10080, 6), null)).toMatchObject({ fiveHour: null, sevenDay: { usedPercent: 6 } });
+    // swapped
+    expect(g(win(10080, 1), win(300, 2))).toMatchObject({ fiveHour: { usedPercent: 2 }, sevenDay: { usedPercent: 1 } });
+    // nearest bucket for other durations
+    expect(g(win(60, 3), win(43200, 4))).toMatchObject({ fiveHour: { usedPercent: 3 }, sevenDay: { usedPercent: 4 } });
+    // no duration → positional fallback
+    expect(g(win(null, 5), win(undefined, 7))).toMatchObject({ fiveHour: { usedPercent: 5 }, sevenDay: { usedPercent: 7 } });
+    // collision: first wins
+    expect(g(win(300, 8), win(240, 9))).toMatchObject({ fiveHour: { usedPercent: 8 }, sevenDay: null });
+  });
+
   it("maps gauges (primary→fiveHour, secondary→sevenDay), planType, today/weekly bucket sums", () => {
     const u = mapCodexUsage(RATE_LIMITS, ACCOUNT_USAGE, NOW)!;
     expect(u.fiveHour).toEqual({ usedPercent: 37, resetsAt: 1783762463 });
