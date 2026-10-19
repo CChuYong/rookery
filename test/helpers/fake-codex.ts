@@ -29,6 +29,7 @@ export interface FakeCodexServerOpts {
   deadInterrupt?: boolean; // turn/interrupt gets NO response at all (not even an ack) — the child is wedged
   // AND unresponsive to requests, so interrupt()'s `await client.request("turn/interrupt")` would hang
   // forever. Exercises onIdleTimeout's ack-timeout race that must still arm the grace→kill escalation.
+  userAgent?: string; // `initialize` result userAgent (default "fake" = unparseable → version check skipped)
   silentInitialize?: boolean; // the `initialize` request never gets a response — stalls openClient() (P3-remaining Track A handshake-timeout test)
   silentThreadStart?: boolean; // `thread/start`/`thread/resume` never get a response — stalls startOrResumeThread() (same test)
   initializeDelayMs?: number; // `initialize` responds after a real setTimeout delay instead of immediately — a genuinely SLOW (but completing) handshake, for proving handshakeTimeoutMs:0 truly disables the race rather than just never happening to trip it
@@ -97,7 +98,7 @@ export function fakeCodexSpawn(
         requests.push({ method: msg.method, params: msg.params ?? {} });
         if (msg.method === "initialize") {
           if (opts.silentInitialize) return;
-          const respond = () => send({ id: msg.id, result: { userAgent: "fake" } });
+          const respond = () => send({ id: msg.id, result: { userAgent: opts.userAgent ?? "fake" } });
           if (opts.initializeDelayMs) setTimeout(respond, opts.initializeDelayMs); else respond();
           return;
         }

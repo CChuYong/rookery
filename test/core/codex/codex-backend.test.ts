@@ -207,7 +207,7 @@ describe("CodexBackend.openSession — translation", () => {
     const start = requests.find((r) => r.method === "thread/start")!.params;
     expect(start).toMatchObject({ cwd: "/wt", model: "gpt-5.5", approvalPolicy: "never", sandbox: "read-only" });
     const turn = requests.find((r) => r.method === "turn/start")!.params;
-    expect(turn).toMatchObject({ threadId: "th-1", effort: "xhigh", input: [{ type: "text", text: "x", text_elements: [] }] });
+    expect(turn).toMatchObject({ threadId: "th-1", effort: "max", input: [{ type: "text", text: "x", text_elements: [] }] });
   });
 
   it("resumes via thread/resume when opts.resume is set", async () => {
@@ -1258,6 +1258,8 @@ describe("CodexBackend — codex-native nested subagents (collab child threads)"
     const { backend: b } = backend(() => [
       { kind: "raw", method: "item/completed", params: { threadId: "th-1", item: { type: "subAgentActivity", id: "call_1", kind: "started", agentThreadId: child, agentPath: "/root/compute" } } },
       { kind: "raw", method: "item/completed", params: { threadId: "th-1", item: { type: "subAgentActivity", id: "call_2", kind: "interacted", agentThreadId: child, agentPath: "/root/compute" } } },
+      // 0.163.0 added kind "completed" (+ model/reasoningEffort): tolerated, no card — the nested panel has no end concept
+      { kind: "raw", method: "item/completed", params: { threadId: "th-1", item: { type: "subAgentActivity", id: "call_3", kind: "completed", agentThreadId: child, agentPath: "/root/compute", model: "gpt-6-sol", reasoningEffort: "ultra" } } },
       { kind: "turnEnd" },
     ]);
     const q = new MessageQueue();
@@ -1268,7 +1270,7 @@ describe("CodexBackend — codex-native nested subagents (collab child threads)"
     // card whose toolId equals the panel key (= child threadId)
     expect(events).toContainEqual({ kind: "tool_use", id: child, name: "spawn_agent", input: { agentPath: "/root/compute" }, parentToolUseId: null });
     expect(events).toContainEqual({ kind: "tool_result", toolUseId: child, isError: false, content: "/root/compute", parentToolUseId: null });
-    // kind !== "started" (interacted/interrupted) emits nothing
+    // kind !== "started" (interacted/interrupted/completed) emits nothing
     expect(events.filter((e) => e.kind === "tool_use")).toHaveLength(1);
   });
 
@@ -1296,5 +1298,44 @@ describe("CodexBackend — codex-native nested subagents (collab child threads)"
     q.close();
     const events = await collect(b.openSession(q, baseOpts()));
     expect(events).toContainEqual({ kind: "tool_use", id: "call_g", name: "collab.spawnAgent", input: { prompt: "do sub-work", model: undefined, receiverThreadIds: undefined }, parentToolUseId: child });
+  });
+});
+
+describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
+  const ua = (v: string) => `rookery/${v} (Mac OS 15.7.3; arm64) iTerm.app/3.6.9 (rookery; 0.1.0)`;
+  const runResume = async (userAgent: string) => {
+    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }], { userAgent });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    await collect(b.openSession(q, baseOpts({ resume: "th-1" })));
+    return requests.find((r) => r.method === "thread/resume")!.params as Record<string, unknown>;
+  };
+
+  it("fails the spawn with an actionable error when the CLI is below the minimum", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { userAgent: ua("0.146.0") });
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    await expect(collect(b.openSession(q, baseOpts()))).rejects.toThrow(/older than the minimum supported 0\.146\.1/);
+    expect(fake.requests.some((r) => r.method === "thread/start")).toBe(false);
+  });
+
+  it("sends excludeTurns on thread/resume only from CLI 0.151.0", async () => {
+    expect(await runResume(ua("0.163.0"))).toMatchObject({ threadId: "th-1", excludeTurns: true });
+    expect(await runResume(ua("0.151.0"))).toMatchObject({ excludeTurns: true });
+    expect(await runResume(ua("0.150.1"))).not.toHaveProperty("excludeTurns");
+    expect(await runResume(ua("0.146.1"))).not.toHaveProperty("excludeTurns");
+    expect(await runResume("fake")).not.toHaveProperty("excludeTurns"); // unparseable → allowed, conservative
+  });
+
+  it("forkSession sends excludeTurns only when the CLI accepts it, and enforces the minimum", async () => {
+    const fork = async (userAgent: string) => {
+      const fake = fakeCodexSpawn(() => [], { userAgent });
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+      const res = await b.forkSession("th-1");
+      return { res, params: fake.requests.find((r) => r.method === "thread/fork")!.params as Record<string, unknown> };
+    };
+    expect((await fork(ua("0.163.0"))).params).toMatchObject({ threadId: "th-1", excludeTurns: true });
+    expect((await fork(ua("0.146.1"))).params).not.toHaveProperty("excludeTurns");
+    const old = fakeCodexSpawn(() => [], { userAgent: ua("0.145.0") });
+    await expect(new CodexBackend({ spawn: old.spawn, defaultModel: () => "gpt-5.5" }).forkSession("th-1")).rejects.toThrow(/older than the minimum/);
   });
 });
