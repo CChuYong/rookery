@@ -29,7 +29,8 @@ export interface FakeCodexServerOpts {
   deadInterrupt?: boolean; // turn/interrupt gets NO response at all (not even an ack) — the child is wedged
   // AND unresponsive to requests, so interrupt()'s `await client.request("turn/interrupt")` would hang
   // forever. Exercises onIdleTimeout's ack-timeout race that must still arm the grace→kill escalation.
-  userAgent?: string; // `initialize` result userAgent (default "fake" = unparseable → version check skipped)
+  userAgent?: string; // `initialize` result userAgent (default "rookery/0.163.0 (fake)"; pass e.g. "fake" for an unparseable one)
+  rejectExcludeTurns?: boolean; // thread/resume|fork carrying excludeTurns → -32600 "requires experimentalApi capability" (old/pre-release CLI)
   silentInitialize?: boolean; // the `initialize` request never gets a response — stalls openClient() (P3-remaining Track A handshake-timeout test)
   silentThreadStart?: boolean; // `thread/start`/`thread/resume` never get a response — stalls startOrResumeThread() (same test)
   initializeDelayMs?: number; // `initialize` responds after a real setTimeout delay instead of immediately — a genuinely SLOW (but completing) handshake, for proving handshakeTimeoutMs:0 truly disables the race rather than just never happening to trip it
@@ -98,7 +99,7 @@ export function fakeCodexSpawn(
         requests.push({ method: msg.method, params: msg.params ?? {} });
         if (msg.method === "initialize") {
           if (opts.silentInitialize) return;
-          const respond = () => send({ id: msg.id, result: { userAgent: opts.userAgent ?? "fake" } });
+          const respond = () => send({ id: msg.id, result: { userAgent: opts.userAgent ?? "rookery/0.163.0 (fake)" } });
           if (opts.initializeDelayMs) setTimeout(respond, opts.initializeDelayMs); else respond();
           return;
         }
@@ -115,6 +116,10 @@ export function fakeCodexSpawn(
         if (msg.method === "thread/start" || msg.method === "thread/resume" || msg.method === "thread/fork") {
           if (msg.method === "thread/fork" && opts.silentForkHang) return; // never respond — exercises forkSession's timeout
           if ((msg.method === "thread/start" || msg.method === "thread/resume") && opts.silentThreadStart) return; // never respond — exercises the handshake-timeout test
+          if (opts.rejectExcludeTurns && (msg.params as { excludeTurns?: boolean } | undefined)?.excludeTurns !== undefined) {
+            send({ id: msg.id, error: { code: -32600, message: `${msg.method}.excludeTurns requires experimentalApi capability` } });
+            return;
+          }
           if (opts.failThreadStart) { send({ id: msg.id, error: { code: -32000, message: "no auth" } }); return; }
           const id = msg.method === "thread/fork" ? `${threadId}-fork` : threadId;
           send({ method: "thread/started", params: { thread: { id } } });

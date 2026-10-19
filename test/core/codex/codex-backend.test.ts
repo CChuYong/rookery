@@ -1324,6 +1324,8 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
     expect(await runResume(ua("0.150.1"))).not.toHaveProperty("excludeTurns");
     expect(await runResume(ua("0.146.1"))).not.toHaveProperty("excludeTurns");
     expect(await runResume("fake")).not.toHaveProperty("excludeTurns"); // unparseable → allowed, conservative
+    expect(await runResume(ua("0.151.0-alpha.2"))).not.toHaveProperty("excludeTurns"); // pre-release of the gate version
+    expect(await runResume(ua("0.0.0"))).not.toHaveProperty("excludeTurns"); // dev build
   });
 
   it("forkSession sends excludeTurns only when the CLI accepts it, and enforces the minimum", async () => {
@@ -1337,5 +1339,30 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
     expect((await fork(ua("0.146.1"))).params).not.toHaveProperty("excludeTurns");
     const old = fakeCodexSpawn(() => [], { userAgent: ua("0.145.0") });
     await expect(new CodexBackend({ spawn: old.spawn, defaultModel: () => "gpt-5.5" }).forkSession("th-1")).rejects.toThrow(/older than the minimum/);
+  });
+
+  it("falls back once without excludeTurns when the child rejects it as experimental (resume + fork)", async () => {
+    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }], { userAgent: ua("0.163.0"), rejectExcludeTurns: true });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    const events = await collect(b.openSession(q, baseOpts({ resume: "th-1" })));
+    const resumes = requests.filter((r) => r.method === "thread/resume");
+    expect(resumes).toHaveLength(2);
+    expect(resumes[0]!.params).toHaveProperty("excludeTurns", true);
+    expect(resumes[1]!.params).not.toHaveProperty("excludeTurns");
+    expect(events[0]).toEqual({ kind: "session_id", sessionId: "th-1" });
+
+    const fake = fakeCodexSpawn(() => [], { userAgent: ua("0.163.0"), rejectExcludeTurns: true });
+    const res = await new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-6.1-sol" }).forkSession("th-1");
+    expect(res.sessionId).toBe("th-1-fork");
+    const forks = fake.requests.filter((r) => r.method === "thread/fork");
+    expect(forks).toHaveLength(2);
+    expect(forks[1]!.params).not.toHaveProperty("excludeTurns");
+  });
+
+  it("does not retry on unrelated thread/resume errors", async () => {
+    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }], { failThreadStart: true });
+    const q = new MessageQueue(); q.push("x"); q.close();
+    await expect(collect(b.openSession(q, baseOpts({ resume: "th-1" })))).rejects.toThrow(/no auth/);
+    expect(requests.filter((r) => r.method === "thread/resume")).toHaveLength(1);
   });
 });

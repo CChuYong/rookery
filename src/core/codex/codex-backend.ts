@@ -5,7 +5,7 @@ import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex-transport
 import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
 import { turnCostUsd, isRatedModel } from "./codex-pricing.js";
-import { initializeCodex } from "./codex-version.js";
+import { initializeCodex, requestExcludingTurns } from "./codex-version.js";
 import type { ResolvedAgentCapabilities } from "../capabilities/types.js";
 
 // Models billed at $0 because they have no pricing entry — warned once per process so the daemon log
@@ -192,7 +192,7 @@ abstract class CodexSessionBase implements AgentStream {
   protected readonly channel = new EventChannel();
   protected client: CodexClient | null = null;
   // Set by openClient() from the initialize handshake; gates `excludeTurns` on thread/resume (CLI >= 0.151.0).
-  protected supportsExcludeTurns = false;
+  protected excludeTurnsState = { supported: false };
   protected threadId: string | null = null;
   protected activeTurnId: string | null = null;
   protected turnDone: (() => void) | null = null;
@@ -319,7 +319,7 @@ abstract class CodexSessionBase implements AgentStream {
     client.onNotification((method, params) => this.handleNotification(method, params));
     client.onServerRequest((id, method) => this.handleServerRequest(id, method));
     // Version gate + `initialized`: a CLI below the minimum supported version fails the spawn here.
-    this.supportsExcludeTurns = (await initializeCodex(client, CLIENT_INFO)).supportsExcludeTurns;
+    this.excludeTurnsState.supported = (await initializeCodex(client, CLIENT_INFO)).supportsExcludeTurns;
 
     // In-app API key: provision the (redirected) CODEX_HOME's auth.json once via RPC —
     // the app-server ignores CODEX_API_KEY env (P1 finding). Subsequent spawns skip via account/read.
@@ -512,7 +512,7 @@ abstract class CodexSessionBase implements AgentStream {
       ...(developerInstructions ? { developerInstructions } : {}),
     };
     const res = (this.opts.resume
-      ? await client.request("thread/resume", { threadId: this.opts.resume, ...startParams, ...(this.supportsExcludeTurns ? { excludeTurns: true } : {}) })
+      ? await requestExcludingTurns(client, this.excludeTurnsState, "thread/resume", { threadId: this.opts.resume, ...startParams })
       : await client.request("thread/start", startParams)) as CodexThreadStartResponse;
     const threadId = res.thread?.id ?? this.opts.resume;
     if (!threadId) throw new Error("codex: thread/start returned no thread id");
@@ -938,7 +938,7 @@ export class CodexBackend implements AgentBackend {
     const { supportsExcludeTurns } = await initializeCodex(client, CLIENT_INFO);
     // Rookery only reads thread.id from the response, so skip the (deprecated) full-history hydration
     // where the CLI accepts it without experimentalApi.
-    const res = (await client.request("thread/fork", { threadId, ...(supportsExcludeTurns ? { excludeTurns: true } : {}) })) as CodexThreadStartResponse;
+    const res = (await requestExcludingTurns(client, { supported: supportsExcludeTurns }, "thread/fork", { threadId })) as CodexThreadStartResponse;
     const id = res.thread?.id;
     if (!id) throw new Error("codex: thread/fork returned no thread id");
     return { sessionId: id };
