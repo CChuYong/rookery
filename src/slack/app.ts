@@ -1,9 +1,9 @@
 import { App, Assistant, LogLevel } from "@slack/bolt";
 import path from "node:path";
 import type { SlackDeps, IncomingCtx } from "./handle-incoming.js";
-import { handleIncoming, ensureSlackReporter, inflightTurns } from "./handle-incoming.js";
+import { handleIncoming, ensureSlackReporter, inflightTurns, markSessionStopped, threadKey } from "./handle-incoming.js";
 import { SlackAgentStatus, type AgentStatusClient } from "./agent-status.js";
-import { handleAgentSessionStopped, handleAgentSessionTitleChanged, type AgentSessionEventDeps } from "./agent-session-events.js";
+import { handleAgentSessionStopped, handleAgentSessionTitleChanged, eventTeamId, makeDeduper, statusForWait, type AgentSessionEventDeps } from "./agent-session-events.js";
 import { ThreadRegistry } from "./thread-registry.js";
 import type { SlackClient, SlackFile, ThreadTarget } from "./types.js";
 import { makeFileDownloader } from "./file-download.js";
@@ -62,10 +62,18 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
 
   // Interaction bridge (approval/AskUserQuestion buttons): master canUseTool → post a Slack block, button click → resolve.
   const bridge = new SlackInteractionBridge(async (target: ThreadTarget, m: { text: string; blocks: unknown[] }) => {
-    await app.client.chat.postMessage({ channel: target.channel, thread_ts: target.threadTs, text: m.text, blocks: m.blocks as never });
+    return app.client.chat.postMessage({ channel: target.channel, thread_ts: target.threadTs, text: m.text, blocks: m.blocks as never });
   }, () => deps.slackConfig().locale,
-  // Waiting on an approval/question card → `suspended`; answered → back to `processing` (best-effort; the turn is still running).
-  (target, state) => { void agentStatus.set(statusClient, target, state === "waiting" ? "suspended" : "processing"); });
+  // Waiting on an approval/question card → `suspended`; answered → `processing` only while a Slack-started turn is in flight,
+  // else `active` (a notify flush / desktop turn in a Slack session must not leave the thread stuck in processing).
+  (target, state) => {
+    const sid = deps.sessions.findIdByKey(threadKey(target.team, target.channel, target.threadTs));
+    void agentStatus.set(statusClient, target, statusForWait(state, sid ? inflightTurns(sid) : 0));
+  },
+  // Cancelled card → single "Cancelled" line without buttons (mirrors the click handler's update).
+  async (target, ts, text) => {
+    await app.client.chat.update({ channel: target.channel, ts, text, blocks: [{ type: "section", text: { type: "mrkdwn", text } }] as never });
+  });
   deps.setBridge?.(bridge);
   // Button click (Socket Mode block_actions) → ack, then forward to the bridge. When the interaction is done, replace that message
   // with a single result line (removing the buttons) → fixes the problem of buttons staying live after a click.
@@ -117,7 +125,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       const name = live.name?.trim() || "rookery";
       await setTitle(name);
       const th = (event as unknown as { assistant_thread?: { channel_id?: string; thread_ts?: string } }).assistant_thread;
-      if (th?.channel_id && th.thread_ts) await agentStatus.set(statusClient, { channel: th.channel_id, threadTs: th.thread_ts }, "active");
+      if (th?.channel_id && th.thread_ts) await agentStatus.set(statusClient, { channel: th.channel_id, threadTs: th.thread_ts }, "active", { title: name }); // creation call: carries the title
       await say(t(live.locale, "slack.greeting", { name }));
     },
     userMessage: async ({ message, client, context }) => {
@@ -131,9 +139,11 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
         text: (m.text ?? "").trim(),
         files: toSlackFiles(m.files),
         nameResolver,
-        // title / initiator are creation-only on Slack's side; the DM thread title matches threadStarted's (agent name).
-        setStatus: (s) => agentStatus.set(statusClient, { channel: m.channel, threadTs: m.thread_ts ?? m.ts }, s, { title: deps.slackConfig().name?.trim() || "rookery", initiatorUserId: m.user }),
+        // The title is set once on threadStarted's creation call; initiator is creation-only on Slack's side.
+        setStatus: (s) => agentStatus.set(statusClient, { channel: m.channel, threadTs: m.thread_ts ?? m.ts }, s, { initiatorUserId: m.user }),
         heartbeatMs: () => agentStatus.heartbeatMs(),
+        refreshStatus: () => agentStatus.refresh(statusClient, { channel: m.channel, threadTs: m.thread_ts ?? m.ts }),
+        messageTs: m.ts,
       };
       if (ctx.userId) recipientByThread.set(threadKeyOf(ctx), ctx.userId);
       if (ctx.text || ctx.files?.length) await handleIncoming(ctx, deps, registry, download);
@@ -157,6 +167,8 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
       // Channel threads: agents.sessions.setStatus works in regular channels (needs thread_ts); failures are swallowed by the helper.
       setStatus: (s) => agentStatus.set(statusClient, { channel: e.channel, threadTs }, s, { initiatorUserId: e.user }),
       heartbeatMs: () => agentStatus.heartbeatMs(),
+      refreshStatus: () => agentStatus.refresh(statusClient, { channel: e.channel, threadTs }),
+      messageTs: e.ts,
     };
     // Let empty mentions (just @rookery) through too, so handleIncoming prompts the user to add a message (prevents a silent drop).
     if (ctx.userId) recipientByThread.set(threadKeyOf(ctx), ctx.userId);
@@ -169,7 +181,7 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
     sessions: deps.sessions,
     slackConfig: () => {
       const c = deps.slackConfig();
-      return { allowAll: c.allowAll, allowedUsers: c.allowedUsers, locale: c.locale };
+      return { allowAll: c.allowAll, allowedUsers: c.allowedUsers, locale: c.locale, name: c.name };
     },
     reporterFor: (id) => registry.get(id),
     cancelInteractions: (target) => { bridge.cancelThread(target); },
@@ -179,14 +191,16 @@ export async function startSlack(deps: SlackDeps): Promise<SlackHandle | null> {
     setStatus: (target, s) => agentStatus.set(statusClient, target, s),
     inflightTurns,
     activeWorkers: deps.activeWorkers,
+    markStopped: markSessionStopped,
+    isDuplicate: makeDeduper(256),
   };
-  type RawSessionEvent = { channel?: string; thread_ts?: string; user?: string; title?: string };
-  const onSessionEvent = (kind: "stopped" | "title") => async ({ event, body, context }: { event: unknown; body: unknown; context: { teamId?: string } }): Promise<void> => {
+  type RawSessionEvent = { channel?: string; thread_ts?: string; user?: string; title?: string; event_ts?: string };
+  const onSessionEvent = (kind: "stopped" | "title") => async ({ event, body, context }: { event: unknown; body: unknown; context: { teamId?: string; botUserId?: string } }): Promise<void> => {
     try {
       const e = event as RawSessionEvent;
-      const team = (body as { team_id?: string } | undefined)?.team_id ?? context.teamId ?? "unknown";
+      const team = eventTeamId(context, body); // same source as the message path (context.teamId) so the session key matches
       if (!e.channel || !e.thread_ts) return;
-      const base = { team, channel: e.channel, threadTs: e.thread_ts, user: e.user };
+      const base = { team, channel: e.channel, threadTs: e.thread_ts, user: e.user, eventTs: e.event_ts, botUserId: (context as { botUserId?: string }).botUserId };
       if (kind === "stopped") await handleAgentSessionStopped(base, sessionEventDeps);
       else handleAgentSessionTitleChanged({ ...base, title: e.title }, sessionEventDeps);
     } catch (err) {

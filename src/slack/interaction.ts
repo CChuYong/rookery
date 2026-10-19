@@ -59,7 +59,35 @@ export class SlackInteractionBridge {
     private readonly post: PostBlocks,
     private readonly getLocale: () => Locale = () => "ko",
     private readonly onWait?: (target: ThreadTarget, state: InteractionWaitState) => void,
+    // Replace a posted card with a one-line text (removes its buttons) — used when a card is cancelled. Best-effort.
+    private readonly updateCard?: (target: ThreadTarget, ts: string, text: string) => Promise<unknown>,
   ) {}
+
+  // Posted-card bookkeeping for cancel-time updates: ts arrives when the post resolves; `cancelled` covers a cancel that
+  // happens before the post returns (the update then fires as soon as the ts is known).
+  private readonly cards = new Map<string, { target: ThreadTarget; ts?: string; cancelled?: boolean }>();
+
+  private trackPost(id: string, target: ThreadTarget, posted: Promise<unknown>): void {
+    this.cards.set(id, { target });
+    void posted.then((r) => {
+      const c = this.cards.get(id);
+      const ts = (r as { ts?: string } | undefined)?.ts;
+      if (!c || !ts) return;
+      if (c.cancelled) { this.cards.delete(id); this.cardCancelled(target, ts); } else c.ts = ts;
+    }, () => {});
+  }
+
+  private cardCancelled(target: ThreadTarget, ts: string): void {
+    if (!this.updateCard) return;
+    void this.updateCard(target, ts, t(this.getLocale(), "interaction.cancelled")).catch(() => {});
+  }
+
+  // A pending card was cancelled (stop / abort): replace it with a single cancelled line once its ts is known.
+  private markCardCancelled(id: string): void {
+    const c = this.cards.get(id);
+    if (!c) return;
+    if (c.ts) { this.cards.delete(id); this.cardCancelled(c.target, c.ts); } else c.cancelled = true;
+  }
 
   private notifyWait(target: ThreadTarget, state: InteractionWaitState): void {
     try { this.onWait?.(target, state); } catch { /* best-effort status hook */ }
@@ -73,6 +101,7 @@ export class SlackInteractionBridge {
       if (p.target.channel !== target.channel || p.target.threadTs !== target.threadTs) continue;
       this.pending.delete(id);
       p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") });
+      this.markCardCancelled(id);
       n++;
     }
     return n;
@@ -85,20 +114,26 @@ export class SlackInteractionBridge {
     opts: { toolUseID: string; signal?: AbortSignal },
   ): Promise<PermissionResult> {
     const id = opts.toolUseID;
+    // Already aborted (e.g. the Stop button raced the tool call): never post a card or flip the status to suspended.
+    if (opts.signal?.aborted) return { behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") };
     if (toolName === "AskUserQuestion" && Array.isArray((input as { questions?: unknown }).questions)) {
       const questions = (input as { questions: Question[] }).questions;
       return new Promise<PermissionResult>((resolve) => {
         this.pending.set(id, { kind: "ask", target, questions, answers: {}, resolve });
         this.armAbort(id, opts.signal, resolve);
         this.notifyWait(target, "waiting");
-        void this.post(target, { text: t(this.getLocale(), "slack.askQuestion"), blocks: this.askBlocks(id, questions) }).catch((err) => this.failPending(id, err));
+        const posted = this.post(target, { text: t(this.getLocale(), "slack.askQuestion"), blocks: this.askBlocks(id, questions) });
+        this.trackPost(id, target, posted);
+        void posted.catch((err) => this.failPending(id, err));
       });
     }
     return new Promise<PermissionResult>((resolve) => {
       this.pending.set(id, { kind: "approve", target, resolve });
       this.armAbort(id, opts.signal, resolve);
       this.notifyWait(target, "waiting");
-      void this.post(target, { text: t(this.getLocale(), "slack.approveNeeded", { tool: toolName }), blocks: this.approveBlocks(id, toolName, input) }).catch((err) => this.failPending(id, err));
+      const posted = this.post(target, { text: t(this.getLocale(), "slack.approveNeeded", { tool: toolName }), blocks: this.approveBlocks(id, toolName, input) });
+      this.trackPost(id, target, posted);
+      void posted.catch((err) => this.failPending(id, err));
     });
   }
 
@@ -113,6 +148,7 @@ export class SlackInteractionBridge {
     if (!p) return undefined; // unknown / already resolved → ignore
     if (p.kind === "approve" && v.d) {
       this.pending.delete(v.t);
+      this.cards.delete(v.t);
       this.notifyWait(p.target, "answered");
       const allow = v.d === "allow";
       p.resolve(allow ? { behavior: "allow" } : { behavior: "deny", message: t(this.getLocale(), "interaction.denied") });
@@ -124,6 +160,7 @@ export class SlackInteractionBridge {
       // Once every question has an answer, resolve all at once.
       if (p.questions.every((qq) => qq.question in p.answers)) {
         this.pending.delete(v.t);
+        this.cards.delete(v.t);
         this.notifyWait(p.target, "answered");
         p.resolve({ behavior: "allow", updatedInput: { questions: p.questions, answers: p.answers } });
         const summary = Object.entries(p.answers).map(([k, val]) => `*${k}* → ${val}`).join("\n");
@@ -142,6 +179,7 @@ export class SlackInteractionBridge {
     const p = this.pending.get(id);
     if (!p) return; // already resolved (click raced the failure, or the turn aborted)
     this.pending.delete(id);
+    this.cards.delete(id);
     this.notifyWait(p.target, "answered"); // the turn carries on (allow/deny result below)
     process.stderr.write(`[rookery][slack] interaction post failed (${p.kind}): ${String(err)}\n`);
     if (p.kind === "approve") p.resolve({ behavior: "allow" });
@@ -157,12 +195,18 @@ export class SlackInteractionBridge {
       p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.expired") });
     }
     this.pending.clear();
+    this.cards.clear();
   }
 
   // Turn cancellation (AbortSignal) → if still pending, close it out with deny.
   private armAbort(id: string, signal: AbortSignal | undefined, resolve: (r: PermissionResult) => void): void {
     if (!signal) return;
-    const onAbort = () => { if (this.pending.delete(id)) resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") }); };
+    const onAbort = () => {
+      if (this.pending.delete(id)) {
+        resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") });
+        this.markCardCancelled(id);
+      }
+    };
     if (signal.aborted) { onAbort(); return; }
     signal.addEventListener("abort", onAbort, { once: true });
   }
