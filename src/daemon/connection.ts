@@ -7,7 +7,7 @@ import type { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import { isSafeGitRef } from "../core/git-ref.js";
 import { getAuthStatus } from "../core/auth-status.js";
 import { defaultTokenReader } from "../core/oauth-usage.js";
-import { parseClientMessage, serializeServerMessage } from "../protocol/messages.js";
+import { parseClientMessage, serializeServerMessage, isValidAutomationEffort } from "../protocol/messages.js";
 import type { ServerMessage } from "../protocol/messages.js";
 import type { Repositories } from "../persistence/repositories.js";
 import type { Automation, AutomationInput } from "../persistence/repositories.js";
@@ -785,7 +785,13 @@ export class Connection {
       }
       case "automation.update": {
         if (!this.automations) return this.reply({ type: "error", message: "automations unavailable", reqId: msg.reqId });
-        const automation = this.automations.update(msg.id, msg.patch as AutomationInput);
+        // Re-validate effort against the MERGED row: the patch may omit `provider`, in which case the stored one applies.
+        const patch = msg.patch as AutomationInput;
+        if (patch.effort != null) {
+          const provider = patch.provider ?? this.automations.list().find((x) => x.id === msg.id)?.provider;
+          if (!isValidAutomationEffort(patch.effort, provider)) return this.reply({ type: "error", message: "invalid effort", reqId: msg.reqId });
+        }
+        const automation = this.automations.update(msg.id, patch);
         if (!automation) return this.reply({ type: "error", message: `unknown automation: ${msg.id}`, reqId: msg.reqId });
         this.bus.emit({ type: "automation.changed", sessionId: ALL_CHANNEL });
         this.reply({ type: "automation.result", reqId: msg.reqId, automation });

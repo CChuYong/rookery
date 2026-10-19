@@ -5,11 +5,14 @@ import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex-transport
 import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
 import { turnCostUsd, isRatedModel } from "./codex-pricing.js";
+import { initializeCodex, requestExcludingTurns } from "./codex-version.js";
 import type { ResolvedAgentCapabilities } from "../capabilities/types.js";
 
 // Models billed at $0 because they have no pricing entry — warned once per process so the daemon log
 // surfaces the cost/budget blind spot (finding [18]) without spamming a line every turn.
 const warnedUnratedModels = new Set<string>();
+// Same once-per-process logging for efforts dropped because the cached catalog says the model lacks them.
+const warnedUnsupportedEfforts = new Set<string>();
 
 export interface CodexRuntimeProjection {
   codexHome: string;
@@ -30,6 +33,10 @@ export interface CodexBackendDeps {
   spawn: CodexSpawn;
   defaultModel: () => string; // Settings resolver — used when the session has no model (spawn override wins)
   apiKey?: () => string | undefined; // in-app codex API key (Settings resolver). Present → provision auth.json via RPC after handshake.
+  // Sync lookup of a model's supported reasoning efforts from the CACHED model/list catalog; undefined when
+  // the catalog (or the model) is unknown. Lets sendTurn drop an effort the model lacks (e.g. a global
+  // `max` default applied to a model that tops out at xhigh) instead of failing the turn.
+  modelEfforts?: (model: string) => string[] | undefined;
   env?: () => NodeJS.ProcessEnv | undefined; // extra env for the spawned child (Settings resolver, e.g. CODEX_HOME redirection)
   // Daemon MCP bridge (P2 master turns; P2.5 Track A hardening — docs/2026-07-06-p25-codex-hardening.md):
   // registers a rookery session's in-process tool defs and returns the ready-to-use per-session
@@ -128,7 +135,7 @@ function toolResultOf(item: CodexItemShape, parent: string | null): AgentEvent |
 // The spawn marker: a parent-side item/completed carrying the new child's identity. Mapped to a
 // synthetic tool_use + immediate tool_result pair whose id IS the child threadId — the desktop's
 // nestedLabel() finds the main-transcript card whose toolId equals the panel key, so labeling
-// works with zero reducer changes. kind !== "started" (interacted/interrupted) is observability
+// works with zero reducer changes. kind !== "started" (interacted/interrupted/completed) is observability
 // noise — no card.
 function spawnCardsOf(item: CodexItemShape, parent: string | null): AgentEvent[] {
   if (item.type !== "subAgentActivity" || item.kind !== "started" || !item.agentThreadId) return [];
@@ -190,6 +197,8 @@ class EventChannel {
 abstract class CodexSessionBase implements AgentStream {
   protected readonly channel = new EventChannel();
   protected client: CodexClient | null = null;
+  // Set by openClient() from the initialize handshake; gates `excludeTurns` on thread/resume (CLI >= 0.151.0).
+  protected excludeTurnsState = { supported: false };
   protected threadId: string | null = null;
   protected activeTurnId: string | null = null;
   protected turnDone: (() => void) | null = null;
@@ -315,8 +324,8 @@ abstract class CodexSessionBase implements AgentStream {
     });
     client.onNotification((method, params) => this.handleNotification(method, params));
     client.onServerRequest((id, method) => this.handleServerRequest(id, method));
-    await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
-    client.notify("initialized", {});
+    // Version gate + `initialized`: a CLI below the minimum supported version fails the spawn here.
+    this.excludeTurnsState.supported = (await initializeCodex(client, CLIENT_INFO)).supportsExcludeTurns;
 
     // In-app API key: provision the (redirected) CODEX_HOME's auth.json once via RPC —
     // the app-server ignores CODEX_API_KEY env (P1 finding). Subsequent spawns skip via account/read.
@@ -509,7 +518,7 @@ abstract class CodexSessionBase implements AgentStream {
       ...(developerInstructions ? { developerInstructions } : {}),
     };
     const res = (this.opts.resume
-      ? await client.request("thread/resume", { threadId: this.opts.resume, ...startParams })
+      ? await requestExcludingTurns(client, this.excludeTurnsState, "thread/resume", { threadId: this.opts.resume, ...startParams })
       : await client.request("thread/start", startParams)) as CodexThreadStartResponse;
     const threadId = res.thread?.id ?? this.opts.resume;
     if (!threadId) throw new Error("codex: thread/start returned no thread id");
@@ -525,6 +534,16 @@ abstract class CodexSessionBase implements AgentStream {
   // thread actually ran this turn under.
   protected async sendTurn(client: CodexClient, threadId: string, text: string, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
     const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
+    const turnModel = modelOverride || this.opts.model || this.deps.defaultModel();
+    const supported = effort ? this.deps.modelEfforts?.(turnModel) : undefined;
+    if (effort && supported && supported.length > 0 && !supported.includes(effort)) {
+      const key = `${turnModel}:${effort}`;
+      if (!warnedUnsupportedEfforts.has(key)) {
+        warnedUnsupportedEfforts.add(key);
+        console.warn(`[codex] model "${turnModel}" does not support effort "${effort}" (supports: ${supported.join(", ")}) — omitting it so the model default applies`);
+      }
+      effort = undefined;
+    }
     const turnEnded = new Promise<void>((resolve) => { this.turnDone = resolve; });
     // Arm BEFORE the turn/start request (not after it resolves): a child wedged after receiving
     // turn/start but before responding — and before emitting any notification — would otherwise be
@@ -932,9 +951,10 @@ export class CodexBackend implements AgentBackend {
   }
 
   private async doFork(client: CodexClient, threadId: string): Promise<{ sessionId: string }> {
-    await client.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { experimentalApi: false, requestAttestation: false } });
-    client.notify("initialized", {});
-    const res = (await client.request("thread/fork", { threadId })) as CodexThreadStartResponse;
+    const { supportsExcludeTurns } = await initializeCodex(client, CLIENT_INFO);
+    // Rookery only reads thread.id from the response, so skip the (deprecated) full-history hydration
+    // where the CLI accepts it without experimentalApi.
+    const res = (await requestExcludingTurns(client, { supported: supportsExcludeTurns }, "thread/fork", { threadId })) as CodexThreadStartResponse;
     const id = res.thread?.id;
     if (!id) throw new Error("codex: thread/fork returned no thread id");
     return { sessionId: id };

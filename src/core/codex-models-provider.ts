@@ -34,10 +34,12 @@ export function makeCodexModelsProvider(opts: {
   // permanently null catalog, and a mixed setup showed the wrong account's models (findings [25]/[26]).
   env?: () => NodeJS.ProcessEnv | undefined;
   apiKey?: () => string | undefined;
-}): { list(): Promise<CodexModelInfo[] | null> } {
+}): { list(): Promise<CodexModelInfo[] | null>; cached(): CodexModelInfo[] | null } {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let cache: CodexModelInfo[] | null = null; // caches the first SUCCESS only
   return {
+    // Sync peek at the first-success cache (never fetches) — for hot paths like the per-turn effort guard.
+    cached() { return cache; },
     async list() {
       if (cache) return cache;
       let client: CodexClient | undefined;

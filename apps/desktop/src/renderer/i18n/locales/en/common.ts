@@ -17,4 +17,5 @@ export default {
   "common.effortHigh": "High",
   "common.effortXhigh": "Extra high",
   "common.effortMax": "Max",
+  "common.effortUltra": "Ultra",
 } satisfies Catalog;

@@ -1,12 +1,13 @@
 // Curated wire types for the `codex app-server` JSON-RPC protocol.
-// Ground truth: `codex app-server generate-ts` output, Codex CLI 0.142.5 (2026-07-06),
-// regenerated from CLI 0.144.1 (2026-07-11) which introduced the multi-agent (collab)
-// item vocabulary below.
+// Ground truth: `codex app-server generate-ts` output, Codex CLI 0.163.0 (2026-10-19).
+// History: 0.142.5 (2026-07-06) -> 0.144.1 (2026-07-11, multi-agent/collab item vocabulary)
+// -> 0.163.0 (2026-10-19). Minimum supported CLI: 0.146.1 (enforced from the `initialize`
+// userAgent, see codex-version.ts). Fields newer than the minimum are optional and gated by version.
 // Regenerate with that command after any CLI bump and diff against these types.
 // Inbound decode is TOLERANT by design: unknown notification methods, unknown item
 // types, and extra fields are ignored (0.x protocol churn).
 
-export type CodexApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
+export type CodexApprovalPolicy = "untrusted" | "on-request" | "never";
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type CodexTurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
 
@@ -42,8 +43,11 @@ export interface CodexThreadStartParams {
   sandbox?: CodexSandboxMode;
   developerInstructions?: string;
 }
-export interface CodexThreadResumeParams extends CodexThreadStartParams { threadId: string }
-export interface CodexThreadForkParams { threadId: string }
+// `excludeTurns` skips the deprecated full-history hydration in the response. Accepted WITHOUT the
+// experimentalApi capability only from CLI 0.151.0 (older CLIs reject it with -32600) — only send
+// it after the version check (codex-version.ts EXCLUDE_TURNS_MIN_VERSION).
+export interface CodexThreadResumeParams extends CodexThreadStartParams { threadId: string; excludeTurns?: boolean }
+export interface CodexThreadForkParams { threadId: string; excludeTurns?: boolean }
 export interface CodexTurnStartParams {
   threadId: string;
   input: CodexTextInput[];
@@ -62,6 +66,8 @@ export interface CodexTokenUsageBreakdown {
   cachedInputTokens?: number;
   outputTokens?: number;
   reasoningOutputTokens?: number;
+  // Added in 0.163.0. No published cache-write price exists, so cost accounting does not bill it.
+  cacheWriteInputTokens?: number;
 }
 export interface CodexThreadTokenUsage {
   total?: CodexTokenUsageBreakdown;
@@ -76,8 +82,8 @@ export interface CodexThreadTokenUsage {
 export interface CodexCollabAgentToolCallItem {
   type: "collabAgentToolCall";
   id: string;
-  tool?: string; // spawnAgent | sendInput | resumeAgent | wait | closeAgent
-  status?: string; // inProgress | completed | failed (observed values)
+  tool?: string; // spawnAgent | sendInput | resumeAgent | wait | closeAgent (+ sendMessage | followupTask | interruptAgent | listAgents since 0.163.0)
+  status?: string; // inProgress | completed | failed (+ interrupted since 0.163.0); anything but "completed" maps to an error result
   senderThreadId?: string;
   receiverThreadIds?: string[];
   prompt?: string | null;
@@ -86,7 +92,9 @@ export interface CodexCollabAgentToolCallItem {
 export interface CodexSubAgentActivityItem {
   type: "subAgentActivity";
   id: string;
-  kind?: string; // started | interacted | interrupted
+  kind?: string; // started | interacted | interrupted (+ completed since 0.163.0)
   agentThreadId?: string;
   agentPath?: string;
+  model?: string | null; // since 0.163.0
+  reasoningEffort?: string | null; // since 0.163.0
 }

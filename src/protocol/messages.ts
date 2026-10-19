@@ -21,6 +21,12 @@ import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot } from "../core/wor
 // effort validation: allow only valid members (reject invalid values), but keep the inferred type as string (compatible with SettingsValues).
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 const effortField = z.string().refine((v) => EFFORT_LEVELS.includes(v), { message: "invalid effort" }).nullable().optional();
+// Codex-only extra level (model/list advertises it per model). The Claude path never sees it: coerceEffort() drops
+// unknown levels. Only fields whose provider is unknown at schema level (side.start) or checked in a superRefine
+// (automation) accept it; the global Claude defaults (masterEffort/workerEffort) keep the strict vocabulary.
+const CODEX_ONLY_EFFORT = "ultra";
+const effortFieldAnyProvider = z.string().refine((v) => EFFORT_LEVELS.includes(v) || v === CODEX_ONLY_EFFORT, { message: "invalid effort" }).nullable().optional();
+const automationEffortField = z.string().nullable().optional();
 
 const triggerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cron"), cron: z.string(), timezone: z.string() }),
@@ -227,13 +233,13 @@ const capabilityQuickBindingInputSchema = z.object({
   }
 });
 
-const automationInputSchema = z.object({
+const automationBaseSchema = z.object({
   name: z.string(),
   enabled: z.boolean().optional(),
   trigger: triggerSchema,
   action: actionSchema,
   model: z.string().nullable().optional(),
-  effort: effortField,
+  effort: automationEffortField, // validated provider-aware in the superRefine below
   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).nullable().optional(),
   maxTurns: z.number().int().positive().nullable().optional(),
   // Lifetime USD cost ceiling — the sibling runaway guard to maxTurns (see workers.cost_budget_usd). NULL = unlimited.
@@ -241,10 +247,30 @@ const automationInputSchema = z.object({
   // Which AgentBackend runs sessions/workers created by this automation. Optional; defaults to "claude" on write
   // (see Repositories.createAutomation). Not nullable — an automation always has a definite backend.
   provider: z.enum(["claude", "codex"]).optional(),
-}).superRefine((v, ctx) => {
+});
+
+// Effort validity for an automation given its (effective) provider. `ultra` is Codex-only.
+export function isValidAutomationEffort(effort: string, provider: string | undefined): boolean {
+  return EFFORT_LEVELS.includes(effort) || (provider === "codex" && effort === CODEX_ONLY_EFFORT);
+}
+
+function refineAutomationCron(v: z.infer<typeof automationBaseSchema>, ctx: z.RefinementCtx): void {
   if (v.trigger.kind === "cron" && !isValidCron(v.trigger.cron, v.trigger.timezone)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid cron expression", path: ["trigger", "cron"] });
   }
+}
+
+// create: the whole row is in the message, so effort is validated against its own provider here.
+const automationInputSchema = automationBaseSchema.superRefine((v, ctx) => {
+  refineAutomationCron(v, ctx);
+  if (v.effort != null && !isValidAutomationEffort(v.effort, v.provider)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
+});
+
+// update: a patch may omit `provider` (keep the stored one), so the schema only accepts the union of valid
+// efforts; the connection handler re-validates against the MERGED row (stored provider fallback).
+const automationPatchSchema = automationBaseSchema.superRefine((v, ctx) => {
+  refineAutomationCron(v, ctx);
+  if (v.effort != null && !isValidAutomationEffort(v.effort, "codex")) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
 });
 
 const clientMessageBaseSchema = z.discriminatedUnion("type", [
@@ -260,7 +286,7 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.stop"), sessionId: z.string(), reqId: z.string().optional() }),
   // Ephemeral read-only conversation forked from a master/worker provider session. It reuses the
   // source cwd (including a worker's live worktree) but never creates a session/worker/worktree row.
-  z.object({ type: z.literal("side.start"), sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim().min(1), model: z.string().optional(), effort: effortField, reqId: z.string() }),
+  z.object({ type: z.literal("side.start"), sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim().min(1), model: z.string().optional(), effort: effortFieldAnyProvider, reqId: z.string() }),
   z.object({ type: z.literal("side.send"), sideId: z.string(), text: z.string().trim().min(1), reqId: z.string().optional() }),
   z.object({ type: z.literal("side.stop"), sideId: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("side.close"), sideId: z.string(), reqId: z.string().optional() }),
@@ -417,7 +443,7 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("mcp.regenerate_token"), reqId: z.string() }),
   z.object({ type: z.literal("automation.list"), reqId: z.string() }),
   z.object({ type: z.literal("automation.create"), reqId: z.string(), automation: automationInputSchema }),
-  z.object({ type: z.literal("automation.update"), reqId: z.string(), id: z.string(), patch: automationInputSchema }),
+  z.object({ type: z.literal("automation.update"), reqId: z.string(), id: z.string(), patch: automationPatchSchema }),
   z.object({ type: z.literal("automation.delete"), reqId: z.string(), id: z.string() }),
   z.object({
     type: z.literal("automation.run"), reqId: z.string(), id: z.string(),

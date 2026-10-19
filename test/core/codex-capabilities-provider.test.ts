@@ -84,6 +84,35 @@ describe("Codex capability response mappers", () => {
     ]);
   });
 
+  it("marks MCP servers with a definitively bad runtime as unavailable; toolsError is detail only (0.163 fields)", () => {
+    const result = mapMcpResponse({ data: [
+      { name: "ok", tools: { a: {} }, authStatus: "oAuth", runtimeStatus: "connected", toolsError: null },
+      { name: "starting", tools: {}, authStatus: "unsupported", runtimeStatus: "starting" },
+      { name: "legacy", tools: {}, authStatus: "unsupported" }, // pre-0.163 shape: no runtimeStatus/toolsError
+      { name: "dead", tools: {}, authStatus: "unsupported", runtimeStatus: "failed" },
+      { name: "needslogin", tools: {}, authStatus: "oAuth", runtimeStatus: "authenticationRequired" },
+      { name: "broken", tools: {}, authStatus: "bearerToken", runtimeStatus: "connected", toolsError: "dial https://secret.example/x failed" },
+      { name: "mystery", tools: {}, authStatus: "unknown" },
+      // own bridge: stale token after a daemon restart must not read as unavailable
+      { name: "rookery", tools: {}, authStatus: "notLoggedIn", runtimeStatus: "failed", toolsError: "connection refused" },
+    ], nextCursor: null });
+    const by = Object.fromEntries(result.entries.map((e) => [e.name, e]));
+    expect(by.ok!.state).toBe("applied");
+    expect(by.starting!.state).toBe("applied");
+    expect(by.legacy!.state).toBe("applied");
+    expect(by.dead).toMatchObject({ state: "unavailable", detail: expect.stringContaining("Runtime: failed") });
+    expect(by.needslogin!.state).toBe("unavailable");
+    expect(by.broken).toMatchObject({ state: "applied", detail: expect.stringContaining("Tool discovery failed") });
+    expect(JSON.stringify(result)).not.toContain("secret.example");
+    expect(by.rookery!.state).toBe("applied");
+    expect(by.mystery).toMatchObject({ state: "applied", detail: "Authentication unknown · 0 tools" });
+  });
+
+  it("maps the packagedDefaults config layer to system scope", () => {
+    const config = mapConfigResponse({ layers: [{ name: { type: "packagedDefaults" }, version: "1", config: {} }] });
+    expect(config.entries).toEqual([expect.objectContaining({ scope: "system", state: "applied" })]);
+  });
+
   it("maps only installed plugins and preserves admin-disabled state", () => {
     const result = mapPluginResponse({
       marketplaces: [{

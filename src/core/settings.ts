@@ -9,10 +9,10 @@ export const DEFAULT_USAGE_REFRESH_MS = 120000;
 export const DEFAULT_SLACK_REFUSAL = "Sorry, you're not authorized to use this bot."; // default refusal reply for non-allowed users
 // Codex worker backend defaults (P1, settings-only — no env/config fallback, unlike workerModel/workerEffort).
 // No codexApiKey: the app-server ignores CODEX_API_KEY env; auth relies on the user's ~/.codex/auth.json (`codex login`).
-export const DEFAULT_CODEX_WORKER_MODEL = "gpt-5.5";
+export const DEFAULT_CODEX_WORKER_MODEL = "gpt-6.1-sol";
 // Codex master default model (P2, settings-only — mirrors codexWorkerModel/DEFAULT_CODEX_WORKER_MODEL's
 // "no env/config fallback" convention; symmetric master/worker split, same default value).
-export const DEFAULT_CODEX_MASTER_MODEL = "gpt-5.5";
+export const DEFAULT_CODEX_MASTER_MODEL = "gpt-6.1-sol";
 export const DEFAULT_CODEX_BIN = "codex";
 // Codex per-turn inactivity watchdog default (P2.5 Track B, settings-only — mirrors
 // DEFAULT_USAGE_REFRESH_MS's shape: a raw string in the settings table/echoed SettingsValues, ""
@@ -33,8 +33,8 @@ export interface SettingsValues {
   workerModel: string;
   masterEffort: string;
   workerEffort: string;
-  codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-5.5".
-  codexMasterModel: string; // codex master default model (settings-only, no env/config fallback). default "gpt-5.5".
+  codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-6.1-sol".
+  codexMasterModel: string; // codex master default model (settings-only, no env/config fallback). default "gpt-6.1-sol".
   codexBin: string; // codex CLI binary/path used to spawn `codex app-server` (settings-only). default "codex".
   codexTurnIdleTimeoutMs: string; // per-turn codex watchdog inactivity timeout, ms as a raw string (settings-only). 0 disables. default "0".
   codexHandshakeTimeoutMs: string; // pre-turn codex handshake+thread-start timeout, ms as a raw string (settings-only). 0 disables. default "30000".

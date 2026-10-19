@@ -28,17 +28,20 @@ export function sandboxPolicyFor(sandbox: CodexSandboxMode): CodexSandboxPolicy 
   }
 }
 
-// rookery effort vocab (low..max) → Codex ReasoningEffort (low..xhigh). `max` has no
-// Codex analog → xhigh. Unknown/empty → undefined (omit → Codex model default).
+// rookery effort vocab → Codex ReasoningEffort. Since the model/list catalog advertises
+// low/medium/high/xhigh/max/ultra per model (CLI 0.163.0) and the desktop picker is catalog-driven,
+// every level is already model-valid and passes through unchanged (`max`/`ultra` used to be
+// downgraded). Unknown/empty → undefined (omit → Codex model default). Claude's effort vocabulary
+// (src/core/effort.ts) is deliberately NOT widened: `ultra` is Codex-only.
 export function mapEffort(effort: string | undefined): string | undefined {
   switch (effort) {
     case "low":
     case "medium":
     case "high":
     case "xhigh":
-      return effort;
     case "max":
-      return "xhigh";
+    case "ultra":
+      return effort;
     default:
       return undefined;
   }

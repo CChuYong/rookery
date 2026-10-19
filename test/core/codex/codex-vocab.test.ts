@@ -15,9 +15,11 @@ describe("codex vocab", () => {
     expect(sandboxPolicyFor("read-only")).toEqual({ type: "readOnly", networkAccess: false });
     expect(sandboxPolicyFor("workspace-write")).toMatchObject({ type: "workspaceWrite", writableRoots: [] });
   });
-  it("maps effort with max→xhigh and unknown→undefined", () => {
+  it("passes every catalog effort level through and maps unknown→undefined", () => {
     expect(mapEffort("high")).toBe("high");
-    expect(mapEffort("max")).toBe("xhigh");
+    expect(mapEffort("xhigh")).toBe("xhigh");
+    expect(mapEffort("max")).toBe("max");
+    expect(mapEffort("ultra")).toBe("ultra");
     expect(mapEffort("weird")).toBeUndefined();
     expect(mapEffort(undefined)).toBeUndefined();
   });

@@ -205,6 +205,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   const codexBackend = new CodexBackend({
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
+    // Effort guard: consult the first-success model/list cache (declared below; only read at turn time).
+    modelEfforts: (model) => codexModelsProvider.cached()?.find((m) => m.id === model)?.supportedEfforts,
     apiKey: codexApiKey,
     // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
     // fresh every turn, same as the other settings resolvers on this backend. 0/negative disables it

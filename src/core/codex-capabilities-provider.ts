@@ -56,7 +56,9 @@ function capabilityScope(value: unknown, fallback: CapabilityScope = "session"):
     case "repo":
     case "project": return "repo";
     case "user": return "user";
-    case "system": return "system";
+    case "system":
+    // ConfigLayerSource "packagedDefaults" (added after 0.144): defaults shipped inside the Codex binary.
+    case "packageddefaults": return "system";
     case "admin":
     case "mdm":
     case "enterprisemanaged":
@@ -176,9 +178,15 @@ function authLabel(authStatus: string | undefined): string {
     case "bearerToken": return "Bearer token";
     case "notLoggedIn": return "Not logged in";
     case "unsupported": return "No authentication required";
+    case "unknown": return "Authentication unknown"; // McpAuthStatus "unknown" (added after 0.144)
     default: return authStatus ?? "Authentication unknown";
   }
 }
+
+// McpServerStatus.runtimeStatus (McpServerConnectionStatus, added after 0.144.1; null/absent on older CLIs
+// or when the thread-runtime state is unavailable). These values mean the server cannot serve tools
+// right now; notStarted/starting/connected/null are treated as available.
+const MCP_UNAVAILABLE_RUNTIME = new Set(["failed", "cancelled", "disabled", "authenticationRequired"]);
 
 export function mapMcpResponse(value: unknown): CapabilityContribution {
   const source = "Codex mcpServerStatus/list";
@@ -192,16 +200,30 @@ export function mapMcpResponse(value: unknown): CapabilityContribution {
     const tools = record(server.tools);
     const authStatus = stringValue(server.authStatus);
     const toolCount = tools ? Object.keys(tools).length : 0;
+    const runtimeStatus = stringValue(server.runtimeStatus);
+    // toolsError = tool discovery failed and no catalog was returned. DETAIL ONLY, never "unavailable": the
+    // probe is a short-lived child in the master's CODEX_HOME, where a slow stdio server can miss the short
+    // startup timeout and the `rookery` bridge url may hold a token that died with the last daemon restart
+    // (re-registered on the next turn) — both would be false negatives. The raw message can embed endpoint
+    // details, so only its presence is surfaced.
+    const toolsFailed = stringValue(server.toolsError) !== undefined;
+    // Rookery's own bridge entry is never judged from the probe (same stale-token reason).
+    const ownBridge = name.toLowerCase() === "rookery";
+    const runtimeBad = !ownBridge && runtimeStatus !== undefined && MCP_UNAVAILABLE_RUNTIME.has(runtimeStatus);
     entries.push({
       id: `codex.mcp.${name.toLowerCase()}`,
       kind: "mcp",
       name,
       description: "MCP server available to Codex.",
-      detail: `${authLabel(authStatus)} · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}`,
+      detail: joinDetails([
+        `${authLabel(authStatus)} · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}`,
+        runtimeBad ? `Runtime: ${runtimeStatus}` : undefined,
+        toolsFailed ? "Tool discovery failed" : undefined,
+      ]),
       provider: "codex",
       source,
       scope: "session",
-      state: authStatus === "notLoggedIn" ? "unavailable" : "applied",
+      state: !ownBridge && (authStatus === "notLoggedIn" || runtimeBad) ? "unavailable" : "applied",
       evidence: "runtime",
     });
   }
