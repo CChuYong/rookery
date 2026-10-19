@@ -216,6 +216,8 @@ describe("MasterAgent", () => {
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as typeof base.queryFn;
     const d = { ...base, queryFn: blocking, backend: new ClaudeBackend(blocking) };
+    const events: CoreEvent[] = [];
+    d.bus.subscribe("s1", (e) => events.push(e));
     const master = new MasterAgent({ sessionId: "s1", cwd: "/x", sdkSessionId: null, deps: d });
 
     const p1 = master.runTurn("first");
@@ -227,6 +229,9 @@ describe("MasterAgent", () => {
 
     expect(prompts).toEqual(["first", "after-stop"]);
     expect(d.repos.listMessages("s1").map((m) => m.content)).not.toContain("queued-before-stop");
+    const cancelled = events.filter((e) => e.type === "master.notice" && (e as { code?: string }).code === "notice.queuedCancelled");
+    expect(cancelled).toHaveLength(1); // once per stop, not per turn
+    expect(cancelled[0]).toMatchObject({ params: { count: 1 } });
   });
 
   it("stopAll() does not cancel a pending worker-notification flush (it is not user input)", async () => {
