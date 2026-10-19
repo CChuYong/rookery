@@ -158,6 +158,15 @@ describe("ClaudeBackend — option assembly", () => {
   }
   const RESULT = [{ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" } as const];
 
+  it("openSession: systemPrompt preset opts out of the SDK snapshot so a changed append is honored on resume", async () => {
+    const cap = capture(RESULT);
+    const backend = new ClaudeBackend(cap.fn);
+    const q = new MessageQueue();
+    q.close();
+    await collect(backend.openSession(q, baseOpts({ resume: "sdk-old", systemPromptAppend: "NEW" })));
+    expect(cap.input().options!.systemPrompt).toEqual({ type: "preset", preset: "claude_code", snapshot: false, append: "NEW" });
+  });
+
   it("startTurn: preset+append, effort gating, resume, tool passthrough, no forwardSubagentText", async () => {
     const cap = capture(RESULT);
     const backend = new ClaudeBackend(cap.fn);
@@ -172,7 +181,7 @@ describe("ClaudeBackend — option assembly", () => {
     expect(o.model).toBe("claude-opus-4-8");
     expect(o.effort).toBe("high");
     expect(o.thinking).toEqual({ type: "adaptive", display: "summarized" });
-    expect(o.systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: "EXTRA" });
+    expect(o.systemPrompt).toEqual({ type: "preset", preset: "claude_code", snapshot: false, append: "EXTRA" });
     expect(o.permissionMode).toBe("bypassPermissions");
     expect(o.includePartialMessages).toBe(true);
     expect(o.resume).toBe("sdk-old");
@@ -261,6 +270,7 @@ describe("ClaudeBackend — option assembly", () => {
     expect(options.systemPrompt).toEqual({
       type: "preset",
       preset: "claude_code",
+      snapshot: false,
       append: "BASE INSTRUCTIONS\n\nMANAGED INSTRUCTIONS",
     });
     expect((options.env as Record<string, string>).ROOKERY_CAP_SECRET_SAFE_ALIAS).toBe("actual-secret-value");

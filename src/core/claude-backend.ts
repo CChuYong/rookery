@@ -288,7 +288,11 @@ export class ClaudeBackend implements AgentBackend {
       ...(effortApplies(opts.model) && coerceEffort(opts.effort) ? { effort: coerceEffort(opts.effort) } : {}),
       ...(effortApplies(opts.model) ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),
       permissionMode: opts.permissionMode as QueryOptions["permissionMode"],
-      systemPrompt: { type: "preset", preset: "claude_code", ...(systemPromptAppend ? { append: systemPromptAppend } : {}) },
+      // snapshot:false — since SDK 0.3.267 the default is to record the system prompt once per conversation and
+      // IGNORE a changed `append` on resume (live-verified on 0.3.303: a resumed turn kept answering from the
+      // first turn's append). Rookery rebuilds the append every master turn (memories, repo catalog, masterName,
+      // managed capability instructions) and on worker stream replacement, so the per-call value must stay authoritative.
+      systemPrompt: { type: "preset", preset: "claude_code", snapshot: false, ...(systemPromptAppend ? { append: systemPromptAppend } : {}) },
       ...(managed?.plugins.length ? { plugins: managed.plugins } : {}),
       ...(managed && Object.keys(managed.env).length > 0 ? { env: { ...process.env, ...managed.env } } : {}),
       includePartialMessages: true,
