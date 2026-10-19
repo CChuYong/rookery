@@ -72,6 +72,10 @@ export interface IncomingCtx {
   // Re-send interval for `processing` (it expires: 1h on agents.sessions.setStatus, ~2min on the legacy API). Read after the
   // first setStatus so the status helper has detected which API is live. Absent → the legacy 90s.
   heartbeatMs?: () => number;
+  // Heartbeat tick: re-send the thread's CURRENT status (so a heartbeat can't overwrite `suspended`). Absent → setStatus("processing").
+  refreshStatus?: () => Promise<void>;
+  // Slack ts of the incoming message — lets handleIncoming drop a message that was sent before a Stop-button press.
+  messageTs?: string;
   // Connection-scoped name resolver (conversations.info/users.info, cached) — powers the [Slack]
   // context header's human-readable names. Absent/failed → raw ids only (best-effort).
   nameResolver?: SlackRefResolver;
@@ -122,6 +126,36 @@ function defaultHeartbeat(fn: () => void, ms: number): () => void {
   const t = setInterval(fn, ms);
   t.unref?.(); // so the heartbeat does not keep the daemon/test process alive
   return () => clearInterval(t);
+}
+
+// Stop-button marks: per session, the Slack event_ts of the latest agent_session_stopped. A message whose own ts is not newer
+// than that was sent BEFORE the stop and must not run, even if it is still busy in handleIncoming's awaits (status call,
+// context prefix, attachment downloads) and would otherwise enqueue its turn after the stop. Bounded (oldest evicted).
+const stopMarks = new Map<string, string>();
+const STOP_MARKS_MAX = 512;
+
+// Numeric compare of Slack ts strings ("seconds.micros"); returns <0, 0, >0.
+export function compareSlackTs(a: string, b: string): number {
+  const [as = "0", af = ""] = a.split(".");
+  const [bs = "0", bf = ""] = b.split(".");
+  const x = BigInt(as || "0") * 1_000_000_000n + BigInt(af.padEnd(9, "0").slice(0, 9) || "0");
+  const y = BigInt(bs || "0") * 1_000_000_000n + BigInt(bf.padEnd(9, "0").slice(0, 9) || "0");
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+export function markSessionStopped(sessionId: string, eventTs: string): void {
+  if (!/^\d+(\.\d+)?$/.test(eventTs)) return;
+  const prev = stopMarks.get(sessionId);
+  if (prev && compareSlackTs(prev, eventTs) >= 0) return;
+  stopMarks.delete(sessionId);
+  stopMarks.set(sessionId, eventTs);
+  while (stopMarks.size > STOP_MARKS_MAX) stopMarks.delete(stopMarks.keys().next().value as string);
+}
+
+function sentBeforeStop(sessionId: string, messageTs?: string): boolean {
+  const mark = stopMarks.get(sessionId);
+  if (!mark || !messageTs || !/^\d+(\.\d+)?$/.test(messageTs)) return false;
+  return compareSlackTs(messageTs, mark) <= 0;
 }
 
 export function threadKey(team: string, channel: string, threadTs: string): string {
@@ -211,10 +245,12 @@ export async function handleIncoming(
   inflight.set(session.id, (inflight.get(session.id) ?? 0) + 1);
   await setStatus("processing");
   // Periodically refresh status during a long turn so it doesn't expire (UX-14).
-  const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void setStatus("processing"); }, ctx.heartbeatMs?.() ?? HEARTBEAT_MS);
+  const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void (ctx.refreshStatus ? ctx.refreshStatus().catch(() => {}) : setStatus("processing")); }, ctx.heartbeatMs?.() ?? HEARTBEAT_MS);
   try {
     // The empty-turn guard above ran on the raw composition — the header alone never makes a turn.
-    await session.master.runTurn(`${await buildSlackContextPrefix(ctx)}\n\n${turnText}`);
+    const prefix = await buildSlackContextPrefix(ctx);
+    if (sentBeforeStop(session.id, ctx.messageTs)) return; // sent before the Stop button was pressed → cancelled (finally still runs)
+    await session.master.runTurn(`${prefix}\n\n${turnText}`);
   } catch {
     // A turn failure is already surfaced to the thread by the reporter via the EventBus 'error' event → posting again here would be a duplicate (MS-2).
   } finally {
