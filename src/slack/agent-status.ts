@@ -11,12 +11,9 @@ export interface AgentStatusClient {
   assistant: { threads: { setStatus(a: { channel_id: string; thread_ts: string; status: string }): Promise<unknown> } };
 }
 
-// Errors meaning "this method/feature is not available to us" (as opposed to transient/per-call failures such as
-// ratelimited or channel_not_found) → switch to the legacy API for the rest of the process.
-const UNAVAILABLE_CODES = new Set([
-  "unknown_method", "feature_disabled", "not_allowed_token_type", "missing_scope", "method_deprecated",
-  "not_allowed", "access_denied", "team_access_not_granted",
-]);
+// Method-level errors meaning "this method/feature is not available to us" → switch to the legacy API for the rest of the
+// process. Everything else (ratelimited, channel_not_found, not_allowed, access_denied, …) is a per-call failure: no flip.
+const UNAVAILABLE_CODES = new Set(["unknown_method", "feature_disabled", "not_allowed_token_type", "method_deprecated", "missing_scope"]);
 
 const NEW_API_HEARTBEAT_MS = 30 * 60_000; // `processing` auto-expires after 1h → re-send well under that
 const LEGACY_HEARTBEAT_MS = 90_000; // legacy status disappears after ~2 min of inactivity
@@ -37,6 +34,8 @@ function hasWarning(res: unknown, w: string): boolean {
 export class SlackAgentStatus {
   private legacy = false; // process-wide: the new API was reported unavailable
   private warned = false;
+  private readonly loggedCodes = new Set<string>(); // each distinct error code is logged once per process
+  private readonly lastStatus = new Map<string, AgentSessionStatus>(); // per thread; absent = active/never set
   private readonly chains = new Map<string, Promise<void>>(); // per-thread ordering (processing → active must not reorder)
 
   constructor(private readonly log: (msg: string) => void = (m) => { process.stderr.write(m); }) {}
@@ -49,11 +48,19 @@ export class SlackAgentStatus {
   // title / initiatorUserId are creation-only on Slack's side (ignored for an existing session).
   set(client: AgentStatusClient, t: Pick<ThreadTarget, "channel" | "threadTs">, status: AgentSessionStatus, init?: { title?: string; initiatorUserId?: string }): Promise<void> {
     const key = `${t.channel}:${t.threadTs}`;
+    if (status === "active") this.lastStatus.delete(key); else this.lastStatus.set(key, status);
     const prev = this.chains.get(key) ?? Promise.resolve();
     const next = prev.then(() => this.send(client, t, status, init)).catch(() => {});
     this.chains.set(key, next);
     void next.then(() => { if (this.chains.get(key) === next) this.chains.delete(key); });
     return next;
+  }
+
+  // Heartbeat: re-send the thread's CURRENT status (processing expires; suspended must not be overwritten by a stale
+  // processing). No-op when the thread is active/unknown.
+  refresh(client: AgentStatusClient, t: Pick<ThreadTarget, "channel" | "threadTs">): Promise<void> {
+    const last = this.lastStatus.get(`${t.channel}:${t.threadTs}`);
+    return last ? this.set(client, t, last) : Promise.resolve();
   }
 
   private async send(client: AgentStatusClient, t: Pick<ThreadTarget, "channel" | "threadTs">, status: AgentSessionStatus, init?: { title?: string; initiatorUserId?: string }): Promise<void> {
@@ -73,9 +80,13 @@ export class SlackAgentStatus {
         return;
       } catch (err) {
         const code = errorCode(err);
+        if (code && !this.loggedCodes.has(code)) {
+          this.loggedCodes.add(code);
+          this.log(`[rookery][slack] agents.sessions.setStatus failed (${code})\n`);
+        }
         if (!code || !UNAVAILABLE_CODES.has(code)) return; // transient / per-call failure: best-effort, no fallback
         this.legacy = true;
-        this.log(`[rookery][slack] agents.sessions.setStatus unavailable (${code}) — falling back to assistant.threads.setStatus\n`);
+        this.log("[rookery][slack] falling back to assistant.threads.setStatus\n");
       }
     }
     if (status === "suspended") return; // the legacy API has no "waiting for input" state

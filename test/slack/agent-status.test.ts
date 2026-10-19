@@ -94,4 +94,31 @@ describe("SlackAgentStatus", () => {
     await Promise.all([p1, p2]);
     expect(order).toEqual(["processing", "active"]);
   });
+
+  it("per-call codes (not_allowed, access_denied) do not flip to legacy; each code is logged once", async () => {
+    for (const code of ["not_allowed", "access_denied"]) {
+      const f = fake({ apiError: code });
+      const logs: string[] = [];
+      const s = new SlackAgentStatus((m) => logs.push(m));
+      await s.set(f.client, T, "processing");
+      await s.set(f.client, T, "processing");
+      expect(f.legacy).toEqual([]);
+      expect(f.api).toHaveLength(2); // still on the new API
+      expect(logs.filter((l) => l.includes(code))).toHaveLength(1);
+    }
+  });
+
+  it("refresh() re-sends the last status: a heartbeat never overwrites suspended with processing", async () => {
+    const f = fake();
+    const s = new SlackAgentStatus(() => {});
+    await s.refresh(f.client, T); // nothing set yet → no-op
+    await s.set(f.client, T, "processing");
+    await s.set(f.client, T, "suspended");
+    await s.refresh(f.client, T);
+    expect(f.api.map((c) => c.args.status)).toEqual(["processing", "suspended", "suspended"]);
+    await s.set(f.client, T, "active");
+    await s.refresh(f.client, T); // active → no-op
+    expect(f.api.map((c) => c.args.status)).toEqual(["processing", "suspended", "suspended", "active"]);
+  });
+
 });
