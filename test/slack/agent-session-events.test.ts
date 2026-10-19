@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { handleAgentSessionStopped, handleAgentSessionTitleChanged, type AgentSessionEventDeps } from "../../src/slack/agent-session-events.js";
+import { handleAgentSessionStopped, handleAgentSessionTitleChanged, eventTeamId, makeDeduper, statusForWait, type AgentSessionEventDeps } from "../../src/slack/agent-session-events.js";
 
 function setup(over: Partial<AgentSessionEventDeps> = {}, cfg: { allowAll?: boolean; allowedUsers?: string[] } = { allowedUsers: ["U1"] }) {
   const calls: string[] = [];
@@ -11,7 +11,7 @@ function setup(over: Partial<AgentSessionEventDeps> = {}, cfg: { allowAll?: bool
       stop: vi.fn(async () => { calls.push("stop"); }),
       rename: vi.fn(),
     },
-    slackConfig: () => ({ allowAll: cfg.allowAll ?? false, allowedUsers: cfg.allowedUsers ?? [], locale: "en" as const }),
+    slackConfig: () => ({ allowAll: cfg.allowAll ?? false, allowedUsers: cfg.allowedUsers ?? [], locale: "en" as const, name: "Rook" }),
     reporterFor: () => ({ markStreamsStopped: () => { calls.push("markStreamsStopped"); } }),
     cancelInteractions: () => { calls.push("cancelInteractions"); },
     post: async (_c, _t, text) => { posts.push(text); },
@@ -88,5 +88,48 @@ describe("handleAgentSessionTitleChanged", () => {
     const s = setup();
     handleAgentSessionTitleChanged({ ...evt, title: "x".repeat(500) }, s.deps);
     expect((s.deps.sessions.rename as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toHaveLength(200);
+  });
+  it("ignores our own echo: no user, bot user, or the configured agent name as title", () => {
+    const s = setup();
+    handleAgentSessionTitleChanged({ ...evt, user: undefined }, s.deps);
+    handleAgentSessionTitleChanged({ ...evt, botUserId: "U1" }, s.deps);
+    handleAgentSessionTitleChanged({ ...evt, title: "Rook" }, s.deps);
+    expect(s.deps.sessions.rename).not.toHaveBeenCalled();
+  });
+
+});
+
+describe("stop event hardening", () => {
+  it("marks the stop ts before stopping, and drops duplicate deliveries", async () => {
+    const order: string[] = [];
+    const seen = makeDeduper(2);
+    const s = setup({
+      markStopped: (id, ts) => { order.push(`mark:${id}:${ts}`); },
+      isDuplicate: seen,
+      sessions: { findIdByKey: () => "s1", stop: vi.fn(async () => { order.push("stop"); }), rename: vi.fn() },
+    });
+    await handleAgentSessionStopped({ ...stopEvt, eventTs: "5.1" }, s.deps);
+    await handleAgentSessionStopped({ ...stopEvt, eventTs: "5.1" }, s.deps); // retry
+    expect(order).toEqual(["mark:s1:5.1", "stop"]);
+    expect(s.posts).toHaveLength(1);
+  });
+
+  it("makeDeduper is a bounded LRU", () => {
+    const d = makeDeduper(2);
+    expect([d("a"), d("b"), d("c")]).toEqual([false, false, false]);
+    expect(d("a")).toBe(false); // evicted
+    expect(d("c")).toBe(true);
+  });
+
+  it("eventTeamId prefers context.teamId, then body.team_id", () => {
+    expect(eventTeamId({ teamId: "TC" }, { team_id: "TB" })).toBe("TC");
+    expect(eventTeamId({}, { team_id: "TB" })).toBe("TB");
+    expect(eventTeamId(undefined, undefined)).toBe("unknown");
+  });
+
+  it("statusForWait: answered returns to processing only while a turn is in flight", () => {
+    expect(statusForWait("waiting", 0)).toBe("suspended");
+    expect(statusForWait("answered", 1)).toBe("processing");
+    expect(statusForWait("answered", 0)).toBe("active");
   });
 });
