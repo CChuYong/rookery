@@ -5,6 +5,7 @@ import type { FileDownloader } from "./file-download.js";
 import type { SlackInteractionBridge } from "./interaction.js";
 import type { SlackReadOps } from "../tools/slack-tools.js";
 import type { SlackRefResolver } from "./name-resolver.js";
+import type { AgentSessionStatus } from "./agent-status.js";
 import { ThreadRegistry } from "./thread-registry.js";
 import { SlackThreadReporter } from "./reporter.js";
 import { t, type Locale } from "../core/i18n.js";
@@ -64,7 +65,11 @@ export interface IncomingCtx {
   userId?: string;
   text: string;
   files?: SlackFile[]; // attached files (if any, download and append to the turn as @paths)
-  setStatus: (s: string) => Promise<void>;
+  // Agent-session status for this thread (processing → active; suspended while waiting on the user). Best-effort.
+  setStatus: (s: AgentSessionStatus) => Promise<void>;
+  // Re-send interval for `processing` (it expires: 1h on agents.sessions.setStatus, ~2min on the legacy API). Read after the
+  // first setStatus so the status helper has detected which API is live. Absent → the legacy 90s.
+  heartbeatMs?: () => number;
   // Connection-scoped name resolver (conversations.info/users.info, cached) — powers the [Slack]
   // context header's human-readable names. Absent/failed → raw ids only (best-effort).
   nameResolver?: SlackRefResolver;
@@ -103,9 +108,14 @@ const EMPTY_MSG = (loc: Locale): string => t(loc, "slack.emptyMsg");
 // from text only and they assume it saw the file.
 const PARTIAL_FILE = (loc: Locale, n: number): string => t(loc, "slack.partialFile", { count: n });
 
-// Long-turn heartbeat: Slack assistant status disappears after 2 minutes of inactivity → keep it alive by periodically re-setting it during progress.
+// Sender allowlist gate (fail-closed): ALLOW_ALL, or a user in the allowlist. Shared by messages, the stop button and title sync.
+export function isPermittedUser(sc: Pick<SlackConfig, "allowedUsers" | "allowAll">, userId?: string): boolean {
+  return sc.allowAll || (sc.allowedUsers.length > 0 && sc.allowedUsers.includes(userId ?? ""));
+}
+
+// Long-turn heartbeat: the processing status expires if not refreshed → keep it alive by periodically re-setting it during progress.
 export type HeartbeatScheduler = (fn: () => void, ms: number) => () => void;
-const HEARTBEAT_MS = 90000; // below the 2-minute timeout
+const HEARTBEAT_MS = 90000; // legacy default: below the 2-minute timeout
 function defaultHeartbeat(fn: () => void, ms: number): () => void {
   const t = setInterval(fn, ms);
   t.unref?.(); // so the heartbeat does not keep the daemon/test process alive
@@ -138,6 +148,9 @@ export function ensureSlackReporter(registry: ThreadRegistry, client: SlackClien
 
 // In-flight turn count per session — prevents clearing status early when concurrent messages arrive in the same thread (slack-concurrent-turns-status-race).
 const inflight = new Map<string, number>();
+export function inflightTurns(sessionId: string): number {
+  return inflight.get(sessionId) ?? 0;
+}
 
 export async function handleIncoming(
   ctx: IncomingCtx,
@@ -150,9 +163,7 @@ export async function handleIncoming(
   // Empty allowlist + ALLOW_ALL unset means everyone is denied — so a default deployment is not left wide open.
   // (On refusal, no session/turn is created; only a refusal message is left.)
   const sc = deps.slackConfig();
-  const { allowedUsers, allowAll } = sc;
-  const permitted = allowAll || (allowedUsers.length > 0 && allowedUsers.includes(ctx.userId ?? ""));
-  if (!permitted) {
+  if (!isPermittedUser(sc, ctx.userId)) {
     // Reply only when refusal auto-reply is on and a message is set (silently ignore when off).
     if (sc.refuseReply && sc.refusalMessage.trim()) await safePost(ctx.client, ctx.channel, ctx.threadTs, sc.refusalMessage);
     return;
@@ -191,14 +202,14 @@ export async function handleIncoming(
   );
 
   // Wrap setStatus as best-effort — a failure must not break the turn (slack-setstatus-failure).
-  const setStatus = async (s: string) => {
+  const setStatus = async (s: AgentSessionStatus) => {
     try { await ctx.setStatus(s); } catch { /* best-effort */ }
   };
 
   inflight.set(session.id, (inflight.get(session.id) ?? 0) + 1);
-  await setStatus("thinking…");
-  // Periodically refresh status during a long turn so it doesn't disappear on the 2-minute timeout (UX-14).
-  const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void setStatus("thinking…"); }, HEARTBEAT_MS);
+  await setStatus("processing");
+  // Periodically refresh status during a long turn so it doesn't expire (UX-14).
+  const stopBeat = (scheduleHeartbeat ?? defaultHeartbeat)(() => { void setStatus("processing"); }, ctx.heartbeatMs?.() ?? HEARTBEAT_MS);
   try {
     // The empty-turn guard above ran on the raw composition — the header alone never makes a turn.
     await session.master.runTurn(`${await buildSlackContextPrefix(ctx)}\n\n${turnText}`);
@@ -209,7 +220,7 @@ export async function handleIncoming(
     const n = (inflight.get(session.id) ?? 1) - 1;
     if (n <= 0) {
       inflight.delete(session.id);
-      await setStatus(""); // clear status only when the last in-flight turn finishes
+      await setStatus("active"); // clear status only when the last in-flight turn finishes
     } else {
       inflight.set(session.id, n);
     }

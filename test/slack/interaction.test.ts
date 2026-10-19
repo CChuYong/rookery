@@ -162,3 +162,27 @@ describe("dispose (bridge discarded with prompts pending — reconcile/toggle-of
     expect(() => { bridge.dispose(); bridge.dispose(); }).not.toThrow();
   });
 });
+
+describe("SlackInteractionBridge status hooks + cancelThread", () => {
+  it("reports waiting on post and answered on click; cancelThread denies only that thread's prompts silently", async () => {
+    const events: string[] = [];
+    const bridge = new SlackInteractionBridge(async () => {}, () => "en", (_t, s) => events.push(s));
+    const p1 = bridge.prompt(target, "Bash", {}, { toolUseID: "a" });
+    const other: ThreadTarget = { channel: "C2", threadTs: "9.9", team: "T1" };
+    const p2 = bridge.prompt(other, "Bash", {}, { toolUseID: "b" });
+    expect(events).toEqual(["waiting", "waiting"]);
+    expect(bridge.cancelThread(target)).toBe(1);
+    await expect(p1).resolves.toMatchObject({ behavior: "deny", message: "Cancelled" });
+    expect(events).toEqual(["waiting", "waiting"]); // cancel reports nothing (stop path owns the status)
+    bridge.handleAction(JSON.stringify({ t: "b", d: "allow" }));
+    await expect(p2).resolves.toEqual({ behavior: "allow" });
+    expect(events).toEqual(["waiting", "waiting", "answered"]);
+  });
+
+  it("a throwing status hook never breaks the prompt", async () => {
+    const bridge = new SlackInteractionBridge(async () => {}, () => "en", () => { throw new Error("x"); });
+    const p = bridge.prompt(target, "Bash", {}, { toolUseID: "a" });
+    bridge.handleAction(JSON.stringify({ t: "a", d: "deny" }));
+    await expect(p).resolves.toMatchObject({ behavior: "deny" });
+  });
+});

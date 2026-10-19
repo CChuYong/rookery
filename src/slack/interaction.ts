@@ -11,8 +11,13 @@ interface Question {
 }
 
 type Pending =
-  | { kind: "approve"; resolve: (r: PermissionResult) => void }
-  | { kind: "ask"; questions: Question[]; answers: Record<string, string>; resolve: (r: PermissionResult) => void };
+  | { kind: "approve"; target: ThreadTarget; resolve: (r: PermissionResult) => void }
+  | { kind: "ask"; target: ThreadTarget; questions: Question[]; answers: Record<string, string>; resolve: (r: PermissionResult) => void };
+
+// Lifecycle hook for the Slack agent-session status: "waiting" = a prompt card was posted (→ suspended), "answered" = the
+// user answered or the post failed and the turn carries on (→ processing again). Cancelled/expired prompts report nothing:
+// the turn is being torn down and the stop/finally paths own the final status.
+export type InteractionWaitState = "waiting" | "answered";
 
 // Post a single message with blocks to a thread (injected for tests). In practice a wrapper over Slack chat.postMessage.
 export type PostBlocks = (target: ThreadTarget, msg: { text: string; blocks: unknown[] }) => Promise<unknown>;
@@ -50,7 +55,28 @@ export function makeSlackCanUseTool(externalKey: string | null, getBridge: () =>
 // core knows nothing about this; the daemon routes session → thread and wires prompt() up as canUseTool.
 export class SlackInteractionBridge {
   private readonly pending = new Map<string, Pending>(); // toolUseID -> pending
-  constructor(private readonly post: PostBlocks, private readonly getLocale: () => Locale = () => "ko") {}
+  constructor(
+    private readonly post: PostBlocks,
+    private readonly getLocale: () => Locale = () => "ko",
+    private readonly onWait?: (target: ThreadTarget, state: InteractionWaitState) => void,
+  ) {}
+
+  private notifyWait(target: ThreadTarget, state: InteractionWaitState): void {
+    try { this.onWait?.(target, state); } catch { /* best-effort status hook */ }
+  }
+
+  // Stop button: resolve every pending prompt of this thread as cancelled (deny) right away, instead of waiting for the
+  // turn's abort signal to propagate through the SDK. Idempotent with armAbort (whichever fires first deletes the entry).
+  cancelThread(target: Pick<ThreadTarget, "channel" | "threadTs">): number {
+    let n = 0;
+    for (const [id, p] of this.pending) {
+      if (p.target.channel !== target.channel || p.target.threadTs !== target.threadTs) continue;
+      this.pending.delete(id);
+      p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.cancelled") });
+      n++;
+    }
+    return n;
+  }
 
   async prompt(
     target: ThreadTarget,
@@ -62,14 +88,16 @@ export class SlackInteractionBridge {
     if (toolName === "AskUserQuestion" && Array.isArray((input as { questions?: unknown }).questions)) {
       const questions = (input as { questions: Question[] }).questions;
       return new Promise<PermissionResult>((resolve) => {
-        this.pending.set(id, { kind: "ask", questions, answers: {}, resolve });
+        this.pending.set(id, { kind: "ask", target, questions, answers: {}, resolve });
         this.armAbort(id, opts.signal, resolve);
+        this.notifyWait(target, "waiting");
         void this.post(target, { text: t(this.getLocale(), "slack.askQuestion"), blocks: this.askBlocks(id, questions) }).catch((err) => this.failPending(id, err));
       });
     }
     return new Promise<PermissionResult>((resolve) => {
-      this.pending.set(id, { kind: "approve", resolve });
+      this.pending.set(id, { kind: "approve", target, resolve });
       this.armAbort(id, opts.signal, resolve);
+      this.notifyWait(target, "waiting");
       void this.post(target, { text: t(this.getLocale(), "slack.approveNeeded", { tool: toolName }), blocks: this.approveBlocks(id, toolName, input) }).catch((err) => this.failPending(id, err));
     });
   }
@@ -85,6 +113,7 @@ export class SlackInteractionBridge {
     if (!p) return undefined; // unknown / already resolved → ignore
     if (p.kind === "approve" && v.d) {
       this.pending.delete(v.t);
+      this.notifyWait(p.target, "answered");
       const allow = v.d === "allow";
       p.resolve(allow ? { behavior: "allow" } : { behavior: "deny", message: t(this.getLocale(), "interaction.denied") });
       return { done: true, summary: allow ? t(this.getLocale(), "interaction.approved") : t(this.getLocale(), "interaction.rejected") };
@@ -95,6 +124,7 @@ export class SlackInteractionBridge {
       // Once every question has an answer, resolve all at once.
       if (p.questions.every((qq) => qq.question in p.answers)) {
         this.pending.delete(v.t);
+        this.notifyWait(p.target, "answered");
         p.resolve({ behavior: "allow", updatedInput: { questions: p.questions, answers: p.answers } });
         const summary = Object.entries(p.answers).map(([k, val]) => `*${k}* → ${val}`).join("\n");
         return { done: true, summary: t(this.getLocale(), "interaction.answered", { summary }) };
@@ -112,6 +142,7 @@ export class SlackInteractionBridge {
     const p = this.pending.get(id);
     if (!p) return; // already resolved (click raced the failure, or the turn aborted)
     this.pending.delete(id);
+    this.notifyWait(p.target, "answered"); // the turn carries on (allow/deny result below)
     process.stderr.write(`[rookery][slack] interaction post failed (${p.kind}): ${String(err)}\n`);
     if (p.kind === "approve") p.resolve({ behavior: "allow" });
     else p.resolve({ behavior: "deny", message: t(this.getLocale(), "interaction.postFailed") });

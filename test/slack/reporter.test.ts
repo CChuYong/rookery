@@ -429,3 +429,20 @@ describe("threadAlert", () => {
     expect(streamed).toContain("the full assistant answer");     // the real message was NOT dropped
   });
 });
+
+describe("SlackThreadReporter.markStreamsStopped", () => {
+  it("drops the dead streamer without stopping it; the next delta opens a fresh stream", async () => {
+    const rec: Rec = { streams: [], posts: [] };
+    const r = new SlackThreadReporter(fakeClient(rec), { channel: "C", threadTs: "1.1", team: "T" });
+    const delta = (d: string) => ({ type: "master.message.delta", sessionId: "s", delta: d.padEnd(60, ".") }) as CoreEvent;
+    r.onEvent(delta("one"));
+    await new Promise((res) => setTimeout(res, 0));
+    expect(rec.streams).toHaveLength(1);
+    r.markStreamsStopped();
+    expect(rec.streams[0]!.stopped).toBe(false); // NOT stopped by us — Slack already did
+    r.onEvent(delta("two"));
+    await new Promise((res) => setTimeout(res, 0));
+    expect(rec.streams).toHaveLength(2);
+    expect(rec.streams[1]!.chunks.some((c) => c.type === "markdown_text" && c.text.includes("two"))).toBe(true);
+  });
+});

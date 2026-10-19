@@ -213,6 +213,15 @@ export class SlackThreadReporter {
     await this.appendThinkCard("complete", rest);
   }
 
+  // Slack stopped our in-progress streaming message(s) itself (agent_session_stopped → streaming_message_ts): forget the
+  // streamer WITHOUT calling stop() on it — it is already dead — so the next append opens a fresh stream instead of
+  // failing with message_not_in_streaming_state. Undelivered buffers/cards belonged to the dead stream and are dropped.
+  markStreamsStopped(): void {
+    this.streamer = null;
+    this.toolTasks.clear();
+    this.resetTurn();
+  }
+
   // Reset turn-boundary state (so the next turn starts clean). thinkingBroken is preserved (once broken, stays off).
   private resetTurn(): void {
     this.proseBuf = "";

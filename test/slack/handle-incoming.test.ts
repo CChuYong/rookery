@@ -80,8 +80,8 @@ describe("handleIncoming", () => {
     await handleIncoming(s.ctx("hello", "100.1"), { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home }, s.registry);
     expect(s.repos.getSessionByExternalKey("slack:T1:C1:100.1")).toBeTruthy();
     expect(s.appends).toContain("hi from master");
-    expect(s.statuses[0]).toContain("thinking");
-    expect(s.statuses[s.statuses.length - 1]).toBe("");
+    expect(s.statuses[0]).toBe("processing");
+    expect(s.statuses[s.statuses.length - 1]).toBe("active");
   });
 
   it("reuses the same session for the same thread", async () => {
@@ -273,20 +273,22 @@ describe("handleIncoming", () => {
 
     let beatFn: (() => void) | undefined;
     let stopped = false;
-    const scheduleHeartbeat = (fn: () => void) => { beatFn = fn; return () => { stopped = true; }; };
+    let beatMs = 0;
+    const scheduleHeartbeat = (fn: () => void, ms: number) => { beatFn = fn; beatMs = ms; return () => { stopped = true; }; };
 
-    const hp = handleIncoming(s.ctx("hi", "750.1"), { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home }, s.registry, undefined, scheduleHeartbeat);
+    const hp = handleIncoming({ ...s.ctx("hi", "750.1"), heartbeatMs: () => 1_800_000 }, { sessions: s.sessions, bus: s.bus, slackConfig: s.slackConfig, home: s.home }, s.registry, undefined, scheduleHeartbeat);
     await new Promise((r) => setTimeout(r, 0)); // until runTurn blocks on the gate
 
-    expect(s.statuses.filter((x) => x.includes("thinking")).length).toBe(1); // initial thinking…
+    expect(s.statuses.filter((x) => x === "processing").length).toBe(1); // initial processing
+    expect(beatMs).toBe(1_800_000); // interval comes from the status helper (new API: 30 min, legacy: 90s)
     expect(beatFn).toBeTruthy(); // heartbeat scheduled
     beatFn!(); // fire the heartbeat → reset the status (resets Slack's 2-minute timeout)
-    expect(s.statuses.filter((x) => x.includes("thinking")).length).toBe(2);
+    expect(s.statuses.filter((x) => x === "processing").length).toBe(2);
 
     releaseQuery();
     await hp;
     expect(stopped).toBe(true); // turn done → heartbeat stops
-    expect(s.statuses[s.statuses.length - 1]).toBe(""); // final status cleared
+    expect(s.statuses[s.statuses.length - 1]).toBe("active"); // final status back to active
   });
 });
 
