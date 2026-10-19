@@ -39,6 +39,17 @@ describe("useDismissTransition (child-delayed close for exit animation)", () => 
     expect(result.current.closing).toBe(false);
   });
 
+  it("cancels the pending close when unmounted mid-exit (no setState after unmount/teardown)", () => {
+    vi.useFakeTimers();
+    mockReducedMotion(false);
+    const onClose = vi.fn();
+    const { result, unmount } = renderHook(() => useDismissTransition(onClose, 140));
+    act(() => result.current.dismiss());
+    unmount();
+    act(() => vi.advanceTimersByTime(140));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("is idempotent — a second dismiss does not schedule another close", () => {
     vi.useFakeTimers();
     mockReducedMotion(false);
