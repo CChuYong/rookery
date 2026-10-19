@@ -590,3 +590,15 @@ describe("ClaudeBackend — running-total cost accounting", () => {
     expect(end.costUsd).toBeCloseTo(0.002, 8);
   });
 });
+
+describe("ClaudeBackend — informational system message", () => {
+  it("surfaces content as a notice push; an empty one is dropped (never the literal word)", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "informational", content: "Heads up", level: "info" },
+      { type: "system", subtype: "informational", content: "", level: "info" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "push", push: { kind: "notice", code: "notice.informational", params: { text: "Heads up" } } });
+  });
+});

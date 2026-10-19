@@ -5,6 +5,7 @@ export default {
   "notice.modelFallback": "↪ 모델 폴백: {from} → {to} ({reason})",
   "notice.memoryRecall": "🧠 기억 {count}개 참조",
   "notice.notification": "🔔 {text}",
+  "notice.informational": "ℹ {text}",
   "notice.compactFailed": "⚠ 컨텍스트 압축 실패{detail}",
   "notice.requiresAction": "⏸ 입력/승인 필요",
   "notice.interrupted": "⏹ 중단됨",

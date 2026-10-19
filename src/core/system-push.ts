@@ -9,6 +9,8 @@ export type SystemPush =
   | { kind: "commands"; commands: SlashCommandInfo[] }
   | { kind: "notice"; code: NoticeCode; params?: Record<string, string | number>; text: string };
 
+const INFORMATIONAL_MAX_CHARS = 500;
+
 function fmtK(n: number | undefined): string {
   if (n == null) return "?";
   return n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n);
@@ -42,6 +44,12 @@ export function classifySystemPush(msg: unknown): SystemPush | null {
     case "notification": {
       const text = typeof m.text === "string" ? m.text : "";
       return text ? notice("notice.notification", { text }) : null;
+    }
+    case "informational": {
+      // SDK >= 0.3.283: human-readable info line carried in `content` (+ `level`), not `text`.
+      const content = typeof m.content === "string" ? m.content.trim() : "";
+      if (!content) return null;
+      return notice("notice.informational", { text: content.length > INFORMATIONAL_MAX_CHARS ? `${content.slice(0, INFORMATIONAL_MAX_CHARS)}…` : content });
     }
     case "status":
       // compacting/requesting are too frequent, so exclude them. Surface only compaction failures.

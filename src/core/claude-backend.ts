@@ -203,6 +203,7 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
       yield { kind: "push", push };
       return;
     }
+    if (sub === "informational") return; // empty content: classifySystemPush declined it — drop rather than surface the literal subtype
     // A system message carries info in its top-level text/subtype (extractText can't read it).
     const s = msg as { subtype?: string; text?: string };
     yield { kind: "system_text", text: s.text ?? s.subtype ?? "system" };

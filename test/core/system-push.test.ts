@@ -32,6 +32,16 @@ describe("classifySystemPush", () => {
     expect(classifySystemPush({ subtype: "notification", text: "" })).toBeNull();
   });
 
+  it("informational → notice with trimmed, capped content; empty is skipped", () => {
+    expect(classifySystemPush({ subtype: "informational", content: "  Fast mode is on  ", level: "info" }))
+      .toMatchObject({ kind: "notice", code: "notice.informational", params: { text: "Fast mode is on" }, text: "ℹ Fast mode is on" });
+    const long = classifySystemPush({ subtype: "informational", content: "x".repeat(900) }) as { params: { text: string } };
+    expect(long.params.text).toHaveLength(501);
+    expect(long.params.text.endsWith("…")).toBe(true);
+    expect(classifySystemPush({ subtype: "informational", content: "   " })).toBeNull();
+    expect(classifySystemPush({ subtype: "informational" })).toBeNull();
+  });
+
   it("status → notice only on compact failure; session_state → only requires_action", () => {
     expect(classifySystemPush({ subtype: "status", status: "compacting" })).toBeNull();
     expect(classifySystemPush({ subtype: "status", compact_result: "failed", compact_error: "oom" }))
