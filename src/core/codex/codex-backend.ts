@@ -1,9 +1,10 @@
+import type { AgentInput } from "../image-input.js";
 import { resolveSpeed, type SpeedPreference } from "../speed.js";
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
 import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex-transport.js";
-import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
+import type { CodexInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
 import { estimateTurnCost } from "./codex-pricing.js";
 import { initializeCodex, requestExcludingTurns } from "./codex-version.js";
@@ -540,8 +541,11 @@ abstract class CodexSessionBase implements AgentStream {
   private turnUsageObserved = false;
   private accountingIncomplete = false;
 
-  protected async sendTurn(client: CodexClient, threadId: string, text: string, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
-    const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
+  protected async sendTurn(client: CodexClient, threadId: string, text: AgentInput, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
+    const input: CodexInput[] = typeof text === "string"
+      ? [{ type: "text", text, text_elements: [] }]
+      : [...(text.text ? [{ type: "text" as const, text: text.text, text_elements: [] as never[] }] : []),
+        ...text.images.map(image => ({ type: "image" as const, url: `data:${image.mediaType};base64,${image.data}` }))];
     this.billedSpeed = this.speedOverride ?? resolveSpeed(this.opts.speed);
     this.longContextSeen = false;
     this.turnUsageObserved = false;
@@ -812,7 +816,7 @@ abstract class CodexSessionBase implements AgentStream {
 class CodexWorkerStream extends CodexSessionBase {
   constructor(
     deps: CodexBackendDeps,
-    private readonly input: AsyncIterable<string>,
+    private readonly input: AsyncIterable<AgentInput>,
     opts: AgentSessionOptions,
     private readonly envOverride: NodeJS.ProcessEnv | undefined,
     totalsByThread: Map<string, CodexTokenUsageBreakdown>,
@@ -854,7 +858,7 @@ class CodexWorkerStream extends CodexSessionBase {
 class CodexTurnStream extends CodexSessionBase {
   constructor(
     deps: CodexBackendDeps,
-    private readonly prompt: string,
+    private readonly prompt: AgentInput,
     opts: MasterTurnOptions,
     private readonly envOverride: NodeJS.ProcessEnv | undefined,
     totalsByThread: Map<string, CodexTokenUsageBreakdown>,
@@ -890,7 +894,7 @@ export class CodexBackend implements AgentBackend {
 
   constructor(private readonly deps: CodexBackendDeps) {}
 
-  openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
+  openSession(input: AsyncIterable<AgentInput>, opts: AgentSessionOptions): AgentStream {
     let streamOpts = opts;
     let envOverride: NodeJS.ProcessEnv | undefined;
     if (opts.capabilities) {
@@ -909,7 +913,7 @@ export class CodexBackend implements AgentBackend {
   // Per-turn ephemeral child (P2 — docs/2026-07-06-p2-codex-master.md). Rejects SYNCHRONOUSLY for
   // restricted sandboxes: they silently block the turn-scoped MCP bridge call rather than erroring
   // (spike finding #2), so this is the only place that footgun can be caught cleanly.
-  startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
+  startTurn(prompt: AgentInput, opts: MasterTurnOptions): AgentStream {
     const mode = mapPermissionMode(opts.permissionMode);
     if (mode.sandbox !== "danger-full-access" && !opts.readOnly) {
       throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");

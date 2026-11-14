@@ -1,3 +1,4 @@
+import { IMAGE_LIMITS, type ImageRef } from "../core/image-input.js";
 import { z } from "zod";
 import type { CoreEvent, SlackStatus } from "../core/events.js";
 import type { UsageSnapshot } from "../core/usage.js";
@@ -17,6 +18,12 @@ import type {
 import type { Automation, AutomationInput } from "../persistence/repositories.js";
 import { isValidCron } from "../core/cron.js";
 import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot } from "../core/workflow-activity.js";
+
+const imageRefSchema = z.object({
+  id: z.string().uuid(), name: z.string().max(200), mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  byteLength: z.number().int().positive().max(IMAGE_LIMITS.fileBytes), width: z.number().int().positive().max(IMAGE_LIMITS.dimension), height: z.number().int().positive().max(IMAGE_LIMITS.dimension),
+}).strict();
+const imagesField = z.array(imageRefSchema).max(IMAGE_LIMITS.count).optional();
 
 // effort validation: allow only valid members (reject invalid values), but keep the inferred type as string (compatible with SettingsValues).
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
@@ -286,12 +293,14 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
   z.object({ type: z.literal("session.setSpeed"), sessionId: z.string(), speed: z.enum(["standard", "fast"]).nullable(), reqId: z.string().optional() }),
-  z.object({ type: z.literal("session.send"), speed: speedField, sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("image.upload"), name: z.string().max(1000), mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), base64: z.string().max(4 * Math.ceil(IMAGE_LIMITS.fileBytes / 3)), reqId: z.string() }).strict(),
+  z.object({ type: z.literal("image.get"), id: z.string().uuid(), reqId: z.string() }).strict(),
+  z.object({ type: z.literal("session.send"), images: imagesField, speed: speedField, sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.stop"), sessionId: z.string(), reqId: z.string().optional() }),
   // Ephemeral read-only conversation forked from a master/worker provider session. It reuses the
   // source cwd (including a worker's live worktree) but never creates a session/worker/worktree row.
-  z.object({ type: z.literal("side.start"), sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim().min(1), model: z.string().optional(), effort: effortFieldAnyProvider, reqId: z.string() }),
-  z.object({ type: z.literal("side.send"), sideId: z.string(), text: z.string().trim().min(1), reqId: z.string().optional() }),
+  z.object({ type: z.literal("side.start"), images: imagesField, sourceKind: z.enum(["master", "worker"]), sourceId: z.string(), text: z.string().trim(), model: z.string().optional(), effort: effortFieldAnyProvider, reqId: z.string() }).refine(input => !!input.text || !!input.images?.length, "Side question cannot be empty"),
+  z.object({ type: z.literal("side.send"), images: imagesField, sideId: z.string(), text: z.string().trim(), reqId: z.string().optional() }).refine(input => !!input.text || !!input.images?.length, "Side question cannot be empty"),
   z.object({ type: z.literal("side.stop"), sideId: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("side.close"), sideId: z.string(), reqId: z.string().optional() }),
   // Master canUseTool (approval/AskUserQuestion) response — resolves the pending interaction by requestId (=toolUseID).
@@ -330,7 +339,7 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.history"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("workflow.list"), reqId: z.string(), workerId: z.string() }),
   z.object({ type: z.literal("workflow.agent.history"), reqId: z.string(), workerId: z.string(), taskId: z.string(), agentId: z.string() }),
-  z.object({ type: z.literal("worker.send"), speed: speedField, id: z.string(), text: z.string(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("worker.send"), images: imagesField, speed: speedField, id: z.string(), text: z.string(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("worker.setSpeed"), id: z.string(), speed: z.enum(["standard", "fast"]).nullable(), reqId: z.string().optional() }),
   // Live-change the model of a running worker (query.setModel).
   z.object({ type: z.literal("worker.setModel"), id: z.string(), model: z.string(), reqId: z.string().optional() }),
@@ -524,6 +533,8 @@ export interface CodexAuthStatus {
 }
 
 export type ServerMessage =
+  | { type: "image.upload.result"; image: ImageRef; reqId: string }
+  | { type: "image.get.result"; image: ImageRef; base64: string; reqId: string }
   | { type: "session.created"; sessionId: string; cwd: string; reqId?: string }
   | { type: "side.started"; sideId: string; reqId: string }
   | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string; speed?: "standard" | "fast" | null }>; reqId?: string }
@@ -573,6 +584,8 @@ export type ServerMessage =
 // fire-and-forget (send: session.attach, *.subscribe) is excluded since it has no response.
 // Mutations without their own ack (session/worker delete, archive, rename, restore, session.stop, session.send, worker.setModel/setPermissionMode) all respond with fleet.ack.
 export interface RequestResultMap {
+  "image.upload": Extract<ServerMessage, { type: "image.upload.result" }>;
+  "image.get": Extract<ServerMessage, { type: "image.get.result" }>;
   "session.create": Extract<ServerMessage, { type: "session.created" }>;
   "session.open": Extract<ServerMessage, { type: "session.created" }>;
   "session.fork": Extract<ServerMessage, { type: "session.created" }>;
@@ -658,6 +671,7 @@ export type RequestType = keyof RequestResultMap;
 export type RequestInput<K extends RequestType> = Omit<Extract<ClientMessage, { type: K }>, "reqId"> & { type: K };
 
 export function parseClientMessage(raw: string): ClientMessage {
+  if (raw.length > IMAGE_LIMITS.wsBytes) throw new Error("WebSocket frame exceeds 16 MiB");
   const json = JSON.parse(raw) as unknown;
   return clientMessageSchema.parse(json);
 }

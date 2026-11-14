@@ -1,13 +1,14 @@
-type Waiter = (result: IteratorResult<string>) => void;
+import type { AgentInput } from "./image-input.js";
+type Waiter = (result: IteratorResult<AgentInput>) => void;
 
-// Streaming-input queue: an open-ended stream of user input strings. Provider-agnostic — the adapter
-// (claude-backend.ts claudeUserMessages) wraps each string into its provider's wire shape.
-export class MessageQueue implements AsyncIterable<string> {
-  private readonly buffer: string[] = [];
+// Streaming-input queue: an open-ended stream of native user inputs. Provider-agnostic — the adapter
+// (claude-backend.ts claudeUserMessages) wraps each input into its provider's wire shape.
+export class MessageQueue implements AsyncIterable<AgentInput> {
+  private readonly buffer: AgentInput[] = [];
   private readonly waiters: Waiter[] = [];
   private closed = false;
 
-  push(text: string): void {
+  push(text: AgentInput): void {
     if (this.closed) throw new Error("MessageQueue is closed");
     const waiter = this.waiters.shift();
     if (waiter) waiter({ value: text, done: false });
@@ -24,7 +25,7 @@ export class MessageQueue implements AsyncIterable<string> {
     }
   }
 
-  async *[Symbol.asyncIterator](): AsyncIterator<string> {
+  async *[Symbol.asyncIterator](): AsyncIterator<AgentInput> {
     while (true) {
       const buffered = this.buffer.shift();
       if (buffered !== undefined) {
@@ -32,7 +33,7 @@ export class MessageQueue implements AsyncIterable<string> {
         continue;
       }
       if (this.closed) return;
-      const result = await new Promise<IteratorResult<string>>((resolve) => {
+      const result = await new Promise<IteratorResult<AgentInput>>((resolve) => {
         this.waiters.push(resolve);
       });
       if (result.done) return;

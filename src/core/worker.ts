@@ -1,3 +1,4 @@
+import { acceptImages, resolveInput, type ImageResolver, type ImageRef } from "./image-input.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccuracy } from "./speed.js";
 import type { AgentBackend, AgentStream, InterruptReceipt } from "./agent-backend.js";
@@ -51,6 +52,7 @@ const WAKE_WATCHDOG_MS = 10000;
 export type WorkerStatus = "running" | "idle" | "background" | "stopped" | "done" | "error";
 
 export interface WorkerDeps {
+  images?: ImageResolver;
   repos: Repositories;
   bus: EventBus;
   backend: AgentBackend;
@@ -106,7 +108,7 @@ export class Worker {
   private abort = new AbortController();
   private seq = 0;
   // instructions that arrived while running (not yet echoed) — flushed one at a time in FIFO order at the next result boundary (parity with the master's turnChain deferral).
-  private readonly deferred: Array<{ text: string; clientMsgId?: string; speed?: SpeedPreference | null }> = [];
+  private readonly deferred: Array<{ text: string; images: ImageRef[]; clientMsgId?: string; speed?: SpeedPreference | null }> = [];
   // accumulated thinking-summary deltas — persisted as a single coalesced entry at message/tool/turn boundaries (same as the master). Live flows only as deltas.
   private readonly thinking = new ThinkingCoalescer();
   private state: WorkerStatus = "running";
@@ -315,20 +317,23 @@ export class Worker {
     }
   }
 
-  send(text: string, clientMsgId?: string, speed?: SpeedPreference | null): void {
+  send(text: string, clientMsgId?: string, speed?: SpeedPreference | null, imageRefs?: ImageRef[]): void {
     if (this.reloadingCapabilities) throw new Error(`Worker ${this.opts.id} capability reload in progress; retry`);
     if (this.capabilityReloadFailure) throw new Error(`Worker ${this.opts.id} capability reload failed; retry reload first`);
     // additional instructions are allowed while running (turn in progress), background (bg tasks running), or idle (waiting). Not for a terminated agent.
     if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
+    const images = acceptImages(this.opts.deps.images, imageRefs);
+    // Resolve immediate sends before any echo or state mutation; deferred sends retain refs only.
+    const input = !this.turnActive ? resolveInput(text, images, this.opts.deps.images) : undefined;
     if (speed !== undefined) this.opts.deps.repos.setWorkerSpeed(this.opts.id, speed);
     this.abortLoopStreak = 0; // a human is actively driving → a fresh instruction breaks any prior abort streak (no false circuit-breaker trip on legit interrupt+redirect)
     this.clearWakeWatchdog(); // a human send takes over → this run is no longer a bare auto-wake (a real turn is coming)
     if (!this.turnActive) {
       // no in-flight turn (idle OR background — the streaming queue is open either way) → enqueue + start a new turn immediately.
       this.turnSpeed = this.resolveTurnSpeed(speed);
-      this.queue.push(this.withHandoffSeed(text)); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
+      this.queue.push(typeof input === "string" ? this.withHandoffSeed(input) : { ...input!, text: this.withHandoffSeed(text) }); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
       this.opts.deps.onTurnStart?.();
-      this.record({ kind: "message", role: "user", content: text }, clientMsgId);
+      this.record({ kind: "message", role: "user", content: text, ...(images.length ? { images } : {}) }, clientMsgId);
       this.clearIdleGrace(); // a user turn supersedes the wake-wait
       this.turnActive = true;
       this.reconcile();
@@ -336,7 +341,7 @@ export class Worker {
       // while running: DON'T enqueue yet — hold in `deferred` and release (enqueue + echo) at the next result boundary.
       // Enqueuing mid-turn lets the SDK read-ahead and COALESCE this message into the in-flight turn (answering it in the
       // same turn). Then the deferred echo has no following turn, so the worker never leaves "running" → stuck "thinking".
-      this.deferred.push({ text, clientMsgId, speed });
+      this.deferred.push({ text, images, clientMsgId, speed });
     }
   }
 
@@ -793,10 +798,11 @@ export class Worker {
           // the user echo settles right before the next turn without wedging in. That turn runs shortly, so we don't drop to idle.
           const next = this.deferred.shift();
           if (next) {
+            const input = resolveInput(next.text, next.images, this.opts.deps.images);
             this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
             this.turnSpeed = this.resolveTurnSpeed(next.speed);
-            queue.push(next.text); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
-            this.record({ kind: "message", role: "user", content: next.text }, next.clientMsgId);
+            queue.push(input); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
+            this.record({ kind: "message", role: "user", content: next.text, ...(next.images.length ? { images: next.images } : {}) }, next.clientMsgId);
             // turnActive stays true — the flushed instruction's turn starts immediately.
           } else {
             // nothing deferred → derive: background while bg tasks still run, else idle (ALL work complete).

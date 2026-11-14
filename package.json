@@ -38,6 +38,7 @@
     "@slack/web-api": "^7.17.0",
     "better-sqlite3": "^12.11.1",
     "croner": "^10.0.1",
+    "image-size": "^2.1.0",
     "ws": "^8.21.0",
     "zod": "^4.0.0"
   },

@@ -1,3 +1,4 @@
+import type { AgentInput } from "./image-input.js";
 import type { SpeedPreference, SpeedObservation, CostAccuracy } from "./speed.js";
 import type { SystemPush } from "./system-push.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
@@ -129,7 +130,7 @@ export interface MasterTurnOptions extends AgentSessionOptions {
 
 export interface AgentBackend {
   // Long-lived streaming-input session (worker): one stream spanning many turns; push follow-ups via `input`.
-  openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream;
+  openSession(input: AsyncIterable<AgentInput>, opts: AgentSessionOptions): AgentStream;
   // Single turn with resume-based continuity (master): the stream ends when the turn completes.
-  startTurn(prompt: string, opts: MasterTurnOptions): AgentStream;
+  startTurn(prompt: AgentInput, opts: MasterTurnOptions): AgentStream;
 }

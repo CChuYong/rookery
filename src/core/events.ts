@@ -1,10 +1,11 @@
+import type { ImageRef } from "./image-input.js";
 import type { SpeedObservation, SpeedPreference, CostAccuracy } from "./speed.js";
 import type { WorkflowAgentSummary, WorkflowRunSummary } from "./workflow-activity.js";
 
 export type WorkerEventData =
   | { kind: "speed"; observation: SpeedObservation }
   | { kind: "system"; text: string }
-  | { kind: "message"; role: "assistant" | "user"; content: string }
+  | { kind: "message"; role: "assistant" | "user"; content: string; images?: ImageRef[] }
   | { kind: "message_delta"; text: string } // token-level delta (not persisted, for live streaming)
   | { kind: "thinking_delta"; text: string } // thinking-summary delta (not persisted, live — display:summarized)
   | { kind: "thinking"; text: string } // coalesced thinking summary (persisted, persist-only — live is shown via deltas). Worker counterpart of master master.thinking
@@ -27,7 +28,7 @@ export interface InteractionQuestion {
 
 export type CoreEvent =
   | { type: "master.speed"; sessionId: string; observation: SpeedObservation }
-  | { type: "master.message"; sessionId: string; role: "assistant" | "user"; content: string; clientMsgId?: string }
+  | { type: "master.message"; sessionId: string; role: "assistant" | "user"; content: string; images?: ImageRef[]; clientMsgId?: string }
   | { type: "master.message.delta"; sessionId: string; delta: string }
   | { type: "master.thinking.delta"; sessionId: string; delta: string } // master thinking-summary delta (live)
   | { type: "master.thinking"; sessionId: string; text: string } // completed thinking summary (for persistence/restore — unlike deltas, coalesced into a single entry)

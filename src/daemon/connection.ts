@@ -1,3 +1,5 @@
+import type { ImageStore } from "./image-store.js";
+import { acceptImages, type ImageRef } from "../core/image-input.js";
 import { randomUUID } from "node:crypto";
 import type { SessionManager } from "../core/session-manager.js";
 import { UI_FLEET_SESSION_KEY } from "../core/session-manager.js";
@@ -130,7 +132,7 @@ export interface ClientSocket {
 
 export interface SideConversationController {
   create(input: { sourceKind: SideSourceKind; sourceId: string; model?: string; effort?: string | null }): Promise<{ id: string }>;
-  send(id: string, text: string): void;
+  send(id: string, text: string, images?: ImageRef[]): void;
   stop(id: string): Promise<void>;
   close(id: string): Promise<void>;
 }
@@ -167,6 +169,7 @@ export class Connection {
     private readonly sides?: SideConversationController,
     private readonly capabilities?: CapabilityProvider,
     private readonly workflows?: WorkflowActivityProvider,
+    private readonly images?: ImageStore,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -208,6 +211,16 @@ export class Connection {
     // Otherwise the void-ed handleRaw rejects and the client's request() hangs forever.
     try {
     switch (msg.type) {
+      case "image.upload": {
+        if (!this.images) throw new Error("Image input unavailable");
+        this.reply({ type: "image.upload.result", image: this.images.upload(msg), reqId: msg.reqId });
+        return;
+      }
+      case "image.get": {
+        if (!this.images) throw new Error("Image input unavailable");
+        this.reply({ type: "image.get.result", ...this.images.get(msg.id), reqId: msg.reqId });
+        return;
+      }
       case "session.create": {
         // No explicit cwd (desktop "New Session" with no folder picked) → the configured default folder, else process.cwd().
         const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()), { provider: msg.provider, speed: msg.speed });
@@ -261,7 +274,7 @@ export class Connection {
         this.subscribe(session.id);
         // Per-UI-session model/effort/permissionMode overrides (if present). Otherwise the global defaults (Slack also uses this path).
         // A runTurn throw is caught by the outer try/catch and replied as error+reqId.
-        await session.master.runTurn(msg.text, { speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
+        await session.master.runTurn(msg.text, { images: msg.images, speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
         // Ack when a reqId is present so request()-style clients get a settled promise; fire-and-forget (no reqId) stays unchanged for old clients.
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sessionId });
         return;
@@ -274,16 +287,19 @@ export class Connection {
       }
       case "side.start": {
         if (!this.sides) return this.reply({ type: "error", message: "Side conversations unavailable", reqId: msg.reqId });
+        const images = acceptImages(this.images, msg.images);
         const { id } = await this.sides.create({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort });
         this.ownedSideIds.add(id);
         // Ordering is load-bearing: tell the client the id before send() can emit the first side.event.
         this.reply({ type: "side.started", sideId: id, reqId: msg.reqId });
-        this.sides.send(id, msg.text);
+        if (images.length) this.sides.send(id, msg.text, images);
+        else this.sides.send(id, msg.text);
         return;
       }
       case "side.send": {
         if (!this.sides || !this.ownedSideIds.has(msg.sideId)) throw new Error(`unknown Side conversation: ${msg.sideId}`);
-        this.sides.send(msg.sideId, msg.text);
+        if (msg.images?.length) this.sides.send(msg.sideId, msg.text, msg.images);
+        else this.sides.send(msg.sideId, msg.text);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sideId });
         return;
       }
@@ -512,7 +528,7 @@ export class Connection {
         // Deliver a follow-up message to a running worker (streaming input). Throws if the agent is terminated/unknown
         // or mid-restore, and the outer try/catch responds with error+reqId. On success, ack when a reqId is present so
         // request()-style clients (desktop) get a settled promise instead of a silently-dropped frame.
-        this.fleet.send(msg.id, msg.text, msg.clientMsgId, msg.speed);
+        this.fleet.send(msg.id, msg.text, msg.clientMsgId, msg.speed, msg.images);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.id });
         return;
       }

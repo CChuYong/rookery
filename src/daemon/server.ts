@@ -1,3 +1,5 @@
+import { ImageStore } from "./image-store.js";
+import { IMAGE_LIMITS } from "../core/image-input.js";
 import type { SpeedPreference } from "../core/speed.js";
 import http from "node:http";
 import path from "node:path";
@@ -133,6 +135,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     process.exit(1);
   }
   const repos = new Repositories(db);
+  const images = new ImageStore(config.home, repos);
   const bus = new EventBus();
   const git = new RealGitOps();
   const settings = new Settings(repos, config);
@@ -278,7 +281,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       // spawn override (UI) takes priority, otherwise fall back to the global default (Slack/master spawn).
       // permissionMode: absent → the Worker defaults to "bypassPermissions". backend/model are picked by provider (default claude).
       deps: {
-        repos, bus,
+        images, repos, bus,
         backend: workerBackends[o.provider ?? "claude"] ?? backend,
         model: o.model ?? (o.provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
         effort: o.effort ?? settings.workerEffort(),
@@ -296,7 +299,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     });
   // Auto-generate labels (Haiku): workers right after spawn, masters from the first message. best-effort.
   const summarizeLabel = makeLabeler(queryFn);
-  const fleet = new FleetOrchestrator({
+  const fleet = new FleetOrchestrator({ images,
     repos, bus, git, factory: subFactory, worktreesDir: config.fleet.worktreesDir, summarizeLabel,
     // Codex native forks must run in the SOURCE worker's isolated home. The new fork rollout and
     // its ancestors are then copied into the target home; target bindings compile lazily on resume.
@@ -379,7 +382,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId, forkedUuid);
     return { sessionId: forkedUuid };
   };
-  const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterSpeed: (provider) => settings.speed(provider, "master"), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,
+  const sessions = new SessionManager({ images, repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterSpeed: (provider) => settings.speed(provider, "master"), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,
     // Fork routing by provider: codex routes through forkCodexMaster (per-session CODEX_HOME
     // relocation, see above); claude keeps the SDK's own (eager) forkSession.
     forkSession: (provider, id, opts) => (provider === "codex" ? forkCodexMaster(id, opts) : sdkForkSession(id, opts)),
@@ -405,7 +408,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         };
       };
     } });
-  const sides = new SideConversationManager({
+  const sides = new SideConversationManager({ images,
     bus,
     backends: { claude: backend, codex: codexBackend },
     resolveSource: (sourceKind, sourceId): SideSource | undefined => {
@@ -694,7 +697,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   httpServer.headersTimeout = 20000;
   httpServer.requestTimeout = 30000;
 
-  const wss = new WebSocketServer({ noServer: true, clientTracking: true });
+  const wss = new WebSocketServer({ noServer: true, clientTracking: true, maxPayload: IMAGE_LIMITS.wsBytes });
 
   httpServer.on("upgrade", (req, socket, head) => {
     const reqPath = (req.url ?? "").split("?")[0];
@@ -721,7 +724,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; } // backpressure: cut it off to stop the leak
       ws.send(d);
     };
-    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides, capabilityService, workflows);
+    const conn = new Connection({ send }, sessions, bus, fleet, repos, usageProvider, settings, commandCatalog, sourceProvider, slack, modelsProvider, interactionRegistry, automationProvider, resolveSlackRefs, codexModelsProvider, codexAuthProvider, extMcp, sides, capabilityService, workflows, images);
     ws.on("message", (raw: RawData) => {
       void conn.handleRaw(raw.toString());
     });

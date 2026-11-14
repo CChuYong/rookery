@@ -1,3 +1,4 @@
+import type { ImageRef } from "../core/image-input.js";
 import type { SpeedPreference, CostAccuracy } from "../core/speed.js";
 import type { DB } from "./db.js";
 import type {
@@ -202,6 +203,18 @@ export class Repositories {
     private readonly db: DB,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
+
+  addImage(image: ImageRef): void {
+    this.db.prepare('INSERT INTO images(id,name,media_type,byte_length,width,height,created_at) VALUES (?,?,?,?,?,?,?)').run(image.id, image.name, image.mediaType, image.byteLength, image.width, image.height, this.now());
+  }
+
+  getImage(id: string): ImageRef | undefined {
+    return this.db.prepare('SELECT id,name,media_type AS mediaType,byte_length AS byteLength,width,height FROM images WHERE id = ?').get(id) as ImageRef | undefined;
+  }
+
+  imageBytes(): number {
+    return (this.db.prepare('SELECT COALESCE(SUM(byte_length),0) AS bytes FROM images').get() as { bytes: number }).bytes;
+  }
 
   onRepoChanged(listener: (change: RepoChange) => void): () => void {
     this.repoChangeListeners.add(listener);

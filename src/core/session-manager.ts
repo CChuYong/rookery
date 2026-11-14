@@ -1,3 +1,4 @@
+import type { ImageResolver } from "./image-input.js";
 import type { SpeedPreference } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { Repositories } from "../persistence/repositories.js";
@@ -34,6 +35,7 @@ export function deriveOrigin(externalKey: string | null): { origin: string; orig
 export type ForkFn = (provider: string, sdkSessionId: string, opts?: { title?: string; sourceSessionId?: string; newSessionId?: string }) => Promise<{ sessionId: string }>;
 
 export interface SessionManagerDeps {
+  images?: ImageResolver;
   repos: Repositories;
   bus: EventBus;
   // Backend registry (P2): a master session picks its AgentBackend by its persisted `provider` column.
@@ -111,7 +113,7 @@ export class SessionManager {
       sessionId: id,
       cwd,
       sdkSessionId,
-      deps: { speed: () => this.deps.masterSpeed?.(provider) ?? "standard", repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities, managedCapabilities, capabilityRuntime },
+      deps: { images: this.deps.images, speed: () => this.deps.masterSpeed?.(provider) ?? "standard", repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities, managedCapabilities, capabilityRuntime },
     });
     const session: Session = { id, cwd, master };
     this.sessions.set(id, session);

@@ -1,3 +1,4 @@
+import { acceptImages, type ImageResolver, type ImageRef } from "./image-input.js";
 import type { SpeedPreference, CostAccuracy } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -14,7 +15,7 @@ const DIFF_MAX_BYTES = 512 * 1024; // byte cap before sending a diff directly as
 export interface WorkerLike {
   start(task?: string): void;
   resume(): void;
-  send(text: string, clientMsgId?: string, speed?: SpeedPreference | null): void;
+  send(text: string, clientMsgId?: string, speed?: SpeedPreference | null, images?: ImageRef[]): void;
   stop(): Promise<void>;
   status(): string;
   waitUntilSettled(): Promise<void>;
@@ -52,6 +53,7 @@ export type WorkerFactory = (opts: {
 }) => WorkerLike;
 
 export interface FleetDeps {
+  images?: ImageResolver;
   repos: Repositories;
   bus: EventBus;
   git: GitOps;
@@ -517,7 +519,8 @@ export class FleetOrchestrator {
     return e as Entry & { agent: WorkerLike };
   }
 
-  send(id: string, message: string, clientMsgId?: string, speed?: SpeedPreference | null): void {
+  send(id: string, message: string, clientMsgId?: string, speed?: SpeedPreference | null, imageRefs?: ImageRef[]): void {
+    const images = acceptImages(this.deps.images, imageRefs);
     if (this.capabilityReloads.get(id)?.phase === "reloading") {
       throw new Error(`worker ${id} capability reload in progress; retry when it finishes`);
     }
@@ -530,7 +533,8 @@ export class FleetOrchestrator {
       void this.relabel(id, entry.homeSessionId, message); // task-less worker: relabel from the first message (best-effort, never throws)
     }
     if (speed !== undefined) { this.deps.repos.setWorkerSpeed(id, speed); entry.speed = speed; }
-    if (speed === undefined) entry.agent.send(message, clientMsgId);
+    if (images.length) entry.agent.send(message, clientMsgId, speed, images);
+    else if (speed === undefined) entry.agent.send(message, clientMsgId);
     else entry.agent.send(message, clientMsgId, speed);
   }
 

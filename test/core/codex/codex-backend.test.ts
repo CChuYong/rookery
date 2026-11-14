@@ -1435,3 +1435,14 @@ it.each(["priority", "fast"])("accepts the catalog %s Fast capability while requ
   expect(fake.requests.find((request) => request.method === "turn/start")?.params).toMatchObject({ serviceTierForTurn: "fast" });
   expect(events).toContainEqual({ kind: "speed", observation: { requested: "fast", state: "unknown" } });
 });
+
+it('sends image-only and mixed native data URL items in master and worker turns', async () => {
+  const { backend: b, requests } = backend(() => [{ kind: 'turnEnd' }]);
+  const images = [{ mediaType: 'image/png' as const, data: 'eHl6' }];
+  await collect(b.startTurn({ text: '', images }, baseOpts()));
+  const queue = new MessageQueue(); queue.push({ text: 'look', images }); queue.close(); await collect(b.openSession(queue, baseOpts()));
+  expect(requests.filter(r => r.method === 'turn/start').map(r => r.params.input)).toEqual([
+    [{ type: 'image', url: 'data:image/png;base64,eHl6' }],
+    [{ type: 'text', text: 'look', text_elements: [] }, { type: 'image', url: 'data:image/png;base64,eHl6' }],
+  ]);
+});

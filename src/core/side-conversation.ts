@@ -1,3 +1,4 @@
+import { acceptImages, resolveInput, type AgentInput, type ImageResolver, type ImageRef } from "./image-input.js";
 import type { SpeedPreference } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { AgentBackend, AgentStream } from "./agent-backend.js";
@@ -25,6 +26,7 @@ export interface SideSource {
 }
 
 export interface SideConversationDeps {
+  images?: ImageResolver;
   bus: EventBus;
   backends: Record<string, AgentBackend>;
   resolveSource(kind: SideSourceKind, id: string): SideSource | undefined;
@@ -97,16 +99,18 @@ export class SideConversationManager {
     return { id };
   }
 
-  send(id: string, text: string): void {
+  send(id: string, text: string, imageRefs?: ImageRef[]): void {
     const side = this.require(id);
     if (side.closing) throw new Error(`Side conversation ${id} is closing`);
     if (side.running) throw new Error(`Side conversation ${id} is already running`);
     const prompt = text.trim();
-    if (!prompt) throw new Error("Side question cannot be empty");
+    const images = acceptImages(this.deps.images, imageRefs);
+    if (!prompt && !images.length) throw new Error("Side question cannot be empty");
+    const input = resolveInput(prompt, images, this.deps.images);
     side.running = true;
-    this.emitData(side, { kind: "message", role: "user", content: prompt });
+    this.emitData(side, { kind: "message", role: "user", content: prompt, ...(images.length ? { images } : {}) });
     this.emitStatus(side, "running");
-    side.task = this.runTurn(side, prompt);
+    side.task = this.runTurn(side, input);
   }
 
   async idle(id: string): Promise<void> {
@@ -150,7 +154,7 @@ export class SideConversationManager {
     this.deps.bus.emit({ type: "side.status", sessionId: source.sessionId, sideId: side.id, sourceKind: source.sourceKind, sourceId: source.sourceId, status });
   }
 
-  private async runTurn(side: SideConversation, prompt: string): Promise<void> {
+  private async runTurn(side: SideConversation, prompt: AgentInput): Promise<void> {
     const abort = new AbortController();
     side.abort = abort;
     try {

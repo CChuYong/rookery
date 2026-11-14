@@ -37,6 +37,8 @@ export interface CodexTurn {
 
 // Outbound input item (we only send text in P1). `text_elements` is required by the schema.
 export interface CodexTextInput { type: "text"; text: string; text_elements: never[] }
+export interface CodexImageInput { type: "image"; url: string }
+export type CodexInput = CodexTextInput | CodexImageInput;
 
 export interface CodexThreadStartParams {
   cwd?: string;
@@ -53,7 +55,7 @@ export interface CodexThreadForkParams { threadId: string; excludeTurns?: boolea
 export interface CodexTurnStartParams {
   serviceTierForTurn?: "default" | "fast";
   threadId: string;
-  input: CodexTextInput[];
+  input: CodexInput[];
   model?: string;
   effort?: string;
   approvalPolicy?: CodexApprovalPolicy;

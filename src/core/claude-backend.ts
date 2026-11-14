@@ -1,3 +1,4 @@
+import type { AgentInput } from "./image-input.js";
 import { resolveSpeed, type SpeedPreference, type SpeedObservation } from "./speed.js";
 import { query as sdkQuery, createSdkMcpServer, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
@@ -19,13 +20,16 @@ export type LoadClaudeCapabilities = (capabilities: ResolvedAgentCapabilities) =
 type QueryInput = Parameters<QueryFn>[0];
 type QueryOptions = NonNullable<QueryInput["options"]>;
 
-// Wrap a stream of user input strings into the minimal SDKUserMessage shape required by streaming-input mode.
+// Wrap a stream of native user inputs into the minimal SDKUserMessage shape required by streaming-input mode.
 // No `as` assertion — if the SDK (0.x) adds mandatory fields, tsc catches it here (moved from message-queue.ts).
-export async function* claudeUserMessages(input: AsyncIterable<string>): AsyncIterable<SDKUserMessage> {
+export async function* claudeUserMessages(input: AsyncIterable<AgentInput>): AsyncIterable<SDKUserMessage> {
   for await (const text of input) {
     const msg: SDKUserMessage = {
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content: typeof text === "string" ? text : [
+        ...(text.text ? [{ type: "text" as const, text: text.text }] : []),
+        ...text.images.map(image => ({ type: "image" as const, source: { type: "base64" as const, media_type: image.mediaType, data: image.data } })),
+      ] },
       parent_tool_use_id: null,
     };
     yield msg;
@@ -415,7 +419,7 @@ export class ClaudeBackend implements AgentBackend {
     };
   }
 
-  openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
+  openSession(input: AsyncIterable<AgentInput>, opts: AgentSessionOptions): AgentStream {
     const speed: ClaudeSpeedState = { current: resolveSpeed(opts.speed), turnActive: false };
     const baseOptions = this.baseOptions(opts);
     const scope = new ClaudeInputScope(opts.abortController);
@@ -450,21 +454,29 @@ export class ClaudeBackend implements AgentBackend {
     return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed, scope);
   }
 
-  startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
+  startTurn(prompt: AgentInput, opts: MasterTurnOptions): AgentStream {
     const speed: ClaudeSpeedState = { current: resolveSpeed(opts.speed), turnActive: true };
     const readOnlyAllowed = ["Read", "Glob", "Grep"];
     const readOnlyDenied = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
-    const q = this.queryFn({
-      prompt,
-      options: {
-        ...this.baseOptions(opts),
-        ...(opts.canUseTool ? { canUseTool: opts.canUseTool as QueryOptions["canUseTool"] } : {}),
-        ...this.buildMcpServersOption(opts),
-        ...(opts.readOnly ? { allowedTools: readOnlyAllowed } : opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
-        ...(opts.readOnly ? { disallowedTools: readOnlyDenied } : opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
-      },
-    });
-    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed);
+    const scope = typeof prompt === "string" ? undefined : new ClaudeInputScope(opts.abortController);
+    let q: ReturnType<QueryFn>;
+    try {
+      q = this.queryFn({
+        prompt: typeof prompt === "string" ? prompt : claudeUserMessages((async function* () { yield prompt; })()),
+        options: {
+          ...this.baseOptions(opts),
+          ...(scope ? { abortController: scope.controller } : {}),
+          ...(opts.canUseTool ? { canUseTool: opts.canUseTool as QueryOptions["canUseTool"] } : {}),
+          ...this.buildMcpServersOption(opts),
+          ...(opts.readOnly ? { allowedTools: readOnlyAllowed } : opts.allowedTools ? { allowedTools: opts.allowedTools } : {}),
+          ...(opts.readOnly ? { disallowedTools: readOnlyDenied } : opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
+        },
+      });
+    } catch (error) {
+      scope?.dispose();
+      throw error;
+    }
+    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed, scope);
   }
 
   // Wraps `opts.toolDefs` groups (the neutral port — see agent-backend.ts) with createSdkMcpServer,

@@ -17,6 +17,7 @@ Read the root [AGENTS.md](../AGENTS.md) **first**. It is the always-loaded map: 
 | [architecture/master-worker-turn.md](architecture/master-worker-turn.md) | You are touching how a master turn (string prompt + resume) or a worker turn (streaming `MessageQueue`) runs. |
 | [architecture/fleet-lifecycle.md](architecture/fleet-lifecycle.md) | You are working on spawn/stop/discard, worktree isolation, terminal-state writes, or restart rehydration. |
 | [architecture/automation.md](architecture/automation.md) | You are working on cron/Slack triggers, the dispatcher, or automation actions (master/worker). |
+| [reference/images.md](reference/images.md) | You are changing native image input, asset limits, storage, retention, provider mapping or reference-only history. |
 | [reference/events.md](reference/events.md) | You need the `CoreEvent` catalog and which `EventBus` channel each event flows on. |
 | [reference/protocol.md](reference/protocol.md) | You need the WS wire schema (client→daemon / daemon→client messages, `reqId` correlation). |
 | [reference/data-model.md](reference/data-model.md) | You need the SQLite tables/columns and the migration rules. |

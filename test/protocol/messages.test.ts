@@ -510,3 +510,17 @@ it("accepts nullable Standard/Fast intent at supported boundaries and rejects un
   }
   expect(parseClientMessage(JSON.stringify({type: "settings.set", reqId: "q", settings: {masterSpeed: "fast", codexWorkerSpeed: null}}))).toMatchObject({settings: {masterSpeed: "fast", codexWorkerSpeed: null}});
 });
+
+it('bounds image upload/ref schemas and accepts image-only Side requests without paths or URLs', () => {
+  const image = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'a.png', mediaType: 'image/png', byteLength: 3, width: 1, height: 1 };
+  for (const type of ['session.send', 'worker.send', 'side.start', 'side.send']) expect(parseClientMessage(JSON.stringify({ type, sessionId: 's', id: 'w', sideId: 'side', sourceKind: 'master', sourceId: 's', text: '', images: [image], reqId: 'q' }))).toMatchObject({ text: '', images: [image] });
+  for (const input of [
+    { type: 'image.get', id: '../x', reqId: 'q' },
+    { type: 'image.get', id: image.id, path: '/tmp/a', reqId: 'q' },
+    { type: 'image.upload', name: 'x', mediaType: 'image/svg+xml', base64: 'AA==', reqId: 'q' },
+    { type: 'image.upload', name: 'x', mediaType: 'image/png', url: 'https://example.com/a.png', reqId: 'q' },
+    { type: 'session.send', sessionId: 's', text: '', images: Array(5).fill(image) },
+    { type: 'session.send', sessionId: 's', text: '', images: [{ ...image, data: 'AA==' }] },
+  ]) expect(() => parseClientMessage(JSON.stringify(input))).toThrow();
+  expect(() => parseClientMessage(' '.repeat(16 * 1024 * 1024 + 1))).toThrow('16 MiB');
+});

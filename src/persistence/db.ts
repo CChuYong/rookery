@@ -236,6 +236,17 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
       ALTER TABLE workers ADD COLUMN speed TEXT CHECK (speed IN ('standard', 'fast'));
       ALTER TABLE automations ADD COLUMN speed TEXT CHECK (speed IN ('standard', 'fast'));`);
   },
+  (db) => {
+    db.exec(`CREATE TABLE images (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL,
+      media_type TEXT NOT NULL CHECK(media_type IN ('image/png','image/jpeg','image/webp','image/gif')),
+      byte_length INTEGER NOT NULL CHECK(byte_length BETWEEN 1 AND 3145728),
+      width INTEGER NOT NULL CHECK(width BETWEEN 1 AND 8000),
+      height INTEGER NOT NULL CHECK(height BETWEEN 1 AND 8000),
+      created_at TEXT NOT NULL,
+      CHECK(width * height <= 20000000)
+    ) STRICT;`);
+  },
 ];
 
 export function currentVersion(db: DB): number {

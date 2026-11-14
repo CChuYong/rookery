@@ -1,3 +1,4 @@
+import { acceptImages, resolveInput, type ImageResolver, type ImageRef } from "./image-input.js";
 import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccuracy } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { AgentBackend, InterruptReceipt, ProviderMcpServer, ProviderPermissionCallback, ProviderToolDef } from "./agent-backend.js";
@@ -29,6 +30,7 @@ type RealCanUseToolSig = (
 ) => Promise<AskChannelResult>;
 
 export interface MasterAgentDeps {
+  images?: ImageResolver;
   repos: Repositories;
   bus: EventBus;
   backend: AgentBackend;
@@ -62,6 +64,7 @@ export interface TurnCapabilities {
 
 // Per-UI-session override (unspecified → global default). Slack always uses the defaults.
 export interface TurnOverride {
+  images?: ImageRef[];
   speed?: SpeedPreference | null;
   model?: string;
   effort?: string;
@@ -277,6 +280,8 @@ export class MasterAgent {
   // Even if two runTurn calls happen concurrently they run one at a time, and a failed turn
   // does not contaminate the chain, but its error is propagated to that caller.
   async runTurn(userText: string, override?: TurnOverride): Promise<void> {
+    const images = acceptImages(this.opts.deps.images, override?.images);
+    if (override) override = { ...override, images };
     if (override?.speed !== undefined) this.opts.deps.repos.setSessionSpeed(this.opts.sessionId, override.speed);
     const gen = this.stopGeneration;
     this.queuedByGen.set(gen, (this.queuedByGen.get(gen) ?? 0) + 1);
@@ -365,14 +370,16 @@ export class MasterAgent {
         const seed = buildHandoffSeed(events, handoffFrom);
         if (seed) promptText = `${seed}\n\n${userText}`;
       }
+      const images = override?.images ?? [];
+      const input = resolveInput(promptText, images, this.opts.deps.images);
       if (opts?.notices) {
         // System-injected worker-completion turn: record clean per-worker notices (code+params, re-localized by clients);
         // the model still receives `userText` (the tagged prompt) below. Not a user message, and don't relabel the session.
         for (const dn of opts.notices) this.recordEvent({ type: "master.notice", sessionId, text: dn.text, code: dn.code, params: dn.params });
       } else {
         repos.addMessage({ sessionId, role: "user", content: userText }); // messages table (last_activity)
-        this.persistEvent({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId }); // Persist transcript (restore)
-        bus.emit({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId }); // Live echo — accurate timeline position after passing through the turn queue
+        this.persistEvent({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId, ...(images.length ? { images } : {}) }); // Persist transcript (restore)
+        bus.emit({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId, ...(images.length ? { images } : {}) }); // Live echo — accurate timeline position after passing through the turn queue
         // Auto-generate a label from the first message (run concurrently so it doesn't block the response, finalized with await at the end of the turn).
         labelDone = this.maybeLabel(userText);
       }
@@ -385,7 +392,7 @@ export class MasterAgent {
       }
       // A fresh session (incl. a cross-provider fork target) has no provider cost history: drop any inherited watermark.
       if (!this.sdkSessionId) this.providerCostTotalUsd = 0;
-      const stream = this.opts.deps.backend.startTurn(promptText, {
+      const stream = this.opts.deps.backend.startTurn(input, {
         cwd: this.opts.cwd,
         model,
         speed,
