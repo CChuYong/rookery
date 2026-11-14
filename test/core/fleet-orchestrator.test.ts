@@ -1426,3 +1426,26 @@ describe("ticket → branch", () => {
     expect(s.repos.listWorkers("sA")[0]!.branch).toMatch(/^rookery\/a\d+$/);
   });
 });
+
+describe("FleetOrchestrator.send speed persistence", () => {
+  it("persists a send's speed only after the worker accepted the send", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    let reject = true;
+    const sent: Array<string | null | undefined> = [];
+    const factory = (): WorkerLike => ({
+      start: () => {}, resume: () => {}, stop: async () => {},
+      send: (_text, _id, speed) => { if (reject) throw new Error("Worker a0 is not running"); sent.push(speed); },
+      status: () => "idle", waitUntilSettled: () => new Promise(() => {}),
+    });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps({ headValue: "b" }), factory, worktreesDir: "/wt", idgen: () => "a0" });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t", speed: "standard" });
+    for (let n = 0; n < 100 && repos.getWorker("a0")?.status === "provisioning"; n++) await new Promise((r) => setTimeout(r, 1));
+    expect(() => fleet.send("a0", "go", undefined, "fast")).toThrow("not running");
+    expect(repos.getWorker("a0")?.speed).toBe("standard");
+    reject = false;
+    fleet.send("a0", "go", undefined, "fast");
+    expect(sent).toEqual(["fast"]);
+    expect(repos.getWorker("a0")?.speed).toBe("fast");
+  });
+});

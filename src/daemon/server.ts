@@ -135,7 +135,14 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     process.exit(1);
   }
   const repos = new Repositories(db);
-  const images = new ImageStore(config.home, repos);
+  // Image input is optional: a broken images directory must not take the whole daemon down. Without a
+  // store, uploads/reads fail with "Image input unavailable" and image refs on sends are rejected.
+  let images: ImageStore | undefined;
+  try {
+    images = new ImageStore(config.home, repos);
+  } catch (err) {
+    process.stderr.write(`[rookery] image store unavailable: ${String(err)}\n`);
+  }
   const bus = new EventBus();
   const git = new RealGitOps();
   const settings = new Settings(repos, config);

@@ -532,10 +532,12 @@ export class FleetOrchestrator {
       entry.pendingLabel = false;
       void this.relabel(id, entry.homeSessionId, message); // task-less worker: relabel from the first message (best-effort, never throws)
     }
-    if (speed !== undefined) { this.deps.repos.setWorkerSpeed(id, speed); entry.speed = speed; }
     if (images.length) entry.agent.send(message, clientMsgId, speed, images);
     else if (speed === undefined) entry.agent.send(message, clientMsgId);
     else entry.agent.send(message, clientMsgId, speed);
+    // Persist the speed intent only once the send was accepted: agent.send throws for a stopped worker
+    // (or a failed reload), and a rejected send must not silently change the worker's stored speed.
+    if (speed !== undefined) { this.deps.repos.setWorkerSpeed(id, speed); entry.speed = speed; }
   }
 
   async reloadCapabilities(

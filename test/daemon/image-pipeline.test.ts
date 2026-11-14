@@ -197,3 +197,41 @@ it("authenticates upload/get, delivers native images, rejects whole invalid send
     fs.rmSync(home, { recursive: true, force: true });
   }
 }, 15000);
+
+it("boots with a symlinked Rookery home and serves images; a broken images dir disables images without crashing boot", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-image-link-"));
+  const real = path.join(root, "real-home");
+  fs.mkdirSync(real, { mode: 0o700 });
+  const linked = path.join(root, "linked-home");
+  fs.symlinkSync(real, linked);
+  const queryFn = fakeQuery([]);
+  const base64 = fs
+    .readFileSync(new URL("../fixtures/images/tiny.png", import.meta.url))
+    .toString("base64");
+  const config = loadConfig({ ROOKERY_HOME: linked, ROOKERY_PORT: "0" });
+  let daemon = await startDaemon({ config, acquireLock: false, queryFn });
+  let ws: WebSocket | undefined;
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    ws = await connect(daemon.port, daemon.token);
+    const uploaded = await client(ws).request({ type: "image.upload", name: "tiny.png", mediaType: "image/png", base64 });
+    expect(uploaded.type).toBe("image.upload.result");
+    expect(fs.existsSync(path.join(real, "images", uploaded.image.id))).toBe(true);
+    ws.close();
+    await daemon.close();
+    // A symlinked images directory is still refused — but only image input goes away, not the daemon.
+    fs.renameSync(path.join(real, "images"), path.join(real, "images-real"));
+    fs.symlinkSync(path.join(real, "images-real"), path.join(real, "images"));
+    daemon = await startDaemon({ config, acquireLock: false, queryFn });
+    ws = await connect(daemon.port, daemon.token);
+    const refused = await client(ws).request({ type: "image.upload", name: "tiny.png", mediaType: "image/png", base64 });
+    expect(refused).toMatchObject({ type: "error" });
+    expect(String(refused.message)).toContain("Image input unavailable");
+    expect(stderr.mock.calls.some((c) => String(c[0]).includes("image store unavailable"))).toBe(true);
+  } finally {
+    stderr.mockRestore();
+    ws?.terminate();
+    await daemon.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}, 15000);

@@ -9,14 +9,11 @@ import { openDb } from "../../../dist/persistence/db.js";
 import { Repositories } from "../../../dist/persistence/repositories.js";
 import { ImageStore } from "../../../dist/daemon/image-store.js";
 import { completionEvents } from "./completion.mjs";
+import { assertTemporaryFixtureDir } from "./fixture-dir.mjs";
 const dir =
   process.env.ROOKERY_IMAGE_FIXTURE_DIR ||
   fs.mkdtempSync(path.join(os.tmpdir(), "rookery-image-ui-"));
-if (
-  !path.resolve(dir).startsWith(path.resolve(os.tmpdir()) + path.sep) &&
-  !path.resolve(dir).startsWith("/tmp/")
-)
-  throw Error("Fixture directory must be under a temporary directory");
+assertTemporaryFixtureDir(dir);
 const home = path.join(dir, "home");
 fs.mkdirSync(home, { recursive: true });
 fs.mkdirSync(path.join(dir, "sample"), { recursive: true });

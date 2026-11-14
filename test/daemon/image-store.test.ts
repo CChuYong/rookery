@@ -264,3 +264,38 @@ it("rolls back file-creation failure and keeps forked refs after deleting the or
   expect(store.get(image.id).base64).toBe(png);
   db.close();
 });
+
+it("resolves a symlinked home but still refuses a symlinked images directory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-image-home-"));
+  homes.push(root);
+  const real = path.join(root, "real");
+  fs.mkdirSync(real);
+  fs.symlinkSync(real, path.join(root, "link"));
+  const db = openDb(":memory:");
+  const store = new ImageStore(path.join(root, "link"), new Repositories(db));
+  const ref = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+  expect(fs.existsSync(path.join(real, "images", ref.id))).toBe(true);
+  expect(store.get(ref.id).base64).toBe(png);
+  fs.renameSync(path.join(real, "images"), path.join(real, "images-real"));
+  fs.symlinkSync(path.join(real, "images-real"), path.join(real, "images"));
+  expect(() => new ImageStore(path.join(root, "link"), new Repositories(db))).toThrow("symlink");
+  db.close();
+});
+
+it("checks quota from an aggregate after one leftover scan, keeping rollback leftovers counted", () => {
+  const bytes = Buffer.from(png, "base64").length;
+  const { store, home, db } = setup(bytes * 3);
+  fs.writeFileSync(path.join(home, "images", ".crash.tmp"), Buffer.alloc(bytes), { mode: 0o600 });
+  const readdir = vi.spyOn(fs, "readdirSync");
+  store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+  // A failed rollback (destination unlink fails after a metadata error) stays reserved.
+  const add = vi.spyOn(Repositories.prototype, "addImage").mockImplementationOnce(() => { throw new Error("db failed"); });
+  const unlink = vi.spyOn(fs, "unlinkSync").mockImplementationOnce(() => { throw new Error("unlink failed"); });
+  expect(() => store.upload({ name: "b.png", mediaType: "image/png", base64: png })).toThrow("db failed");
+  add.mockRestore();
+  unlink.mockRestore();
+  expect(() => store.upload({ name: "c.png", mediaType: "image/png", base64: png })).toThrow("quota");
+  expect(readdir.mock.calls.filter((c) => String(c[0]).endsWith("images"))).toHaveLength(1);
+  readdir.mockRestore();
+  db.close();
+});
