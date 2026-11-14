@@ -8,6 +8,9 @@ class FakeEditor {
   private value = "";
   private changeCb: (() => void) | null = null;
   commandCb: (() => void) | null = null;
+  readOnly = false;
+  updateOptions(o: { readOnly?: boolean }): void { if (o.readOnly !== undefined) this.readOnly = o.readOnly; }
+  getOption(id: number): unknown { return id === editor.EditorOption.readOnly ? this.readOnly : undefined; }
   getValue(): string { return this.value; }
   setValue(v: string): void { this.value = v; this.changeCb?.(); }
   onDidChangeModelContent(cb: () => void): void { this.changeCb = cb; }
@@ -18,6 +21,7 @@ class FakeEditor {
 export const __instances: FakeEditor[] = [];
 
 export const editor = {
+  EditorOption: { readOnly: 91 },
   create: (_host: unknown, _opts?: unknown): FakeEditor => {
     const e = new FakeEditor();
     __instances.push(e);

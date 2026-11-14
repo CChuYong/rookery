@@ -53,9 +53,9 @@ describe("WorkspaceManager fs", () => {
     const { mgr } = setup();
     expect(await mgr.readImage("/r/a.ts")).toEqual({ unsupported: true });
   });
-  it("readImage confines to allowed roots (rejects outside)", async () => {
+  it("readImage reads absolute paths outside the roots but rejects relative escapes", async () => {
     const { mgr } = setup();
-    await expect(mgr.readImage("/etc/evil.png")).rejects.toThrow();
+    await expect(mgr.readImage("../evil.png")).rejects.toThrow();
   });
 
   it("writes a file", async () => {
@@ -66,19 +66,25 @@ describe("WorkspaceManager fs", () => {
 
   it("confines read/write/list to allowed roots — rejects escapes & absolute paths outside", async () => {
     const { mgr, fs } = setup();
-    await expect(mgr.read("/r/../../etc/passwd")).rejects.toThrow(); // .. escape
-    await expect(mgr.read("/etc/passwd")).rejects.toThrow(); // absolute path outside the root
+    await expect(mgr.read("../../etc/passwd")).rejects.toThrow(); // relative .. escape
     await expect(mgr.write("/r/../evil", "x")).rejects.toThrow();
+    await expect(mgr.write("/etc/passwd", "x")).rejects.toThrow(); // writes stay confined
     await expect(mgr.list("/etc")).rejects.toThrow();
     expect(fs.writeFile).not.toHaveBeenCalled(); // a rejected write never touches fs
     // paths inside the root are fine
     expect(await mgr.read("/r/a.ts")).toEqual({ content: "export const x = 1;\n", tooLarge: false });
   });
 
-  it("watchFile silently skips out-of-root paths (no throw — fire-and-forget IPC, so a throw would be uncaught)", () => {
+  it("reads an absolute path outside the roots as read-only", async () => {
+    const { mgr } = setup({ fs: fakeFs({ "/r/a.ts": "in", "/tmp/write-test.txt": "outside" }, { "/r": [] }) });
+    expect(await mgr.read("/tmp/write-test.txt")).toEqual({ content: "outside", tooLarge: false, readOnly: true });
+    expect(await mgr.read("/r/a.ts")).not.toHaveProperty("readOnly");
+  });
+
+  it("watchFile silently skips relative out-of-root paths (no throw — fire-and-forget IPC, so a throw would be uncaught)", () => {
     const watch = vi.fn(() => ({ close: () => {} }));
     const { mgr } = setup({ watch });
-    expect(() => mgr.watchFile("/etc/passwd")).not.toThrow(); // outside the work folder → silently ignore (avoid a dialog)
+    expect(() => mgr.watchFile("../passwd")).not.toThrow(); // relative escape → silently ignore (avoid a dialog)
     expect(watch).not.toHaveBeenCalled();
     mgr.watchFile("/r/a.ts"); // inside the root → registered normally
     expect(watch).toHaveBeenCalledWith("/r/a.ts", expect.any(Function));
@@ -99,11 +105,13 @@ describe("WorkspaceManager fs", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("read/write/list before any root() resolution are rejected (allowed set empty)", async () => {
+  it("before any root() resolution, writes/lists are rejected and reads are read-only (allowed set empty)", async () => {
     // create the manager directly without setup's seeding → allowed set is empty.
     const fs = fakeFs({ "/r/a.ts": "x" }, { "/r": [] });
     const mgr = new WorkspaceManager({ fs: fs as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }) });
-    await expect(mgr.read("/r/a.ts")).rejects.toThrow();
+    await expect(mgr.write("/r/a.ts", "y")).rejects.toThrow();
+    await expect(mgr.list("/r")).rejects.toThrow();
+    expect(await mgr.read("/r/a.ts")).toEqual({ content: "x", tooLarge: false, readOnly: true });
     mgr.root({}); // resolveRoot → seed
     expect(await mgr.read("/r/a.ts")).toEqual({ content: "x", tooLarge: false });
   });
