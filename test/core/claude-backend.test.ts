@@ -701,3 +701,92 @@ it("separates real SDK input-pump failure from caller cancellation", async () =>
     expect(sdk.delivered).toEqual([]);
   } finally { sdk.close(); }
 });
+
+// ── Worker steering (2026-11-15): a follow-up joins the running turn through the streaming input ──
+describe("claudeUserMessages — priority", () => {
+  it("claudeUserMessages copies priority onto the SDK message", async () => {
+    async function* inputs() {
+      yield { text: "hi", images: [], priority: "next" as const };
+      yield { text: "plain", images: [] };
+    }
+    const out: Record<string, unknown>[] = [];
+    for await (const m of claudeUserMessages(inputs())) out.push(m as unknown as Record<string, unknown>);
+    expect(out[0]).toEqual({ type: "user", priority: "next", message: { role: "user", content: [{ type: "text", text: "hi" }] }, parent_tool_use_id: null });
+    expect(out[1]).not.toHaveProperty("priority");
+  });
+});
+
+describe("ClaudeStream.steer", () => {
+  // A query that records every prompt message it pulls and never emits a result, so the
+  // first input's turn stays active until the test closes the queue.
+  function promptCapture() {
+    const seen: unknown[] = [];
+    const flags: boolean[] = [];
+    const queryFn = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+      for await (const m of input.prompt as AsyncIterable<unknown>) seen.push(m);
+    })(), { interrupt: async () => {}, applyFlagSettings: async ({ fastMode }: { fastMode: boolean }) => { flags.push(fastMode); } })) as unknown as QueryFn;
+    const until = async (n: number) => { while (seen.length < n) await new Promise((r) => setTimeout(r, 1)); };
+    return { seen, flags, queryFn, until };
+  }
+
+  it("steer pushes a priority-tagged message while a turn is active", async () => {
+    const cap = promptCapture();
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(cap.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("first task");
+    await cap.until(1);
+    await expect(stream.steer!("also check bar", "c-2")).resolves.toBe(true);
+    await cap.until(2);
+    expect(cap.seen[1]).toMatchObject({ type: "user", priority: "next", message: { role: "user", content: [{ type: "text", text: "also check bar" }] } });
+    queue.close();
+    await done;
+  });
+
+  it("steer does not re-apply speed flags", async () => {
+    const cap = promptCapture();
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(cap.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("first task");
+    await cap.until(1);
+    expect(cap.flags).toEqual([false]);
+    await stream.steer!({ text: "steered", images: [] });
+    await cap.until(2);
+    expect(cap.flags).toEqual([false]);
+    queue.close();
+    await done;
+  });
+
+  it("steer returns false when no turn is active or the input is closed", async () => {
+    const cap = promptCapture();
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(cap.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    await expect(stream.steer!("too early")).resolves.toBe(false);
+    queue.push("first task");
+    await cap.until(1);
+    queue.close();
+    await expect(stream.steer!("too late")).resolves.toBe(false);
+    await done;
+    expect(cap.seen).toHaveLength(1);
+  });
+
+  it("steer returns false when the session input has no push target", async () => {
+    const cap = promptCapture();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const stream = new ClaudeBackend(cap.queryFn).openSession((async function* () { yield "only"; await gate; })(), baseOpts());
+    const done = collect(stream);
+    await cap.until(1);
+    await expect(stream.steer!("nowhere")).resolves.toBe(false);
+    release();
+    await done;
+  });
+});
+
+it("startTurn (master single-turn path) exposes no steer", async () => {
+  const stream = new ClaudeBackend(rawQuery([])).startTurn("hi", baseOpts());
+  expect(stream.steer).toBeUndefined();
+  await collect(stream);
+});

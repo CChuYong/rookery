@@ -25,7 +25,9 @@ export interface ResolvedImage {
   mediaType: ImageMediaType;
   data: string;
 }
-export type AgentInput = string | { text: string; images: ResolvedImage[] };
+// `priority` is a delivery hint for a streaming session (only Claude reads it): a steered follow-up
+// rides with it so it joins the running turn instead of starting the next one.
+export type AgentInput = string | { text: string; images: ResolvedImage[]; priority?: "now" | "next" | "later" };
 // Validation returns fresh authoritative refs, never caller-owned metadata. Resolution occurs only at dispatch.
 export interface ImageResolver {
   validate(refs: readonly ImageRef[]): ImageRef[];

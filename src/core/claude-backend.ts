@@ -31,6 +31,7 @@ export async function* claudeUserMessages(input: AsyncIterable<AgentInput>): Asy
         ...text.images.map(image => ({ type: "image" as const, source: { type: "base64" as const, media_type: image.mediaType, data: image.data } })),
       ] },
       parent_tool_use_id: null,
+      ...(typeof text !== "string" && text.priority ? { priority: text.priority } : {}),
     };
     yield msg;
   }
@@ -331,6 +332,18 @@ class ClaudeInputScope {
   }
 }
 
+// SDK priority for a steered follow-up: delivered after the current tool step, inside the running turn.
+export const CLAUDE_STEER_PRIORITY = "next" as const;
+
+// The streaming input doubles as a steer target when it accepts pushes (the worker's MessageQueue).
+interface ClaudeInputTarget {
+  push(input: AgentInput): void;
+}
+
+function asInputTarget(input: AsyncIterable<AgentInput>): ClaudeInputTarget | undefined {
+  return typeof (input as Partial<ClaudeInputTarget>).push === "function" ? (input as unknown as ClaudeInputTarget) : undefined;
+}
+
 interface ClaudeSpeedState {
   current: SpeedPreference; // captured intent of the input currently executing
   override?: SpeedPreference; // live control queued for the next input
@@ -339,7 +352,7 @@ interface ClaudeSpeedState {
 
 class ClaudeStream implements AgentStream {
   // initialCostWatermark: 0 for a fresh session or a resume with no known baseline; else the caller's baseline.
-  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number, private readonly speed: ClaudeSpeedState, private readonly inputScope?: ClaudeInputScope) {}
+  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number, protected readonly speed: ClaudeSpeedState, private readonly inputScope?: ClaudeInputScope) {}
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
     const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set(), costWatermark: this.initialCostWatermark, requestedSpeed: this.speed.current };
@@ -379,6 +392,27 @@ class ClaudeStream implements AgentStream {
   async supportedCommands(): Promise<SlashCommandInfo[]> {
     const cmds = (await (this.q as { supportedCommands?: () => Promise<SlashCommandInfo[]> }).supportedCommands?.()) ?? [];
     return cmds.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint, aliases: c.aliases }));
+  }
+}
+
+// The streaming worker session (openSession) — the only Claude stream that can steer. The master's
+// single-turn path (startTurn) stays a plain ClaudeStream without `steer`.
+class ClaudeSessionStream extends ClaudeStream {
+  constructor(q: ReturnType<QueryFn>, initialCostWatermark: number, speed: ClaudeSpeedState, inputScope: ClaudeInputScope, private readonly target: ClaudeInputTarget | undefined) {
+    super(q, initialCostWatermark, speed, inputScope);
+  }
+
+  // The SDK reads the streaming input ahead and folds a message that arrives mid-turn into the
+  // in-flight turn, so steering is just a priority-tagged push. Never throws: false = caller queues.
+  async steer(input: AgentInput): Promise<boolean> {
+    if (!this.speed.turnActive || !this.target) return false;
+    const base = typeof input === "string" ? { text: input, images: [] } : input;
+    try {
+      this.target.push({ ...base, priority: CLAUDE_STEER_PRIORITY });
+      return true;
+    } catch {
+      return false; // input closed (stream stopping/replaced)
+    }
   }
 }
 
@@ -427,6 +461,13 @@ export class ClaudeBackend implements AgentBackend {
     const messages = async function* () {
       try {
         for await (const message of claudeUserMessages(input)) {
+          if (message.priority) {
+            // A steered follow-up joins the current turn: no flag application or speed-intent change.
+            // Marking the turn active is a no-op when folded in, and correct if it lands after a result.
+            speed.turnActive = true;
+            yield message;
+            continue;
+          }
           const next = speed.override ?? resolveSpeed(opts.speed);
           await q.applyFlagSettings?.({ fastMode: next === "fast" });
           speed.current = next;
@@ -451,7 +492,7 @@ export class ClaudeBackend implements AgentBackend {
       scope.dispose();
       throw error;
     }
-    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed, scope);
+    return new ClaudeSessionStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed, scope, asInputTarget(input));
   }
 
   startTurn(prompt: AgentInput, opts: MasterTurnOptions): AgentStream {
