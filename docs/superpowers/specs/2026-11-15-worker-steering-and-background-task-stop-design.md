@@ -69,8 +69,9 @@ every existing contract that does not have to change, and do not invent product 
   (`turn/started` notification and the `turn/start` response).
 - Worker live state is derived (`turnActive ? running : bgTasks>0 ? background : idle`) with a settle grace;
   `bgTasks` is fed by both edge frames and the level frame (REPLACE semantics).
-- `worker.status` events carry `bg?: {count, types}`; the desktop reducer keeps the previous `bg` when an event has
-  none (`reduce.ts`), so "no tasks" must be sent explicitly once the indicator can show outside `background`.
+- `worker.status` events carry `bg?: {count, types}`, and every `worker.status` also appends a worker row to the
+  owning session's log and is consumed by `WorkerNotifier`, the worker-settled trigger and the Slack relay — so it
+  must not be re-emitted just to refresh task metadata.
 - New user-facing strings go through i18n (ko default, en); code comments in English; protocol inbound is zod.
 
 ## Approaches considered
@@ -142,9 +143,10 @@ the list, count toward the header indicator, and are stoppable. Subagents and wo
 panel); ambient tasks are excluded per the SDK's "hosts should exclude them from activity indicators". When a
 worker is `background` only because of excluded tasks, the header shows its status badge but no list.
 
-**Events.** Extend `worker.status`'s `bg` to `{count, types, tasks: [{id, type, description}]}` and emit it whenever
-task membership changes, even when the derived status does not change, and with an explicit empty list when the
-last task ends. The desktop reducer replaces `bg` on every event that carries it.
+**Events.** A dedicated `worker.tasks {sessionId, workerId, tasks: [{id, type, description}]}` event carries the
+listed set whenever it changes (including to an empty list); `worker.status` is untouched so its log/notifier/trigger
+consumers see no extra emissions. `fleet.list` rows carry the same `tasks` for reconnecting clients. (Planning-time
+call: the spec originally suggested extending `worker.status`; see Constraints for why not.)
 
 **Stop.** Add optional `stopTask?(taskId: string): Promise<void>` to `AgentStream` (Claude: `Query.stopTask`).
 `Worker.stopTask(taskId)` succeeds only for a listed task currently in its live set and does not change worker
