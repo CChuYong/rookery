@@ -1,37 +1,58 @@
+/* Hallmark · shape: app screen · genre: ide-workbench · redesign: IDE chrome pass · dock chrome for globals.css (stamp and critique live there) */
 /* Rookery dockview theme: layer on the built-in `.dockview-theme-dark` (which
    supplies the full --dv-* var set) and override only the accent/surface vars
    to the rookery @theme tokens. Apply BOTH classes on an ancestor of the
    DockviewReact root: `className="dockview-theme-dark dockview-theme-rookery"`. */
+/* Doubled class: dockview's own .dockview-theme-dark sets the same variables at equal specificity and its stylesheet
+   can load later, which painted the panes #1e1e1e; the compound selector makes the Rookery values win. */
+.dockview-theme-dark.dockview-theme-rookery,
 .dockview-theme-rookery {
   --dv-background-color: var(--color-ink);
   --dv-group-view-background-color: var(--color-ink);
-  --dv-tabs-and-actions-container-background-color: var(--color-surface);
-  --dv-tabs-and-actions-container-height: 34px;
-  --dv-tab-border-radius: 6px;
+  --dv-tabs-and-actions-container-background-color: var(--color-sunk);
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tab-border-radius: 0px;
   --dv-activegroup-visiblepanel-tab-color: var(--color-fg);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-fg-dim);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-muted);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--color-muted);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-muted);
   --dv-tab-divider-color: transparent;
-  --dv-separator-border: var(--color-line);
+  /* tab fills come from our own rules below; dockview's stock dark fills (#1e1e1e / #2d2d2d) are cleared */
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-separator-border: transparent;  /* groups are parted by space, not lines; the sash still shows on hover */
   --dv-paneview-active-outline-color: var(--color-accent);
-  --dv-active-sash-color: var(--color-accent);
-  --dv-drag-over-background-color: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --dv-active-sash-color: var(--color-thumb-hi);
+  --dv-drag-over-background-color: color-mix(in oklab, var(--color-accent) 14%, transparent);
   --dv-drag-over-border-color: var(--color-accent);
 }
 
-/* Pill tabs with the signature coral underline (mirrors the app's TabBar). The
-   custom RookeryTab paints icon/title/close; these rules own the tab shell. */
+/* Quiet tabs on the canvas plane: no strip background, no bottom rule, no dividers, no accent line. The active
+   tab is simply full-white text on a faint lift; inactive tabs are muted. The custom RookeryTab paints
+   icon/title/close (data-kind identifies the panel kind for the rules below); these rules own the tab shell. */
 .dockview-theme-rookery .dv-tabs-and-actions-container {
-  border-bottom: 1px solid var(--color-line);
-  padding: 0 6px;
+  padding: 0 8px;
   align-items: center;
+}
+/* Every group header (editor, Files/Git/Activity, Terminal) shares one 32px height so the strips line up. */
+.dockview-theme-rookery .dv-tabs-and-actions-container:has(.rk-tab[data-kind="files"]),
+.dockview-theme-rookery .dv-tabs-and-actions-container:has(.rk-tab[data-kind="git"]),
+.dockview-theme-rookery .dv-tabs-and-actions-container:has(.rk-tab[data-kind="nested"]),
+.dockview-theme-rookery .dv-tabs-and-actions-container:has(.rk-tab[data-kind="terminal"]) {
+  height: 32px;
+}
+/* A conversation shown on its own needs no tab: hide the strip until a second tab (a file, a diff) joins it. */
+.dockview-theme-rookery .dv-groupview:has(> .dv-tabs-and-actions-container .rk-tab[data-kind="conversation"]):not(:has(> .dv-tabs-and-actions-container .dv-tab ~ .dv-tab)) > .dv-tabs-and-actions-container {
+  display: none;
 }
 .dockview-theme-rookery .dv-tabs-container > .dv-tab {
   position: relative;
-  height: 26px;
+  height: 24px;
   margin: 0 1px;
-  border-radius: 6px;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--dur-micro) ease, color var(--dur-micro) ease;
 }
 .dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
   background-color: var(--color-raised);
@@ -39,20 +60,56 @@
 }
 .dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-inactive-tab {
   background-color: transparent;
-  color: var(--color-fg-dim);
+  color: var(--color-muted);
 }
 .dockview-theme-rookery .dv-tab.dv-inactive-tab:hover {
-  background-color: color-mix(in srgb, var(--color-raised) 60%, transparent);
-  color: var(--color-fg);
+  color: var(--color-fg-dim);
 }
-/* the coral underline under the active tab (the strip's signature) */
-.dockview-theme-rookery .dv-tabs-container > .dv-tab.dv-active-tab::after {
-  content: "";
+/* close × shows on hover (RookeryTab's own group-hover opacity) and stays visible on an active editor/terminal tab;
+   the inspector card's tabs (Files / Git / Activity) only reveal it on hover. */
+.dockview-theme-rookery .dv-tab.dv-active-tab .rk-tab:is([data-kind="editor"], [data-kind="terminal"], [data-kind="conversation"]) .tab-close {
+  opacity: 1;
+}
+
+/* Floating inspector (T3 Code's right card): the group holding Files / Git / Activity is inset from the window edge
+   and drawn as one lifted card — surface colour, one hairline, small radius, soft shadow — instead of a full-height
+   column. The grid still owns its size (the sash keeps working); only the painted box is inset. */
+.dockview-theme-rookery .dv-view:has(> .dv-groupview .rk-tab[data-kind="files"]),
+.dockview-theme-rookery .dv-view:has(> .dv-groupview .rk-tab[data-kind="git"]),
+.dockview-theme-rookery .dv-view:has(> .dv-groupview .rk-tab[data-kind="nested"]) {
+  padding: 8px 12px 12px 4px;
+}
+.dockview-theme-rookery .dv-groupview:has(.rk-tab[data-kind="files"]),
+.dockview-theme-rookery .dv-groupview:has(.rk-tab[data-kind="git"]),
+.dockview-theme-rookery .dv-groupview:has(.rk-tab[data-kind="nested"]) {
+  --dv-group-view-background-color: var(--color-surface);
+  --dv-tabs-and-actions-container-background-color: var(--color-surface);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+/* Inspector tabs size to their label and mark the active one with text colour alone (no pill fill), so three tabs fit
+   the card without clipping into dockview's overflow chevron. */
+.dockview-theme-rookery .dv-groupview:has(.rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"])) .dv-tabs-container > .dv-tab {
+  min-width: 0;
+  width: auto;
+  flex: 0 0 auto;
+}
+.dockview-theme-rookery .dv-groupview:has(.rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"])) .dv-tab.dv-active-tab {
+  background-color: transparent !important;
+  color: var(--color-fg);
+  box-shadow: inset 0 -1px 0 var(--color-fg-dim);
+}
+/* The inspector tabs' close × takes no width (it overlays the tab's right edge on hover), so the three labels fit. */
+.dockview-theme-rookery .rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"]) {
+  position: relative;
+}
+.dockview-theme-rookery .rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"]) .tab-close {
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: -4px;
-  height: 2px;
-  border-radius: 9999px;
-  background: var(--color-accent);
+  right: 2px;
+  margin: 0;
+  background-color: var(--color-surface);
 }

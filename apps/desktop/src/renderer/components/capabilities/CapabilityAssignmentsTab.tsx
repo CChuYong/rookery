@@ -9,6 +9,7 @@ import type {
   CapabilityScopeKind,
 } from "@daemon/core/capabilities/types.js";
 import { useT } from "../../i18n/provider.js";
+import { cn } from "../../lib/cn.js";
 import { Button } from "../../ui/button.js";
 import type { CapabilityCenterApi, CapabilityTargetOptions } from "./types.js";
 
@@ -143,57 +144,57 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
       .catch((cause) => setFormError(message(cause))).finally(() => setSaving(false));
   };
 
-  if (loading) return <div className="flex justify-center gap-2 py-24 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
-  if (error) return <div className="flex flex-col items-center gap-3 py-20 text-center"><CircleAlert size={26} className="text-fail" /><p className="text-[12px] text-fail">{t("capabilities.assignmentsLoadFailed")}</p><p className="font-mono text-[10.5px] text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadKey((value) => value + 1)}>{t("common.retry")}</Button></div>;
+  if (loading) return <div className="flex justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
+  if (error) return <div className="flex flex-col items-center gap-3 py-20 text-center"><CircleAlert size={26} className="text-fail" /><p className="text-ui text-fail">{t("capabilities.assignmentsLoadFailed")}</p><p className="text-meta text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadKey((value) => value + 1)}>{t("common.retry")}</Button></div>;
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)]">
       <section className="min-w-0">
-        <div className="mb-3"><h2 className="text-[14px] font-semibold text-fg">{t("capabilities.assignments")}</h2><p className="mt-1 text-[11px] text-muted">{t("capabilities.assignmentsDescription")}</p></div>
+        <div className="mb-3"><h2 className="text-title font-medium text-fg">{t("capabilities.assignments")}</h2><p className="mt-1 text-meta text-muted">{t("capabilities.assignmentsDescription")}</p></div>
         {library?.bindings.length ? (
-          <div className="space-y-2">
+          <div className="divide-y divide-line-soft border-y border-line">
             {library.bindings.map((binding) => {
               const pack = library.packs.find((candidate) => candidate.instanceId === binding.packInstanceId);
               return (
-                <article key={binding.id} data-testid={`capability-binding-${binding.id}`} className="rounded-[var(--radius)] border border-line bg-surface/40 px-3.5 py-3">
+                <div key={binding.id} data-testid={`capability-binding-${binding.id}`} className="px-3 py-2.5">
                   <div className="flex flex-wrap items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2"><h3 className="text-[12.5px] font-medium text-fg">{pack?.manifest.displayName ?? binding.packInstanceId}</h3><span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{binding.enabled ? t("capabilities.bindingEnabled") : t("capabilities.bindingTombstone")}</span></div>
-                      <p className="mt-1 text-[10.5px] text-fg-dim">{scopeLabel(t, binding.scopeKind)}{binding.scopeRef ? ` · ${[...targets.repos, ...targets.sessions, ...targets.workers].find((item) => item.id === binding.scopeRef)?.label ?? binding.scopeRef}` : ""}</p>
-                      <p className="mt-1 text-[10px] text-muted">{audienceLabel(t, binding)}</p>
-                      <p className="mt-1 text-[10px] text-muted">{t("capabilities.bindingInheritance")}</p>
+                      <div className="flex flex-wrap items-center gap-2"><h3 className="text-body font-medium text-fg">{pack?.manifest.displayName ?? binding.packInstanceId}</h3><span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className={cn("h-1.5 w-1.5 rounded-full", binding.enabled ? "bg-pr" : "bg-stop")} aria-hidden />{binding.enabled ? t("capabilities.bindingEnabled") : t("capabilities.bindingTombstone")}</span></div>
+                      <p className="mt-1 text-meta text-fg-dim">{scopeLabel(t, binding.scopeKind)}{binding.scopeRef ? ` · ${[...targets.repos, ...targets.sessions, ...targets.workers].find((item) => item.id === binding.scopeRef)?.label ?? binding.scopeRef}` : ""}</p>
+                      <p className="mt-1 text-meta text-faint">{audienceLabel(t, binding)}</p>
+                      <p className="mt-1 text-meta text-faint">{t("capabilities.bindingInheritance")}</p>
                     </div>
-                    <Button variant="ghost" size="iconSm" aria-label={t("capabilities.edit")} onClick={() => edit(binding)}><Pencil size={13} /></Button>
-                    {confirmDelete === binding.id ? <><Button variant="danger" size="sm" onClick={() => { setSaving(true); void api.deleteBinding(binding.id).then(reload).then(() => setConfirmDelete(null)).catch((cause) => setFormError(message(cause))).finally(() => setSaving(false)); }}>{t("common.delete")}</Button><Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>{t("common.cancel")}</Button></> : <Button variant="ghost" size="iconSm" aria-label={t("common.delete")} onClick={() => setConfirmDelete(binding.id)}><Trash2 size={13} /></Button>}
+                    <Button variant="ghost" size="iconSm" aria-label={t("capabilities.edit")} onClick={() => edit(binding)}><Pencil size={14} /></Button>
+                    {confirmDelete === binding.id ? <><Button variant="danger" size="sm" onClick={() => { setSaving(true); void api.deleteBinding(binding.id).then(reload).then(() => setConfirmDelete(null)).catch((cause) => setFormError(message(cause))).finally(() => setSaving(false)); }}>{t("common.delete")}</Button><Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>{t("common.cancel")}</Button></> : <Button variant="ghost" size="iconSm" aria-label={t("common.delete")} onClick={() => setConfirmDelete(binding.id)}><Trash2 size={14} /></Button>}
                   </div>
-                </article>
+                </div>
               );
             })}
           </div>
-        ) : <div className="flex flex-col items-center gap-2 py-16 text-center text-muted"><Plus size={25} className="opacity-40" /><p className="text-[12px]">{t("capabilities.assignmentsEmpty")}</p></div>}
+        ) : <div className="flex flex-col items-center gap-2 py-16 text-center text-muted"><Plus size={25} className="opacity-40" /><p className="text-ui">{t("capabilities.assignmentsEmpty")}</p></div>}
       </section>
 
-      <section className="h-fit rounded-[var(--radius)] border border-line bg-surface/45 p-4">
-        <h2 className="text-[13px] font-semibold text-fg">{editingId ? t("capabilities.editAssignment") : t("capabilities.newAssignment")}</h2>
+      <section className="h-fit rounded-lg border border-line bg-surface p-4">
+        <h2 className="text-body font-medium text-fg">{editingId ? t("capabilities.editAssignment") : t("capabilities.newAssignment")}</h2>
         <div className="mt-4 space-y-4">
-          <label className="block text-[11px] text-fg-dim">{t("capabilities.pack")}
-            <select aria-label={t("capabilities.pack")} value={packInstanceId} onChange={(event) => setPackInstanceId(event.target.value)} className="mt-1 w-full rounded-md border border-line bg-base px-2.5 py-2 text-[11.5px] text-fg">
+          <label className="block text-meta text-fg-dim">{t("capabilities.pack")}
+            <select aria-label={t("capabilities.pack")} value={packInstanceId} onChange={(event) => setPackInstanceId(event.target.value)} className="mt-1 w-full rounded-md border border-line bg-base px-2.5 py-2 text-meta text-fg">
               <option value="">{t("capabilities.select")}</option>
               {library?.packs.map((pack) => <option key={pack.instanceId} value={pack.instanceId}>{pack.manifest.displayName}</option>)}
             </select>
           </label>
-          <label className="block text-[11px] text-fg-dim">{t("capabilities.bindingScope")}
-            <select aria-label={t("capabilities.bindingScope")} value={scopeKind} onChange={(event) => { const next = event.target.value as CapabilityScopeKind; setScopeKind(next); setScopeRef(""); }} className="mt-1 w-full rounded-md border border-line bg-base px-2.5 py-2 text-[11.5px] text-fg">
+          <label className="block text-meta text-fg-dim">{t("capabilities.bindingScope")}
+            <select aria-label={t("capabilities.bindingScope")} value={scopeKind} onChange={(event) => { const next = event.target.value as CapabilityScopeKind; setScopeKind(next); setScopeRef(""); }} className="mt-1 w-full rounded-md border border-line bg-base px-2.5 py-2 text-meta text-fg">
               {SCOPES.map((scope) => <option key={scope} value={scope}>{scopeLabel(t, scope)}</option>)}
             </select>
           </label>
-          {scopeKind !== "rookery" && <label className="block text-[11px] text-fg-dim">{t("capabilities.bindingTarget")}
-            <select aria-label={t("capabilities.bindingTarget")} value={scopeRef} onChange={(event) => setScopeRef(event.target.value)} className="mt-1 w-full rounded-md border border-line bg-base px-2.5 py-2 text-[11.5px] text-fg"><option value="">{t("capabilities.select")}</option>{scopeTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select>
+          {scopeKind !== "rookery" && <label className="block text-meta text-fg-dim">{t("capabilities.bindingTarget")}
+            <select aria-label={t("capabilities.bindingTarget")} value={scopeRef} onChange={(event) => setScopeRef(event.target.value)} className="mt-1 w-full rounded-md border border-line bg-base px-2.5 py-2 text-meta text-fg"><option value="">{t("capabilities.select")}</option>{scopeTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select>
           </label>}
-          <fieldset><legend className="text-[11px] text-fg-dim">{t("capabilities.bindingAgents")}</legend><div className="mt-2 flex flex-wrap gap-3">{AGENTS.map((agent) => <label key={agent} className="flex items-center gap-1.5 text-[11px] text-fg-dim"><input type="checkbox" checked={agents.includes(agent)} onChange={() => toggle(agents, agent, setAgents)} />{t(`capabilities.agent.${agent}`)}</label>)}</div></fieldset>
-          <fieldset><legend className="text-[11px] text-fg-dim">{t("capabilities.bindingOrigins")}</legend><div className="mt-2 flex flex-wrap gap-3">{ORIGINS.map((origin) => <label key={origin} className="flex items-center gap-1.5 text-[11px] text-fg-dim"><input type="checkbox" checked={origins.includes(origin)} onChange={() => toggle(origins, origin, setOrigins)} />{t(`capabilities.origin.${origin}`)}</label>)}</div></fieldset>
-          <label className="flex items-start gap-2 rounded-md border border-line bg-base/40 p-2.5 text-[11px] text-fg-dim"><input type="checkbox" checked={!enabled} onChange={(event) => setEnabled(!event.target.checked)} /><span><strong className="font-medium text-fg">{t("capabilities.bindingTombstone")}</strong><span className="mt-0.5 block text-[10px] text-muted">{t("capabilities.bindingTombstoneDescription")}</span></span></label>
-          {formError && <p className="text-[11px] text-fail">{formError}</p>}
+          <fieldset><legend className="text-meta text-fg-dim">{t("capabilities.bindingAgents")}</legend><div className="mt-2 flex flex-wrap gap-3">{AGENTS.map((agent) => <label key={agent} className="flex items-center gap-1.5 text-meta text-fg-dim"><input type="checkbox" checked={agents.includes(agent)} onChange={() => toggle(agents, agent, setAgents)} />{t(`capabilities.agent.${agent}`)}</label>)}</div></fieldset>
+          <fieldset><legend className="text-meta text-fg-dim">{t("capabilities.bindingOrigins")}</legend><div className="mt-2 flex flex-wrap gap-3">{ORIGINS.map((origin) => <label key={origin} className="flex items-center gap-1.5 text-meta text-fg-dim"><input type="checkbox" checked={origins.includes(origin)} onChange={() => toggle(origins, origin, setOrigins)} />{t(`capabilities.origin.${origin}`)}</label>)}</div></fieldset>
+          <label className="flex items-start gap-2 rounded-md border border-line bg-base/40 p-2.5 text-meta text-fg-dim"><input type="checkbox" checked={!enabled} onChange={(event) => setEnabled(!event.target.checked)} /><span><strong className="font-medium text-fg">{t("capabilities.bindingTombstone")}</strong><span className="mt-0.5 block text-meta text-muted">{t("capabilities.bindingTombstoneDescription")}</span></span></label>
+          {formError && <p className="text-meta text-fail">{formError}</p>}
           <div className="flex justify-end gap-2">{editingId && <Button variant="ghost" size="sm" onClick={resetForm}>{t("common.cancel")}</Button>}<Button variant="primary" size="sm" loading={saving} onClick={save}>{editingId ? t("common.save") : t("capabilities.createAssignment")}</Button></div>
         </div>
       </section>

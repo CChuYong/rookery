@@ -28,7 +28,7 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
   }, [root, hash]);
 
   if (!files) return <SkeletonRows rows={8} />;
-  if (files.length === 0) return <div className="flex flex-1 items-center justify-center text-[12px] text-muted">{t("commitView.noChangedFiles")}</div>;
+  if (files.length === 0) return <div className="flex flex-1 items-center justify-center text-ui text-muted">{t("commitView.noChangedFiles")}</div>;
   const totalAdded = files.reduce((s, f) => s + f.added, 0);
   const totalDeleted = files.reduce((s, f) => s + f.deleted, 0);
   return (
@@ -36,32 +36,32 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
       {/* Commit details (top) */}
       <div className="shrink-0 border-b border-line px-4 py-2.5">
         <div className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-[13px] font-semibold tracking-[-0.01em]">{info?.subject || "—"}</span>
-          <span className="shrink-0 font-mono text-[11px] text-muted/80">{info?.shortHash || hash.slice(0, 7)}</span>
+          <span className="min-w-0 truncate text-body font-medium tracking-[-0.01em]">{info?.subject || "—"}</span>
+          <span className="shrink-0 font-mono text-meta text-muted/80">{info?.shortHash || hash.slice(0, 7)}</span>
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-muted">
           {info?.author && <span className="text-fg-dim">{info.author}</span>}
           {info?.email && <span className="text-muted/70">&lt;{info.email}&gt;</span>}
-          {info?.date && <><span>·</span><span>{info.date}</span></>}
-          <span>·</span>
-          <span className="font-mono">{t(files.length === 1 ? "commitView.filesOne" : "commitView.filesMany", { count: files.length })} <span className="text-pr">+{totalAdded}</span> <span className="text-fail">−{totalDeleted}</span></span>
+          {info?.date && <><span className="h-3 w-px bg-line" aria-hidden /><span>{info.date}</span></>}
+          <span className="h-3 w-px bg-line" aria-hidden />
+          <span>{t(files.length === 1 ? "commitView.filesOne" : "commitView.filesMany", { count: files.length })} <span className="tabular-nums text-pr">+{totalAdded}</span> <span className="tabular-nums text-fail">−{totalDeleted}</span></span>
         </div>
-        {info?.body && <pre className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words font-sans text-[11.5px] leading-relaxed text-fg-dim/90">{info.body}</pre>}
+        {info?.body && <pre className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap break-words font-sans text-meta leading-relaxed text-fg-dim/90">{info.body}</pre>}
       </div>
 
       <div className="flex min-h-0 flex-1">
       <div className="flex w-56 shrink-0 flex-col overflow-y-auto border-r border-line py-1">
-        <div className="eyebrow px-2.5 pb-1 pt-1.5 eyebrow-sm uppercase text-muted">{t("commitView.changedFiles", { count: files.length })}</div>
+        <div className="px-2.5 pb-1 pt-1.5 text-ui font-medium text-fg-dim">{t("commitView.changedFiles", { count: files.length })}</div>
         {files.map((f) => (
           <button
             key={f.path}
             onClick={() => setSel(f.path)}
             title={f.path}
-            className={cn("flex w-full items-center gap-2 px-2.5 py-1 text-left text-[12px]", sel === f.path ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised")}
+            className={cn("flex h-6 w-full items-center gap-2 px-2.5 text-left text-ui", sel === f.path ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised")}
           >
-            <span className={cn("w-3 shrink-0 text-center font-mono text-[11px]", GIT_TONE[f.status] ?? "text-muted")}>{f.status}</span>
+            <span className={cn("w-3 shrink-0 text-center font-mono text-meta", GIT_TONE[f.status] ?? "text-muted")}>{f.status}</span>
             <span className="min-w-0 flex-1 truncate">{basename(f.path)}</span>
-            <span className="shrink-0 font-mono text-[9.5px]"><span className="text-pr">+{f.added}</span> <span className="text-fail">−{f.deleted}</span></span>
+            <span className="shrink-0 font-mono text-meta tabular-nums"><span className="text-pr">+{f.added}</span> <span className="text-fail">−{f.deleted}</span></span>
           </button>
         ))}
       </div>

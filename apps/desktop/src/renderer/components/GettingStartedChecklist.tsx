@@ -19,11 +19,11 @@ export function GettingStartedChecklist({ authDone, folderDone, sessionDone, wor
   const doneCount = items.filter((i) => i.done).length;
 
   return (
-    <div className="rise-in fixed bottom-4 right-4 z-40 w-80 rounded-xl border border-line bg-surface shadow-2xl">
+    <div className="rise-in fixed bottom-4 right-4 z-40 w-80 rounded-xl border border-line bg-surface shadow-lg">
       <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-        <span className="text-[12px] font-semibold">{t("gettingStarted.title")}</span>
-        <span className="font-mono text-[10px] text-muted">{doneCount}/{items.length}</span>
-        <button onClick={onDismiss} aria-label={t("gettingStarted.dismiss")} className="ml-auto rounded p-1 text-muted transition-colors hover:bg-raised hover:text-fg-dim"><X size={13} /></button>
+        <span className="text-ui font-medium">{t("gettingStarted.title")}</span>
+        <span className="font-mono text-meta text-muted">{doneCount}/{items.length}</span>
+        <button onClick={onDismiss} aria-label={t("gettingStarted.dismiss")} className="ml-auto rounded p-1 text-muted transition-colors hover:bg-raised hover:text-fg-dim"><X size={14} /></button>
       </div>
       <div className="flex flex-col gap-1 p-2">
         {items.map((it) => (
@@ -32,12 +32,12 @@ export function GettingStartedChecklist({ authDone, folderDone, sessionDone, wor
               {it.done && <Check size={12} />}
             </span>
             <div className="min-w-0 flex-1">
-              <div className={`text-[12px] font-medium ${it.done ? "text-muted line-through" : "text-fg"}`}>{it.title}</div>
-              <div className="text-[10px] leading-tight text-muted">{it.desc}</div>
+              <div className={`text-ui font-medium ${it.done ? "text-muted line-through" : "text-fg"}`}>{it.title}</div>
+              <div className="text-meta leading-tight text-muted">{it.desc}</div>
             </div>
             {!it.done && (
-              <button onClick={it.action} className="flex shrink-0 items-center gap-0.5 rounded-md border border-line px-2 py-1 text-[10px] text-fg-dim transition-colors hover:bg-raised hover:text-fg">
-                {it.actionLabel} <ChevronRight size={11} />
+              <button onClick={it.action} className="flex shrink-0 items-center gap-0.5 rounded-md border border-line px-2 py-1 text-meta text-fg-dim transition-colors hover:bg-raised hover:text-fg">
+                {it.actionLabel} <ChevronRight size={12} />
               </button>
             )}
           </div>

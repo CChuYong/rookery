@@ -46,13 +46,14 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
     setActive(pageKey, tab.id);
     setMenu({ x: e.clientX, y: e.clientY, tab });
   };
-  // Coral underline that slides beneath the active tab.
+  // Accent rule on the TOP edge of the active tab (flat VS Code chrome, matching the dockview tab strip), placed
+  // instantly at its measured position (no left/width slide).
   const { containerRef, rect } = useSegmentIndicator(active, [tabs.length]);
   return (
-    <div ref={containerRef} className="relative flex h-8 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-surface px-1.5">
+    <div ref={containerRef} className="relative flex h-[34px] shrink-0 items-stretch overflow-x-auto border-b border-line bg-sunk">
       {rect && (
         <div
-          className="pointer-events-none absolute bottom-0 h-[2px] rounded-full bg-accent transition-[left,width] duration-200 ease-out motion-reduce:transition-none"
+          className="pointer-events-none absolute top-0 h-px bg-accent"
           style={{ left: rect.left, width: rect.width }}
         />
       )}
@@ -61,14 +62,14 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
         const title = tab.kind === "agent" ? agentLabel : tab.title;
         const dirty = tab.kind === "file" && tab.dirty;
         return (
-          <div key={tab.id} data-seg={tab.id} onContextMenu={(e) => onContextMenu(e, tab)} className={cn("group flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] transition-colors duration-150", tab.id === active ? "bg-raised text-fg" : "text-muted hover:bg-raised/60")}>
+          <div key={tab.id} data-seg={tab.id} onContextMenu={(e) => onContextMenu(e, tab)} className={cn("group flex shrink-0 items-center gap-1.5 border-r border-line-soft px-3 text-ui transition-colors duration-150", tab.id === active ? "bg-ink text-fg" : "text-muted hover:text-fg-dim")}>
             <button onClick={() => setActive(pageKey, tab.id)} className="flex items-center gap-1.5">
-              <Icon size={12} className={tab.kind === "agent" ? "text-accent" : undefined} />
+              <Icon size={14} className="text-muted" />
               <span title={editorTooltip(tab.id)} className="max-w-[140px] truncate">{title}</span>
               {dirty && <span className="dot-pop h-1.5 w-1.5 rounded-full bg-fg-dim" />}
             </button>
             {tab.kind !== "agent" && (
-              <button onClick={() => requestClose(tab)} aria-label={t("tabBar.closeTab")} className="text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={11} /></button>
+              <button onClick={() => requestClose(tab)} aria-label={t("tabBar.closeTab")} className="ml-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={14} /></button>
             )}
           </div>
         );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellOff, Plus, Clock, RotateCcw, Loader2, Blocks } from "lucide-react";
+import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellRing, BellOff, Plus, Clock, RotateCcw, Loader2, Blocks, MessageSquare, FolderGit2 } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
@@ -46,8 +46,8 @@ import { WindowControls } from "./components/WindowControls.js";
 import { DaemonDownBanner } from "./components/DaemonDownBanner.js";
 import { Tooltip } from "./components/Tooltip.js";
 import { RestartDaemonDialog } from "./components/RestartDaemonDialog.js";
-import { UsagePanel } from "./components/UsagePanel.js";
 import { ResourceMonitor } from "./components/ResourceMonitor.js";
+import { StatusBar } from "./components/StatusBar.js";
 import { SettingsPage } from "./components/SettingsPage.js";
 import { AttentionBell } from "./components/AttentionBell.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
@@ -1023,7 +1023,7 @@ export function App(): JSX.Element {
   // terminal) gets an explicit message instead of looping silently (audit #2).
   const workRootFallback =
     wsRootState === "missing" ? (
-      <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.workdirMissing")}</div>
+      <div className="px-3 py-3 text-ui text-muted">{t("rightSidebar.workdirMissing")}</div>
     ) : (
       <SkeletonRows rows={8} />
     );
@@ -1103,17 +1103,21 @@ export function App(): JSX.Element {
       }
     : null;
 
-  const navBtn = (label: string, active: boolean, onClick: () => void, badge = false) => (
+  // Nav list row (Sessions / Repos): a flat tree-sidebar entry, not a segmented pill — same grammar as the
+  // repo-tree/session rows below it. The badge is an inline dot (not something Segment's item shape carries),
+  // kept as a plain button here so it stays wired exactly as before.
+  const navBtn = (label: string, Icon: typeof MessageSquare, active: boolean, onClick: () => void, badge = false) => (
     <button
       onClick={onClick}
       className={cn(
-        "no-drag relative rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
-        active ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg-dim",
+        "no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors",
+        active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg-dim",
       )}
     >
-      {label}
-      {/* dot on the Repos tab when there's an unread worker — so even in the Sessions view you notice "something finished". */}
-      {badge && <span className="badge-pop absolute -right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-run" />}
+      <Icon size={14} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {/* dot on the Repos row when there's an unread worker — so even in the Sessions view you notice "something finished". */}
+      {badge && <span className="badge-pop h-1.5 w-1.5 shrink-0 rounded-full bg-run" />}
     </button>
   );
 
@@ -1129,30 +1133,41 @@ export function App(): JSX.Element {
         : `s:${s.activeSessionId ?? "none"}`;
 
   return (
-    <div className="app-top-inset relative flex h-screen overflow-hidden bg-ink text-fg">
+    <div className="app-top-inset relative flex h-screen flex-col overflow-hidden bg-ink text-fg">
       <WindowControls />
+      {/* The sidebar+main row sits above a full-width status bar (Orca shell anatomy) — min-h-0 so this row (not
+          the status bar) absorbs the flex height and stays scrollable internally. */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside
         style={collapsed ? undefined : { width: leftPanel.width }}
         className={cn(
-          "sidebar-top relative flex shrink-0 flex-col border-r border-line bg-surface pt-10",
-          leftPanel.resizing ? "" : "transition-all duration-200",
-          collapsed ? "w-14 items-center gap-2" : "gap-3 px-3 pb-3",
+          "sidebar-top relative flex shrink-0 flex-col border-r border-line bg-sunk pt-10",
+          // The collapse/expand swap is a width change — never animated (DESIGN: no width/height transitions).
+          // A live resize drag also updates width every frame with no transition needed.
+          collapsed ? "w-14 items-center gap-2" : "gap-0 px-3 pb-3",
         )}
       >
         {/* the top traffic-light area (pt-10) is a window-move drag region (macOS). On Windows/Linux the dedicated
             title bar handles this, so .win-chrome hides this strip + shrinks the pt (globals.css). */}
         <div className="mac-drag-strip drag absolute inset-x-0 top-0 h-10" />
         {!collapsed && (
-          <div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
-            <button
-              onClick={toggleNotify}
-              aria-label={notifyOn ? t("app.notifyOnTitle") : t("app.notifyOffTitle")}
-              title={notifyOn ? t("app.notifyOnTitle") : t("app.notifyOffTitle")}
-              className={cn("no-drag flex h-7 w-7 items-center justify-center rounded-md border border-line bg-ink/40 transition-colors hover:bg-raised", notifyOn ? "text-fg-dim" : "text-muted")}
-            >
-              {notifyOn ? <Bell size={13} /> : <BellOff size={13} />}
+          // Same strip as the traffic lights: back/forward + the attention bell + collapse sit at its right edge,
+          // using the window-chrome row instead of a second one below it.
+          <div className="absolute inset-x-0 top-0 z-20 flex h-10 items-center justify-end gap-0.5 pr-2">
+            {!compactSidebar && (
+              <>
+                <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+                  <ChevronLeft size={14} />
+                </button>
+                <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+                  <ChevronRight size={14} />
+                </button>
+              </>
+            )}
+            <AttentionBell onNavigate={onAttentionNav} />
+            <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} title={t("app.collapseSidebar")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim">
+              <PanelLeftClose size={14} />
             </button>
-            <ResourceMonitor snapshot={resources} onRefresh={pollResourcesOnce} onOpenChange={setResOpen} />
           </div>
         )}
         {collapsed ? (
@@ -1161,135 +1176,79 @@ export function App(): JSX.Element {
               onClick={toggleSidebar}
               aria-label={t("app.expandSidebar")}
               title={t("app.expandSidebar")}
-              className="no-drag rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim"
+              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim"
             >
-              <PanelLeft size={16} />
+              <PanelLeft size={14} />
             </button>
             <button
               onClick={goBack}
               disabled={!canBack}
               aria-label={t("app.back")}
               title={t("app.back")}
-              className="no-drag rounded-md p-1.5 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
+              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={14} />
             </button>
             <button
               onClick={goForward}
               disabled={!canFwd}
               aria-label={t("app.forward")}
               title={t("app.forward")}
-              className="no-drag rounded-md p-1.5 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
+              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
             >
-              <ChevronRight size={16} />
+              <ChevronRight size={14} />
             </button>
             <ResourceMonitor snapshot={resources} collapsed onRefresh={pollResourcesOnce} onOpenChange={setResOpen} />
             <button onClick={toggleNotify} aria-label={notifyOn ? t("app.notifyOff") : t("app.notifyOn")} title={notifyOn ? t("app.notifyOff") : t("app.notifyOn")} className="no-drag mt-auto rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim">
-              {notifyOn ? <Bell size={16} /> : <BellOff size={16} />}
+              {notifyOn ? <BellRing size={14} /> : <BellOff size={14} />}
             </button>
             <Tooltip label={t("app.restartDaemon")} side="right">
-              <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim disabled:opacity-40">
-                <RotateCcw size={16} className={cn(restarting && "animate-spin")} />
+              <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim disabled:opacity-40">
+                <RotateCcw size={14} className={cn(restarting && "animate-spin motion-reduce:animate-none")} />
               </button>
             </Tooltip>
             {/* Automation is a top-level feature (audit #22) — the collapsed rail needs the same reachable-from-anywhere
                 entry as the expanded footer, not just restart/Settings. */}
             <AttentionBell onNavigate={onAttentionNav} />
             <Tooltip label={t("app.capabilityCenter")} side="right">
-              <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Blocks size={16} />
+              <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                <Blocks size={14} />
               </button>
             </Tooltip>
             <Tooltip label={t("app.automation")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag rounded-md p-1.5 transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Clock size={16} />
+              <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                <Clock size={14} />
               </button>
             </Tooltip>
             <Tooltip label={t("app.settings")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag mb-1 rounded-md p-1.5 transition-colors", overlay === "settings" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Settings size={16} />
+              <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag mb-1 rounded-md p-1.5 transition-colors", overlay === "settings" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
+                <Settings size={14} />
               </button>
             </Tooltip>
           </>
         ) : (
-          <>
-            <div className="drag flex items-center gap-1 px-0.5">
-              {navBtn(t("app.navSessions"), !showRepos && !overlay, () => { navigate({ overlay: null, showRepos: false }); }, Object.values(s.sessionAttention).some(Boolean))}
-              {navBtn(t("app.navRepos"), showRepos && !overlay, () => { navigate({ overlay: null, showRepos: true }); }, Object.values(s.attention).some(Boolean))}
-              <div className="no-drag ml-auto flex items-center gap-0.5">
-                <AttentionBell onNavigate={onAttentionNav} />
-                {!compactSidebar && (
-                  <>
-                    <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                      <ChevronLeft size={16} />
-                    </button>
-                    <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="rounded-md p-1 text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                      <ChevronRight size={16} />
-                    </button>
-                  </>
-                )}
-                <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} title={t("app.collapseSidebar")} className="rounded-md p-1 text-muted hover:bg-raised hover:text-fg-dim">
-                  <PanelLeftClose size={15} />
-                </button>
-              </div>
-            </div>
-            {/* Sessions view only: quick entry right below the tabs — new session. (Automation moved to the always-rendered
-                bottom cluster below, audit #22 — it's a top-level feature and shouldn't disappear on the Repos tab.) */}
+          <div className="flex min-h-0 flex-1 flex-col gap-2 pt-2">
+            {/* Sessions / Repos — a flat nav list (not a segmented pill track), same row grammar as the tree below it. */}
+            <nav className="flex flex-col gap-0.5">
+              {navBtn(t("app.navSessions"), MessageSquare, !showRepos && !overlay, () => { navigate({ overlay: null, showRepos: false }); }, Object.values(s.sessionAttention).some(Boolean))}
+              {navBtn(t("app.navRepos"), FolderGit2, showRepos && !overlay, () => { navigate({ overlay: null, showRepos: true }); }, Object.values(s.attention).some(Boolean))}
+            </nav>
+            {/* Sessions view only: quick entry right below the nav list — new session. (Automation lives in the
+                always-visible status bar, audit #22 — it's a top-level feature and shouldn't disappear on the Repos tab.) */}
             {!showRepos && (
-              <div className="flex flex-col">
-                <button
-                  onClick={create}
-                  className={cn("no-drag flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors", overlay === "newSession" ? "bg-accent/15 text-accent" : "text-fg-dim hover:bg-raised hover:text-fg")}
-                >
-                  <Plus size={15} className="shrink-0" /> {t("app.newSession")}
-                </button>
-              </div>
+              <button
+                onClick={create}
+                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "newSession" ? "text-accent" : "text-fg-dim hover:bg-raised hover:text-fg")}
+              >
+                <Plus size={14} className="shrink-0" /> {t("app.newSession")}
+              </button>
             )}
             {showRepos ? (
               <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
             ) : (
               <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
-            <UsagePanel usage={s.usage} loadFailed={s.usageLoadFailed} compact={shortViewport} />
-            {/* Status and actions use separate rows. Mixing them in one wrapping row made the first action tooltip
-                cross the viewport edge and let long Slack status text push controls onto unpredictable lines. */}
-            <div className="flex flex-col gap-1 px-1 py-0.5 font-mono text-[11px] text-muted">
-              <div className="flex min-w-0 items-center gap-3 overflow-hidden">
-                <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap" title={`daemon · ${daemonStatusText}`}>
-                  <span className={cn("h-1.5 w-1.5 rounded-full transition-colors duration-200", s.daemon === "up" ? "bg-pr led-live" : s.daemon === "starting" ? "bg-run led-live" : "bg-fail", daemonJustUp && "status-flash")} />
-                  <span>daemon{s.daemon !== "up" && <span className="text-fg-dim"> · {daemonStatusText}</span>}</span>
-                </span>
-                <span className="inline-flex min-w-0 items-center gap-1 whitespace-nowrap" title={`slack · ${slackStatusText}`}>
-                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", s.slack === "up" ? "bg-pr led-live" : s.slack === "connecting" ? "bg-run led-live" : s.slack === "error" ? "bg-fail" : "bg-stop", slackJustUp && "status-flash")} />
-                  <span className="truncate">slack{s.slack !== "up" && <span className="text-fg-dim"> · {slackStatusText}</span>}</span>
-                </span>
-              </div>
-              <div className="flex items-center justify-end gap-1">
-                {/* Always-rendered entry point (audit #22) — Automation is a top-level feature, so unlike "New session" it
-                    shouldn't require switching to the Sessions tab first. */}
-                <Tooltip label={t("app.capabilityCenter")} side="top">
-                  <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                    <Blocks size={14} />
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("app.automation")} side="top">
-                  <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                    <Clock size={14} />
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("app.restartDaemon")} side="top">
-                  <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
-                    <RotateCcw size={13} className={cn(restarting && "animate-spin")} />
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("app.settings")} side="top">
-                  <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "settings" ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                    <Settings size={14} />
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-          </>
+          </div>
         )}
       </aside>
       {!collapsed && <ResizeHandle onPointerDown={leftPanel.startDrag} />}
@@ -1299,7 +1258,7 @@ export function App(): JSX.Element {
             bubble sits frozen. This strip says "reconnecting" so that reads as a transient reconnect, not a hang. Hidden once up;
             replaced by DaemonDownBanner if it ultimately fails (→ 'down'). */}
         {s.daemon === "starting" && (
-          <div className="flex shrink-0 items-center justify-center gap-1.5 border-b border-run/30 bg-run/10 px-3 py-1.5 text-[11px] font-medium text-run">
+          <div className="flex shrink-0 items-center justify-center gap-1.5 border-b border-run/30 bg-run/10 px-3 py-1.5 text-meta font-medium text-run">
             <Loader2 size={12} className="animate-spin" /> {t("app.reconnecting")}
           </div>
         )}
@@ -1316,7 +1275,7 @@ export function App(): JSX.Element {
             onPreviewEffective={() => openRepoCapabilityPreview(repoSettingsRepo.id)}
           />
         ) : overlay === "repoSettings" ? (
-          <div className="flex flex-1 items-center justify-center gap-2 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
+          <div className="flex flex-1 items-center justify-center gap-2 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
         ) : overlay === "capabilities" ? (
           <CapabilitiesPage
             key={capabilityOpenEpoch}
@@ -1507,8 +1466,8 @@ export function App(): JSX.Element {
             </>
             )
           ) : (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-[13px] text-muted">
-              {t("app.emptyRepoHint")}
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-ui text-muted">
+              <p className="max-w-sm">{t("app.emptyRepoHint")}</p>
             </div>
           )
         ) : !s.activeSessionId ? (
@@ -1591,6 +1550,30 @@ export function App(): JSX.Element {
       {rightMounted && termPageKey && !dockable && (
         <RightSidebar open={rightVisible} pageKey={termPageKey} subId={showRepos ? s.activeWorkerId : null} cwd={showRepos ? undefined : activeSess?.cwd} activeTabPath={activeTab.startsWith("file:") ? activeTab.slice("file:".length) : null} loadAgentHistory={loadWorkflowAgentHistory} />
       )}
+      </div>
+      <StatusBar
+        daemon={s.daemon}
+        daemonStatusText={daemonStatusText}
+        daemonJustUp={daemonJustUp}
+        slack={s.slack}
+        slackStatusText={slackStatusText}
+        slackJustUp={slackJustUp}
+        usage={s.usage}
+        usageLoadFailed={s.usageLoadFailed}
+        resources={resources}
+        onResourceRefresh={pollResourcesOnce}
+        onResourceOpenChange={setResOpen}
+        notifyOn={notifyOn}
+        onToggleNotify={toggleNotify}
+        capabilityActive={overlay === "capabilities"}
+        onToggleCapabilityCenter={toggleCapabilityCenter}
+        automationActive={overlay === "automation"}
+        onToggleAutomation={() => navigate({ overlay: overlay === "automation" ? null : "automation" })}
+        settingsActive={overlay === "settings"}
+        onToggleSettings={() => navigate({ overlay: overlay === "settings" ? null : "settings" })}
+        restarting={restarting}
+        onRestart={() => setRestartConfirm(true)}
+      />
 
       <Toaster />
       {restartConfirm && <RestartDaemonDialog busy={restarting} onClose={() => setRestartConfirm(false)} onConfirm={() => void doRestart()} />}

@@ -23,9 +23,9 @@ export function ImagePreview({ path }: { path: string }): JSX.Element {
 
   if (err) {
     const msg = err === "toolarge" ? t("imagePreview.tooLarge") : err === "unsupported" ? t("imagePreview.unsupported") : t("imagePreview.error");
-    return <div className="flex min-h-0 flex-1 items-center justify-center text-[12px] text-muted">{msg}</div>;
+    return <div className="flex min-h-0 flex-1 items-center justify-center text-ui text-muted">{msg}</div>;
   }
-  if (!url) return <div className="flex min-h-0 flex-1 items-center justify-center text-[12px] text-muted">{t("common.loading")}</div>;
+  if (!url) return <div className="flex min-h-0 flex-1 items-center justify-center text-ui text-muted">{t("common.loading")}</div>;
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-ink p-4">
       <img src={url} alt={baseName(path)} className="fade-in max-h-full max-w-full object-contain" style={{ imageRendering: "auto" }} />

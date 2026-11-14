@@ -206,33 +206,33 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   }
 
   const ToolBtn = ({ label, onClick, children }: { label: string; onClick: () => void; children: JSX.Element }): JSX.Element => (
-    <button aria-label={label} title={label} onClick={onClick} className="rounded p-1 text-muted hover:bg-raised hover:text-fg-dim">{children}</button>
+    <button aria-label={label} title={label} onClick={onClick} className="rounded-sm p-1 text-muted hover:bg-raised hover:text-fg">{children}</button>
   );
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-7 shrink-0 items-center justify-end gap-0.5 border-b border-line/60 px-1.5">
-        <ToolBtn label={t("fileTree.newFile")} onClick={() => void onCreateFile(root)}><FilePlus size={13} /></ToolBtn>
-        <ToolBtn label={t("fileTree.newFolder")} onClick={() => void onCreateFolder(root)}><FolderPlus size={13} /></ToolBtn>
-        <ToolBtn label={t("fileTree.collapseAll")} onClick={() => collapseAllDirs(pageKey)}><ChevronsDownUp size={13} /></ToolBtn>
-        <ToolBtn label={t("common.refresh")} onClick={() => setReloadKey((k) => k + 1)}><RefreshCw size={13} /></ToolBtn>
+        <ToolBtn label={t("fileTree.newFile")} onClick={() => void onCreateFile(root)}><FilePlus size={14} /></ToolBtn>
+        <ToolBtn label={t("fileTree.newFolder")} onClick={() => void onCreateFolder(root)}><FolderPlus size={14} /></ToolBtn>
+        <ToolBtn label={t("fileTree.collapseAll")} onClick={() => collapseAllDirs(pageKey)}><ChevronsDownUp size={14} /></ToolBtn>
+        <ToolBtn label={t("common.refresh")} onClick={() => setReloadKey((k) => k + 1)}><RefreshCw size={14} /></ToolBtn>
       </div>
       <div className="flex h-7 shrink-0 items-center gap-1 border-b border-line/60 px-2 transition-colors focus-within:border-accent/50">
-        <Search size={11} className="shrink-0 text-muted" />
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("fileTree.searchPlaceholder")} className="w-full bg-transparent text-[12px] text-fg-dim placeholder:text-muted focus:outline-none" />
+        <Search size={12} className="shrink-0 text-muted" />
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("fileTree.searchPlaceholder")} className="w-full bg-transparent text-ui text-fg-dim placeholder:text-muted focus:outline-none" />
       </div>
       <div ref={bodyRef} data-testid="filetree-body" role="tree" tabIndex={0} onKeyDown={onKeyDown} className="min-h-0 flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40">
         {filtering && matches.length === 0 ? (
-          <div className="px-3 py-3 text-[12px] text-muted">{t("fileTree.noMatches")}</div>
+          <div className="px-3 py-3 text-ui text-muted">{t("fileTree.noMatches")}</div>
         ) : !filtering && rootStatus === "loading" ? (
           <SkeletonRows rows={8} />
         ) : !filtering && rootStatus === "error" ? (
           // The whole string doubles as the retry button's label (same convention as CheckpointMenu.loadFailed).
-          <button onClick={() => setReloadKey((k) => k + 1)} className="w-full px-3 py-3 text-left text-[12px] text-fail hover:bg-fail/10">
+          <button onClick={() => setReloadKey((k) => k + 1)} className="w-full px-3 py-3 text-left text-ui text-fail hover:bg-fail/10">
             {t("fileTree.loadFailed")}
           </button>
         ) : !filtering && rows.length === 0 ? (
-          <div className="px-3 py-3 text-[12px] text-muted">{t("fileTree.emptyFolder")}</div>
+          <div className="px-3 py-3 text-ui text-muted">{t("fileTree.emptyFolder")}</div>
         ) : (
           <div className="relative w-full" style={{ height: rowVirt.getTotalSize() }}>
             {(() => {
@@ -246,7 +246,7 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
                 if (filtering) {
                   const rel = matches[vi.index]!;
                   return (
-                    <button key={rel} style={style} onClick={() => openFile(pageKey, `${root}/${rel}`)} className="flex h-7 w-full items-center gap-1.5 rounded px-2.5 text-left text-[12px] text-fg-dim hover:bg-raised">
+                    <button key={rel} style={style} onClick={() => openFile(pageKey, `${root}/${rel}`)} className="flex h-7 w-full items-center gap-1.5 rounded px-2.5 text-left text-ui text-fg-dim hover:bg-raised">
                       <Icon icon={fileIcon(rel)} width={14} height={14} className="shrink-0" />
                       <span className="truncate">{rel}</span>
                     </button>
@@ -293,9 +293,9 @@ function NameDialog({ title, initial, onSubmit, onCancel }: { title: string; ini
   useModalKeys({ escape: "ignore", onSubmit: submit });
   useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-4", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="text-[13px] font-semibold">{title}</div>
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
+        <div className="text-title font-medium">{title}</div>
         <Input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <div className="flex justify-end gap-2">
           {/* audit #73 — was a raw button (rounded-lg 8px) beside the Button-based confirm (--radius 10px); promoted
@@ -322,12 +322,16 @@ function FileRow({ row, active, selected, open, git, onClick, onContextMenu }: {
       onClick={onClick}
       onContextMenu={onContextMenu}
       style={{ paddingLeft: 8 + row.depth * 12 }}
-      className={cn("flex h-6 w-full items-center gap-1 rounded pr-2 text-left text-[12px] hover:bg-raised", active ? "bg-accent/15 text-fg" : selected ? "bg-raised text-fg" : "text-fg-dim")}
+      className={cn("relative flex h-6 w-full items-center gap-1 rounded pr-2 text-left text-ui hover:bg-raised", active ? "bg-accent/15 text-fg" : selected ? "bg-raised text-fg" : "text-fg-dim")}
     >
+      {/* 1px indent guides — one per ancestor depth, aligned to the middle of that level's reserved column */}
+      {Array.from({ length: row.depth }, (_, i) => (
+        <span key={i} aria-hidden className="pointer-events-none absolute top-0 h-full w-px bg-line-soft" style={{ left: 8 + i * 12 + 5 }} />
+      ))}
       {row.isDir ? <ChevronRight size={12} className={cn("shrink-0 text-muted transition-transform duration-200 ease-out", open && "rotate-90")} /> : <span className="w-3 shrink-0" />}
       <Icon icon={icon} width={14} height={14} className="shrink-0" />
       <span className="truncate">{row.name}</span>
-      {git && <span data-testid={`git-${row.path}`} className={cn("ml-auto shrink-0 pl-1 font-mono text-[10px]", GIT_TONE[git] ?? "text-accent/60")}>{git}</span>}
+      {git && <span data-testid={`git-${row.path}`} className={cn("ml-auto shrink-0 pl-1 font-mono text-meta", GIT_TONE[git] ?? "text-accent/60")}>{git}</span>}
     </button>
   );
 }

@@ -34,7 +34,7 @@ function AssistantMessageImpl({ content, streaming, ts, className }: { content: 
   };
   const hasTs = typeof ts === "number" && Number.isFinite(ts);
   return (
-    <div aria-busy={streaming || undefined} className={cn("group w-full [overflow-wrap:anywhere] px-0.5 text-[13.5px] leading-relaxed text-fg", className)}>
+    <div aria-busy={streaming || undefined} className={cn("group w-full [overflow-wrap:anywhere] px-0.5 text-prose leading-[1.65] text-fg-dim", className)}>
       {streaming ? <StreamingMarkdown content={content} /> : <Markdown>{content}</Markdown>}
       {!streaming && (
         // Fixed height (prevents layout jump) + revealed only on hover.
@@ -46,14 +46,14 @@ function AssistantMessageImpl({ content, streaming, ts, className }: { content: 
             className="flex h-5 w-5 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim"
           >
             {/* the key flip remounts the icon so dot-pop re-runs on each copy — the boolean-flip vocabulary for the literal success flip */}
-            {copied ? <Check key="ok" size={13} className="text-pr dot-pop" /> : <Copy key="copy" size={13} />}
+            {copied ? <Check key="ok" size={14} className="text-pr dot-pop" /> : <Copy key="copy" size={14} />}
           </button>
           <span className="sr-only" role="status" aria-live="polite">{copied ? t("assistantMessage.copied") : ""}</span>
           {hasTs && (
             <time
               dateTime={new Date(ts).toISOString()}
               title={new Date(ts).toLocaleString(locale)}
-              className="select-none text-[11px] tabular-nums text-muted"
+              className="select-none text-meta tabular-nums text-muted"
             >
               {timeLabel(ts, Date.now(), t, locale)}
             </time>

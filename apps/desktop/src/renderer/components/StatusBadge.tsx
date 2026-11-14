@@ -14,12 +14,13 @@ export function StatusBadge({ status }: { status: string }): JSX.Element {
     <span
       role="status"
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-medium transition-colors duration-200",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-sm border px-1.5 py-0.5 text-meta font-medium transition-colors duration-200",
         toneClass(status),
+        "border-transparent bg-transparent px-0",
       )}
     >
       {isProvisioning(status) ? (
-        <Loader2 size={11} className="animate-spin" />
+        <Loader2 size={12} className="animate-spin" />
       ) : (
         <span
           className={cn(
@@ -42,7 +43,7 @@ export function StatusBadge({ status }: { status: string }): JSX.Element {
 export function ProviderBadge({ provider }: { provider?: string }): JSX.Element | null {
   if (provider !== "codex") return null;
   return (
-    <span className="inline-flex shrink-0 items-center rounded-md border border-line px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted">
+    <span className="inline-flex shrink-0 items-center text-meta text-muted">
       Codex
     </span>
   );

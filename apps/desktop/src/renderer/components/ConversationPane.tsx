@@ -84,10 +84,10 @@ export function ConversationPane({
       <div className="flex min-w-0 flex-1 flex-col">
         <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} commands={composerCommands} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
         {pending.length > 0 && (
-          <div className="flex flex-col gap-1 px-4 pb-2">
+          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-1 px-6 pb-2">
             {pending.map((p) => (
-              <div key={p.clientMsgId} className="ml-auto max-w-[80%] rounded-xl border border-dashed border-line bg-ink/30 px-3 py-2 text-[13px] text-fg-dim opacity-70">
-                <span className="mr-2 inline-flex items-center gap-1 rounded bg-line/40 px-1.5 py-0.5 text-[10px] text-muted"><Clock size={10} /> {t("conversation.pendingBadge")}</span>
+              <div key={p.clientMsgId} className="ml-auto max-w-[80%] rounded-md border border-dashed border-line bg-ink/30 px-3 py-2 text-ui text-fg-dim opacity-70">
+                <span className="mr-2 inline-flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-meta text-muted"><Clock size={12} /> {t("conversation.pendingBadge")}</span>
                 {p.text}
               </div>
             ))}

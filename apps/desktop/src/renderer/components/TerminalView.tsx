@@ -12,32 +12,32 @@ export function TerminalView({ id, onExit }: { id: string; onExit: (id: string) 
     const host = hostRef.current;
     if (!host) return;
     // Map the full ANSI palette onto the rookery @theme tokens (read live from :root — globals.css is loaded by now) so
-    // git/test/ls output speaks run/pr/fail/nochg/coral instead of xterm's stock saturated ANSI.
+    // git/test/ls output speaks run/pr/fail/nochg/orange instead of xterm's stock saturated ANSI.
     const css = getComputedStyle(document.documentElement);
     const tok = (name: string, fallback: string): string => css.getPropertyValue(name).trim() || fallback;
-    const ink = tok("--color-ink", "#0b0d12");
-    const fg = tok("--color-fg", "#e7e9ee");
-    const fgDim = tok("--color-fg-dim", "#aab1c0");
-    const muted = tok("--color-muted", "#79808f");
-    const accent = tok("--color-accent", "#f97362");
-    const accentHi = tok("--color-accent-hi", "#fb8472");
-    const run = tok("--color-run", "#f5b544");
-    const pr = tok("--color-pr", "#46c073");
-    const fail = tok("--color-fail", "#ef5350");
-    const nochg = tok("--color-nochg", "#5b8def");
+    const ink = tok("--color-ink", "#0f0f0f");
+    const fg = tok("--color-fg", "#e8e8e8");
+    const fgDim = tok("--color-fg-dim", "#b7b7b7");
+    const muted = tok("--color-muted", "#868686");
+    const accent = tok("--color-accent", "#f97c3d");
+    const accentHi = tok("--color-accent-hi", "#ff9661");
+    const run = tok("--color-run", "#6db0f4");
+    const pr = tok("--color-pr", "#6fc884");
+    const fail = tok("--color-fail", "#f27166");
+    const nochg = tok("--color-nochg", "#819bb7");
     const term = new Terminal({
       fontFamily: "'Geist Mono Variable', ui-monospace, monospace",
       fontSize: 12.5,
       theme: {
         background: ink, foreground: fg, cursor: accent, cursorAccent: ink,
-        selectionBackground: "rgba(249, 115, 98, 0.22)", // coral wash
-        black: tok("--color-surface", "#13161d"), brightBlack: muted,
+        selectionBackground: "rgba(249, 124, 61, 0.28)", // orange wash
+        black: tok("--color-surface", "#161616"), brightBlack: muted,
         red: fail, brightRed: fail,
         green: pr, brightGreen: pr,
-        yellow: run, brightYellow: run,
-        blue: nochg, brightBlue: nochg,
+        yellow: accentHi, brightYellow: accentHi,
+        blue: run, brightBlue: run,
         magenta: accent, brightMagenta: accentHi,
-        cyan: "#56c7c0", brightCyan: "#7ad6cf",
+        cyan: "#64c3c3", brightCyan: "#8adbdb",
         white: fgDim, brightWhite: fg,
       },
       cursorBlink: true,

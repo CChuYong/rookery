@@ -103,31 +103,31 @@ function CapabilityRow({ pack, library, scopeKind, scopeRef, state, api, onSaved
   };
 
   return (
-    <article data-testid={`${prefix}-capability-${pack.instanceId}`} className="rounded-lg border border-line bg-surface/45 p-4">
+    <div data-testid={`${prefix}-capability-${pack.instanceId}`} className="px-3 py-2.5">
       <div className="flex flex-wrap items-start gap-3">
-        <span className="mt-0.5 rounded-md border border-line bg-raised p-2 text-pr">{kind === "mcp" ? <Cable size={15} /> : <Sparkles size={15} />}</span>
+        <span className="mt-0.5 text-faint">{kind === "mcp" ? <Cable size={14} /> : <Sparkles size={14} />}</span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[13px] font-semibold text-fg">{pack.manifest.displayName}</h3>
-            <span className="rounded border border-pr/30 bg-pr/5 px-1.5 py-0.5 text-[10px] text-pr">{t(`capabilityCatalog.kind.${kind}`)}</span>
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{t(`capabilities.packStatus.${pack.status}`)}</span>
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">Claude · Codex</span>
+            <h3 className="text-body font-medium text-fg">{pack.manifest.displayName}</h3>
+            <span className="text-meta text-muted">{t(`capabilityCatalog.kind.${kind}`)}</span>
+            <span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className="h-2.5 w-px bg-line-soft" aria-hidden />{t(`capabilities.packStatus.${pack.status}`)}</span>
+            <span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className="h-2.5 w-px bg-line-soft" aria-hidden /><span>Claude</span><span className="h-2.5 w-px bg-line-soft" aria-hidden /><span>Codex</span></span>
           </div>
-          {pack.manifest.description && <p className="mt-1 text-[11.5px] text-fg-dim">{pack.manifest.description}</p>}
-          {missingSecrets > 0 && <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-run"><ShieldAlert size={11} /> {t("repositorySettings.missingSecrets", { count: missingSecrets })}</p>}
-          {hint && <p className="mt-1.5 text-[10.5px] text-muted">{hint}</p>}
+          {pack.manifest.description && <p className="mt-1 text-ui text-fg-dim">{pack.manifest.description}</p>}
+          {missingSecrets > 0 && <p className="mt-1.5 flex items-center gap-1 text-meta text-run"><ShieldAlert size={12} /> {t("repositorySettings.missingSecrets", { count: missingSecrets })}</p>}
+          {hint && <p className="mt-1.5 text-meta text-faint">{hint}</p>}
         </div>
       </div>
 
       {state.custom ? (
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-run/30 bg-run/5 px-3 py-2.5">
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line-soft pt-3">
           <CircleAlert size={14} className="shrink-0 text-run" />
-          <p className="min-w-0 flex-1 text-[11px] text-fg-dim">{t("repositorySettings.customAssignment")}</p>
+          <p className="min-w-0 flex-1 text-meta text-fg-dim">{t("repositorySettings.customAssignment")}</p>
           <Button variant="outline" size="sm" onClick={onOpenAdvancedAssignments}>{t("repositorySettings.openAdvanced")}</Button>
         </div>
       ) : (
-        <div className="mt-4 grid items-end gap-3 border-t border-line pt-3 md:grid-cols-[minmax(150px,0.7fr)_minmax(200px,1fr)_auto]">
-          <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
+        <div className="mt-3 grid items-end gap-3 border-t border-line-soft pt-3 md:grid-cols-[minmax(150px,0.7fr)_minmax(200px,1fr)_auto]">
+          <label className="flex flex-col gap-1 text-meta font-medium text-fg-dim">
             {t("repositorySettings.mode")}
             <Select size="sm" aria-label={t("repositorySettings.modeFor", { name: pack.manifest.displayName })} value={mode} disabled={busy} onChange={(event) => { setMode(event.target.value as CapabilityQuickBindingMode); setError(null); }}>
               <option value="inherit">{scopeKind === "rookery" ? t("settings.capabilitiesNotSet") : t("repositorySettings.mode.inherit")}</option>
@@ -136,16 +136,16 @@ function CapabilityRow({ pack, library, scopeKind, scopeRef, state, api, onSaved
             </Select>
           </label>
           <fieldset disabled={busy || mode === "inherit"}>
-            <legend className="mb-1 text-[10.5px] font-medium text-fg-dim">{t("repositorySettings.agents")}</legend>
+            <legend className="mb-1 text-meta font-medium text-fg-dim">{t("repositorySettings.agents")}</legend>
             <div className="flex h-8 items-center gap-4">
-              {(["master", "worker"] as const).map((agent) => <label key={agent} className="flex items-center gap-2 text-[11.5px] text-fg"><input type="checkbox" aria-label={t(`capabilities.agent.${agent}`)} checked={agents.includes(agent)} onChange={(event) => toggleAgent(agent, event.target.checked)} /> {t(`capabilities.agent.${agent}`)}</label>)}
+              {(["master", "worker"] as const).map((agent) => <label key={agent} className="flex items-center gap-2 text-meta text-fg"><input type="checkbox" aria-label={t(`capabilities.agent.${agent}`)} checked={agents.includes(agent)} onChange={(event) => toggleAgent(agent, event.target.checked)} /> {t(`capabilities.agent.${agent}`)}</label>)}
             </div>
           </fieldset>
           <Button variant="primary" size="sm" loading={busy} onClick={save}>{t("common.save")}</Button>
         </div>
       )}
-      {error && <p role="alert" className="mt-3 rounded-md border border-fail/30 bg-fail/5 px-3 py-2 text-[10.5px] text-fail">{error}</p>}
-    </article>
+      {error && <p role="alert" className="mt-3 text-meta text-fail">{error}</p>}
+    </div>
   );
 }
 
@@ -179,20 +179,20 @@ export function CapabilityScopeBindings({ scopeKind, scopeRef, api, generation, 
     return (library?.packs ?? []).filter((pack) => !normalized || catalogSearchText(pack).includes(normalized));
   }, [library, query]);
 
-  if (loading) return <div className="flex justify-center gap-2 py-20 text-[12px] text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
-  if (error) return <div className="flex flex-col items-center gap-3 py-16 text-center"><CircleAlert size={24} className="text-fail" /><p className="text-[12px] text-fail">{t(isRookery ? "settings.capabilitiesLoadFailed" : "repositorySettings.loadFailed")}</p><p className="font-mono text-[10.5px] text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>{t("common.retry")}</Button></div>;
+  if (loading) return <div className="flex justify-center gap-2 py-20 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
+  if (error) return <div className="flex flex-col items-center gap-3 py-16 text-center"><CircleAlert size={24} className="text-fail" /><p className="text-ui text-fail">{t(isRookery ? "settings.capabilitiesLoadFailed" : "repositorySettings.loadFailed")}</p><p className="text-meta text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>{t("common.retry")}</Button></div>;
 
   return (
     <div>
       <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1"><h2 className="text-[16px] font-semibold text-fg">{t(isRookery ? "settings.capabilitiesTitle" : "repositorySettings.capabilities")}</h2><p className="mt-1 text-[11.5px] leading-relaxed text-muted">{t(isRookery ? "settings.capabilitiesDescription" : "repositorySettings.capabilitiesDescription")}</p></div>
+        <div className="min-w-0 flex-1"><h2 className="text-title font-medium text-fg">{t(isRookery ? "settings.capabilitiesTitle" : "repositorySettings.capabilities")}</h2><p className="mt-1 text-meta leading-relaxed text-muted">{t(isRookery ? "settings.capabilitiesDescription" : "repositorySettings.capabilitiesDescription")}</p></div>
         <div className="flex flex-wrap gap-1">
           <Button variant="ghost" size="sm" onClick={onPreviewEffective}>{t("repositorySettings.previewEffective")}</Button>
           <Button variant="ghost" size="sm" onClick={onOpenAdvancedAssignments}>{t("repositorySettings.openAdvanced")}</Button>
         </div>
       </div>
-      {(library?.packs.length ?? 0) > 0 && <div className="relative mt-5"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><Input size="sm" className="pl-8" aria-label={t(isRookery ? "settings.capabilitiesSearch" : "repositorySettings.search")} placeholder={t(isRookery ? "settings.capabilitiesSearch" : "repositorySettings.search")} value={query} onChange={(event) => setQuery(event.target.value)} /></div>}
-      {library?.packs.length ? visible.length ? <div className="mt-4 space-y-3">{visible.map((pack) => <CapabilityRow key={pack.instanceId} pack={pack} library={library} scopeKind={scopeKind} scopeRef={scopeRef} state={capabilityScopeState(library.bindings, scopeKind, scopeRef, pack.instanceId)} api={api} onSaved={load} onOpenAdvancedAssignments={onOpenAdvancedAssignments} />)}</div> : <p className="py-14 text-center text-[12px] text-muted">{t(isRookery ? "settings.capabilitiesNoMatches" : "repositorySettings.noMatches")}</p> : <div className="py-16 text-center"><p className="text-[12px] text-muted">{t(isRookery ? "settings.capabilitiesEmpty" : "repositorySettings.empty")}</p><Button className="mt-3" variant="outline" size="sm" onClick={onOpenCatalog}>{t("repositorySettings.openCatalog")}</Button></div>}
+      {(library?.packs.length ?? 0) > 0 && <div className="relative mt-5"><Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><Input size="sm" className="pl-8" aria-label={t(isRookery ? "settings.capabilitiesSearch" : "repositorySettings.search")} placeholder={t(isRookery ? "settings.capabilitiesSearch" : "repositorySettings.search")} value={query} onChange={(event) => setQuery(event.target.value)} /></div>}
+      {library?.packs.length ? visible.length ? <div className="mt-4 divide-y divide-line-soft border-y border-line">{visible.map((pack) => <CapabilityRow key={pack.instanceId} pack={pack} library={library} scopeKind={scopeKind} scopeRef={scopeRef} state={capabilityScopeState(library.bindings, scopeKind, scopeRef, pack.instanceId)} api={api} onSaved={load} onOpenAdvancedAssignments={onOpenAdvancedAssignments} />)}</div> : <p className="py-14 text-center text-ui text-muted">{t(isRookery ? "settings.capabilitiesNoMatches" : "repositorySettings.noMatches")}</p> : <div className="py-16 text-center"><p className="text-ui text-muted">{t(isRookery ? "settings.capabilitiesEmpty" : "repositorySettings.empty")}</p><Button className="mt-3" variant="outline" size="sm" onClick={onOpenCatalog}>{t("repositorySettings.openCatalog")}</Button></div>}
     </div>
   );
 }

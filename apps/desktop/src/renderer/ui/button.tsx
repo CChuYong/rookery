@@ -4,27 +4,25 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/cn.js";
 
 const button = cva(
-  "inline-flex items-center justify-center gap-1.5 rounded-[var(--radius)] font-medium whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-0 disabled:opacity-40 disabled:pointer-events-none select-none",
+  "inline-flex items-center justify-center gap-1.5 rounded-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,transform] duration-[var(--dur-micro)] active:scale-[0.98] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hi focus-visible:ring-offset-2 focus-visible:ring-offset-ink disabled:opacity-40 disabled:pointer-events-none select-none",
   {
     variants: {
       variant: {
-        primary:
-          "bg-accent text-accent-ink hover:bg-accent-hi shadow-[0_1px_0_rgba(255,255,255,0.08)_inset] disabled:bg-raised disabled:text-muted disabled:opacity-100",
-        ghost: "text-fg-dim hover:bg-raised hover:text-fg",
-        outline: "border border-line text-fg-dim hover:bg-raised hover:text-fg hover:border-fg-dim/40",
-        danger: "text-fail/80 hover:bg-fail/10 hover:text-fail",
-        // Solid destructive action (audit #73) — distinct from `danger` above (which stays the existing
-        // subtle ghost-style used by Composer's Stop / InteractionCard's Deny) so those two callers are
-        // untouched. This is the "primary, but red" counterpart used for ConfirmDialog's destructive confirm.
-        dangerSolid:
-          "bg-fail/90 text-fg hover:bg-fail shadow-[0_1px_0_rgba(255,255,255,0.08)_inset] disabled:bg-raised disabled:text-muted disabled:opacity-100",
-        chip: "border border-line/80 text-fg-dim hover:border-accent/40 hover:text-fg",
+        // Neutral fill (IDE primary, e.g. T3/Orca) — the orange accent is reserved for lines/focus/markers, not button fills.
+        primary: "bg-fg text-ink hover:bg-fg-dim disabled:bg-raised disabled:text-muted disabled:opacity-100",
+        ghost: "text-muted hover:bg-raised hover:text-fg",
+        outline: "border border-line text-fg-dim hover:bg-raised hover:text-fg",
+        danger: "text-fail/85 hover:bg-fail/10 hover:text-fail",
+        // Solid destructive action (audit #73) — distinct from `danger` above (which stays the subtle ghost-style
+        // used by Composer's Stop / InteractionCard's Deny). The "primary, but red" confirm for ConfirmDialog.
+        dangerSolid: "bg-fail text-accent-ink hover:bg-fail/90 disabled:bg-raised disabled:text-muted disabled:opacity-100",
+        chip: "border border-line text-fg-dim hover:bg-raised hover:text-fg",
       },
       size: {
-        sm: "h-7 px-2.5 text-[12px]",
-        md: "h-9 px-3.5 text-[13px]",
-        icon: "h-9 w-9 p-0",
-        iconSm: "h-7 w-7 p-0",
+        sm: "h-6 px-2.5 text-ui",
+        md: "h-7 px-3 text-body",
+        icon: "h-7 w-7 p-0",
+        iconSm: "h-6 w-6 p-0",
       },
     },
     defaultVariants: { variant: "ghost", size: "md" },
@@ -45,7 +43,7 @@ export function Button({ className, variant, size, loading, disabled, type, chil
       className={cn(button({ variant, size }), className)}
       {...props}
     >
-      {loading ? <Loader2 className="animate-spin motion-reduce:hidden" size={15} aria-hidden /> : children}
+      {loading ? <Loader2 className="animate-spin motion-reduce:hidden" size={14} aria-hidden /> : children}
     </button>
   );
 }

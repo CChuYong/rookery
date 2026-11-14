@@ -37,22 +37,22 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
   useFocusTrap(panelRef);
 
   return (
-    // audit #72 — overlay/panel classes aligned with the rest of the modal system (bg-black/55 backdrop-blur-sm +
+    // audit #72 — overlay/panel classes aligned with the rest of the modal system (bg-scrim +
     // the dialog-in entrance, replacing the one-off rise-in). No exit animation is wired here (no
     // useDismissTransition) — Escape/Skip/Get-started all resolve through onFinish, which unmounts this at the
     // App.tsx mount site once onboardingDone is persisted.
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm">
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-8 shadow-2xl motion-safe:animate-[dialog-in_160ms_ease-out]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-7 shadow-pop motion-safe:animate-[dialog-in_160ms_ease-out]">
         {step === 0 ? (
           <div className="flex flex-col items-center text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent"><Sparkles size={22} /></div>
-            <h2 id={titleId} className="text-lg font-semibold">{t("onboarding.welcomeTitle")}</h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted">{t("onboarding.welcomeBody")}</p>
+            <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full border border-line bg-raised text-fg-dim"><Sparkles size={18} /></div>
+            <h2 id={titleId} className="text-title font-medium text-fg">{t("onboarding.welcomeTitle")}</h2>
+            <p className="mt-3 text-body leading-relaxed text-muted">{t("onboarding.welcomeBody")}</p>
           </div>
         ) : (
           <div>
-            <h2 id={titleId} className="text-center text-lg font-semibold">{t("onboarding.conceptTitle")}</h2>
-            <p className="mt-2 text-center text-[12px] leading-relaxed text-muted">{t("onboarding.conceptBody")}</p>
+            <h2 id={titleId} className="text-center text-title font-medium text-fg">{t("onboarding.conceptTitle")}</h2>
+            <p className="mt-2 text-center text-ui leading-relaxed text-muted">{t("onboarding.conceptBody")}</p>
             <div className="mt-5 flex flex-col gap-3">
               <ConceptRow icon={<Bot size={16} />} title={t("onboarding.master")} desc={t("onboarding.masterDesc")} />
               <ConceptRow icon={<Users size={16} />} title={t("onboarding.worker")} desc={t("onboarding.workerDesc")} />
@@ -65,15 +65,15 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
         <div className="mt-7 flex items-center">
           <div className="flex gap-1.5">
             {[0, 1].map((i) => (
-              <span key={i} className={`h-1.5 rounded-full transition-all ${i === step ? "w-4 bg-accent" : "w-1.5 bg-line"}`} />
+              <span key={i} className={`h-1.5 rounded-full transition-colors duration-[var(--dur-micro)] ${i === step ? "w-4 bg-accent" : "w-1.5 bg-line"}`} />
             ))}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <button disabled={busy} onClick={() => void finish()} className="rounded-md px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-fg-dim disabled:opacity-50">{t("onboarding.skip")}</button>
-            {step > 0 && <button disabled={busy} onClick={() => setStep(step - 1)} className="rounded-md px-3 py-1.5 text-[12px] text-fg-dim transition-colors hover:bg-raised disabled:opacity-50">{t("onboarding.back")}</button>}
+            <button disabled={busy} onClick={() => void finish()} className="rounded-md px-3 py-1.5 text-ui text-muted transition-colors hover:text-fg-dim disabled:opacity-50">{t("onboarding.skip")}</button>
+            {step > 0 && <button disabled={busy} onClick={() => setStep(step - 1)} className="rounded-md px-3 py-1.5 text-ui text-fg-dim transition-colors hover:bg-raised disabled:opacity-50">{t("onboarding.back")}</button>}
             {step < last ? (
               <Button variant="primary" size="sm" autoFocus disabled={busy} onClick={() => setStep(step + 1)}>
-                {t("onboarding.next")} <ArrowRight size={13} />
+                {t("onboarding.next")} <ArrowRight size={14} />
               </Button>
             ) : (
               <Button variant="primary" size="sm" autoFocus loading={busy} onClick={() => void finish()}>
@@ -82,7 +82,7 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
             )}
           </div>
         </div>
-        {err && <p className="mt-2 text-right text-[12px] text-fail">{t("onboarding.saveFailed")}</p>}
+        {err && <p className="mt-2 text-right text-ui text-fail">{t("onboarding.saveFailed")}</p>}
       </div>
     </div>
   );
@@ -90,11 +90,11 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
 
 function ConceptRow({ icon, title, desc }: { icon: JSX.Element; title: string; desc: string }): JSX.Element {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-line bg-ink/40 px-3 py-2.5">
-      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent/15 text-accent">{icon}</span>
+    <div className="flex items-start gap-3 border-b border-line-soft pb-3 last:border-b-0 last:pb-0">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-raised text-fg-dim">{icon}</span>
       <div>
-        <div className="text-[13px] font-medium text-fg">{title}</div>
-        <div className="text-[11px] leading-relaxed text-muted">{desc}</div>
+        <div className="text-body font-medium text-fg">{title}</div>
+        <div className="text-ui leading-relaxed text-muted">{desc}</div>
       </div>
     </div>
   );

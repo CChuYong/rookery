@@ -11,19 +11,23 @@ export function MetricsView({ items }: { items: LogItem[] }): JSX.Element | null
     | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; terminalReason?: string }
     | undefined;
   if (!m) return null;
+  // An errored/aborted result can report zero usage — keep the last real context reading instead of showing 0%/0 tok.
+  const ctx = m.tokens > 0 ? m : ([...items].reverse().find((it) => it.kind === "metrics" && (it as { tokens: number }).tokens > 0) as typeof m | undefined) ?? m;
+  // "completed" is the SDK's normal terminal reason; only other reasons (api_error, max_turns, …) are worth flagging.
+  const reason = m.terminalReason && m.terminalReason !== "completed" ? m.terminalReason : undefined;
   return (
-    <span className="flex items-center gap-2 font-mono text-[11px] text-muted">
-      <span className={cn("inline-flex items-baseline gap-1", ctxTone(m.contextPct))}>{m.contextPct}% <span className="text-[9px] text-muted/70">ctx</span></span>
-      <span>·</span>
-      <span>{fmtTokens(m.tokens)} tok</span>
-      <span>·</span>
-      <span>{t("sessionMetrics.turns", { count: m.turns })}</span>
-      <span>·</span>
-      <span>{fmtUsd(m.cost)}</span>
-      {m.terminalReason && (
+    <span className="flex items-center gap-2.5 text-meta text-muted">
+      <span className={cn("inline-flex items-baseline gap-1", ctxTone(ctx.contextPct))}>
+        <span className="tabular-nums">{ctx.contextPct}%</span>
+        <span className="text-meta text-muted/70">ctx</span>
+      </span>
+      <span className="tabular-nums">{fmtTokens(ctx.tokens)} tok</span>
+      <span className="tabular-nums">{t("sessionMetrics.turns", { count: m.turns })}</span>
+      <span className="tabular-nums">{fmtUsd(m.cost)}</span>
+      {reason && (
         <>
-          <span>·</span>
-          <span className="text-fail" title={t("sessionMetrics.terminalReason")}>⚠ {m.terminalReason}</span>
+          <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
+          <span className="text-fail" title={t("sessionMetrics.terminalReason")}>⚠ {reason}</span>
         </>
       )}
     </span>

@@ -25,8 +25,11 @@ function ConversationImpl({ items, kind, loaded, loadFailed, onRetryHistory, onO
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <MessageList items={items} kind={kind} loaded={loaded} loadFailed={loadFailed} onRetryHistory={onRetryHistory} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} onRespond={onRespond} />
-      <div className="border-t border-line bg-surface px-3 py-2.5">
-        <Composer {...composer} />
+      {/* same centered column as the message list, so the composer lines up under the prose above it. */}
+      <div className="bg-ink py-3">
+        <div className="mx-auto w-full max-w-[720px] px-6">
+          <Composer {...composer} />
+        </div>
       </div>
     </div>
   );

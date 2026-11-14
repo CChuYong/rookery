@@ -35,7 +35,7 @@ export default {
   "settings.mcpScopeOff": "꺼짐",
   "settings.mcpScopeReadonly": "읽기 전용",
   "settings.mcpScopeFull": "전체 제어",
-  "settings.mcpFullWarning": "⚠ 전체 제어를 켜면 외부 에이전트가 bypassPermissions 워커를 스폰·조종할 수 있어요. 신뢰하는 클라이언트에서만 사용하세요.",
+  "settings.mcpFullWarning": "전체 제어를 켜면 외부 에이전트가 bypassPermissions 워커를 스폰·조종할 수 있어요. 신뢰하는 클라이언트에서만 사용하세요.",
   "settings.mcpCopy": "복사",
   "settings.mcpCopied": "복사됨",
   "settings.mcpRegenerate": "토큰 재발급",

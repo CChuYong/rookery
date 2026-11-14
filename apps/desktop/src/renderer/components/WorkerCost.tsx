@@ -1,4 +1,3 @@
-import { Coins } from "lucide-react";
 import { useStore } from "../store/store.js";
 import type { LogItem } from "../store/reduce.js";
 import { fmtUsd } from "../format.js";
@@ -24,7 +23,7 @@ export function WorkerCost({ workerId, fleetCost }: { workerId: string; fleetCos
   const logCost = useStore((s) => latestCost(s.workerLogs[workerId] ?? EMPTY));
   const cost = Math.max(logCost, fleetCost ?? 0); // fleet.list snapshot shows cost without opening; the live log wins when higher (fresher)
   if (!cost) return null;
-  return <span className="shrink-0 font-mono text-[9px] tabular-nums text-muted/70" title={t("workerCost.workerTitle")}>{fmtUsd(cost)}</span>;
+  return <span className="shrink-0 font-mono text-meta tabular-nums text-muted" title={t("workerCost.workerTitle")}>{fmtUsd(cost)}</span>;
 }
 
 // Fleet-wide spend = sum of each live worker's cumulative cost (fleet snapshot, or the live log when higher). The "fleet
@@ -33,14 +32,15 @@ export function FleetBurn({ rows }: { rows: Array<{ id: string; costUsd?: number
   const t = useT();
   const total = useStore((s) => rows.reduce((sum, r) => sum + Math.max(latestCost(s.workerLogs[r.id] ?? EMPTY), r.costUsd ?? 0), 0));
   if (!total) return null;
+  // The fleet ledger's own section head — plain text (label left, total right), not a pill/badge, same scale
+  // as RepoTree's "N workers" group counters.
   return (
     <div
-      className="mx-1 mb-0.5 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 font-mono text-[10.5px] text-fg-dim"
+      className="mx-1 mb-1 flex items-center justify-between gap-2 px-2 pb-1 pt-2 text-meta font-medium"
       title={t("workerCost.fleetTitle")}
     >
-      <Coins size={11} className="shrink-0 text-muted" />
-      <span className="text-muted">{t("workerCost.fleetLabel")}</span>
-      <span className="ml-auto tabular-nums">{fmtUsd(total)}</span>
+      <span className="text-faint">{t("workerCost.fleetLabel")}</span>
+      <span className="tabular-nums text-faint">{fmtUsd(total)}</span>
     </div>
   );
 }

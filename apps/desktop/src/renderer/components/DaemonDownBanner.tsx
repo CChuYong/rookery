@@ -7,14 +7,14 @@ export function DaemonDownBanner({ note, onRetry }: { note: string | null; onRet
   const t = useT();
   return (
     <div className="flex flex-1 items-center justify-center p-6">
-      <div className="max-w-[420px] rounded-2xl border border-line bg-surface p-8 text-center">
-        <AlertTriangle size={30} className="mx-auto mb-3 text-run" />
-        <h2 className="mb-2 text-[17px] font-semibold">{t("daemonDownBanner.title")}</h2>
+      <div className="max-w-[400px] rounded-lg border border-line bg-surface p-6 text-center">
+        <AlertTriangle size={22} className="mx-auto mb-3 text-run" />
+        <h2 className="mb-2 text-title font-medium">{t("daemonDownBanner.title")}</h2>
         {note
-          ? <p className="text-[13px] leading-relaxed text-fail">{note}</p>
-          : <p className="text-[13px] leading-relaxed text-muted">{t("daemonDownBanner.description")}</p>}
-        <p className="mt-1 text-[12px] text-muted">
-          {t("daemonDownBanner.logLabel")} <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-[11px] text-fg-dim">~/.rookery/daemon.log</code>
+          ? <p className="text-body leading-relaxed text-fail">{note}</p>
+          : <p className="text-body leading-relaxed text-muted">{t("daemonDownBanner.description")}</p>}
+        <p className="mt-1 text-ui text-muted">
+          {t("daemonDownBanner.logLabel")} <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-meta text-fg-dim">~/.rookery/daemon.log</code>
         </p>
         <Button variant="primary" className="mt-5" onClick={onRetry}>{t("daemonDownBanner.retry")}</Button>
       </div>

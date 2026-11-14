@@ -35,7 +35,7 @@ export default {
   "settings.mcpScopeOff": "Off",
   "settings.mcpScopeReadonly": "Read-only",
   "settings.mcpScopeFull": "Full control",
-  "settings.mcpFullWarning": "⚠ Full control lets an external agent spawn and drive bypassPermissions workers. Use only with clients you trust.",
+  "settings.mcpFullWarning": "Full control lets an external agent spawn and drive bypassPermissions workers. Use only with clients you trust.",
   "settings.mcpCopy": "Copy",
   "settings.mcpCopied": "Copied",
   "settings.mcpRegenerate": "Regenerate token",

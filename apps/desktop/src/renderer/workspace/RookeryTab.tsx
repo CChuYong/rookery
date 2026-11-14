@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { IDockviewPanelHeaderProps } from "dockview";
 import { MessageSquare, FileText, GitCompare, GitCommitHorizontal, SquareTerminal, Files, GitBranch, Bot, X, type LucideIcon } from "lucide-react";
-import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { editorTooltip, type PanelParams } from "./panel-ids.js";
 import { fixedPanelTitle } from "./panel-titles.js";
@@ -12,9 +11,9 @@ import { ContextMenu, type MenuItem } from "../components/ContextMenu.js";
 
 const EMPTY_TABS: Tab[] = [];
 
-// Custom dockview tab matching the app's TabBar aesthetic (per-kind icon, coral
+// Custom dockview tab matching the app's TabBar aesthetic (per-kind icon, orange
 // for the conversation, hover-reveal close on editor tabs only). Active/inactive
-// background + the coral underline are painted in dockview-theme.css via the
+// background + the orange underline are painted in dockview-theme.css via the
 // .dv-active-tab / .dv-inactive-tab hooks.
 function iconFor(params: PanelParams): LucideIcon {
   switch (params.kind) {
@@ -86,17 +85,19 @@ export function RookeryTab(props: IDockviewPanelHeaderProps): JSX.Element {
   };
   return (
     <>
-      <div onContextMenu={onContextMenu} className="rk-tab group flex h-full items-center gap-1.5 px-2 text-[11.5px] font-medium select-none">
-        <Icon size={12} className={cn("shrink-0", params.kind === "conversation" ? "text-accent" : "text-muted")} />
+      {/* data-kind drives the group-header-height rule in dockview-theme.css (files/git/nested/terminal get a
+          shorter strip than the main editor/conversation group). */}
+      <div onContextMenu={onContextMenu} data-kind={params.kind} className={`rk-tab group flex h-full items-center gap-1.5 text-ui select-none ${params.kind === "editor" ? "px-3" : "px-2"}`}>
+        <Icon size={14} className="shrink-0 text-muted" />
         <span title={tooltip} className="max-w-[168px] truncate">{label}</span>
         {closable && (
           <button
             onMouseDown={(e) => e.stopPropagation()} /* don't start a tab drag when clicking close */
             onClick={(e) => { e.stopPropagation(); if (dirty) setConfirming({ ids: params.kind === "editor" ? [params.tabId] : [], title: label, dirtyCount: 1, bulk: false, closeApi: true }); else api.close(); }}
             aria-label={t("tabBar.closeTab")}
-            className="ml-0.5 rounded p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            className="tab-close ml-0.5 rounded-sm p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           >
-            <X size={11} />
+            <X size={14} />
           </button>
         )}
       </div>

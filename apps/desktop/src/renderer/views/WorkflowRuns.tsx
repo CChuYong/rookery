@@ -25,11 +25,12 @@ function timeLabel(ts: number, now: number, locale: string, t: ReturnType<typeof
   return t("relativeTime.daysAgo", { n: rel.value });
 }
 
-function statusTone(status: WorkflowRunSnapshot["status"]): string {
-  if (status === "running") return "border-run/25 bg-run/10 text-run";
-  if (status === "failed") return "border-fail/25 bg-fail/10 text-fail";
-  if (status === "completed") return "border-pr/25 bg-pr/10 text-pr";
-  return "border-line bg-ink/40 text-muted";
+// State tag colour: a dot + the text in the same tone, no boxed/uppercase chrome.
+function statusTone(status: WorkflowRunSnapshot["status"]): { dot: string; text: string } {
+  if (status === "running") return { dot: "bg-run led-live", text: "text-run" };
+  if (status === "failed") return { dot: "bg-fail", text: "text-fail" };
+  if (status === "completed") return { dot: "bg-pr", text: "text-pr" };
+  return { dot: "bg-muted", text: "text-muted" };
 }
 
 function AgentRoster({
@@ -49,9 +50,9 @@ function AgentRoster({
   const rows = useVirtualizer({
     count: agents.length,
     getScrollElement: () => bodyRef.current,
-    estimateSize: () => 34,
+    estimateSize: () => 26,
     overscan: 8,
-    initialRect: { width: 280, height: 272 },
+    initialRect: { width: 280, height: 208 },
   });
   if (agents.length === 0) return null;
   // Before ResizeObserver supplies the first real measurement (notably in jsdom), keep a bounded initial
@@ -59,9 +60,9 @@ function AgentRoster({
   const measuredRows = rows.getVirtualItems();
   const visibleRows = measuredRows.length > 0
     ? measuredRows
-    : agents.slice(0, 20).map((_, index) => ({ index, key: index, start: index * 34, size: 34 }));
+    : agents.slice(0, 20).map((_, index) => ({ index, key: index, start: index * 26, size: 26 }));
   return (
-    <div ref={bodyRef} className="overflow-y-auto" style={{ height: Math.min(agents.length * 34, 272) }}>
+    <div ref={bodyRef} className="overflow-y-auto" style={{ height: Math.min(agents.length * 26, 208) }}>
       <div className="relative w-full" style={{ height: rows.getTotalSize() }}>
         {visibleRows.map((row) => {
           const agent = agents[row.index]!;
@@ -74,15 +75,15 @@ function AgentRoster({
               type="button"
               onClick={() => onSelect(agent)}
               className={cn(
-                "absolute left-0 top-0 flex w-full items-center gap-2 rounded px-2 text-left text-[11px] transition-colors hover:bg-raised/60",
+                "absolute left-0 top-0 flex w-full items-center gap-2 rounded px-2 text-left text-body transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi",
                 selectedKey?.endsWith(`/${key}`) && "bg-accent/10",
               )}
               style={{ height: row.size, transform: `translateY(${row.start}px)` }}
             >
               <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", agent.status === "running" ? "bg-run led-live" : agent.status === "completed" ? "bg-pr" : "bg-muted")} />
-              <span className="min-w-0 flex-1 truncate font-mono text-fg-dim" title={`${identity} · ${agent.agentId}${agent.model ? ` · ${agent.model}` : ""}`}>{identity} · {agent.agentId.slice(0, 8)}</span>
-              <span className="max-w-[72px] truncate font-mono text-muted" title={latest}>{latest}</span>
-              <span className="shrink-0 font-mono text-[9px] text-muted/75">{timeLabel(agent.lastActivityAt, Date.now(), locale, t)}</span>
+              <span className="min-w-0 flex-1 truncate text-ui text-fg-dim" title={`${identity} · ${agent.agentId}${agent.model ? ` · ${agent.model}` : ""}`}>{identity}{" · "}<span className="font-mono text-meta text-muted">{agent.agentId.slice(0, 8)}</span></span>
+              <span className="max-w-[72px] truncate font-mono text-meta text-muted" title={latest}>{latest}</span>
+              <span className="shrink-0 font-mono text-meta text-muted/75">{timeLabel(agent.lastActivityAt, Date.now(), locale, t)}</span>
             </button>
           );
         })}
@@ -159,32 +160,32 @@ function PhaseSection({
       <div className="space-y-1 border-b border-line/70 px-2.5 py-2">
         <div className="flex items-center gap-2">
           <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", active.length > 0 ? "bg-run led-live" : completed.length > 0 ? "bg-pr" : "bg-muted/60")} />
-          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-fg-dim" title={phaseName}>{phaseName}</span>
-          {group.phase?.model && <span className="max-w-[80px] truncate font-mono text-[9px] text-muted" title={group.phase.model}>{group.phase.model}</span>}
+          <span className="min-w-0 flex-1 truncate text-meta font-medium text-fg-dim" title={phaseName}>{phaseName}</span>
+          {group.phase?.model && <span className="max-w-[80px] truncate font-mono text-meta text-muted" title={group.phase.model}>{group.phase.model}</span>}
         </div>
-        <div className="font-mono text-[9.5px] text-muted">
+        <div className="font-mono text-meta text-muted">
           {t("workflowActivity.activeCount", { count: active.length })}
           {" · "}{t("workflowActivity.completedCount", { count: completed.length })}
           {" · "}{t("workflowActivity.startedCount", { count: group.agents.length })}
           {stopped.length > 0 && <>{" · "}{t("workflowActivity.stoppedCount", { count: stopped.length })}</>}
         </div>
-        {group.phase?.detail && <div className="text-[10px] leading-relaxed text-muted" title={group.phase.detail}>{group.phase.detail}</div>}
+        {group.phase?.detail && <div className="text-meta leading-relaxed text-muted" title={group.phase.detail}>{group.phase.detail}</div>}
       </div>
       {group.agents.length > 0 && (
         <div className="space-y-1 p-1.5">
           {active.length > 0 && <AgentRoster taskId={taskId} agents={active} selectedKey={selectedKey} onSelect={onSelect} />}
           {completed.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle(completedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-[10px] font-medium text-muted hover:text-fg-dim">
-                <ChevronRight size={11} className={cn("transition-transform", expanded.has(completedKey) && "rotate-90")} /> {t("workflowActivity.completedAgents", { count: completed.length })}
+              <button type="button" onClick={() => toggle(completedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+                <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", expanded.has(completedKey) && "rotate-90")} /> {t("workflowActivity.completedAgents", { count: completed.length })}
               </button>
               {expanded.has(completedKey) && <AgentRoster taskId={taskId} agents={completed} selectedKey={selectedKey} onSelect={onSelect} />}
             </>
           )}
           {stopped.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle(stoppedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-[10px] font-medium text-muted hover:text-fg-dim">
-                <ChevronRight size={11} className={cn("transition-transform", expanded.has(stoppedKey) && "rotate-90")} /> {t("workflowActivity.stoppedAgents", { count: stopped.length })}
+              <button type="button" onClick={() => toggle(stoppedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+                <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", expanded.has(stoppedKey) && "rotate-90")} /> {t("workflowActivity.stoppedAgents", { count: stopped.length })}
               </button>
               {expanded.has(stoppedKey) && <AgentRoster taskId={taskId} agents={stopped} selectedKey={selectedKey} onSelect={onSelect} />}
             </>
@@ -244,18 +245,21 @@ function WorkflowRun({
     <section className="overflow-hidden rounded-lg border border-line bg-ink/40">
       <div className="space-y-1.5 border-b border-line px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-fg" title={run.workflowName}>{run.workflowName || t("workflowActivity.taskFallbackName")}</span>
-          <span className={cn("shrink-0 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase", statusTone(run.status))}>{t(`workflowActivity.${run.status}`)}</span>
-          <span className="shrink-0 font-mono text-[9px] text-muted">{timeLabel(run.lastActivityAt, Date.now(), locale, t)}</span>
+          <span className="min-w-0 flex-1 truncate text-ui font-medium text-fg" title={run.workflowName}>{run.workflowName || t("workflowActivity.taskFallbackName")}</span>
+          <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta", statusTone(run.status).text)}>
+            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusTone(run.status).dot)} aria-hidden />
+            {t(`workflowActivity.${run.status}`)}
+          </span>
+          <span className="shrink-0 text-meta text-muted">{timeLabel(run.lastActivityAt, Date.now(), locale, t)}</span>
         </div>
-        <div className="font-mono text-[10px] text-muted">
+        <div className="font-mono text-meta tabular-nums text-muted">
           {t("workflowActivity.activeCount", { count: run.counts.active })}
           {" · "}{t("workflowActivity.completedCount", { count: run.counts.completed })}
           {" · "}{t("workflowActivity.startedCount", { count: run.counts.started })}
           {run.counts.stopped > 0 && <>{" · "}{t("workflowActivity.stoppedCount", { count: run.counts.stopped })}</>}
         </div>
-        {(run.summary || run.lastToolName) && <div className="truncate text-[10.5px] text-fg-dim" title={run.summary || run.lastToolName}>{run.summary || `${t("workflowActivity.latest")}: ${run.lastToolName}`}</div>}
-        {warning && <div className="flex items-center gap-1.5 text-[10.5px] text-nochg"><AlertTriangle size={11} /> {warning}</div>}
+        {(run.summary || run.lastToolName) && <div className="truncate text-meta text-fg-dim" title={run.summary || run.lastToolName}>{run.summary || `${t("workflowActivity.latest")}: ${run.lastToolName}`}</div>}
+        {warning && <div className="flex items-center gap-1.5 text-meta text-nochg"><AlertTriangle size={12} /> {warning}</div>}
       </div>
       {run.visibility === "live" && (run.agents.length > 0 || hasPhaseMetadata) && (
         <div className="space-y-1 p-2">
@@ -264,22 +268,22 @@ function WorkflowRun({
           )) : <>
           {active.length > 0 && (
             <>
-              <div className="px-1 py-1 text-[10px] font-medium text-muted">{t("workflowActivity.activeAgents", { count: active.length })}</div>
+              <div className="px-1 py-1 text-meta font-medium text-muted">{t("workflowActivity.activeAgents", { count: active.length })}</div>
               <AgentRoster taskId={run.taskId} agents={active} selectedKey={selectedKey} onSelect={select} />
             </>
           )}
           {completed.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle("completed")} className="flex w-full items-center gap-1 px-1 py-1 text-left text-[10px] font-medium text-muted hover:text-fg-dim">
-                <ChevronRight size={11} className={cn("transition-transform", completedOpen && "rotate-90")} /> {t("workflowActivity.completedAgents", { count: completed.length })}
+              <button type="button" onClick={() => toggle("completed")} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+                <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", completedOpen && "rotate-90")} /> {t("workflowActivity.completedAgents", { count: completed.length })}
               </button>
               {completedOpen && <AgentRoster taskId={run.taskId} agents={completed} selectedKey={selectedKey} onSelect={select} />}
             </>
           )}
           {stopped.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle("stopped")} className="flex w-full items-center gap-1 px-1 py-1 text-left text-[10px] font-medium text-muted hover:text-fg-dim">
-                <ChevronRight size={11} className={cn("transition-transform", stoppedOpen && "rotate-90")} /> {t("workflowActivity.stoppedAgents", { count: stopped.length })}
+              <button type="button" onClick={() => toggle("stopped")} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+                <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", stoppedOpen && "rotate-90")} /> {t("workflowActivity.stoppedAgents", { count: stopped.length })}
               </button>
               {stoppedOpen && <AgentRoster taskId={run.taskId} agents={stopped} selectedKey={selectedKey} onSelect={select} />}
             </>
@@ -289,9 +293,9 @@ function WorkflowRun({
       )}
       {selectedBelongs && (
         <div className="border-t border-line">
-          <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">{t("workflowActivity.selectedAgent")}</div>
-          {loading && <div className="px-3 pb-3 text-[11px] text-muted">{t("workflowActivity.historyLoading")}</div>}
-          {failed && <div className="px-3 pb-3 text-[11px] text-fail">{t("workflowActivity.historyFailed")}</div>}
+          <div className="px-3 py-1.5 text-meta font-medium text-muted">{t("workflowActivity.selectedAgent")}</div>
+          {loading && <div className="px-3 pb-3 text-meta text-muted">{t("workflowActivity.historyLoading")}</div>}
+          {failed && <div className="px-3 pb-3 text-meta text-fail">{t("workflowActivity.historyFailed")}</div>}
           {selectedLog && !loading && !failed && <div className="flex h-72 min-h-0 flex-col"><MessageList kind="worker" items={selectedLog} /></div>}
         </div>
       )}
@@ -310,7 +314,10 @@ export function WorkflowRuns({ workerId, loadAgentHistory }: WorkflowRunsProps):
   if (runs.length === 0) return null;
   return (
     <div className="flex flex-col gap-2 p-2">
-      <div className="eyebrow px-1 pt-1 eyebrow-sm font-medium uppercase text-muted">{t("workflowActivity.workflows")} · {runs.length}</div>
+      <div className="flex items-center gap-1.5 px-1 pt-1 text-ui font-medium text-fg-dim">
+        <span>{t("workflowActivity.workflows")}</span>
+        <span className="font-mono text-faint">{runs.length}</span>
+      </div>
       {runs.map((run) => (
         <WorkflowRun key={run.taskId} workerId={workerId} run={run} selectedKey={selectedKey} setSelectedKey={setSelectedKey} loadAgentHistory={loadAgentHistory} />
       ))}

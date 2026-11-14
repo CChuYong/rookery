@@ -20,9 +20,10 @@ export interface SegmentProps<V extends string = string> {
   items: Array<SegmentItem<V>>;
   value: V;
   onChange: (value: V) => void;
-  // underline = navigation-tier (a sliding coral line marks the active tab; text/bg wash otherwise unchanged).
+  // underline = navigation-tier (an orange line marks the active tab, placed instantly; text/bg wash otherwise unchanged).
   // pill = in-form selection (a sliding raised background block marks the active choice).
-  variant: "underline" | "pill";
+  // icon = Orca-style ghost icon tabs (no sliding indicator, no visible label — the label becomes the a11y name + title tooltip).
+  variant: "underline" | "pill" | "icon";
   className?: string; // merged onto the tablist container (layout/spacing/border overrides)
   itemClassName?: string; // merged onto every non-secondary item button (sizing/padding overrides)
   indicatorClassName?: string; // fine positioning override for the sliding indicator (e.g. a few px offset)
@@ -64,11 +65,12 @@ export function Segment<V extends string = string>({
 
   return (
     <div ref={containerRef} role="tablist" aria-label={aria["aria-label"]} onKeyDown={onKeyDown} className={cn("relative flex items-center", className)}>
-      {rect && (
+      {variant !== "icon" && rect && (
         <div
           className={cn(
-            "pointer-events-none absolute transition-[left,width] duration-200 ease-out motion-reduce:transition-none",
-            variant === "underline" ? "bottom-0 h-[2px] rounded-full bg-accent" : "inset-y-1 rounded-[6px] bg-raised shadow-sm",
+            // placed instantly (no left/width animation): the selection moves, it does not slide
+            "pointer-events-none absolute",
+            variant === "underline" ? "bottom-0 h-px bg-accent" : "inset-y-0.5 rounded-sm bg-raised",
             indicatorClassName,
           )}
           style={{ left: rect.left, width: rect.width }}
@@ -83,11 +85,11 @@ export function Segment<V extends string = string>({
           : item.disabled
             ? "text-muted"
             : active
-              ? (variant === "underline" ? "bg-accent/15 text-fg" : "text-fg")
-              : (variant === "underline" ? "text-muted hover:bg-raised hover:text-fg-dim" : "text-muted hover:text-fg-dim");
+              ? (variant === "underline" ? "bg-accent/15 text-fg" : variant === "icon" ? "bg-raised text-fg" : "text-fg")
+              : (variant === "underline" ? "text-muted hover:bg-raised hover:text-fg-dim" : variant === "icon" ? "text-muted hover:bg-raised hover:text-fg-dim" : "text-muted hover:text-fg-dim");
         return (
           <Fragment key={item.value}>
-            {idx === firstSecondaryIdx && <span className="mx-0.5 h-3 w-px shrink-0 bg-line/60" aria-hidden />}
+            {idx === firstSecondaryIdx && <span className="mx-1 h-3 w-px shrink-0 bg-line" aria-hidden />}
             <button
               type="button"
               data-seg={item.value}
@@ -101,17 +103,25 @@ export function Segment<V extends string = string>({
                 // no disabled:pointer-events-none — a disabled item can still carry a hint tooltip (title) that
                 // should show on hover (e.g. WorkerSpawnModal's "connect GitHub first"); disabled:cursor-not-allowed
                 // + no hover:* class in stateCls (below) is enough to suppress any color change on hover.
-                "relative z-10 flex items-center gap-1 whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                "relative z-10 flex items-center justify-center gap-1 whitespace-nowrap transition-colors active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi disabled:cursor-not-allowed disabled:opacity-40",
                 secondary
-                  ? "rounded px-1.5 py-0.5 text-[10px]"
-                  : cn("rounded-md px-2 py-0.5 text-[11px]", variant === "pill" && "rounded-[6px]"),
+                  ? "rounded-sm px-1.5 py-0.5 text-meta"
+                  : variant === "icon"
+                    ? "h-6 w-6 rounded-sm"
+                    : cn("rounded-sm px-2 py-1 text-ui", variant === "underline" && "rounded-t-sm rounded-b-none"),
                 stateCls,
                 !secondary && itemClassName,
               )}
             >
-              {Icon && <Icon size={13} />}
-              {item.label}
-              {item.count != null && <span className="ml-1 text-fg-dim/50">{item.count}</span>}
+              {Icon && <Icon size={variant === "icon" ? 16 : 13} />}
+              {variant === "icon" ? <span className="sr-only">{item.label}</span> : item.label}
+              {item.count != null && (
+                variant === "icon" ? (
+                  <span className="pointer-events-none absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full border border-line bg-ink px-0.5 font-mono text-meta leading-none text-fg-dim">{item.count}</span>
+                ) : (
+                  <span className="ml-1 font-mono text-meta tabular-nums text-faint">{item.count}</span>
+                )
+              )}
             </button>
           </Fragment>
         );

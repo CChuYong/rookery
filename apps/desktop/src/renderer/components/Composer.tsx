@@ -5,7 +5,7 @@ import { Send, Paperclip, Square, Loader2, MessageCircleQuestion, LifeBuoy } fro
 import { baseName as basename } from "../lib/path.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
-import { Select, Input } from "../ui/input.js";
+import { Input } from "../ui/input.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
@@ -16,6 +16,10 @@ import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
 // After Stop is clicked, how long the worker may stay busy before we surface the "Recover" escalation. A soft
 // interrupt normally lands in ~1-2s; past this, the turn is almost certainly wedged in a long tool call/workflow.
 const STUCK_STOP_MS = 6000;
+
+// Model/effort/permission selects live in the composer's quiet bottom toolbar — borderless text buttons
+// (T3's "Opus 4.8 · High" convention), not a bordered form field (that look is reserved for the textarea well itself).
+const CHIP_SELECT = "[field-sizing:content] h-6 min-w-0 cursor-pointer appearance-none rounded border-0 bg-transparent px-1.5 text-ui text-fg-dim transition-colors hover:bg-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-40";
 
 // Model/effort controls at the bottom of the input box. editable=true means selectable (master session, before spawn),
 // false means a read-only badge (running worker — model is fixed at spawn time).
@@ -203,7 +207,8 @@ export function Composer({
   return (
     <div
       className={cn(
-        "relative flex flex-col gap-2 rounded-xl border bg-ink/40 px-3 py-2 focus-within:border-accent/50",
+        // T3's composer well — a quiet surface box, a neutral focus edge (no orange glow/ring).
+        "relative flex flex-col gap-2 rounded-lg border bg-surface px-3 py-2 transition-colors focus-within:border-fg/20",
         dragOver ? "border-accent/70 bg-accent/5" : "border-line",
         className,
       )}
@@ -212,7 +217,7 @@ export function Composer({
       onDrop={onDrop}
     >
       {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-accent/60 bg-ink/70 text-[12px] font-medium text-accent">
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent/60 bg-ink/70 text-ui font-medium text-accent">
           {t("composer.dropToAttach")}
         </div>
       )}
@@ -246,9 +251,8 @@ export function Composer({
                   onChange={(e) => controls.onModel?.(e.target.value)}
                 />
               ) : (
-                <Select
-                  size="xs"
-                  className="min-w-0 text-fg-dim"
+                <select
+                  className={CHIP_SELECT}
                   title={t("composer.modelTitle")}
                   value={controls.model}
                   disabled={disabled}
@@ -263,12 +267,11 @@ export function Composer({
                     <option key={m.id} value={m.id}>{m.label}</option>
                   ))}
                   {!modelList.some((m) => m.id === controls.model) && controls.model && <option value={controls.model}>{controls.model}</option>}
-                </Select>
+                </select>
               )}
               {controls.effort !== undefined && effortSupported(controls.model) && (
-                <Select
-                  size="xs"
-                  className="min-w-0 text-fg-dim"
+                <select
+                  className={CHIP_SELECT}
                   title={t("composer.effortTitle")}
                   value={controls.effort}
                   disabled={disabled}
@@ -277,12 +280,11 @@ export function Composer({
                   {effortOptions.map((ef) => (
                     <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                   ))}
-                </Select>
+                </select>
               )}
               {controls.permissionMode !== undefined && (
-                <Select
-                  size="xs"
-                  className="min-w-0 text-fg-dim"
+                <select
+                  className={CHIP_SELECT}
                   title={t("composer.permTitle")}
                   value={controls.permissionMode}
                   disabled={disabled}
@@ -291,24 +293,29 @@ export function Composer({
                   {(controls.permissionModes ?? PERMISSION_MODES).map((pm) => (
                     <option key={pm} value={pm}>{permLabel(pm, t)}</option>
                   ))}
-                </Select>
+                </select>
               )}
             </>
           ) : (
-            <span className="font-mono text-[11px] text-muted" title={t("composer.fixedModelTitle")}>
-              ◇ {modelList.find((m) => m.id === controls.model)?.label ?? controls.model}
-              {controls.effort !== undefined && effortSupported(controls.model) ? ` · ${t(effortLabelKey(controls.effort))}` : ""}
+            <span className="inline-flex items-center gap-1.5 text-meta text-muted" title={t("composer.fixedModelTitle")}>
+              <span className="text-fg-dim">{modelList.find((m) => m.id === controls.model)?.label ?? controls.model}</span>
+              {controls.effort !== undefined && effortSupported(controls.model) && (
+                <>
+                  <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
+                  <span>{t(effortLabelKey(controls.effort))}</span>
+                </>
+              )}
             </span>
           ))}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {onSideSend && !disabled && (
-            <Button variant="ghost" size="icon" aria-label={t("composer.sideQuestion")} disabled={!text.trim()} onClick={submitSide}>
-              <MessageCircleQuestion size={16} />
+            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.sideQuestion")} disabled={!text.trim()} onClick={submitSide}>
+              <MessageCircleQuestion size={14} />
             </Button>
           )}
           {onAttachFile && (
-            <Button variant="ghost" size="icon" aria-label={t("composer.attachFile")} disabled={disabled} onClick={() => void attach()}>
-              <Paperclip size={15} />
+            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled} onClick={() => void attach()}>
+              <Paperclip size={14} />
             </Button>
           )}
           {/* Stop stays visible for the whole turn so an in-progress turn can always be aborted (audit #23). Once you type/attach
@@ -318,18 +325,26 @@ export function Composer({
             stuck && onRecover ? (
               // Interrupt didn't land — the turn is wedged. Turn the dead spinner into an actionable Recover
               // (worker.recover: hard-kill the stuck subprocess and resume the session in place → back to idle).
-              <Button variant="danger" size="icon" aria-label={t("composer.recover")} title={t("composer.recoverHint")} onClick={onRecover}>
+              <Button variant="danger" size="icon" className="h-[26px] w-[26px] rounded-md bg-raised" aria-label={t("composer.recover")} title={t("composer.recoverHint")} onClick={onRecover}>
                 <LifeBuoy size={14} />
               </Button>
             ) : (
-              <Button variant="danger" size="icon" disabled={stopping} aria-label={t("composer.stop")} title={t("composer.stopHint")} onClick={() => { setStopping(true); onStop(); }}>
+              <Button variant="danger" size="icon" className="h-[26px] w-[26px] rounded-md bg-raised" disabled={stopping} aria-label={t("composer.stop")} title={t("composer.stopHint")} onClick={() => { setStopping(true); onStop(); }}>
                 {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
               </Button>
             )
           )}
           {!(busy && onStop && !disabled && !text.trim()) && (
-            <Button variant="primary" size="icon" aria-label={sendLabelText} disabled={disabled || (!text.trim() && !allowEmpty)} onClick={submit}>
-              <Send size={16} />
+            // White-on-black send, like T3 — the accent stays off the send action entirely.
+            <Button
+              variant="primary"
+              size="icon"
+              className="h-[26px] w-[26px] rounded-full bg-fg text-ink hover:bg-fg/90 disabled:bg-raised disabled:text-faint"
+              aria-label={sendLabelText}
+              disabled={disabled || (!text.trim() && !allowEmpty)}
+              onClick={submit}
+            >
+              <Send size={14} />
             </Button>
           )}
         </div>

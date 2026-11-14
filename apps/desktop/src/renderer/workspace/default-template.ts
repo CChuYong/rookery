@@ -24,11 +24,11 @@ export function defaultPanels(agentKind: "master" | "worker"): SeedPanel[] {
   return seeds;
 }
 
-// Terminal group heights (px). Collapsed = tab-strip only (dockview's own tab
-// strip is 34px, see dockview-theme.css) — a page with no open terminals
-// shouldn't permanently occupy ~220px of vertical space (audit #30).
-export const TERMINAL_COLLAPSED_HEIGHT = 40;
-export const TERMINAL_EXPANDED_HEIGHT = 220;
+// Terminal group heights (px). Collapsed = the dockview group header (32px, see
+// dockview-theme.css) + TerminalPanel's single 30px "New terminal" row — a page
+// with no open terminals shouldn't permanently occupy ~220px (audit #30).
+export const TERMINAL_COLLAPSED_HEIGHT = 62;
+export const TERMINAL_EXPANDED_HEIGHT = 240;
 
 // Seed height for a page's terminal group: collapsed when it has no open
 // terminals yet, full height otherwise (e.g. a page whose terminals were

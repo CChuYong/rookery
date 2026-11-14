@@ -127,9 +127,9 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
     { tier: 2, title: t("attentionBell.tier2"), rows: items.filter((i) => i.tier === 2) },
   ];
   const icon = (kind: AttentionItem["kind"]): JSX.Element =>
-    kind === "interaction" ? <Zap size={13} className="text-accent" />
-    : kind === "worker-failure" || kind === "automation-failure" ? <CircleAlert size={13} className="text-fail" />
-    : <Eye size={13} className="text-muted" />;
+    kind === "interaction" ? <Zap size={14} className="text-accent" />
+    : kind === "worker-failure" || kind === "automation-failure" ? <CircleAlert size={14} className="text-fail" />
+    : <Eye size={14} className="text-muted" />;
 
   return (
     <>
@@ -138,13 +138,13 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
         onClick={toggle}
         aria-label={t("attentionBell.aria", { count: items.length })}
         aria-expanded={open}
-        className={cn("no-drag relative rounded-md p-1.5 transition-colors", open ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
+        className={cn("no-drag relative flex h-6 w-6 items-center justify-center rounded-md transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
       >
-        <Bell size={16} />
+        <Bell size={14} />
         {items.length > 0 && (
           <span
             className={cn(
-              "absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-0.5 text-[9.5px] font-bold leading-none",
+              "absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-0.5 text-meta font-medium leading-none",
               urgent > 0 ? "bg-accent text-white" : "bg-raised text-muted ring-1 ring-line",
             )}
           >
@@ -158,24 +158,24 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
           role="dialog"
           aria-label={t("attentionBell.title")}
           style={{ top: pos.top, left: pos.left }}
-          className="fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden rounded-xl border border-line bg-surface p-1.5 shadow-xl"
+          className="fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden rounded-md border border-line bg-surface p-1.5 shadow-pop"
         >
-          <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{t("attentionBell.title")}</div>
+          <div className="px-2.5 pb-1 pt-1.5 text-meta font-medium text-faint">{t("attentionBell.title")}</div>
           {items.length === 0 ? (
-            <div className="px-2.5 pb-3 pt-1 text-[12.5px] text-muted">{t("attentionBell.empty")}</div>
+            <div className="px-2.5 pb-3 pt-1 text-ui text-muted">{t("attentionBell.empty")}</div>
           ) : (
             <div className="min-h-0 max-h-[420px] overflow-y-auto">
               {tiers.map(({ tier, title, rows }) =>
                 rows.length === 0 ? null : (
                   <div key={tier}>
-                    <div className={cn("px-2.5 pb-0.5 pt-2 text-[10.5px] font-medium uppercase tracking-[0.08em]", tier === 0 ? "text-accent" : tier === 1 ? "text-fail" : "text-muted")}>{title}</div>
+                    <div className={cn("px-2.5 pb-0.5 pt-2 text-meta font-medium", tier === 0 ? "text-accent" : tier === 1 ? "text-fail" : "text-faint")}>{title}</div>
                     {rows.map((it) => (
-                      <div key={it.key} className="group flex items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-raised">
+                      <div key={it.key} className="group flex items-center gap-2 rounded-md px-2.5 py-1.5 hover:bg-raised">
                         <button onClick={() => go(it)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                           {icon(it.kind)}
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[12.5px] text-fg-dim">{it.label}</span>
-                            <span className="block truncate text-[11px] text-muted">
+                            <span className="block truncate text-body text-fg-dim">{it.label}</span>
+                            <span className="block truncate text-meta text-muted">
                               {t(`attentionBell.kind_${it.kind}`)}{(() => { const d = it.detailKey ? t(it.detailKey) : it.detail; return d ? ` · ${d}` : ""; })()}
                             </span>
                           </span>
