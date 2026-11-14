@@ -29,9 +29,11 @@ describe("WorkerHeader background reason", () => {
     expect(screen.queryByText("백그라운드 · 1")).toBeNull();
   });
 
-  it("falls back to the general background count and hides reasons once idle", () => {
+  it("shows only the status badge (no activity text) for a background worker with bg but no listed tasks, and hides reasons once idle", () => {
     const { rerender } = render(<WorkerHeader {...baseProps} worker={{ id: "w2", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 2, types: ["local_bash"] } } as never} />);
-    expect(screen.getByText("백그라운드 · 2")).toBeInTheDocument();
+    expect(screen.getByText("백그라운드 작업 중")).toBeInTheDocument();
+    expect(screen.queryByText(/백그라운드 ·/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "백그라운드 작업" })).toBeNull();
     rerender(<WorkerHeader {...baseProps} worker={{ id: "w2", label: "t", repoPath: "/r", status: "idle", branch: null, model: null } as never} />);
     expect(screen.queryByText(/백그라운드 ·/)).toBeNull();
     expect(screen.queryByText(/Workflow ·/)).toBeNull();
@@ -54,7 +56,20 @@ describe("WorkerHeader background task list", () => {
     expect(items[0]).toHaveTextContent("중지: npm test --watch");
     expect(items[1]).toHaveTextContent("중지: vite dev");
     fireEvent.click(items[0]!);
+    expect(onStopTask).toHaveBeenCalledTimes(1);
     expect(onStopTask).toHaveBeenCalledWith("b1");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("does not reopen a stale menu when the tasks drop to empty and later reappear", () => {
+    const w = { id: "wt5", label: "t", repoPath: "/r", status: "running", branch: null, model: null };
+    const { rerender } = render(<WorkerHeader {...baseProps} worker={{ ...w, tasks } as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "백그라운드 작업" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    rerender(<WorkerHeader {...baseProps} worker={{ ...w, tasks: [] } as never} />);
+    expect(screen.queryByRole("menu")).toBeNull();
+    rerender(<WorkerHeader {...baseProps} worker={{ ...w, tasks } as never} />);
+    expect(screen.getByRole("button", { name: "백그라운드 작업" })).toBeInTheDocument();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
@@ -104,7 +119,7 @@ describe("WorkerHeader responsive-hide hooks (panel controls must never clip)", 
   it("gives the status badge and the background chip droppable classes so the far-right controls stay reachable on a narrow pane", () => {
     // jsdom can't evaluate the @container rules; lock the CONTRACT instead — the two newest header items carry the
     // same responsive-hide hooks the CSS drops, so they can no longer push the ml-auto controls past overflow:hidden.
-    const { container } = render(<WorkerHeader {...baseProps} worker={{ id: "w1", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 1, types: ["local_bash"] } } as never} />);
+    const { container } = render(<WorkerHeader {...baseProps} worker={{ id: "w1", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 1, types: ["local_bash"] }, tasks: [{ id: "b1", type: "local_bash", description: "npm test" }] } as never} />);
     expect(screen.getByText("백그라운드 작업 중").closest(".workspace-header-status")).not.toBeNull();
     expect(screen.getByText("백그라운드 · 1").closest(".workspace-header-activity")).not.toBeNull();
     expect(container.querySelector(".workspace-header-controls")).not.toBeNull(); // controls keep their stable hook (never in a hide-set)

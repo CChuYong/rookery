@@ -552,6 +552,14 @@ describe("worker.tasks (listed background tasks)", () => {
     expect(s.fleet.w1).toMatchObject({ id: "w1", label: "app" });
   });
 
+  it("a worker.status after worker.tasks keeps the tasks", () => {
+    let s = reduceEvent(emptyState(), { type: "worker.spawned", sessionId: "s1", workerId: "w1", repoPath: "/r", label: "app" });
+    s = reduceEvent(s, { type: "worker.tasks", sessionId: "s1", workerId: "w1", tasks: [{ id: "b1", type: "local_bash", description: "npm test" }] });
+    s = reduceEvent(s, { type: "worker.status", sessionId: "s1", workerId: "w1", status: "background", bg: { count: 1, types: ["local_bash"] } });
+    expect(s.fleet.w1?.status).toBe("background");
+    expect(s.fleet.w1?.tasks).toEqual([{ id: "b1", type: "local_bash", description: "npm test" }]);
+  });
+
   it("worker.tasks for an unknown worker is ignored", () => {
     const s0 = emptyState();
     const s = reduceEvent(s0, { type: "worker.tasks", sessionId: "s1", workerId: "ghost", tasks: [{ id: "b1", type: "local_bash", description: "x" }] });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SquareTerminal, PanelRight, Ticket, RotateCcw, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { baseName } from "../lib/path.js";
@@ -33,14 +33,18 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
   const t = useT();
   const activeWorkflows = useStore((state) => Object.values(state.workflows[worker.id] ?? {}).filter((run) => run.status === "running").length);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // Listed background tasks (Claude only — codex workers never carry tasks) arrive in any status, running included.
+  // Ambient/subagent/workflow bg tasks are deliberately NOT listed, so `bg.count` never drives this indicator.
+  const tasks = worker.tasks ?? [];
+  const showTasks = activeWorkflows === 0 && tasks.length > 0;
+  // Drop a stale open menu when the button goes away, so it can't reopen by itself when tasks reappear.
+  useEffect(() => { if (!showTasks) setMenu(null); }, [showTasks]);
   // Text-only badge (a dot for state, no bordered chip) — the status badge already carries the colored chrome.
   if (activeWorkflows > 0) {
     return <span className="workspace-header-activity flex shrink-0 items-center gap-1 font-mono text-meta text-run"><span className="h-1 w-1 shrink-0 rounded-full bg-run led-live" />{t("workspaceHeaders.workflowTasks", { count: activeWorkflows })}</span>;
   }
-  // Listed background tasks (Claude only — codex workers never carry tasks) arrive in any status, running included,
-  // so this ghost button shows whenever the set is non-empty and opens a per-task Stop menu.
-  const tasks = worker.tasks ?? [];
-  if (tasks.length > 0) {
+  // Ghost button whenever the listed set is non-empty; opens a per-task Stop menu.
+  if (showTasks) {
     return (
       <>
         <button
@@ -73,9 +77,6 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
         )}
       </>
     );
-  }
-  if (worker.status === "background" && worker.bg?.count) {
-    return <span className="workspace-header-activity shrink-0 font-mono text-meta text-muted">{t("workspaceHeaders.backgroundTasks", { count: worker.bg.count })}</span>;
   }
   return null;
 }
