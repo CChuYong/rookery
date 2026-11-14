@@ -6,9 +6,10 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
-import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, type FakeStep } from "../helpers/fake-query.js";
+import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, withoutSteer, type FakeStep } from "../helpers/fake-query.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
-import type { AgentBackend, AgentSessionOptions } from "../../src/core/agent-backend.js";
+import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream } from "../../src/core/agent-backend.js";
+import type { AgentInput, ImageRef, ImageResolver } from "../../src/core/image-input.js";
 import type { ResolvedAgentCapabilities } from "../../src/core/capabilities/types.js";
 
 // Poll until the condition becomes true (throw on timeout) — for reproducing mid-turn timing.
@@ -758,7 +759,7 @@ describe("Worker", () => {
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: withoutSteer(new ClaudeBackend(gated)) } });
     agent.start("task");
     // Wait until turn0's assistant is recorded (= just before the gate).
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
@@ -796,7 +797,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: withoutSteer(new ClaudeBackend(gated)) } });
     agent.start("task");
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
     agent.send("m1");
@@ -1229,7 +1230,7 @@ describe("Worker", () => {
       });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gatedQuery) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: withoutSteer(new ClaudeBackend(gatedQuery)) } });
     agent.start("task");
 
     // Wait until the assistant message is recorded (= turn0 is mid-flight at the gate)
@@ -1447,7 +1448,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => { releaseGate(); }, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gatedQuery) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: withoutSteer(new ClaudeBackend(gatedQuery)) } });
     agent.start("task");
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
     // mid-turn send → echo deferred + message buffered in the MessageQueue (the gen is parked at the gate, not pulling input)
@@ -1821,5 +1822,379 @@ describe("Worker managed capability runtime", () => {
     expect(reporter.setApplied).toHaveBeenCalledTimes(1);
     expect(reporter.setApplied).toHaveBeenCalledWith(target, "worker-revision");
     expect(reporter.setError).not.toHaveBeenCalled();
+  });
+});
+
+describe("Worker steering (mid-turn send folded into the running turn)", () => {
+  type Steer = (input: AgentInput, clientMsgId?: string) => Promise<boolean>;
+  const turnEnd = (subtype = "success"): AgentEvent => ({ kind: "turn_end", subtype, costUsd: 0, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 });
+  const said = (text: string): AgentEvent => ({ kind: "message", role: "assistant", text, parentToolUseId: null });
+  const imgRef: ImageRef = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "a.png", mediaType: "image/png", byteLength: 3, width: 1, height: 1 };
+  const images: ImageResolver = {
+    validate: (refs) => refs.map(() => ({ ...imgRef })),
+    resolve: (refs) => refs.map(() => ({ mediaType: "image/png" as const, data: "eHl6" })),
+  };
+  // A hand-driven stream: the test pushes provider events; every input the worker enqueues is captured in `pulled`.
+  function mk(steer?: Steer, extra: { steerTimeoutMs?: number } = {}) {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    const pulled: AgentInput[] = [];
+    const pending: AgentEvent[] = [];
+    let wake: (() => void) | undefined;
+    let closed = false;
+    const backend: AgentBackend = {
+      openSession(input, o) {
+        void (async () => { for await (const m of input) pulled.push(m); })();
+        o.abortController.signal.addEventListener("abort", () => { closed = true; wake?.(); });
+        const stream: AgentStream = {
+          async *[Symbol.asyncIterator]() {
+            while (true) {
+              while (pending.length) yield pending.shift()!;
+              if (closed) return;
+              await new Promise<void>((r) => { wake = r; });
+              wake = undefined;
+            }
+          },
+          interrupt: async () => undefined,
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          supportedCommands: async () => [],
+          ...(steer ? { steer } : {}),
+        };
+        return stream;
+      },
+      startTurn: () => { throw new Error("not used"); },
+    };
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend, images, wakeWatchdogMs: 40, ...extra } });
+    const emit = (ev: AgentEvent) => { pending.push(ev); wake?.(); };
+    const flush = () => new Promise((r) => setTimeout(r, 5));
+    const users = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; role?: string; content?: string; clientMsgId?: string; text?: string; images?: unknown[] }).filter((p) => p.kind === "message" && p.role === "user");
+    const notices = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; text?: string }).filter((p) => p.kind === "notice").map((p) => p.text ?? "");
+    const pulledText = () => pulled.map((p) => (typeof p === "string" ? p : p.text));
+    return { repos, agent, emit, flush, users, notices, pulled, pulledText, statuses };
+  }
+  function held() {
+    let resolve!: (v: boolean) => void;
+    const promise = new Promise<boolean>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it("mid-turn send steers and echoes once", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-1");
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(steer).toHaveBeenCalledWith("redirect", "c-1");
+    const echoes = x.users().filter((u) => u.content === "redirect");
+    expect(echoes).toHaveLength(1);
+    expect(echoes[0]!.clientMsgId).toBe("c-1");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle"); // nothing deferred → no extra turn
+    expect(x.pulledText()).toEqual(["task"]); // the steered text never went through the queue as its own turn
+    await x.agent.stop();
+  });
+
+  it("steer rejected falls back to the deferred path", async () => {
+    const steer = vi.fn<Steer>(async () => false);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("later", "c-2");
+    await x.flush();
+    expect(x.users().some((u) => u.content === "later")).toBe(false); // no immediate echo
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "later"]);
+    expect(x.users().filter((u) => u.content === "later").map((u) => u.clientMsgId)).toEqual(["c-2"]);
+    expect(x.agent.status()).toBe("running"); // the deferred instruction's turn is starting
+    await x.agent.stop();
+  });
+
+  it("no steer when something is already deferred", async () => {
+    const steer = vi.fn<Steer>(async () => false);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first");
+    await x.flush();
+    x.agent.send("second");
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1); // "second" never overtakes the deferred "first"
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first", "second"]);
+    await x.agent.stop();
+  });
+
+  it("sends during an in-flight steer keep order", async () => {
+    const h = held();
+    const steer = vi.fn<Steer>(() => h.promise);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first");
+    x.agent.send("second"); // the first steer is still in flight → deferred, no second steer
+    expect(steer).toHaveBeenCalledTimes(1);
+    h.resolve(false);
+    await x.flush();
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first", "second"]);
+    expect(x.users().map((u) => u.content)).toEqual(["task", "first", "second"]);
+    await x.agent.stop();
+  });
+
+  for (const accepted of [true, false]) {
+    it(`stop during in-flight steer (steer later resolves ${accepted})`, async () => {
+      const h = held();
+      const x = mk(vi.fn<Steer>(() => h.promise));
+      x.agent.start("task");
+      await x.flush();
+      x.agent.send("redirect", "c-3");
+      await x.agent.stop();
+      h.resolve(accepted);
+      await x.flush();
+      expect(x.agent.status()).toBe("stopped");
+      expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (stopped): redirect"))).toHaveLength(1);
+      expect(x.users().some((u) => u.content === "redirect")).toBe(false);
+    });
+  }
+
+  it("steer accepted at the boundary still settles", async () => {
+    const x = mk(vi.fn<Steer>(async () => true));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(turnEnd());
+    await x.flush();
+    // The SDK answered the steered message as a new turn: a spontaneous model frame, then its own result.
+    x.emit(said("on it"));
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses.slice(-2)).toEqual(["running", "idle"]);
+    await x.agent.stop();
+  });
+
+  it("steered images are resolved up front", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("look", "c-4", undefined, [imgRef]);
+    await x.flush();
+    expect(steer).toHaveBeenCalledWith({ text: "look", images: [{ mediaType: "image/png", data: "eHl6" }] }, "c-4");
+    const echo = x.users().find((u) => u.content === "look");
+    expect(echo?.images).toHaveLength(1);
+    expect(JSON.stringify(x.repos.listWorkerEvents("a1"))).not.toContain("eHl6"); // refs only in the transcript
+    await x.agent.stop();
+  });
+
+  it("an unreadable image on a steered send throws before any steer, echo, or queueing (retryable, like an idle send)", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    const broken = vi.spyOn(images, "resolve").mockImplementationOnce(() => { throw new Error("Image unreadable; retry"); });
+    expect(() => x.agent.send("look", "c-10", undefined, [imgRef])).toThrow("unreadable");
+    broken.mockRestore();
+    await x.flush();
+    expect(steer).not.toHaveBeenCalled();
+    expect(x.users().some((u) => u.content === "look")).toBe(false);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task"]); // nothing was deferred either
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("a steer resets the abort-loop streak", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.emit(turnEnd("error_during_execution"));
+    x.emit(said("auto-restarted")); // SDK restarts on its own → running again
+    x.emit(turnEnd("error_during_execution")); // streak 2
+    x.emit(said("auto-restarted again"));
+    await x.flush();
+    x.agent.send("redirect"); // a human steering mid-turn breaks the streak
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1);
+    x.emit(turnEnd("error_during_execution")); // would be streak 3 without the reset
+    await x.flush();
+    expect(x.agent.status()).not.toBe("stopped");
+    expect(x.notices().some((n) => /without completing/i.test(n))).toBe(false);
+    await x.agent.stop();
+  });
+
+  it("streams without steer keep today's behavior", async () => {
+    const x = mk(undefined);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("later", "c-5");
+    await x.flush();
+    expect(x.users().some((u) => u.content === "later")).toBe(false);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "later"]);
+    expect(x.users().find((u) => u.content === "later")?.clientMsgId).toBe("c-5");
+    await x.agent.stop();
+  });
+
+  it("a steer that never settles falls back after the timeout", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise), { steerTimeoutMs: 20 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("slow", "c-6");
+    await new Promise((r) => setTimeout(r, 40)); // past the steer timeout
+    expect(x.users().some((u) => u.content === "slow")).toBe(false);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "slow"]); // delivered through the deferred fallback
+    h.resolve(true); // a late acceptance is ignored — no second echo
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "slow")).toHaveLength(1);
+    await x.agent.stop();
+  });
+
+  it("a turn that ends while the steer is in flight holds the boundary, then dispatches the rejected message first", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first");
+    x.agent.send("second"); // deferred behind the in-flight steer
+    x.emit(turnEnd()); // the turn ends before the provider answered the steer
+    await x.flush();
+    expect(x.agent.status()).toBe("running"); // boundary held: no transient idle, "second" not dispatched ahead
+    expect(x.pulledText()).toEqual(["task"]);
+    h.resolve(false);
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first", "second"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses.filter((s) => s === "idle")).toHaveLength(1);
+    await x.agent.stop();
+  });
+
+  it("a held boundary whose steer is accepted waits for the new turn, and settles if none comes", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    x.emit(turnEnd());
+    await x.flush();
+    h.resolve(true);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1);
+    expect(x.agent.status()).toBe("running"); // the provider will answer it as a new turn
+    await new Promise((r) => setTimeout(r, 80)); // past wakeWatchdogMs with no frames → it fizzled
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("interrupt during in-flight steer: a rejection is dropped with the interrupted notice, never deferred", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-7");
+    await x.agent.interruptTurn();
+    h.resolve(false);
+    await x.flush();
+    x.emit(turnEnd("error_during_execution"));
+    await x.flush();
+    expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (interrupted): redirect"))).toHaveLength(1);
+    expect(x.pulledText()).toEqual(["task"]); // no ghost turn
+    expect(x.users().some((u) => u.content === "redirect")).toBe(false);
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("interrupt during in-flight steer: an acceptance is recorded once as delivered", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-8");
+    await x.agent.interruptTurn();
+    h.resolve(true);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1);
+    expect(x.notices().some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+    await x.agent.stop();
+  });
+
+  it("through the Claude adapter: a mid-turn send is pushed with priority, echoed at once, and the worker still settles idle", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const pulled: Array<{ text: string; priority?: string }> = [];
+    const gated = ((input: { prompt?: AsyncIterable<{ priority?: string; message?: { content?: unknown } }> }) => {
+      async function* gen(): AsyncGenerator<unknown> {
+        let turn = 0;
+        for await (const um of input.prompt!) {
+          const c = um?.message?.content;
+          const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("") : "";
+          pulled.push({ text, ...(um.priority ? { priority: um.priority } : {}) });
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${text}` }] } };
+          if (turn === 0) await gate;
+          // This fake answers the steered message as its own turn (the boundary case); the worker must still settle.
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+          turn++;
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as unknown as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated), wakeWatchdogMs: 200 } });
+    agent.start("task");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && e.payload_json.includes("reply:task")));
+    agent.send("redirect", "c-9");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.payload_json.includes('"content":"redirect"'))); // echoed before the turn ends
+    release();
+    await until(() => pulled.length === 2 && agent.status() === "idle");
+    expect(pulled[1]).toEqual({ text: "redirect", priority: "next" });
+    const echoes = repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { role?: string; content?: string; clientMsgId?: string }).filter((p) => p.role === "user");
+    expect(echoes.map((e) => [e.content, e.clientMsgId])).toEqual([["task", undefined], ["redirect", "c-9"]]);
+    await agent.stop();
+  });
+
+  it("recover (abandon) during in-flight steer drops it with a notice and nothing else", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.agent.abandon();
+    h.resolve(false);
+    await x.flush();
+    expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (recovered): redirect"))).toHaveLength(1);
+    expect(x.users().some((u) => u.content === "redirect")).toBe(false);
   });
 });

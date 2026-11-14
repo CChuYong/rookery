@@ -1,6 +1,6 @@
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
-import type { AgentBackend } from "../../src/core/agent-backend.js";
+import type { AgentBackend, AgentStream } from "../../src/core/agent-backend.js";
 
 // Minimal step that mimics the shape of an SDK message. Handles only assistant text/result.
 export type FakeStep =
@@ -156,4 +156,23 @@ export function fakeBackend(script: FakeStep[], opts?: Parameters<typeof fakeQue
 }
 export function fakeStreamingBackend(responder: (userText: string, turn: number, content?: unknown) => FakeStep[], opts?: { stillQueued?: string[] }): AgentBackend {
   return new ClaudeBackend(fakeStreamingQuery(responder, opts));
+}
+
+// The deferred-FIFO fallback path: hide the stream's steer() (as on a provider that can't steer) so a mid-turn
+// send is held for the next turn boundary. Tests of that fallback wrap their backend with this.
+export function withoutSteer(backend: AgentBackend): AgentBackend {
+  return {
+    openSession: (input, opts) => {
+      const s = backend.openSession(input, opts);
+      const plain: AgentStream = {
+        [Symbol.asyncIterator]: () => s[Symbol.asyncIterator](),
+        interrupt: () => s.interrupt(),
+        setModel: (m) => s.setModel(m),
+        setPermissionMode: (m) => s.setPermissionMode(m),
+        supportedCommands: () => s.supportedCommands(),
+      };
+      return plain;
+    },
+    startTurn: (prompt, opts) => backend.startTurn(prompt, opts),
+  };
 }

@@ -6,7 +6,7 @@ import { SideConversationManager } from "../../src/core/side-conversation.js";
 import { EventBus } from "../../src/core/events.js";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
-import { fakeBackend, fakeStreamingBackend } from "../helpers/fake-query.js";
+import { fakeBackend, fakeStreamingBackend, withoutSteer } from "../helpers/fake-query.js";
 import type { ImageResolver, ImageRef } from "../../src/core/image-input.js";
 const ref: ImageRef = {
   id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -341,7 +341,8 @@ it("Worker cancellation drops deferred image refs; unreadable queued images fail
       throw new Error("Image unreadable; retry");
     });
     const seen: string[] = [];
-    const backend = fakeStreamingBackend((text) => {
+    // The queued (deferred) path: a steerable stream would resolve the image up front and throw from send().
+    const backend = withoutSteer(fakeStreamingBackend((text) => {
       seen.push(text);
       return [
         {
@@ -352,7 +353,7 @@ it("Worker cancellation drops deferred image refs; unreadable queued images fail
           session_id: "sdk",
         },
       ];
-    });
+    }));
     const worker = new Worker({
       id: "w",
       sessionId: "s",

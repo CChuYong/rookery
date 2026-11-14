@@ -1,4 +1,4 @@
-import { acceptImages, resolveInput, type ImageResolver, type ImageRef } from "./image-input.js";
+import { acceptImages, resolveInput, type AgentInput, type ImageResolver, type ImageRef } from "./image-input.js";
 import { t, DEFAULT_LOCALE } from "./i18n.js";
 import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccuracy } from "./speed.js";
 import type { AgentBackend, AgentStream, InterruptReceipt } from "./agent-backend.js";
@@ -44,6 +44,16 @@ const ABORT_LOOP_THRESHOLD = 3;
 // Re-armed on every frame, so a genuinely active wake turn never trips; send-driven turns don't arm it at all.
 const WAKE_WATCHDOG_MS = 10000;
 
+// Steering: how long a mid-turn send waits for the provider to accept it into the running turn before it falls
+// back to the deferred FIFO. The provider call itself is unbounded (Codex turn/steer can stay pending until its
+// child closes), and delivery must not hang on it. A late acceptance after this is ignored (never delivered twice).
+export const STEER_TIMEOUT_MS = 5000;
+
+type DeferredInstruction = { text: string; images: ImageRef[]; clientMsgId?: string; speed?: SpeedPreference | null };
+// A mid-turn send whose steer() request has not settled yet. stop()/abandon() claim it (clear the field) so a late
+// settle is ignored; interruptTurn() only marks it, because an accepted steer was really delivered.
+type InflightSteer = DeferredInstruction & { input: AgentInput; interrupted: boolean };
+
 // Live states are DERIVED (see reconcile()): running = turn in flight · background = turn ended but
 // harness-tracked background tasks still run (claude only) · idle = ALL assigned work complete, awaiting
 // instructions. Terminal: stopped/error (+ orchestrator-only failed/orphaned in the DB). "done" is RETIRED
@@ -70,6 +80,7 @@ export interface WorkerDeps {
   // beat early). The wake cancels the grace (→ running, no idle ever emitted); expiry means no wake came
   // (→ idle, truthful). Injectable for deterministic tests.
   settleGraceMs?: number;
+  steerTimeoutMs?: number; // how long a mid-turn send waits for steer() before falling back to deferred (default STEER_TIMEOUT_MS). Injectable for deterministic tests.
   wakeWatchdogMs?: number; // how long an auto-wake "running" may stay silent (no turn_end/activity) before settling to idle — a fizzled wake. Injectable for deterministic tests.
   // Resolved once for each provider stream. A live worker deliberately keeps its original revision;
   // later desired changes are surfaced as pending-reload until an explicit immediate/when-idle reload.
@@ -108,7 +119,12 @@ export class Worker {
   private abort = new AbortController();
   private seq = 0;
   // instructions that arrived while running (not yet echoed) — flushed one at a time in FIFO order at the next result boundary (parity with the master's turnChain deferral).
-  private readonly deferred: Array<{ text: string; images: ImageRef[]; clientMsgId?: string; speed?: SpeedPreference | null }> = [];
+  private readonly deferred: DeferredInstruction[] = [];
+  // At most one mid-turn send is being steered at a time; later sends queue behind it in `deferred`.
+  private inflightSteer?: InflightSteer;
+  // A turn_end arrived while a steer was in flight: the boundary decision (dispatch the next deferred or settle)
+  // waits for the steer's outcome so a rejected steer still goes ahead of the sends deferred behind it.
+  private boundaryHeld = false;
   // accumulated thinking-summary deltas — persisted as a single coalesced entry at message/tool/turn boundaries (same as the master). Live flows only as deltas.
   private readonly thinking = new ThinkingCoalescer();
   private state: WorkerStatus = "running";
@@ -221,8 +237,9 @@ export class Worker {
     const t = setTimeout(() => {
       this.wakeWatchdog = undefined;
       if (this.turnActive && this.bgTasks.size === 0 && !this.isTerminalState()) {
-        this.turnActive = false; // the fizzled wake produced no turn — settle (reconcile derives idle, or background if bg tasks somehow run)
-        this.reconcile();
+        // the fizzled wake produced no turn — release the next deferred instruction (a steer accepted at a boundary
+        // can leave some), else settle (reconcile derives idle, or background if bg tasks somehow run)
+        this.advanceBoundary();
       }
     }, this.opts.deps.wakeWatchdogMs ?? WAKE_WATCHDOG_MS);
     t.unref?.();
@@ -317,8 +334,12 @@ export class Worker {
     // additional instructions are allowed while running (turn in progress), background (bg tasks running), or idle (waiting). Not for a terminated agent.
     if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
     const images = acceptImages(this.opts.deps.images, imageRefs);
-    // Resolve immediate sends before any echo or state mutation; deferred sends retain refs only.
-    const input = !this.turnActive ? resolveInput(text, images, this.opts.deps.images) : undefined;
+    // Steer into the running turn only when the provider can, and only when nothing older is queued (deferred or
+    // already being steered) — a newer instruction never overtakes an older one.
+    const stream = this.stream;
+    const steering = this.turnActive && stream?.steer !== undefined && this.deferred.length === 0 && !this.inflightSteer;
+    // Resolve immediate and steered sends before any echo or state mutation; deferred sends retain refs only.
+    const input = !this.turnActive || steering ? resolveInput(text, images, this.opts.deps.images) : undefined;
     if (speed !== undefined) this.opts.deps.repos.setWorkerSpeed(this.opts.id, speed);
     this.abortLoopStreak = 0; // a human is actively driving → a fresh instruction breaks any prior abort streak (no false circuit-breaker trip on legit interrupt+redirect)
     this.clearWakeWatchdog(); // a human send takes over → this run is no longer a bare auto-wake (a real turn is coming)
@@ -331,12 +352,100 @@ export class Worker {
       this.clearIdleGrace(); // a user turn supersedes the wake-wait
       this.turnActive = true;
       this.reconcile();
+    } else if (steering) {
+      // while running: fold it into the current turn (Codex turn/steer, Claude priority push). The echo is recorded
+      // when the provider accepts it — it is part of THIS turn, so no boundary bookkeeping can leave it stuck.
+      this.beginSteer(stream!, { text, images, clientMsgId, speed, input: input!, interrupted: false });
     } else {
       // while running: DON'T enqueue yet — hold in `deferred` and release (enqueue + echo) at the next result boundary.
       // Enqueuing mid-turn lets the SDK read-ahead and COALESCE this message into the in-flight turn (answering it in the
       // same turn). Then the deferred echo has no following turn, so the worker never leaves "running" → stuck "thinking".
       this.deferred.push({ text, images, clientMsgId, speed });
     }
+  }
+
+  private beginSteer(stream: AgentStream, steer: InflightSteer): void {
+    this.inflightSteer = steer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), this.opts.deps.steerTimeoutMs ?? STEER_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    let request: Promise<boolean>;
+    try {
+      request = stream.steer!(steer.input, steer.clientMsgId).catch(() => false); // contract: never throws — defend anyway
+    } catch {
+      request = Promise.resolve(false);
+    }
+    // The race settles once: a steer that resolves after the timeout is ignored (the fallback already owns the message).
+    void Promise.race([request, timedOut])
+      .then((accepted) => {
+        clearTimeout(timer);
+        this.settleSteer(steer, accepted === true);
+      })
+      // Detached from any caller: a throw here (e.g. a queue closed by a teardown path that didn't claim the steer)
+      // must not become an unhandled rejection that takes the daemon down.
+      .catch(() => {});
+  }
+
+  private settleSteer(steer: InflightSteer, accepted: boolean): void {
+    if (this.inflightSteer !== steer) return; // claimed by stop()/abandon() — they record its fate
+    this.inflightSteer = undefined;
+    const held = this.boundaryHeld;
+    this.boundaryHeld = false;
+    if (this.isTerminalState()) {
+      // a cap/breaker stop or a stream error ended the worker while the request was out — never delivered as a turn
+      this.record({ kind: "notice", text: `Dropped deferred instruction (stopped): ${steer.text.slice(0, 120)}` }, steer.clientMsgId);
+      return;
+    }
+    if (accepted) {
+      this.record({ kind: "message", role: "user", content: steer.text, ...(steer.images.length ? { images: steer.images } : {}) }, steer.clientMsgId);
+      // Accepted after the turn already ended (Claude: it sits in the input and is answered as a NEW turn). Stay
+      // running for that turn like an auto-wake: its frames re-arm the watchdog and its turn_end settles; if it
+      // never comes, the watchdog settles (or releases the next deferred) instead of sticking "running".
+      if (held) this.armWakeWatchdog();
+      return;
+    }
+    if (steer.interrupted) {
+      // interruptTurn() dropped everything queued at that moment; a steer it raced with is dropped the same way
+      this.record({ kind: "notice", text: `Dropped deferred instruction (interrupted): ${steer.text.slice(0, 120)}` }, steer.clientMsgId);
+      if (held) this.advanceBoundary();
+      return;
+    }
+    if (held) {
+      // the turn ended while we waited → this is the boundary: dispatch it now (ahead of anything deferred behind it)
+      this.dispatch(this.queue, steer, steer.input);
+      return;
+    }
+    this.deferred.unshift(steer); // still mid-turn → next at the coming boundary, ahead of later sends
+  }
+
+  // Release one instruction as its own turn: checkpoint, its speed, enqueue, then the echo (right before the turn).
+  private dispatch(queue: MessageQueue, next: DeferredInstruction, input: AgentInput): void {
+    this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
+    this.turnSpeed = this.resolveTurnSpeed(next.speed);
+    queue.push(input);
+    this.record({ kind: "message", role: "user", content: next.text, ...(next.images.length ? { images: next.images } : {}) }, next.clientMsgId);
+  }
+
+  // A turn boundary reached outside the consume loop (a held boundary or a fizzled wake): dispatch the next deferred
+  // instruction, or settle. An unreadable image fails only that instruction (retryable error) instead of the stream.
+  private advanceBoundary(): void {
+    let next: DeferredInstruction | undefined;
+    while ((next = this.deferred.shift())) {
+      let input: AgentInput;
+      try {
+        input = resolveInput(next.text, next.images, this.opts.deps.images);
+      } catch (err) {
+        this.record({ kind: "error", message: String(err), clientMsgId: next.clientMsgId, retryInput: { text: next.text, ...(next.images.length ? { images: next.images } : {}) } });
+        continue;
+      }
+      this.dispatch(this.queue, next, input);
+      this.turnActive = true;
+      return;
+    }
+    this.turnActive = false;
+    this.reconcile();
   }
 
   // list of slash commands/skills this session recognizes (built-in + project + plugin + skill). Fetched directly from the live query.
@@ -354,7 +463,9 @@ export class Worker {
     if (!this.isTerminalState()) this.transition("stopped");
     // Capture and clear deferred instructions synchronously before closing the queue/aborting.
     // Notices are emitted AFTER await this.loop so they don't seq-interleave with the consume loop's record().
-    const dropped = this.deferred.splice(0);
+    // An in-flight steer is claimed too (listed first — it was sent before anything deferred): even if the provider
+    // accepts it later, the stopped worker never runs it, so it gets the same notice and never an echo.
+    const dropped: DeferredInstruction[] = [...this.claimInflightSteer(), ...this.deferred.splice(0)];
     this.queue.close();
     this.abort.abort();
     try {
@@ -376,6 +487,7 @@ export class Worker {
   // lost (same as a daemon restart), but the conversation resumes from sdk_session on the next send.
   async abandon(): Promise<void> {
     this.deferred.splice(0); // drop deferred instructions — no ghost turns after the kill
+    const steering = this.claimInflightSteer(); // this object is discarded after recover: a late settle must not act
     this.queue.close();
     this.abort.abort(); // kills the SDK subprocess tree (interrupt can't; abort can) — takes bg tasks/workflow with it
     try {
@@ -384,6 +496,18 @@ export class Worker {
       /* best-effort */
     }
     await this.loop; // ends via the aborted-return path (no terminal transition/notice)
+    // Recorded before recover() re-arms the worker, so it can't collide with the resumed worker's seq.
+    for (const d of steering) {
+      this.record({ kind: "notice", text: `Dropped deferred instruction (recovered): ${d.text.slice(0, 120)}` }, d.clientMsgId);
+    }
+  }
+
+  // Take ownership of an in-flight steer (its late settle becomes a no-op) and release a boundary held for it.
+  private claimInflightSteer(): DeferredInstruction[] {
+    const steer = this.inflightSteer;
+    this.inflightSteer = undefined;
+    this.boundaryHeld = false;
+    return steer ? [steer] : [];
   }
 
   // interrupt only the current turn (keep the session) — parity with the master stop()'s turn-abort. Does not close the queue, so additional instructions are possible.
@@ -391,6 +515,9 @@ export class Worker {
     // ORDER IS LOAD-BEARING: splice MUST run synchronously BEFORE the await — else the SDK could emit `result`
     // during the await and the consume loop would shift() a deferred item as a ghost turn before we clear.
     const dropped = this.deferred.splice(0);
+    // An in-flight steer is not claimed: if the provider accepted it, it was delivered (recorded as such on settle);
+    // if not, settleSteer drops it with this same notice instead of deferring it.
+    if (this.inflightSteer) this.inflightSteer.interrupted = true;
     let receipt: InterruptReceipt | undefined;
     try {
       receipt = await this.stream?.interrupt();
@@ -795,14 +922,17 @@ export class Worker {
           }
           // turn boundary: if there's an instruction deferred while running, flush one in FIFO order now (after the previous turn's output) →
           // the user echo settles right before the next turn without wedging in. That turn runs shortly, so we don't drop to idle.
+          if (this.inflightSteer) {
+            // A steer request is still out: its outcome decides this boundary (settleSteer). Stay "running" — no
+            // transient idle, and nothing deferred behind it may be dispatched ahead of it. Bounded by the steer timeout.
+            this.boundaryHeld = true;
+            continue;
+          }
           const next = this.deferred.shift();
           if (next) {
             dispatching = next;
             const input = resolveInput(next.text, next.images, this.opts.deps.images);
-            this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
-            this.turnSpeed = this.resolveTurnSpeed(next.speed);
-            queue.push(input); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
-            this.record({ kind: "message", role: "user", content: next.text, ...(next.images.length ? { images: next.images } : {}) }, next.clientMsgId);
+            this.dispatch(queue, next, input); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
             dispatching = undefined;
             // turnActive stays true — the flushed instruction's turn starts immediately.
           } else {
