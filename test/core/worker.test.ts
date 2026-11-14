@@ -1757,6 +1757,36 @@ describe("Worker background state machine", () => {
     await x.agent.stop();
   });
 
+  it("a description-only change of a listed task emits worker.tasks", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev -- --port 3001" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    expect(events).toEqual([
+      [{ id: "b1", type: "local_bash", description: "npm run dev" }],
+      [{ id: "b1", type: "local_bash", description: "npm run dev -- --port 3001" }],
+    ]);
+    await x.agent.stop();
+  });
+
+  it("abandon publishes an empty task list", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.abandon();
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    expect(x.agent.listedBackgroundTasks()).toEqual([]);
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // abandon never goes terminal
+  });
+
   it("stop clears a non-empty listed view with worker.tasks []", async () => {
     const x = mk(() => [
       { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },

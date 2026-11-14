@@ -544,6 +544,10 @@ export class Worker {
       /* best-effort */
     }
     await this.loop; // ends via the aborted-return path (no terminal transition/notice)
+    // The kill took every background task with it, and recover() discards this object (its replacement starts
+    // with an empty listed view and never emits) → publish [] here so clients drop a stale listed view.
+    this.bgTasks.clear();
+    this.publishTasks();
     // Recorded before recover() re-arms the worker, so it can't collide with the resumed worker's seq.
     for (const d of steering) {
       this.record({ kind: "notice", text: `Dropped deferred instruction (recovered): ${d.text.slice(0, 120)}` }, d.clientMsgId);
