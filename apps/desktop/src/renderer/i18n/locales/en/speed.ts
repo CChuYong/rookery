@@ -1,0 +1,23 @@
+export default {
+  "speed.label": "Speed",
+  "speed.hint": "Fast can cost more. The provider checks availability. Changes apply next turn.",
+  "speed.inherit": "Default ({speed})",
+  "speed.inherited": "Inherited: {speed}",
+  "speed.pending": "Applies next turn",
+  "speed.unsupported": "Fast unavailable for this model; preference retained",
+  "speed.activeFast": "Last reported: Fast",
+  "speed.activeStandard": "Last reported: Standard",
+  "speed.cooldown": "Fast cooldown",
+  "speed.requestedFast": "Fast requested; effective speed unknown",
+  "speed.requestedStandard": "Standard requested; effective speed unknown",
+  "speed.availabilityUnknown": "Availability unknown",
+  "speed.masterDefault": "Master speed",
+  "speed.workerDefault": "Worker speed",
+  "speed.estimated": "Estimated",
+  "speed.costUnavailable": "Cost unavailable: accounting is incomplete",
+  "speed.costEstimated": "Estimated cost",
+  "speed.budgetEstimated": "Codex costs and budget checks are estimates; unavailable accounting can stop budgeted workers.",
+  "speed.lastReported": "Last reported speed: {state}",
+  "speed.standard": "Standard",
+  "speed.fast": "Fast"
+};

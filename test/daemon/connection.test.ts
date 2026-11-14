@@ -1575,3 +1575,24 @@ it("persists wire speed intent and replays observations with accounting quality"
   await h.conn.handleRaw(JSON.stringify({type: "session.list", reqId: "list"}));
   expect(parsed(h.sent).find(m => m.type === "session.list.result")).toMatchObject({sessions: [expect.objectContaining({id: sessionId, speed: "standard"})]});
 });
+
+describe("session.setSpeed", () => {
+  it("persists intent and acknowledges without executing an empty turn", async () => {
+    const { conn, sent, repos, sm } = setup();
+    const session = sm.create("/tmp");
+    const run = vi.spyOn(session.master, "runTurn");
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: session.id, speed: "fast", reqId: "speed-1" }));
+    expect(repos.getSession(session.id)?.speed).toBe("fast");
+    expect(run).not.toHaveBeenCalled();
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual({ type: "fleet.ack", action: "setSpeed", id: session.id, reqId: "speed-1" });
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: session.id, speed: null, reqId: "speed-2" }));
+    expect(repos.getSession(session.id)?.speed).toBeNull();
+  });
+  it("rejects unknown sessions and invalid preferences", async () => {
+    const { conn, sent } = setup();
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: "missing", speed: "fast", reqId: "speed-3" }));
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual(expect.objectContaining({ type: "error", reqId: "speed-3" }));
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: "missing", speed: "turbo", reqId: "speed-4" }));
+    expect(sent.map((s) => JSON.parse(s))).not.toContainEqual(expect.objectContaining({ type: "fleet.ack", reqId: "speed-4" }));
+  });
+});

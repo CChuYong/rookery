@@ -8,5 +8,6 @@ const EMPTY: LogItem[] = [];
 
 export function SessionMetrics({ sessionId }: { sessionId: string }): JSX.Element | null {
   const items = useStore((st) => st.logsBySession[sessionId] ?? EMPTY);
-  return <MetricsView items={items} />;
+  const provider = useStore((s) => s.sessions.find((row) => row.id === sessionId)?.provider);
+  return <MetricsView items={items} provider={provider} />;
 }

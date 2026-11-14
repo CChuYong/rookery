@@ -1,3 +1,4 @@
+import { latestSpeedObservation, lastReportedSpeed, speedPendingNextTurn } from "../lib/speed.js";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
@@ -82,7 +83,7 @@ export function ConversationPane({
   return (
     <div className="relative flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} commands={composerCommands} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
+        <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} controls={rest.controls ? { ...rest.controls, speedPending: speedPendingNextTurn(items), speedObservation: latestSpeedObservation(items), speedLastObservation: lastReportedSpeed(items) } : undefined} commands={composerCommands} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
         {pending.length > 0 && (
           <div className="mx-auto flex w-full max-w-[720px] flex-col gap-1 px-6 pb-2">
             {pending.map((p) => (
@@ -97,6 +98,10 @@ export function ConversationPane({
       {side && (
         <SideConversationDrawer
           sourceKind={kind}
+          speed={rest.controls?.speed ?? rest.controls?.defaultSpeed}
+          defaultSpeed={rest.controls?.defaultSpeed}
+          provider={rest.controls?.provider}
+          model={rest.controls?.model}
           sideId={side.id}
           openingQuestion={side.question}
           onSend={(sideId, text) => onSideSend?.(sideId, text)}

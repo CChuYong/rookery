@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "@daemon/core/speed.js";
 import { create } from "zustand";
 import type { CoreEvent, WorkerEventData, SlackStatus } from "@daemon/core/events.js";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
@@ -15,7 +16,9 @@ import { MODELS } from "../lib/models.js";
 import type { ModelOption } from "../lib/models.js";
 
 interface Store extends AppState {
-  sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean; provider?: string }>;
+  setSpeedIntent: (kind: "master" | "worker", id: string, speed: SpeedPreference | null) => void;
+  invalidateSpeed: (kind: "master" | "worker", id: string) => void;
+  sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef?: string | null; label?: string | null; archived?: boolean; pinned?: boolean; speed?: SpeedPreference | null; provider?: string }>;
   // ── Single location (navigation) model — overlay/showRepos/activeSessionId/activeWorkerId together form one Location.
   // All transitions go through navigate/goBack/goForward (browser-style history). canBack/Fwd derive from navBack/navFwd.length.
   overlay: Overlay; // Main-area full page (settings/new session/automation) — null means the normal session/Repos view
@@ -170,6 +173,14 @@ function applyWorkerDeletionState(
 
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
+  setSpeedIntent: (kind, id, speed) => {
+    set((s) => kind === "master" ? { sessions: s.sessions.map((row) => row.id === id ? { ...row, speed } : row) }
+      : s.fleet[id] ? { fleet: { ...s.fleet, [id]: { ...s.fleet[id], speed } } } : {});
+    get().invalidateSpeed(kind, id);
+  },
+  invalidateSpeed: (kind, id) => set((s) => kind === "master"
+    ? { logsBySession: { ...s.logsBySession, [id]: [...(s.logsBySession[id] ?? []), { kind: "speedReset" }] } }
+    : { workerLogs: { ...s.workerLogs, [id]: [...(s.workerLogs[id] ?? []), { kind: "speedReset" }] } }),
   sessions: [], activeSessionId: null, activeWorkerId: null, repoSettingsId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
   historyLoaded: {}, historyLoadFailed: {},
   overlay: null, showRepos: false, navBack: [], navFwd: [],
@@ -190,7 +201,11 @@ export const useStore = create<Store>((set, get) => ({
   usageLoadFailed: false,
   setUsageLoadFailed: (v) => set({ usageLoadFailed: v }),
   settings: null,
-  setSettings: (settings) => set({ settings }),
+  setSettings: (settings) => set((s) => {
+    const changed = s.settings && (["masterModel", "workerModel", "codexMasterModel", "codexWorkerModel", "masterSpeed", "workerSpeed", "codexMasterSpeed", "codexWorkerSpeed"] as const).some((key) => s.settings?.[key] !== settings[key]);
+    const invalidate = (logs: Record<string, LogItem[]>) => Object.fromEntries(Object.entries(logs).map(([id, items]) => [id, [...items, { kind: "speedReset" as const }]]));
+    return { settings, ...(changed ? { logsBySession: invalidate(s.logsBySession), workerLogs: invalidate(s.workerLogs) } : {}) };
+  }),
   models: [...MODELS], // Initialize with the static fallback (no flicker) → swapped to live when models.list arrives
   setModels: (models) => set({ models: models.length ? models : [...MODELS] }),
   codexModels: null,
@@ -244,11 +259,12 @@ export const useStore = create<Store>((set, get) => ({
       // (busy map retired: the composer's "in progress" is derived by ConversationPane from running ‖ pending. Turn end is when master.status:idle turns running off.)
       // Master turn-in-progress state → running map (live pulse) + unread (if it ends as idle while not being looked at, sessionAttention).
       if (e.type === "master.status") {
+        const logsBySession = e.status === "running" ? { ...s.logsBySession, [e.sessionId]: [...(s.logsBySession[e.sessionId] ?? []), { kind: "speedReset" as const }] } : s.logsBySession;
         const running = { ...s.running, [e.sessionId]: e.status === "running" };
         if (e.status === "idle" && e.sessionId !== s.activeSessionId) {
-          return { running, sessionAttention: { ...s.sessionAttention, [e.sessionId]: true } };
+          return { logsBySession, running, sessionAttention: { ...s.sessionAttention, [e.sessionId]: true } };
         }
-        if (e.status === "running") return { running, sessionAttention: { ...s.sessionAttention, [e.sessionId]: false } };
+        if (e.status === "running") return { logsBySession, running, sessionAttention: { ...s.sessionAttention, [e.sessionId]: false } };
         return { running };
       }
       if (e.type === "worker.deletion") {
@@ -257,7 +273,8 @@ export const useStore = create<Store>((set, get) => ({
       // A worker settled while the user wasn't looking → mark unread (attention). Not marked if being viewed; cleared when running resumes.
       if (e.type === "worker.status") {
         if (!s.fleet[e.workerId] || s.deletingWorkers[e.workerId]) return {};
-        const base = reduceEvent(s, e, now);
+        const reduced = reduceEvent(s, e, now);
+        const base = e.status === "running" ? { ...reduced, workerLogs: { ...reduced.workerLogs, [e.workerId]: [...(reduced.workerLogs[e.workerId] ?? []), { kind: "speedReset" as const }] } } : reduced;
         if (e.workerId === s.activeWorkerId) return base; // The worker currently being viewed isn't unread
         // Settled and worth a look. `stopped` is included because the worker state graph retired `done` from live
         // writes: a natural stream end now lands on `stopped` (+ a notice), so leaving it out meant a finished
@@ -349,7 +366,7 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => {
       const replayed = events.reduce<LogItem[]>((log, ev) => applySubEvent(log, ev.payload as WorkerEventData, ev.createdAt ? Date.parse(ev.createdAt) : undefined), []);
       return {
-        workerLogs: { ...s.workerLogs, [id]: syncWorkflowTools(replayed, s.workflows[id]) },
+        workerLogs: { ...s.workerLogs, [id]: syncWorkflowTools(replayed.map((item) => item.kind === "speed" ? { ...item, historical: true } : item), s.workflows[id]) },
         historyLoaded: { ...s.historyLoaded, [id]: true },
         historyLoadFailed: { ...s.historyLoadFailed, [id]: false },
       };

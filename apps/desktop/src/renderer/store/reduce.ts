@@ -1,9 +1,12 @@
+import type { SpeedObservation, SpeedPreference, CostAccuracy } from "@daemon/core/speed.js";
 import type { CoreEvent, WorkerEventData, InteractionQuestion } from "@daemon/core/events.js";
 import type { WorkerRow } from "@daemon/protocol/messages.js";
 import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot, WorkflowRunSummary } from "@daemon/core/workflow-activity.js";
 import { contextPct } from "../format.js";
 
 export type LogItem =
+  | { kind: "speedReset" }
+  | { kind: "speed"; observation: SpeedObservation; historical?: boolean }
   | { kind: "message"; role: string; content: string; streaming?: boolean; ts?: number } // ts: arrival epoch ms (for hover relative time)
   | { kind: "thinking"; text: string; streaming?: boolean } // thinking summary (collapsible, display:summarized)
   | { kind: "tool"; toolId: string; name: string; status: "in_progress" | "background" | "complete"; ok?: boolean; input?: string; result?: string; elapsedSec?: number; workflow?: WorkflowRunSummary }
@@ -11,7 +14,7 @@ export type LogItem =
   | { kind: "notice"; text: string; code?: string; params?: Record<string, string | number> } // informational system push (compaction/retry/fallback)
   // Master canUseTool (approve/AskUserQuestion) inline card. When resolved, shows a one-line summary instead of buttons.
   | { kind: "interaction"; requestId: string; mode: "approve" | "ask"; toolName?: string; inputText?: string; questions?: InteractionQuestion[]; resolved?: boolean; summary?: string; expired?: boolean }
-  | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; terminalReason?: string };
+  | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; terminalReason?: string };
 
 // The worker row's single source of truth is the protocol WorkerRow. archived always arrives on fleet.list but is omitted when building worker.* events, so it's optional.
 // permissionMode is required here (the worker composer's selector reads it) — defaulted to "bypassPermissions" wherever the source (event/list) doesn't carry it.
@@ -100,7 +103,7 @@ function seedCore(prev: LogItem[] | undefined, sid: string, events: Array<{ payl
   // Force each event's sessionId to sid: a forked session's copied events carry the ORIGINAL session's id, which would
   // otherwise route them (via reduceEvent) into the wrong session's log → the fork would render empty. No-op for normal sessions.
   for (const ev of events) st = reduceEvent(st, { ...(ev.payload as CoreEvent), sessionId: sid } as CoreEvent, ev.createdAt ? Date.parse(ev.createdAt) : undefined);
-  const committed = st.logsBySession[sid] ?? [];
+  const committed = (st.logsBySession[sid] ?? []).map((item) => item.kind === "speed" ? { ...item, historical: true } : item);
   if (!prev || prev.length === 0) return committed; // restart, etc. → the replay is everything
   if (events.length === 0) return prev; // nothing persisted → keep local (uncommitted)
   // Anchor by committed's message count → preserve the tail (uncommitted) after that many committed messages in prev.
@@ -176,8 +179,10 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
     case "tool_progress":
       // Update only the elapsed seconds on the in-progress tool card (don't touch completed ones).
       return log.map((i) => (i.kind === "tool" && i.toolId === d.id && i.status === "in_progress" ? { ...i, elapsedSec: d.elapsedSec } : i));
+    case "speed":
+      return [...log, { kind: "speed", observation: d.observation }];
     case "result":
-      return [...log, { kind: "metrics", contextPct: contextPct(d.contextTokens ?? 0, d.contextWindow ?? 0), tokens: d.contextTokens ?? 0, turns: d.numTurns ?? 0, durationMs: d.durationMs ?? 0, cost: d.costUsd ?? 0, ...(d.terminalReason ? { terminalReason: d.terminalReason } : {}) }];
+      return [...log, { kind: "metrics", contextPct: contextPct(d.contextTokens ?? 0, d.contextWindow ?? 0), tokens: d.contextTokens ?? 0, turns: d.numTurns ?? 0, durationMs: d.durationMs ?? 0, cost: d.costUsd ?? 0, costAccuracy: d.costAccuracy, requestedSpeed: d.requestedSpeed, ...(d.terminalReason ? { terminalReason: d.terminalReason } : {}) }];
     case "error":
       return [...log, { kind: "message", role: "assistant", content: `⚠ ${d.message}` }];
     case "notice":
@@ -316,9 +321,11 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       const next = log.map((i) => (i.kind === "tool" && i.toolId === e.toolId ? { ...i, status: "complete" as const, ok: e.ok, result: e.result } : i));
       return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: next } };
     }
+    case "master.speed":
+      return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "speed", observation: e.observation }) } };
     case "master.result": {
       const log = (state.logsBySession[e.sessionId] ?? []).map((i) => (i.kind === "tool" && i.status === "in_progress" ? { ...i, status: "complete" as const } : i));
-      const metrics: LogItem = { kind: "metrics", contextPct: contextPct(e.contextTokens, e.contextWindow), tokens: e.contextTokens, turns: e.numTurns, durationMs: e.durationMs, cost: e.costUsd };
+      const metrics: LogItem = { kind: "metrics", contextPct: contextPct(e.contextTokens, e.contextWindow), tokens: e.contextTokens, turns: e.numTurns, durationMs: e.durationMs, cost: e.costUsd, costAccuracy: e.costAccuracy, requestedSpeed: e.requestedSpeed };
       return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: [...log, metrics] } };
     }
     case "master.notice": {
@@ -349,7 +356,7 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       const status = e.status ?? "running";
       // the worker.spawned event doesn't carry permissionMode → default it; a later fleet.list (setFleet) reconciles the real value.
       // provider carried on the event so a codex worker shows its badge live; a later fleet.list (setFleet) reconciles the authoritative value.
-      const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, provider: e.provider, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
+      const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, provider: e.provider, speed: e.speed, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
       return { ...state, fleet: { ...state.fleet, [e.workerId]: row }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status }) } };
     }
     case "worker.deletion": {

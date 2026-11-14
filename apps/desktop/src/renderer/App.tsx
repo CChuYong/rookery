@@ -1,3 +1,7 @@
+import type { ComposerControls } from "./components/Composer.js";
+import type { SpeedPreference } from "@daemon/core/speed.js";
+import { persistSpeedPreference, type SpeedWriteState } from "./lib/speed-preference.js";
+import { defaultSpeed } from "./lib/speed.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellRing, BellOff, Plus, Clock, RotateCcw, Loader2, Blocks, MessageSquare, FolderGit2 } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
@@ -717,12 +721,12 @@ export function App(): JSX.Element {
     });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
-  const startSession = (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string }) => {
+  const startSession = (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string; speed?: SpeedPreference | null }) => {
     navigate({ overlay: null });
     const c = client;
     if (!c) return;
     void c
-      .request({ type: "session.create", ...(opts.cwd ? { cwd: opts.cwd } : {}), ...(opts.provider ? { provider: opts.provider as "claude" | "codex" } : {}) })
+      .request({ type: "session.create", speed: opts.speed, ...(opts.cwd ? { cwd: opts.cwd } : {}), ...(opts.provider ? { provider: opts.provider as "claude" | "codex" } : {}) })
       .then((r) =>
         c.request({ type: "session.list" }).then((lr) => {
           useStore.getState().setSessions(lr.sessions ?? []);
@@ -740,7 +744,7 @@ export function App(): JSX.Element {
             const clientMsgId = crypto.randomUUID();
             useStore.getState().pushPending(sid, { clientMsgId, text: prompt });
             // request(): a rejected send rolls the pending bubble back and surfaces a toast instead of silently stranding it.
-            void c.request({ type: "session.send", sessionId: sid, text: prompt, model: opts.model, effort: opts.effort, clientMsgId }).catch((e) => {
+            void c.request({ type: "session.send", sessionId: sid, text: prompt, model: opts.model, effort: opts.effort, speed: opts.speed, clientMsgId }).catch((e) => {
               useStore.getState().dropPending(sid, clientMsgId);
               toast.error(tRef.current("toast.sendFailed"), String(e));
             });
@@ -780,7 +784,7 @@ export function App(): JSX.Element {
       : ov.effort;
     // request(): a rejected send (unknown session, runTurn throw, disconnected) rolls the pending bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished while the composer stayed stuck busy.
-    void client?.request({ type: "session.send", sessionId: sid, text, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
+    void client?.request({ type: "session.send", sessionId: sid, text, speed: st.sessions.find((x) => x.id === sid)?.speed, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
       useStore.getState().dropPending(sid, clientMsgId);
       toast.error(tRef.current("toast.sendFailed"), String(e));
     });
@@ -816,7 +820,7 @@ export function App(): JSX.Element {
     useStore.getState().pushWorkerPending(id, { clientMsgId, text });
     // request(): a rejected send (mid-restore, terminated worker, disconnected) rolls the bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished.
-    void client?.request({ type: "worker.send", id, text, clientMsgId }).catch((e) => {
+    void client?.request({ type: "worker.send", id, text, speed: useStore.getState().fleet[id]?.speed, clientMsgId }).catch((e) => {
       useStore.getState().dropWorkerPending(id, clientMsgId);
       toast.error(tRef.current("toast.sendFailed"), String(e));
     });
@@ -826,6 +830,7 @@ export function App(): JSX.Element {
     // Optimistic: update the fleet row model immediately (reflects the dropdown value).
     useStore.setState((st) => (st.fleet[id] ? { fleet: { ...st.fleet, [id]: { ...st.fleet[id], model } } } : {}));
     // request(): a rejected change (terminated worker, disconnected) rolls the dropdown back so it doesn't lie about the applied value.
+    useStore.getState().invalidateSpeed("worker", id);
     void client?.request({ type: "worker.setModel", id, model }).catch((e) => {
       useStore.setState((st) => (st.fleet[id] ? { fleet: { ...st.fleet, [id]: { ...st.fleet[id], model: prev } } } : {}));
       toast.error(tRef.current("toast.actionFailed"), String(e));
@@ -866,7 +871,7 @@ export function App(): JSX.Element {
   const closeSide = useCallback((sideId: string) => {
     void client?.request({ type: "side.close", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
   }, []);
-  const spawnSub = async (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number): Promise<void> => {
+  const spawnSub = async (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number, speed?: SpeedPreference | null): Promise<void> => {
     const c = client;
     const repo = spawnRepo;
     if (!c || !repo) {
@@ -874,7 +879,7 @@ export function App(): JSX.Element {
       toast.error(tRef.current("toast.spawnFailed"), String(error));
       throw error;
     }
-    const result = await c.request({ type: "fleet.spawn", repo, task, label: label || repo, model, effort, base, ticketKey: ticket?.key, ticketUrl: ticket?.url, permissionMode: permissionMode as "bypassPermissions" | "plan" | undefined, provider: provider as "claude" | "codex" | undefined, costBudgetUsd }).catch((error) => {
+    const result = await c.request({ type: "fleet.spawn", repo, task, label: label || repo, model, effort, base, ticketKey: ticket?.key, ticketUrl: ticket?.url, permissionMode: permissionMode as "bypassPermissions" | "plan" | undefined, provider: provider as "claude" | "codex" | undefined, costBudgetUsd, speed }).catch((error) => {
       toast.error(tRef.current("toast.spawnFailed"), String(error));
       throw error;
     });
@@ -988,6 +993,12 @@ export function App(): JSX.Element {
   const fleet = useMemo(() => Object.values(s.fleet), [s.fleet]); // used in RepoTree (Repos view)
   // Master composer model/effort controls — inline would be a new ref every render, breaking the Conversation memo. Keep the same ref
   // across unrelated re-renders like usage polling (deps: settings/active session/overrides only).
+  const speedChangeSequence = useRef(new Map<string, SpeedWriteState>());
+  const setTargetSpeed = useCallback((kind: "master" | "worker", id: string, speed: SpeedPreference | null) => {
+    if (!client) return;
+    void persistSpeedPreference(client, kind, id, speed, speedChangeSequence.current)
+      .catch((error) => toast.error(tRef.current("toast.saveFailed"), String(error)));
+  }, []);
   const masterControls = useMemo(() => {
     if (!(s.settings && s.activeSessionId)) return undefined;
     const provider = s.sessions.find((x) => x.id === s.activeSessionId)?.provider;
@@ -1003,8 +1014,11 @@ export function App(): JSX.Element {
     });
     return {
       ...values,
+      speed: s.sessions.find((x) => x.id === s.activeSessionId)?.speed ?? null,
+      defaultSpeed: defaultSpeed(s.settings, provider, "master"),
+      onSpeed: (speed: SpeedPreference | null) => setTargetSpeed("master", s.activeSessionId!, speed),
       editable: true,
-      onModel: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { model: m }),
+      onModel: (m: string) => { useStore.getState().invalidateSpeed("master", s.activeSessionId!); useStore.getState().setOverride(s.activeSessionId!, { model: m }); },
       onEffort: (e: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { effort: e }),
       onPermissionMode: (m: string) => useStore.getState().setOverride(useStore.getState().activeSessionId!, { permissionMode: m }),
     };
@@ -1027,6 +1041,18 @@ export function App(): JSX.Element {
     ) : (
       <SkeletonRows rows={8} />
     );
+  const workerControls: ComposerControls | undefined = activeSub ? {
+    provider: activeSub.provider,
+    speed: activeSub.speed ?? null,
+    defaultSpeed: defaultSpeed(s.settings, activeSub.provider, "worker"),
+    onSpeed: (speed) => setTargetSpeed("worker", activeSub.id, speed),
+    model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
+    editable: workerComposerState(activeSub.status).controlsEditable,
+    onModel: (model) => subSetModel(activeSub.id, model),
+    permissionMode: activeSub.permissionMode ?? "bypassPermissions",
+    onPermissionMode: (mode) => subSetPermissionMode(activeSub.id, mode),
+    permissionModes: ["bypassPermissions", "plan"],
+  } : undefined;
   const workerRender: WorkspaceRender | null = activeSub
     ? {
         conversation: () => (
@@ -1048,15 +1074,7 @@ export function App(): JSX.Element {
             onDropFiles={onDropFiles}
             browseDir={browseDir}
             commands={displayCommands}
-            controls={{
-              provider: activeSub.provider,
-              model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
-              editable: workerComposerState(activeSub.status).controlsEditable,
-              onModel: (m) => subSetModel(activeSub.id, m),
-              permissionMode: activeSub.permissionMode ?? "bypassPermissions",
-              onPermissionMode: (m) => subSetPermissionMode(activeSub.id, m),
-              permissionModes: ["bypassPermissions", "plan"] as const,
-            }}
+            controls={workerControls}
             disabled={workerComposerState(activeSub.status).disabled}
             placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
           />
@@ -1445,16 +1463,7 @@ export function App(): JSX.Element {
                       onDropFiles={onDropFiles}
                       browseDir={browseDir}
                       commands={displayCommands}
-                      controls={{
-                        // while running, the model + permission mode can be changed live (query.setModel / query.setPermissionMode). effort can't → omitted.
-                        provider: activeSub.provider,
-                        model: activeSub.model ?? (activeSub.provider === "codex" ? s.settings?.codexWorkerModel : s.settings?.workerModel) ?? "claude-opus-4-8",
-                        editable: workerComposerState(activeSub.status).controlsEditable,
-                        onModel: (m) => subSetModel(activeSub.id, m),
-                        permissionMode: activeSub.permissionMode ?? "bypassPermissions",
-                        onPermissionMode: (m) => subSetPermissionMode(activeSub.id, m),
-                        permissionModes: ["bypassPermissions", "plan"] as const, // workers: only bypass + plan (no default/acceptEdits)
-                      }}
+                      controls={workerControls}
                       disabled={workerComposerState(activeSub.status).disabled}
                       placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
                     />

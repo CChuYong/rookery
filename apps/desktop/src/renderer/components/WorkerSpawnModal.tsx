@@ -1,3 +1,6 @@
+import type { SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
+import { defaultSpeed } from "../lib/speed.js";
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
@@ -24,10 +27,12 @@ export function WorkerSpawnModal(p: {
   branches?: string[]; // base branch candidates (picker hidden if absent)
   integrations?: IntegrationsStatus; // only connected integrations enable GitHub/Linear modes
   searchSource?: (provider: SourceProviderId, query: string) => Promise<SourceItem[]>; // search issues/tickets
-  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number) => void | Promise<void>;
+  onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number, speed?: SpeedPreference | null) => void | Promise<void>;
   onClose: () => void;
 }): JSX.Element {
   const t = useT();
+  const [speed, setSpeed] = useState<SpeedPreference | null>(null);
+  const settings = useStore((s) => s.settings);
   const [mode, setMode] = useState<Mode>("direct");
   const [task, setTask] = useState("");
   const [label, setLabel] = useState("");
@@ -127,6 +132,7 @@ export function WorkerSpawnModal(p: {
         permissionMode,
         provider === "claude" ? undefined : provider, // wire-minimal: absent means claude
         costBudgetUsd,
+        ...(speed === null ? [] as const : [speed] as const),
       );
       // Preserve the synchronous callback behavior used by local/test callers while awaiting the real
       // renderer request contract. Avoiding an unconditional `await undefined` also keeps state updates in
@@ -244,6 +250,8 @@ export function WorkerSpawnModal(p: {
               title={t("workerSpawnModal.costBudget")}
             />
           </div>
+          <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "worker")} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
+          {provider === "codex" && <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>}
           {/* SDK permission mode for this worker — only bypassPermissions / plan (no default/acceptEdits). Changeable later in the composer. */}
           <Select size="sm" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")}>
             <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>

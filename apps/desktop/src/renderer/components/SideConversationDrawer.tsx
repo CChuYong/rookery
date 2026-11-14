@@ -1,3 +1,6 @@
+import type { SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
+import { latestSpeedObservation } from "../lib/speed.js";
 import { Loader2, LockKeyhole, X } from "lucide-react";
 import { useStore } from "../store/store.js";
 import type { LogItem } from "../store/reduce.js";
@@ -9,6 +12,10 @@ import { useT } from "../i18n/provider.js";
 const EMPTY: LogItem[] = [];
 
 export interface SideConversationDrawerProps {
+  speed?: SpeedPreference | null;
+  defaultSpeed?: SpeedPreference;
+  provider?: string;
+  model?: string;
   sourceKind: "master" | "worker";
   sideId: string | null;
   openingQuestion: string;
@@ -17,7 +24,7 @@ export interface SideConversationDrawerProps {
   onClose: () => void;
 }
 
-export function SideConversationDrawer({ sourceKind, sideId, openingQuestion, onSend, onStop, onClose }: SideConversationDrawerProps): JSX.Element {
+export function SideConversationDrawer({ speed, defaultSpeed, provider, model, sourceKind, sideId, openingQuestion, onSend, onStop, onClose }: SideConversationDrawerProps): JSX.Element {
   const t = useT();
   const side = useStore((s) => sideId ? s.sideConversations[sideId] : undefined);
   const status = side?.status ?? "opening";
@@ -46,6 +53,7 @@ export function SideConversationDrawer({ sourceKind, sideId, openingQuestion, on
       <MessageList items={items} loaded />
       <div className="border-t border-line bg-surface p-2.5">
         <Composer
+          leftSlot={speed !== undefined ? <SpeedControl speed={speed} defaultSpeed={defaultSpeed} provider={provider} model={model ?? ""} observation={latestSpeedObservation(items)} /> : undefined}
           onSend={(text) => { if (sideId) onSend(sideId, text); }}
           busy={running}
           onStop={sideId ? () => onStop(sideId) : undefined}

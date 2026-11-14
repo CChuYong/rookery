@@ -1,0 +1,23 @@
+export default {
+  "speed.label": "속도",
+  "speed.hint": "Fast는 비용이 더 들 수 있습니다. 제공자가 사용 가능 여부를 확인하며 변경은 다음 턴에 적용됩니다.",
+  "speed.inherit": "기본값 ({speed})",
+  "speed.inherited": "상속: {speed}",
+  "speed.pending": "다음 턴에 적용",
+  "speed.unsupported": "이 모델에서 Fast를 사용할 수 없음; 선택 유지",
+  "speed.activeFast": "마지막 보고: Fast",
+  "speed.activeStandard": "마지막 보고: Standard",
+  "speed.cooldown": "Fast 대기 시간",
+  "speed.requestedFast": "Fast 요청됨; 실제 속도 알 수 없음",
+  "speed.requestedStandard": "Standard 요청됨; 실제 속도 알 수 없음",
+  "speed.availabilityUnknown": "사용 가능 여부 알 수 없음",
+  "speed.masterDefault": "Master 속도",
+  "speed.workerDefault": "Worker 속도",
+  "speed.estimated": "추정",
+  "speed.costUnavailable": "비용 알 수 없음: 집계가 불완전합니다",
+  "speed.costEstimated": "추정 비용",
+  "speed.budgetEstimated": "Codex 비용과 예산 검사는 추정치입니다. 비용을 집계할 수 없으면 예산이 설정된 Worker가 중단될 수 있습니다.",
+  "speed.lastReported": "마지막 보고 속도: {state}",
+  "speed.standard": "Standard",
+  "speed.fast": "Fast"
+};

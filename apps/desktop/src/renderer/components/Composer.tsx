@@ -10,6 +10,8 @@ import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSup
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
+import type { SpeedObservation, SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
 import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
 
@@ -24,6 +26,12 @@ const CHIP_SELECT = "[field-sizing:content] h-6 min-w-0 cursor-pointer appearanc
 // Model/effort controls at the bottom of the input box. editable=true means selectable (master session, before spawn),
 // false means a read-only badge (running worker — model is fixed at spawn time).
 export interface ComposerControls {
+  speed?: SpeedPreference | null;
+  defaultSpeed?: SpeedPreference;
+  speedPending?: boolean;
+  speedObservation?: SpeedObservation;
+  speedLastObservation?: SpeedObservation;
+  onSpeed?: (speed: SpeedPreference | null) => void;
   provider?: string; // "codex" → the model dropdown is sourced from the codex model/list catalog + per-model efforts (like the spawn surfaces); absent/"claude" → the Claude models list. Codex falls back to the Claude list only if the catalog couldn't be fetched.
   model: string;
   effort?: string; // if absent, hide the effort select/badge (a running worker can't change effort live)
@@ -307,6 +315,7 @@ export function Composer({
               )}
             </span>
           ))}
+        {controls?.speed !== undefined && <SpeedControl speed={controls.speed} defaultSpeed={controls.defaultSpeed} provider={controls.provider} model={controls.model} pendingNextTurn={controls.speedPending} observation={controls.speedObservation} lastObservation={controls.speedLastObservation} onChange={controls.onSpeed} disabled={disabled || !controls.editable} />}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {onSideSend && !disabled && (
             <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.sideQuestion")} disabled={!text.trim()} onClick={submitSide}>

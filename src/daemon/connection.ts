@@ -245,6 +245,12 @@ export class Connection {
         for (const event of this.interactions?.pendingEvents(session.id) ?? []) this.reply({ type: "event", event }); // rehydrate any open card for this session
         return;
       }
+      case "session.setSpeed": {
+        if (!this.repos.getSession(msg.sessionId)) throw new Error(`unknown session: ${msg.sessionId}`);
+        this.repos.setSessionSpeed(msg.sessionId, msg.speed);
+        if (msg.reqId) this.reply({ type: "fleet.ack", action: "setSpeed", id: msg.sessionId, reqId: msg.reqId });
+        return;
+      }
       case "session.send": {
         const session = this.sessions.get(msg.sessionId);
         if (!session) {

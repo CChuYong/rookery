@@ -1,3 +1,6 @@
+import type { SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
+import { defaultSpeed } from "../lib/speed.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder, X, AlertTriangle, FolderGit2 } from "lucide-react";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
@@ -28,7 +31,7 @@ export function NewSessionPage(p: {
   defaultModel: string;
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, settings.codexMasterModel)
-  onStart: (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string }) => void;
+  onStart: (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string; speed?: SpeedPreference | null }) => void;
   onClose?: () => void; // if absent, hide the close button (when shown as the default screen with no session)
   browseDir?: (dir: string, cwd?: string) => Promise<BrowseResult>; // @ file autocomplete (relative to the selected cwd)
   loadCommands?: (cwd?: string) => Promise<SlashCommand[]>; // / skill candidates (relative to the selected cwd)
@@ -40,6 +43,8 @@ export function NewSessionPage(p: {
   onRegisterRepo?: () => void; // opens RepoModal (audit #58) — shown in the empty-repo state in place of the (hidden) repo picker
 }): JSX.Element {
   const t = useT();
+  const [speed, setSpeed] = useState<SpeedPreference | null>(null);
+  const settings = useStore((s) => s.settings);
   const [cwd, setCwd] = useState("");
   const [model, setModel] = useState(p.defaultModel);
   const [effort, setEffort] = useState(p.defaultEffort);
@@ -73,6 +78,7 @@ export function NewSessionPage(p: {
       cwd: cwd.trim() || undefined,
       prompt: prompt.trim() || undefined,
       model: isCodex ? codexModel.trim() || undefined : model,
+      ...(speed === null ? {} : { speed }),
       effort: currentEffort,
       provider: isCodex ? "codex" : undefined, // wire-minimal: absent means claude
     });
@@ -198,7 +204,7 @@ export function NewSessionPage(p: {
             onAttachFile={p.onAttachFile}
             onDropFiles={p.onDropFiles}
             onEscape={p.onClose}
-            leftSlot={<>{folderPicker}{providerSelector}{codexControls}</>}
+            leftSlot={<>{folderPicker}{providerSelector}{codexControls}<SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "master")} provider={provider} model={isCodex ? effortModel : model} onChange={setSpeed} /></>}
             className="px-3 py-3"
             initialText={initialText}
             onDraftChange={onDraftChange}
