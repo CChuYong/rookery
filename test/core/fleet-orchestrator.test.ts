@@ -891,6 +891,25 @@ describe("FleetOrchestrator", () => {
     await s.fleet.stop(id); // cleanup
   });
 
+  it("stopTask() delegates to the live agent's stopTask", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const calls: string[] = [];
+    let resolveSettled: () => void = () => {};
+    const settled = new Promise<void>((r) => { resolveSettled = r; });
+    const factory = (): WorkerLike => ({
+      start: () => {}, resume: () => {}, send: () => {}, status: () => "background", waitUntilSettled: () => settled,
+      stop: async () => { resolveSettled(); },
+      stopTask: async (taskId: string) => { calls.push(taskId); },
+    });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps({ headValue: "base0" }), factory, worktreesDir: "/wt", idgen: () => "w0" });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "r", task: "t" });
+    await until(() => calls.length === 0 && fleet.status(id) === "background");
+    await fleet.stopTask(id, "b1");
+    expect(calls).toEqual(["b1"]);
+    await fleet.stop(id);
+  });
+
   // A3: discard used to race trackFlow settle and emit the terminal worker.status twice → write-once means just once.
   it("emits a terminal worker.status only once when discard races trackFlow settle (write-once)", async () => {
     const s = liveSetup();
@@ -1071,6 +1090,44 @@ describe("FleetOrchestrator", () => {
     const row = fleet.list().find((w) => w.id === "wX")!;
     expect(row.costUsd).toBe(2.5);
     expect(typeof row.lastActivityTs).toBe("number");
+  });
+
+  it("fleet.list rows carry tasks", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const git = new FakeGitOps({ headValue: "base0" });
+    let n = 0;
+    const factory = (o: { id: string }): WorkerLike => ({
+      start: () => {}, send: () => {}, resume: () => {}, stop: async () => {},
+      status: () => "background", waitUntilSettled: () => new Promise(() => {}),
+      backgroundTasks: () => (o.id === "a0" ? [{ id: "b1", type: "local_bash", description: "npm run dev" }] : []),
+    });
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", idgen: () => `a${n++}` });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app2", task: "t" });
+    await vi.waitFor(() => expect(fleet.list().length).toBe(2));
+    repos.createWorker({ id: "wDet", sessionId: "sA", repoPath: "/r", label: "detached", worktreePath: "/wt/wDet", branch: "b" });
+    const rows = fleet.list();
+    await vi.waitFor(() => expect(fleet.list().find((w) => w.id === "a0")?.tasks).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]));
+    expect("tasks" in rows.find((w) => w.id === "a1")!).toBe(false); // live but nothing listed
+    expect("tasks" in rows.find((w) => w.id === "wDet")!).toBe(false); // no live agent
+  });
+
+  it("backgroundTasks(id) returns a live worker's listed tasks, [] when not live or unknown", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const factory = (): WorkerLike => ({
+      start: () => {}, send: () => {}, resume: () => {}, stop: async () => {},
+      status: () => "background", waitUntilSettled: () => new Promise(() => {}),
+      backgroundTasks: () => [{ id: "b1", type: "local_bash", description: "npm run dev" }],
+    });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps({ headValue: "base0" }), factory, worktreesDir: "/wt", idgen: () => "a0" });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
+    await vi.waitFor(() => expect(fleet.backgroundTasks("a0")).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]));
+    repos.createWorker({ id: "wDet", sessionId: "sA", repoPath: "/r", label: "detached", worktreePath: "/wt/wDet", branch: "b" });
+    expect(fleet.backgroundTasks("wDet")).toEqual([]);
+    expect(fleet.backgroundTasks("nope")).toEqual([]);
   });
 
   it("list() carries costBudgetUsd + maxTurns (protocol WorkerRow siblings), null when unset", () => {
@@ -1324,6 +1381,13 @@ describe("FleetOrchestrator rehydrate (restart recovery)", () => {
     expect(s.agents.has("old1")).toBe(false);
     expect(s.fleet.status("old1")).toBe("orphaned");
     expect(() => s.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "r", task: "t" })).not.toThrow();
+  });
+
+  it("stopTask on an unknown/detached worker throws", async () => {
+    const s = resumable({ exists: false });
+    s.fleet.rehydrate(); // old1 → orphaned, no live agent
+    await expect(s.fleet.stopTask("nope", "b1")).rejects.toThrow("Unknown worker: nope");
+    await expect(s.fleet.stopTask("old1", "b1")).rejects.toThrow("Worker old1 is not running (its session ended, likely a daemon restart).");
   });
 
   it("stopping a pending-resumable agent does not resume it (just marks stopped)", async () => {

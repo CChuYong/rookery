@@ -16,6 +16,14 @@ export type WorkerEventData =
   | { kind: "notice"; text: string } // informational system push (compaction/retry/fallback) — shown as a single-line chip in the conversation
   | { kind: "error"; message: string; clientMsgId?: string; retryInput?: {text:string;images?:ImageRef[]} };
 
+// One user-visible ("listed") background task of a worker: not ambient, and not a backgrounded subagent
+// (local_agent) or workflow (local_workflow) — those have their own Activity surfaces.
+export interface BackgroundTaskView {
+  id: string;
+  type: string;
+  description: string;
+}
+
 export type SlackStatus = "unconfigured" | "off" | "connecting" | "up" | "error";
 
 // A single question that surfaces the master's canUseTool (approval/AskUserQuestion) to non-Slack clients (desktop).
@@ -61,6 +69,10 @@ export type CoreEvent =
   // bg: present only while harness-tracked background tasks run (status "background") — count + distinct
   // task types (e.g. local_bash) so clients can label WHY the worker is still busy after its turn ended.
   | { type: "worker.status"; sessionId: string; workerId: string; status: string; bg?: { count: number; types: string[] } }
+  // The worker's LISTED background tasks (see BackgroundTaskView) — emitted only when that set changes (ids or
+  // descriptions), including to []. Deliberately separate from worker.status: every worker.status is a
+  // session-log row and a notifier/trigger/relay input, so task metadata churn must not re-emit it.
+  | { type: "worker.tasks"; sessionId: string; workerId: string; tasks: BackgroundTaskView[] }
   // Permanent deletion lifecycle. While started, fleet.list excludes the worker even though slow worktree cleanup may
   // still be running and the DB row remains. Completed/failed is the commit/rollback boundary for every client.
   | { type: "worker.deletion"; sessionId: string; workerId: string; phase: "started" | "completed" | "failed"; message?: string }

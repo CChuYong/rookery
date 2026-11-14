@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { isSafeGitRef } from "../core/git-ref.js";
+import { formatBackgroundTasks } from "./background-tasks-format.js";
 
 // Byte cap on transcript output that gets re-injected into the master context (symmetric with view_subagent_diff). Row count is capped by listWorkerEvents.
 const TRANSCRIPT_MAX_BYTES = 256 * 1024;
@@ -100,7 +101,7 @@ export function fleetToolDefs(
   const send = tool(
     "send_worker",
     "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved). Use this to steer, correct, ask it to commit/push and open its own PR, or to continue after it has gone idle. " +
-      "Does NOT interrupt: if the worker is mid-turn, the instruction is queued and runs at the next turn boundary (it does not abort the work in progress). To make it drop what it is doing and act on your new instruction immediately, call interrupt_worker first, then send_worker.",
+      "If the worker is mid-turn, the instruction is delivered into the running turn (the worker folds it into its current work); if that isn't possible it runs at the next turn boundary. To make it abandon its current work first, call interrupt_worker, then send_worker.",
     { speed: z.enum(["standard", "fast"]).optional(), id: z.string(), text: z.string().describe("The instruction to send."), notify: z.boolean().optional().describe("When true, you are notified once the worker finishes this instruction (idle) or fails. One-shot.") },
     async (args) => {
       try {
@@ -148,7 +149,7 @@ export function fleetToolDefs(
     { id: z.string() },
     async (args) => {
       try {
-        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})`);
+        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})${formatBackgroundTasks(fleet.backgroundTasks(args.id))}`);
       } catch (err) {
         return errorText(String(err));
       }

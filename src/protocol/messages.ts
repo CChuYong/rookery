@@ -1,6 +1,6 @@
 import { IMAGE_LIMITS, type ImageRef } from "../core/image-input.js";
 import { z } from "zod";
-import type { CoreEvent, SlackStatus } from "../core/events.js";
+import type { BackgroundTaskView, CoreEvent, SlackStatus } from "../core/events.js";
 import type { UsageSnapshot } from "../core/usage.js";
 import type { SettingsValues } from "../core/settings.js";
 import type { CommandCandidate } from "../core/capabilities/commands.js";
@@ -347,6 +347,8 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.setPermissionMode"), id: z.string(), permissionMode: z.enum(["bypassPermissions", "plan"]), reqId: z.string().optional() }),
   // Interrupt the worker's current turn (query.interrupt) — keeps the session alive, further instructions possible. The worker-side counterpart of the master's session.stop.
   z.object({ type: z.literal("worker.interrupt"), id: z.string(), reqId: z.string().optional() }),
+  // stop ONE listed background task of a live worker (session and turn untouched)
+  z.object({ type: z.literal("worker.task.stop"), id: z.string(), taskId: z.string().min(1).max(512), reqId: z.string().optional() }),
   // Recover a wedged worker: hard-kill the stuck subprocess and re-arm a lazy resume of the same session (→ idle, still usable). Unlike fleet.stop, non-terminal.
   z.object({ type: z.literal("worker.recover"), id: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("worker.checkpoints"), reqId: z.string(), id: z.string() }),
@@ -504,6 +506,7 @@ export interface WorkerRow {
   costUsd?: number;        // cumulative $ from the worker's last result event; absent if it never completed a turn
   maxTurns?: number | null; // per-result turn cap (runaway guard) persisted on the worker; null/absent = no cap
   costBudgetUsd?: number | null; // explicit per-worker lifetime USD ceiling override; null/absent = no per-worker override (the workerCostBudgetUsd settings default may still apply — see server.ts subFactory)
+  tasks?: BackgroundTaskView[]; // live worker's listed background tasks (fleet.list snapshot); absent when none — live updates ride the worker.tasks event
 }
 
 // Integration connection status (on-demand pull). github=gh auth, linear=key present + viewer verification.
@@ -616,6 +619,7 @@ export interface RequestResultMap {
   "fleet.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
   "fleet.discard": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.interrupt": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "worker.task.stop": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.recover": Extract<ServerMessage, { type: "fleet.ack" }>;
   "fleet.spawn": Extract<ServerMessage, { type: "fleet.spawn.result" }>;
   "repos.list": Extract<ServerMessage, { type: "repos.list.result" }>;

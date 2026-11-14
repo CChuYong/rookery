@@ -842,6 +842,8 @@ export function App(): JSX.Element {
   }, []);
   // Interrupt the worker's current turn (keep the session) — composer stop button. The worker equivalent of the master's stopMaster.
   const subInterrupt = useCallback((id: string) => { void client?.request({ type: "worker.interrupt", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
+  // Stop one listed background task of a worker (header task menu) — the worker and its turn keep running.
+  const subStopTask = useCallback((id: string, taskId: string) => { void client?.request({ type: "worker.task.stop", id, taskId }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
   // Recover a wedged worker whose soft interrupt won't land (stuck in a long tool call / Dynamic Workflow): hard-kill
   // and resume the session in place → idle, still usable. Surfaced by the composer's Stop escalation (onRecover).
   const subRecover = useCallback((id: string) => { void client?.request({ type: "worker.recover", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
@@ -1418,6 +1420,7 @@ export function App(): JSX.Element {
                   onToggleRight={() => {}}
                   onFetchCheckpoints={() => fetchCheckpoints(activeSub.id)}
                   onRestore={(seq) => onRestore(activeSub.id, seq)}
+                  onStopTask={(taskId) => subStopTask(activeSub.id, taskId)}
                   dock
                 />
                 <WorkspaceRenderProvider value={workerRender}>
@@ -1435,6 +1438,7 @@ export function App(): JSX.Element {
                 onToggleRight={toggleRight}
                 onFetchCheckpoints={() => fetchCheckpoints(activeSub.id)}
                 onRestore={(seq) => onRestore(activeSub.id, seq)}
+                onStopTask={(taskId) => subStopTask(activeSub.id, taskId)}
               />
               <div className="flex min-h-0 flex-1">
                 <div className="flex min-w-0 flex-1 flex-col">

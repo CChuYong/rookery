@@ -219,6 +219,15 @@ describe("protocol v2 client messages", () => {
     expect(parseClientMessage(JSON.stringify({ type: "worker.interrupt", id: "a1", reqId: "q1" }))).toMatchObject({ type: "worker.interrupt", id: "a1", reqId: "q1" });
     expect(() => parseClientMessage(JSON.stringify({ type: "worker.interrupt" }))).toThrow(); // id missing → rejected
   });
+  it("worker.task.stop parses; missing, empty, or oversized taskId rejects", () => {
+    expect(parseClientMessage(JSON.stringify({ type: "worker.task.stop", id: "a1", taskId: "b1", reqId: "q1" }))).toEqual({ type: "worker.task.stop", id: "a1", taskId: "b1", reqId: "q1" });
+    expect(parseClientMessage(JSON.stringify({ type: "worker.task.stop", id: "a1", taskId: "b1" }))).toMatchObject({ type: "worker.task.stop", id: "a1", taskId: "b1" });
+    expect(() => parseClientMessage(JSON.stringify({ type: "worker.task.stop", id: "a1" }))).toThrow(); // taskId missing → rejected
+    expect(() => parseClientMessage(JSON.stringify({ type: "worker.task.stop", taskId: "b1" }))).toThrow(); // id missing → rejected
+    expect(() => parseClientMessage(JSON.stringify({ type: "worker.task.stop", id: "a1", taskId: "" }))).toThrow(); // empty taskId → rejected
+    expect(() => parseClientMessage(JSON.stringify({ type: "worker.task.stop", id: "a1", taskId: "x".repeat(513) }))).toThrow(); // over 512 → rejected
+    expect(parseClientMessage(JSON.stringify({ type: "worker.task.stop", id: "a1", taskId: "x".repeat(512) }))).toMatchObject({ taskId: "x".repeat(512) });
+  });
   it("fleet.spawn parses without a task (task-less spawn)", () => {
     expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app" }).success).toBe(true);
     expect(clientMessageSchema.safeParse({ type: "fleet.spawn", reqId: "r", repo: "app", task: "do x" }).success).toBe(true);

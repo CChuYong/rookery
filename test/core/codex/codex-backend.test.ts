@@ -601,6 +601,118 @@ describe("CodexBackend — controls and edges", () => {
   });
 });
 
+describe("CodexBackend — worker steering (turn/steer)", () => {
+  // Opens a worker whose first turn never self-ends and resolves once that turn is streaming (its
+  // turn/started has been processed, so the active turn id is known). The caller ends the turn.
+  async function busyWorker(opts?: Parameters<typeof fakeCodexSpawn>[1]) {
+    const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "working…" }], opts);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const q = new MessageQueue(); q.push("long task");
+    const stream = b.openSession(q, baseOpts());
+    const seen: AgentEvent[] = [];
+    let release!: () => void;
+    const streaming = new Promise<void>((r) => { release = r; });
+    const done = (async () => {
+      for await (const ev of stream) {
+        seen.push(ev);
+        if (ev.kind === "text_delta") release();
+        if (ev.kind === "turn_end") q.close();
+      }
+    })();
+    await streaming;
+    return { stream, requests: fake.requests, seen, done };
+  }
+  const acceptSteer = { rpc: { "turn/steer": () => ({ result: { turnId: "turn-0" } }) } };
+
+  it("steer sends turn/steer with the active turn id", async () => {
+    const { stream, requests, done } = await busyWorker(acceptSteer);
+    await expect(stream.steer!("look at foo.ts", "c-1")).resolves.toBe(true);
+    await stream.interrupt();
+    await done;
+    expect(requests.find((r) => r.method === "turn/steer")).toEqual({
+      method: "turn/steer",
+      params: { threadId: "th-1", expectedTurnId: "turn-0", clientUserMessageId: "c-1", input: [{ type: "text", text: "look at foo.ts", text_elements: [] }] },
+    });
+  });
+
+  it("steer maps images like turn/start", async () => {
+    const { stream, requests, done } = await busyWorker(acceptSteer);
+    await expect(stream.steer!({ text: "x", images: [{ mediaType: "image/png", data: "AAAA" }] })).resolves.toBe(true);
+    await stream.interrupt();
+    await done;
+    const steer = requests.find((r) => r.method === "turn/steer");
+    expect(steer?.params.input).toEqual([
+      { type: "text", text: "x", text_elements: [] },
+      { type: "image", url: "data:image/png;base64,AAAA" },
+    ]);
+    expect(steer?.params).not.toHaveProperty("clientUserMessageId");
+  });
+
+  it("steer returns false with no active turn (before the first turn starts, and after turn/completed)", async () => {
+    const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], acceptSteer);
+    const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
+    const q = new MessageQueue();
+    const stream = b.openSession(q, baseOpts());
+    await expect(stream.steer!("too early")).resolves.toBe(false); // no child / thread / turn yet
+    let afterCompleted: boolean | undefined;
+    const done = (async () => {
+      for await (const ev of stream) {
+        if (ev.kind === "turn_end") { afterCompleted = await stream.steer!("too late"); q.close(); }
+      }
+    })();
+    q.push("t1");
+    await done;
+    expect(afterCompleted).toBe(false);
+    expect(fake.requests.some((r) => r.method === "turn/steer")).toBe(false);
+  });
+
+  it("steer returns false when the server rejects it; the stream stays usable and emits no error", async () => {
+    const { stream, requests, seen, done } = await busyWorker({
+      rpc: { "turn/steer": () => ({ error: { code: -32600, message: "expected active turn id turn-9 but found turn-0" } }) },
+    });
+    await expect(stream.steer!("redirect")).resolves.toBe(false);
+    expect(requests.some((r) => r.method === "turn/steer")).toBe(true);
+    await stream.interrupt(); // the turn is still live and controllable after the rejection
+    await expect(done).resolves.toBeUndefined();
+    expect(seen.some((e) => e.kind === "push")).toBe(false);
+    expect(seen.at(-1)).toMatchObject({ kind: "turn_end", subtype: "interrupted" });
+  });
+
+  it("steer resets the idle watchdog — an accepted steer counts as activity", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeCodexSpawn(() => [{ kind: "agentDelta", text: "working…" }], acceptSteer); // never self-ends
+      const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5", idleTimeoutMs: () => 1000 });
+      const q = new MessageQueue(); q.push("long task");
+      const stream = b.openSession(q, baseOpts());
+      let release!: () => void;
+      const streaming = new Promise<void>((r) => { release = r; });
+      const done = (async () => {
+        for await (const ev of stream) {
+          if (ev.kind === "text_delta") release();
+          if (ev.kind === "turn_end") q.close();
+        }
+      })();
+      await streaming;
+      await vi.advanceTimersByTimeAsync(800);
+      await expect(stream.steer!("keep going")).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(800); // 1600ms since the last notification, but only 800ms since the steer
+      expect(fake.requests.some((r) => r.method === "turn/interrupt")).toBe(false);
+      await vi.advanceTimersByTimeAsync(300); // a full idle window after the steer → the watchdog still fires
+      expect(fake.requests.some((r) => r.method === "turn/interrupt")).toBe(true);
+      await done; // the fake answers the watchdog's interrupt with turn/completed(interrupted)
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("master turn streams do not offer steer", () => {
+    const { backend: b } = backend(() => [{ kind: "turnEnd" }]);
+    const stream = b.startTurn("hi", baseOpts() as never);
+    expect(stream.steer).toBeUndefined();
+  });
+});
+
 describe("CodexBackend — pricing aggregation", () => {
   it("sums per-update TOTAL deltas across a multi-call turn (fresh session baseline = zeros)", async () => {
     const { backend: b } = backend(() => [

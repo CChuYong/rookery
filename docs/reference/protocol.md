@@ -50,6 +50,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `worker.setModel` | opt | `id`, `model` | live-change worker model | `fleet.ack` |
 | `worker.setPermissionMode` | opt | `id`, `permissionMode` (`bypassPermissions\|plan`) | live-change worker permission mode | `fleet.ack` |
 | `worker.interrupt` | opt | `id` | interrupt worker turn (session preserved) | `fleet.ack` (`interrupt`) |
+| `worker.task.stop` | opt | `id`, `taskId` (1–512 chars) | stop one listed background task (Claude only; worker state unchanged — the provider's settle frame removes it from `worker.tasks`) | `fleet.ack` (`task.stop`); unknown task / codex → `error` |
 | `worker.checkpoints` | ✓ | `id` | list worktree checkpoints | `worker.checkpoints.result` |
 | `worker.restore` | ✓ | `id`, `seq` | restore worker to a checkpoint | `fleet.ack` (`restore`) |
 | `fleet.list` | ✓ | — | list the whole fleet | `fleet.list.result` |
@@ -158,7 +159,7 @@ Notes:
 | `event` | `event: CoreEvent` | a live `CoreEvent` (see [events.md](./events.md)) |
 | `error` | `message`, `reqId?` | parse/handler failure |
 
-`WorkerRow` (shared by worker.list/fleet.list): `id`, `label`, `repoPath`, `status`, `branch`, `model`, `permissionMode?`, `ticketKey?`, `ticketUrl?` (no `pr_url` — there is no automatic PR pipeline).
+`WorkerRow` (shared by worker.list/fleet.list): `id`, `label`, `repoPath`, `status`, `branch`, `model`, `permissionMode?`, `ticketKey?`, `ticketUrl?`, `tasks?: BackgroundTaskView[]` (`{id,type,description}` — the listed background tasks of a live worker, the snapshot that `worker.tasks` events update) (no `pr_url` — there is no automatic PR pipeline).
 
 Workflow requests accept ids only—never a transcript path. The daemon registry verifies worker/task/agent ownership and reads histories only beneath the launch directory it previously realpath-validated against `<sdkSessionId>/subagents/workflows/<runId>`. Phase grouping arrives live from the Claude adapter's allowlisted `task_progress.workflow_progress` decoder; an independently realpath-validated sibling `<sdkSessionId>/workflows/<runId>.json` provides recovery/enrichment. Only ordered phase definitions and agent `label`/`phaseIndex`/`phaseTitle`/`model` fields cross the protocol. Snapshots are live in daemon memory, not SQLite-backed.
 
