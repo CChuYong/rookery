@@ -204,7 +204,11 @@ Isolated daemon (port 8899, temp `ROOKERY_HOME`), Claude SDK CLI 2.1.325, Codex 
   wording: imperative "Additional instruction (do it within this same task) … Then continue with the remaining
   steps." was rejected as a suspected prompt injection by both Haiku 5.5 and Sonnet 5.5; a conversational "Oh, one
   more thing: please also create …" was followed (Haiku 5.5). Master `send_worker` text is at risk of the first
-  style.
+  style. **Mitigated (final review):** the worker system-prompt append now adds `WORKER_STEER_INSTRUCTION` after the
+  fence rule — messages surfaced as "The user sent a new message while you were working" are genuine operator
+  instructions unless inside `<untrusted-…>` fence tags. Re-probe on the same isolated setup (Haiku 5.5, the same
+  imperative text, steer 2.5 s into the first `sleep 10`): followed in 2 of 2 runs (`steer.txt` = `steered`, the
+  final reply says it was created "as you asked mid-task"), one echo, one result, `running → idle`.
 - **Claude end of turn: a separate turn, with a transient `idle`.** A send that arrives after the model's last tool
   step (here: right after the final assistant text, before `result`) is not folded. `steer()` accepts it anyway
   (`turnActive` stays true until `result`), so it is echoed once, then the SDK emits `result` for the old turn and
@@ -216,6 +220,19 @@ Isolated daemon (port 8899, temp `ROOKERY_HOME`), Claude SDK CLI 2.1.325, Codex 
   SDK 0.3.325 with Haiku). Such a `turn_end` carries `steerPending`, and the worker holds `running` with the
   settle-grace (`settleGraceMs`, 3000 ms) instead of emitting `idle`; the follow-up turn's `init` resolves it, and
   expiry with no turn settles truthfully. An absorbed steer settles at its turn end with no delay. Codex is unchanged.
+- **Claude interrupt with a pending steer: the steer survives (final review).** Haiku 5.5, a foreground Bash
+  `python3 -c 'import time; time.sleep(30)'` (the user's global hook blocks `sleep 30 && echo …`), steer pushed 3 s
+  in, `worker.interrupt` 2 s later. The interrupt receipt listed the steer in `still_queued` (notice "Interrupt
+  receipt: 1 queued message(s) may still run."), the interrupted result (`error_during_execution`,
+  `aborted_tools`) did not list its uuid, and the SDK started a new turn for it 150 ms later (`init`), which acted
+  on it (`steer.txt` written) and ended `success`. Statuses: `running → idle` only (the `steerPending` hold covered
+  the gap), one echo, no dropped notice. So an interrupt neither drops nor duplicates an accepted steer; no
+  retryable error is recorded for it. (A steer accepted after the model's last step, then interrupted while its
+  own follow-up turn ran, was consumed by that turn and stopped with it — the normal interrupt outcome.)
+  **Recover / stream error do lose it**: the steer lives only in the SDK subprocess's input queue until a tool
+  boundary or the next turn. The adapter now reports accepted steers that no result has listed yet
+  (`AgentStream.pendingSteers()`); `abandon()` and the consume loop's error path record a retryable `error`
+  (`clientMsgId` + `retryInput`) for each, like deferred entries. Unit-tested only; not live-probed.
 - **Codex.** `turn/steer` mid-turn was accepted and delivered as a real user message in the same turn (rollout:
   user message right after the original task, one `task_complete`). gpt-6.1-terra acted on it; gpt-6-luna (low)
   received it but ignored it. At the end of a turn (11 probes with a 0–150 ms delay after the final assistant text)
