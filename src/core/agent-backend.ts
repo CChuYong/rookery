@@ -93,6 +93,11 @@ export interface AgentStream extends AsyncIterable<AgentEvent> {
   // (no active turn, stream closed, or the provider refused it) tells the caller to fall back to queuing.
   // Never throws. `clientMsgId` is the caller's echo-correlation id, forwarded where the provider has one.
   steer?(input: AgentInput, clientMsgId?: string): Promise<boolean>;
+  // Optional, alongside steer: the accepted steer inputs (the very values passed to steer(), so callers can match
+  // their own records by identity) that no turn is known to have consumed yet. A teardown that kills the provider
+  // process loses these. Absent on Codex, whose turn/steer acceptance puts the message in the thread at once
+  // (live-observed in the rollout), so there is nothing provider-side to lose.
+  pendingSteers?(): AgentInput[];
   // Optional: stop ONE provider-tracked background task by id. Resolving means the provider accepted the
   // request; the task leaves the running set only through the provider's own settle frames. Absent on
   // providers with no background-task concept (Codex).

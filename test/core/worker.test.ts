@@ -3,7 +3,7 @@ import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
 import type { CoreEvent } from "../../src/core/events.js";
-import { Worker } from "../../src/core/worker.js";
+import { Worker, WORKER_FENCE_INSTRUCTION, WORKER_STEER_INSTRUCTION } from "../../src/core/worker.js";
 import { WorkerNotifier } from "../../src/core/worker-notifier.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
@@ -2056,7 +2056,10 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     resolve: (refs) => refs.map(() => ({ mediaType: "image/png" as const, data: "eHl6" })),
   };
   // A hand-driven stream: the test pushes provider events; every input the worker enqueues is captured in `pulled`.
-  function mk(steer?: Steer, extra: { steerTimeoutMs?: number; settleGraceMs?: number } = {}) {
+  function mk(steer?: Steer, rig: { steerTimeoutMs?: number; settleGraceMs?: number; pendingSteers?: () => AgentInput[] } = {}) {
+    const { pendingSteers, ...extra } = rig;
+    let failure: Error | undefined;
+    let lastOpts: AgentSessionOptions | undefined;
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
@@ -2069,12 +2072,14 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     let closed = false;
     const backend: AgentBackend = {
       openSession(input, o) {
+        lastOpts = o;
         void (async () => { for await (const m of input) pulled.push(m); })();
         o.abortController.signal.addEventListener("abort", () => { closed = true; wake?.(); });
         const stream: AgentStream = {
           async *[Symbol.asyncIterator]() {
             while (true) {
               while (pending.length) yield pending.shift()!;
+              if (failure) throw failure;
               if (closed) return;
               await new Promise<void>((r) => { wake = r; });
               wake = undefined;
@@ -2085,6 +2090,7 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
           setPermissionMode: async () => {},
           supportedCommands: async () => [],
           ...(steer ? { steer } : {}),
+          ...(pendingSteers ? { pendingSteers } : {}),
         };
         return stream;
       },
@@ -2096,7 +2102,10 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     const users = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; role?: string; content?: string; clientMsgId?: string; text?: string; images?: unknown[] }).filter((p) => p.kind === "message" && p.role === "user");
     const notices = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; text?: string }).filter((p) => p.kind === "notice").map((p) => p.text ?? "");
     const pulledText = () => pulled.map((p) => (typeof p === "string" ? p : p.text));
-    return { repos, bus, agent, emit, flush, users, notices, pulled, pulledText, statuses };
+    const fail = (err: Error) => { failure = err; wake?.(); };
+    type Ev = { kind?: string; text?: string; message?: string; clientMsgId?: string; retryInput?: { text: string; images?: unknown[] } };
+    const errors = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as Ev).filter((p) => p.kind === "error");
+    return { repos, bus, agent, emit, flush, users, notices, pulled, pulledText, statuses, fail, errors, opts: () => lastOpts };
   }
   function held() {
     let resolve!: (v: boolean) => void;
@@ -2487,6 +2496,200 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     expect(x.users().some((u) => u.content === "redirect")).toBe(false);
   });
 
+  // Final review #1: a Claude steer is accepted (and echoed) the moment it is pushed, but it sits in the SDK's in-memory
+  // queue until a tool boundary or the next turn. A teardown that kills the subprocess loses it; the user must be
+  // able to resend it, the same way deferred instructions get a retryable error on a stream error.
+  function pendingRig() {
+    const pend: AgentInput[] = [];
+    const steer = vi.fn<Steer>(async (input) => { pend.push(input); return true; });
+    return { pend, steer, pendingSteers: () => [...pend] };
+  }
+
+  it("recover after an accepted steer the provider has not consumed records a retryable error for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r", undefined, [imgRef]);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1); // echoed at acceptance
+    await x.agent.abandon();
+    const errs = x.errors();
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.clientMsgId).toBe("c-r");
+    expect(errs[0]!.retryInput).toEqual({ text: "redirect", images: [imgRef] });
+    expect(errs[0]!.message).toMatch(/recover/i);
+    expect(x.notices().some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+  });
+
+  it("recover after the steer was consumed by a turn records nothing for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r");
+    await x.flush();
+    r.pend.length = 0; // the turn's result listed the steer as consumed
+    x.emit(turnEnd());
+    await x.flush();
+    await x.agent.abandon();
+    expect(x.errors()).toEqual([]);
+  });
+
+  it("a steer still pending after its turn_end (left for its own turn) is reported if recover kills it first", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers, settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r");
+    await x.flush();
+    x.emit(steerPendingEnd()); // not consumed by this turn; its own turn has not started
+    await x.flush();
+    await x.agent.abandon();
+    expect(x.errors().map((e) => e.clientMsgId)).toEqual(["c-r"]);
+  });
+
+  it("a stream error after an accepted unconsumed steer records a retryable error for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-e");
+    await x.flush();
+    x.fail(new Error("boom"));
+    await x.flush();
+    expect(x.agent.status()).toBe("error");
+    const steerErr = x.errors().filter((e) => e.clientMsgId === "c-e");
+    expect(steerErr).toHaveLength(1);
+    expect(steerErr[0]!.retryInput).toEqual({ text: "redirect" });
+    expect(steerErr[0]!.message).toContain("boom");
+  });
+
+  it("streams without pendingSteers keep today's recover behavior (nothing recorded for an accepted steer)", async () => {
+    const x = mk(vi.fn<Steer>(async () => true));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r");
+    await x.flush();
+    await x.agent.abandon();
+    expect(x.errors()).toEqual([]);
+  });
+
+  // Live (isolated daemon, Haiku 5.5, SDK 0.3.325): interrupting a turn while a steer waits behind a long Bash call does
+  // NOT drop the steer — the interrupt receipt lists it in still_queued, the interrupted result omits its uuid, and the
+  // SDK answers it as its own follow-up turn ~150 ms later. The worker holds "running" across the gap.
+  it("through the Claude adapter: interrupt with a pending steer — the steer survives and runs as its own turn, no transient idle", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    type In = { uuid?: string; message?: { content?: unknown } };
+    const textOf = (um: In) => { const c = um?.message?.content; return typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("") : ""; };
+    let interrupted!: () => void;
+    const interruptP = new Promise<void>((r) => { interrupted = r; });
+    let it!: AsyncIterator<In>;
+    let steerMsg: In | undefined;
+    const gated = ((input: { prompt?: AsyncIterable<In> }) => {
+      it = input.prompt![Symbol.asyncIterator]();
+      async function* gen(): AsyncGenerator<unknown> {
+        const first = await it.next();
+        yield { type: "system", subtype: "init", session_id: "sdk-1" };
+        yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${textOf(first.value!)}` }] } };
+        await interruptP; // a long tool call, cut short by the interrupt
+        yield { type: "result", subtype: "error_during_execution", terminal_reason: "aborted_tools", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+        // the queued steer runs as its own turn
+        yield { type: "system", subtype: "init", session_id: "sdk-1" };
+        yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${textOf(steerMsg!)}` }] } };
+        yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null, user_message_uuid: steerMsg!.uuid, user_message_uuids: [steerMsg!.uuid] };
+        for (let n = await it.next(); !n.done; n = await it.next()) { /* no further turns */ }
+      }
+      const interrupt = async () => {
+        steerMsg = (await it.next()).value; // still in the SDK queue when the interrupt lands
+        interrupted();
+        return { still_queued: [steerMsg!.uuid] };
+      };
+      return Object.assign(gen(), { interrupt, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as unknown as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gated), wakeWatchdogMs: 500, settleGraceMs: 10_000 } });
+    const payloads = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; role?: string; content?: string; text?: string });
+    agent.start("task");
+    await until(() => payloads().some((p) => p.content === "reply:task"));
+    agent.send("redirect", "c-i");
+    await until(() => payloads().some((p) => p.role === "user" && p.content === "redirect"));
+    await agent.interruptTurn();
+    await until(() => payloads().some((p) => p.content === "reply:redirect") && agent.status() === "idle");
+    expect(statuses).toEqual(["idle"]); // running throughout, then the final idle — no idle between the two turns
+    expect(payloads().filter((p) => p.role === "user" && p.content === "redirect")).toHaveLength(1);
+    const notes = payloads().filter((p) => p.kind === "notice").map((p) => p.text ?? "");
+    expect(notes).toContain("Interrupt receipt: 1 queued message(s) may still run.");
+    expect(notes.some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+    await agent.abandon(); // the follow-up turn consumed it → nothing left to report
+    expect(payloads().filter((p) => p.kind === "error")).toEqual([]);
+  });
+
+  // Final review #3: recover() discards this Worker object; its timers must not fire into the shared DB/bus afterwards.
+  it("abandon clears an armed settle-grace hold (no late idle from the discarded object)", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 20 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd()); // arms the hold
+    await x.flush();
+    await x.agent.abandon();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(x.statuses).not.toContain("idle");
+    expect(x.repos.getWorker("a1")?.status).not.toBe("idle");
+  });
+
+  it("abandon clears an armed wake watchdog (no late idle from the discarded object)", async () => {
+    const x = mk(); // wakeWatchdogMs: 40
+    x.agent.start("task");
+    await x.flush();
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    x.emit(said("spontaneous")); // auto-wake → running + watchdog armed
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    const before = x.statuses.length;
+    await x.agent.abandon();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(x.statuses.slice(before)).not.toContain("idle");
+  });
+
+  it("the worker system prompt carries the steering rule after the untrusted-fence rule", async () => {
+    const x = mk();
+    x.agent.start("task");
+    await x.flush();
+    const append = x.opts()!.systemPromptAppend!;
+    expect(append.startsWith(WORKER_FENCE_INSTRUCTION)).toBe(true);
+    expect(append).toContain(WORKER_STEER_INSTRUCTION);
+    expect(WORKER_STEER_INSTRUCTION).toContain("The user sent a new message while you were working");
+    expect(WORKER_STEER_INSTRUCTION).toContain("<untrusted-...>");
+    await x.agent.stop();
+  });
+
+  it("a throw while settling a steer is logged to stderr, not swallowed", async () => {
+    const x = mk(vi.fn<Steer>(async () => true));
+    x.agent.start("task");
+    await x.flush();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const add = vi.spyOn(x.repos, "addWorkerEvent").mockImplementationOnce(() => { throw new Error("db gone"); });
+    try {
+      x.agent.send("redirect");
+      await x.flush();
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.calls.flat().map(String).join(" ")).toContain("db gone");
+    } finally {
+      add.mockRestore();
+      spy.mockRestore();
+    }
+    await x.agent.stop();
+  });
+
   // Task 10 (live-found on Claude): a steer accepted after the model's last tool step is not folded into the running
   // turn — the SDK answers it as its own follow-up turn. The adapter flags that turn_end (steerPending); the worker
   // must hold "running" instead of emitting a transient idle that wakes a notify:true master early.
@@ -2562,7 +2765,33 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     await x.agent.stop();
   });
 
-  it("a send during the hold starts its own turn and ends the hold", async () => {
+  // What this proves: a send during the hold takes the immediate path (no turn is tracked, so it is not steered),
+  // goes straight to the input, and cancels the hold. It does NOT prove both pending messages are answered before
+  // idle: with one turn_end for two messages, the worker settles at the first turn_end (see the next test).
+  it("a send during the hold is enqueued at once (not steered) and cancels the hold", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer, { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    x.agent.send("more");
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1); // only "redirect" was steered
+    expect(x.pulledText()).toEqual(["task", "more"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle"); // the hold was cancelled: the first turn_end settles at once
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  // Known edge (documented, not fixed): if the SDK answers the steered message and the held-period send as two
+  // separate turns, the worker settles idle at the first turn_end and the second turn auto-wakes it — one transient
+  // idle between them. Nothing is lost and the worker ends idle.
+  it("a send during the hold answered as two separate turns shows one transient idle between them, and ends idle", async () => {
     const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
     x.agent.start("task");
     await x.flush();
@@ -2570,13 +2799,22 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     await x.flush();
     x.emit(steerPendingEnd());
     await x.flush();
-    x.agent.send("more"); // no turn is tracked during the hold → immediate path, not a steer
+    x.agent.send("more");
     await x.flush();
-    expect(x.pulledText()).toContain("more");
+    x.emit(init); // the steered message's own turn
+    x.emit(said("BRAVO"));
     x.emit(turnEnd());
     await x.flush();
     expect(x.agent.status()).toBe("idle");
-    expect(x.statuses).toEqual(["idle"]);
+    x.emit(init); // then "more" as another turn (auto-wake on its first model frame)
+    x.emit(said("MORE"));
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle", "running", "idle"]);
+    expect(x.users().map((u) => u.content)).toEqual(["task", "redirect", "more"]); // each echoed once
     await x.agent.stop();
   });
 

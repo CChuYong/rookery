@@ -348,7 +348,7 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   // Interrupt the worker's current turn (query.interrupt) — keeps the session alive, further instructions possible. The worker-side counterpart of the master's session.stop.
   z.object({ type: z.literal("worker.interrupt"), id: z.string(), reqId: z.string().optional() }),
   // stop ONE listed background task of a live worker (session and turn untouched)
-  z.object({ type: z.literal("worker.task.stop"), id: z.string(), taskId: z.string(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("worker.task.stop"), id: z.string(), taskId: z.string().min(1).max(512), reqId: z.string().optional() }),
   // Recover a wedged worker: hard-kill the stuck subprocess and re-arm a lazy resume of the same session (→ idle, still usable). Unlike fleet.stop, non-terminal.
   z.object({ type: z.literal("worker.recover"), id: z.string(), reqId: z.string().optional() }),
   z.object({ type: z.literal("worker.checkpoints"), reqId: z.string(), id: z.string() }),

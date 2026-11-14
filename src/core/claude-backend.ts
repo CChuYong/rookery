@@ -137,13 +137,14 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     const sub = (msg as { subtype?: string }).subtype;
     if (sub === "background_tasks_changed") {
       // NOTE: this frame may also carry a top-level `session_id` — already re-emitted above (harmless/idempotent).
-      const bt = msg as { tasks?: Array<{ task_id?: string; task_type?: string; description?: unknown; ambient?: unknown }> };
-      const tasks = (bt.tasks ?? []).flatMap((t) => {
-        if (!t.task_id) return [];
+      const bt = msg as { tasks?: Array<{ task_id?: unknown; task_type?: unknown; description?: unknown; ambient?: unknown }> };
+      const tasks = (Array.isArray(bt.tasks) ? bt.tasks : []).flatMap((t) => {
+        // Same bounds as the edge path below: these ids/types flow into worker.tasks and the stop request.
+        if (typeof t?.task_id !== "string" || !t.task_id || t.task_id.length > 512) return [];
         const description = workflowText(t.description, 4_000);
         return [{
           taskId: t.task_id,
-          taskType: t.task_type ?? "task",
+          taskType: workflowText(t.task_type, 256) ?? "task",
           ...(description ? { description } : {}),
           ...(t.ambient === true ? { ambient: true } : {}),
         }];
@@ -438,8 +439,9 @@ class ClaudeSessionStream extends ClaudeStream {
     super(q, initialCostWatermark, speed, inputScope);
   }
 
-  // uuids of steered inputs accepted since the last main-thread result (see steerLeftForNextTurn).
-  private readonly steered = new Set<string>();
+  // Accepted steers not yet known to be consumed, by uuid. `judged` = already held one result for it
+  // (left for its own follow-up turn); see steerLeftForNextTurn and pendingSteers.
+  private readonly steered = new Map<string, { input: AgentInput; judged: boolean }>();
 
   // The SDK reads the streaming input ahead and folds a message that arrives mid-turn into the
   // in-flight turn, so steering is just a priority-tagged push. Never throws: false = caller queues.
@@ -453,8 +455,14 @@ class ClaudeSessionStream extends ClaudeStream {
     } catch {
       return false; // input closed (stream stopping/replaced)
     }
-    this.steered.add(uuid);
+    this.steered.set(uuid, { input, judged: false });
     return true;
+  }
+
+  // The inputs (the same values passed to steer()) accepted but not yet listed in a result's
+  // user_message_uuids. They sit in the SDK's in-memory input queue, so a killed subprocess loses them.
+  pendingSteers(): AgentInput[] {
+    return [...this.steered.values()].map((s) => s.input);
   }
 
   // The SDK folds a "next" message only at a tool boundary. One pushed after the model's last tool step stays in
@@ -462,12 +470,21 @@ class ClaudeSessionStream extends ClaudeStream {
   // user_message_uuids lists every uuid-stamped input the turn consumed, folded ones included, and omits a steer
   // left for the next turn (a uuid-less opener's result carries no list at all). Each steer is judged at the
   // first result after it was accepted only, so a producer that never reports the list holds at most once.
+  // A steer left for the next turn stays tracked (pendingSteers) until the following result: listed there or
+  // not, its own turn has run by then, so tracking ends (the same once-per-steer bound).
   protected override steerLeftForNextTurn(result: unknown): boolean {
     if (this.steered.size === 0) return false;
     const r = result as { user_message_uuid?: unknown; user_message_uuids?: unknown };
     const consumed = Array.isArray(r.user_message_uuids) ? r.user_message_uuids : typeof r.user_message_uuid === "string" ? [r.user_message_uuid] : [];
-    const pending = [...this.steered].some((id) => !consumed.includes(id));
-    this.steered.clear();
+    let pending = false;
+    for (const [id, s] of this.steered) {
+      if (consumed.includes(id) || s.judged) {
+        this.steered.delete(id);
+      } else {
+        s.judged = true;
+        pending = true;
+      }
+    }
     return pending;
   }
 }
