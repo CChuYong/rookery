@@ -1,0 +1,13 @@
+{"t":0,"agent":"a269606","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a89861a","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a269606","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":950160}
+{"t":0,"agent":"a89861a","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":1113962}
+{"t":0,"agent":"aabdc3d","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"afb6300","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a700bee","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a63c98a","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"aabdc3d","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":932325}
+{"t":0,"agent":"afb6300","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":958527}
+{"t":0,"agent":"a63c98a","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":967131}
+{"t":0,"agent":"a700bee","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":991093}
+{"t":0,"agent":"aae1568","agent_type":"untracked-native-fork","event":"agent_stop","success":true,"synthetic":true,"telemetry_status":"unmatched_stop","reason":"SubagentStop arrived without a matching SubagentStart; native Agent/Task start telemetry was not observed."}

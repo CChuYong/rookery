@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /Users/clover/workspace/clovot/apps/desktop/src/renderer && for f in components/WorkspaceHeaders.tsx components/MetricsView.tsx components/SessionMetrics.tsx components/MessageList.tsx ...",
+  "error": "Exit code 1\n== components/WorkspaceHeaders.tsx ==\n49:  // fixed panel has a way back. \"Right panel\" toggles Files·Git·(worker) Nested as\n62:        // label instead (same reasoning as #49a's tab rename). The legacy (!dock) toggle above keeps terminalTitle.\n99:      <span className=\"workspace-header-eyebrow eyebrow shrink-0 select-none font-mono text-[9px] uppercase tracking-[0.16em] text-muted/60\">{t(\"workspaceHeaders.workerEyebrow\")}</span>\n100:      <span className=\"workspace-header-title min-...",
+  "timestamp": "2026-11-13T16:04:38.529Z",
+  "retry_count": 2
+}

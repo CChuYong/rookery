@@ -1,0 +1,7 @@
+{
+  "tool_name": "StructuredOutput",
+  "tool_input_preview": "{\"input\":\"{\\\"real\\\": false, \\\"severity\\\": \\\"low\\\", \\\"effort\\\": \\\"S\\\", \\\"reason\\\": \\\"세 가지 요소 모두 코드 주석에 명시된 의도적 설계: 우측 패널 카드형 inset(T3 Code 스타일, dockview-theme.css:74-92 '지금 설계는 둥근 카드로 insert'), dock 그룹...",
+  "error": "Output does not match required schema: root: must have required property 'real', root: must have required property 'severity', root: must have required property 'effort', root: must have required property 'reason', root: must NOT have additional properties ('input' is not allowed)",
+  "timestamp": "2026-11-14T09:41:48.241Z",
+  "retry_count": 7
+}

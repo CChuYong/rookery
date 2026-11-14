@@ -27,6 +27,15 @@ function WorkerMetrics({ workerId }: { workerId: string }): JSX.Element | null {
   return <MetricsView items={items} provider={provider} />;
 }
 
+// Menu text for one listed task: the description cut to 80 characters (whole code points, never half a surrogate
+// pair) with an ellipsis, or the task type when the provider sent no description.
+const TASK_LABEL_MAX = 80;
+function taskMenuLabel(task: { type: string; description: string }): string {
+  const chars = Array.from(task.description.trim());
+  if (chars.length === 0) return task.type;
+  return chars.length > TASK_LABEL_MAX ? `${chars.slice(0, TASK_LABEL_MAX).join("")}…` : chars.join("");
+}
+
 // Keep the primary Worker status badge authoritative while adding a compact explanation for its background state.
 // This child subscribes directly so workflow heartbeats do not pull the whole App through a render.
 function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStopTask?: (taskId: string) => void }): JSX.Element | null {
@@ -69,7 +78,7 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
             y={menu.y}
             onClose={() => setMenu(null)}
             items={tasks.map((task) => ({
-              label: t("workspaceHeaders.stopTask", { type: task.type, description: task.description }),
+              label: t("workspaceHeaders.stopTask", { description: taskMenuLabel(task) }),
               onClick: () => onStopTask?.(task.id),
               hint: task.type,
             }))}

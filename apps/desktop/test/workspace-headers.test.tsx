@@ -61,6 +61,17 @@ describe("WorkerHeader background task list", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("truncates a long description to 80 characters with an ellipsis and falls back to the task type when it is empty", () => {
+    const long = "x".repeat(79) + "😀" + "tail that must not show";
+    const odd = [{ id: "b1", type: "local_bash", description: long }, { id: "b2", type: "monitor", description: "" }];
+    render(<WorkerHeader {...baseProps} worker={{ id: "wt6", label: "t", repoPath: "/r", status: "running", branch: null, model: null, tasks: odd } as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "백그라운드 작업" }));
+    const items = screen.getAllByRole("menuitem");
+    expect(items[0]).toHaveTextContent(`중지: ${"x".repeat(79)}😀…`); // the 80th character is a whole emoji, never half a surrogate pair
+    expect(items[0]).not.toHaveTextContent("tail");
+    expect(items[1]).toHaveTextContent("중지: monitor");
+  });
+
   it("does not reopen a stale menu when the tasks drop to empty and later reappear", () => {
     const w = { id: "wt5", label: "t", repoPath: "/r", status: "running", branch: null, model: null };
     const { rerender } = render(<WorkerHeader {...baseProps} worker={{ ...w, tasks } as never} />);

@@ -1,0 +1,73 @@
+{
+  "agents": [
+    {
+      "agent_id": "a26960680979d3238",
+      "agent_type": "workflow-subagent",
+      "started_at": "2026-11-13T16:21:43.288Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-13T16:37:33.448Z",
+      "duration_ms": 950160
+    },
+    {
+      "agent_id": "a89861a0463922c64",
+      "agent_type": "workflow-subagent",
+      "started_at": "2026-11-13T16:21:45.491Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-13T16:40:19.453Z",
+      "duration_ms": 1113962
+    },
+    {
+      "agent_id": "aabdc3dee89ffada9",
+      "agent_type": "workflow-subagent",
+      "started_at": "2026-11-13T19:00:13.350Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-13T19:15:45.675Z",
+      "duration_ms": 932325
+    },
+    {
+      "agent_id": "afb630041d2807a6c",
+      "agent_type": "workflow-subagent",
+      "started_at": "2026-11-13T19:00:15.527Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-13T19:16:14.054Z",
+      "duration_ms": 958527
+    },
+    {
+      "agent_id": "a700beedf02982086",
+      "agent_type": "workflow-subagent",
+      "started_at": "2026-11-13T19:00:16.666Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-13T19:16:47.759Z",
+      "duration_ms": 991093
+    },
+    {
+      "agent_id": "a63c98ae9753e5909",
+      "agent_type": "workflow-subagent",
+      "started_at": "2026-11-13T19:00:18.120Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-13T19:16:25.251Z",
+      "duration_ms": 967131
+    },
+    {
+      "agent_id": "aae15685352615c25",
+      "agent_type": "untracked-native-fork",
+      "started_at": "2026-11-14T08:09:22.763Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-11-14T08:09:22.763Z",
+      "synthetic": true,
+      "telemetry_status": "unmatched_stop",
+      "telemetry_note": "SubagentStop arrived without a matching SubagentStart; native Agent/Task start telemetry was not observed."
+    }
+  ],
+  "total_spawned": 6,
+  "total_completed": 7,
+  "total_failed": 0,
+  "last_updated": "2026-11-14T08:09:22.866Z"
+}

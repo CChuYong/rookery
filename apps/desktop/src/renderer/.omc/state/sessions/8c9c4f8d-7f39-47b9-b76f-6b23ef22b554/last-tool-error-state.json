@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd /Users/clover/workspace/clovot && node ~/.claude/skills/hallmark/scripts/sloplint.mjs \\\\\\n  apps/desktop/src/renderer/components/CapabilitiesPage.tsx \\\\\\n  apps/desktop/src/renderer/com...",
+  "error": "Exit code 1\napps/desktop/src/renderer/components/CapabilitiesPage.tsx\n  REFLEX 26b :1 no :active styling anywhere | fix: All eight states; guard: not a form control, no aria-disabled anywhere\n  REFLEX 26b :1 no :disabled styling anywhere\napps/desktop/src/renderer/components/capabilities/CapabilityLibraryTab.tsx\n  REFLEX 26b :1 no :active styling anywhere\n  REFLEX 26b :1 no :disabled styling anywhere\n  REFLEX 64 :132 font-mono on \"v\" at 11px (<span class=\"rounded-sm border border-line p…\">) | fix...",
+  "timestamp": "2026-11-13T16:39:00.191Z",
+  "retry_count": 2
+}
