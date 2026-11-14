@@ -24,14 +24,13 @@ export function SpeedControl({ speed, defaultSpeed = "standard", provider, model
   const availability = fastAvailability(provider, model, catalog);
   const requested = speed ?? defaultSpeed;
   const pending = pendingNextTurn || (observation && observation.requested !== requested);
-  const status = pending ? t("speed.pending")
-    : availability === "unsupported" && requested === "fast" ? t("speed.unsupported")
-    : observation?.state === "fast" ? t("speed.activeFast")
-    : observation?.state === "standard" ? t("speed.activeStandard")
-    : observation?.state === "cooldown" ? t("speed.cooldown")
-    : (observation || lastObservation) ? t(requested === "fast" ? "speed.requestedFast" : "speed.requestedStandard")
-    : t("speed.pending");
-  const explanation = [t("speed.hint"), status, observation?.reason, lastObservation ? t("speed.lastReported", { state: lastObservation.state }) : undefined, lastObservation?.reason, availability === "unknown" ? t("speed.availabilityUnknown") : undefined].filter(Boolean).join(". ");
+  const reported = pending ? lastObservation : observation ?? lastObservation;
+  const status = availability === "unsupported" && requested === "fast" ? t("speed.unsupported")
+    : reported?.state === "fast" ? t("speed.activeFast")
+    : reported?.state === "standard" ? t("speed.activeStandard")
+    : reported?.state === "cooldown" ? t("speed.cooldown")
+    : undefined;
+  const explanation = [status, reported?.reason].filter(Boolean).join(". ") || undefined;
   return (
     <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-meta text-muted">
       {onChange ? (
@@ -48,8 +47,6 @@ export function SpeedControl({ speed, defaultSpeed = "standard", provider, model
           <option value="fast" disabled={availability === "unsupported"}>{t("speed.fast")}</option>
         </select>
       ) : <span title={explanation}>{t("speed.inherited", { speed: requested === "fast" ? "Fast" : "Standard" })}</span>}
-      <span title={explanation}>{status}</span>
-      {availability === "unknown" && !observation && <span title={t("speed.hint")}>{t("speed.availabilityUnknown")}</span>}
     </span>
   );
 }

@@ -41,7 +41,7 @@ it("automation edit restores selected Fast, preserves it when unsupported, and s
   const onSubmit = vi.fn().mockResolvedValue(undefined);
   render(english(<AutomationForm job={init} repos={[{ name: "app", path: "/app" }]} onSubmit={onSubmit} onClose={vi.fn()} />));
   expect(screen.getByLabelText("Speed")).toHaveValue("fast");
-  expect(screen.getByText(/Fast unavailable for this model/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Speed")).toHaveAttribute("title", expect.stringContaining("Fast unavailable for this model"));
   await act(async () => fireEvent.click(screen.getByText("Save")));
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ speed: "fast" }));
 });

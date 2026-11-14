@@ -12,7 +12,7 @@ describe("speed intent and observations", () => {
     const onSpeed = vi.fn();
     show({ onSpeed, speedObservation: { requested: "fast", state: "unknown" } });
     expect(screen.getByLabelText("Speed")).toHaveValue("fast");
-    expect(screen.getByText("Fast requested; effective speed unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Fast requested; effective speed unknown")).toBeNull();
     expect(screen.queryByText("Fast active")).toBeNull();
     fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "standard" } });
     expect(onSpeed).toHaveBeenCalledExactlyOnceWith("standard");
@@ -22,27 +22,31 @@ describe("speed intent and observations", () => {
     show();
     expect(screen.getByLabelText("Speed")).toHaveValue("fast");
     expect(screen.getByRole("option", { name: "Fast" })).toBeDisabled();
-    expect(screen.getByText("Fast unavailable for this model; preference retained")).toBeInTheDocument();
+    expect(screen.getByLabelText("Speed")).toHaveAttribute("title", "Fast unavailable for this model; preference retained");
   });
-  it("missing capability metadata permits Fast and explains unknown availability", () => {
+  it("missing capability metadata permits Fast without status messages", () => {
     show();
     expect(screen.getByRole("option", { name: "Fast" })).not.toBeDisabled();
-    expect(screen.getByText("Availability unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Availability unknown")).toBeNull();
+    expect(screen.queryByText("Applies next turn")).toBeNull();
+    expect(screen.getByLabelText("Speed")).not.toHaveAttribute("title");
   });
-  it("shows pending next turn instead of stale active state", () => {
+  it("keeps pending state out of the composer chrome", () => {
     show({ speed: "standard", speedObservation: { requested: "fast", state: "fast" } });
-    expect(screen.getByText("Applies next turn")).toBeInTheDocument();
+    expect(screen.queryByText("Applies next turn")).toBeNull();
     expect(screen.queryByText("Fast active")).toBeNull();
   });
   it("makes cooldown and provider reason inspectable", () => {
     show({ speedObservation: { requested: "fast", state: "cooldown", reason: "account cooling down" } });
-    expect(screen.getByText("Fast cooldown")).toHaveAttribute("title", expect.stringContaining("account cooling down"));
+    expect(screen.queryByText("Fast cooldown")).toBeNull();
+    expect(screen.getByLabelText("Speed")).toHaveAttribute("title", expect.stringContaining("account cooling down"));
   });
 });
 
-it("configuration invalidation shows next-turn pending while retaining historical detail", () => {
+it("configuration invalidation retains historical detail only in the tooltip", () => {
   show({ speedPending: true, speedLastObservation: { requested: "fast", state: "fast", reason: "last turn only" } });
-  expect(screen.getByText("Applies next turn")).toHaveAttribute("title", expect.stringContaining("last turn only"));
+  expect(screen.queryByText("Applies next turn")).toBeNull();
+  expect(screen.getByLabelText("Speed")).toHaveAttribute("title", expect.stringContaining("last turn only"));
   expect(screen.queryByText("Last reported: Fast")).toBeNull();
 });
 
@@ -56,5 +60,5 @@ it.each([
   show({ model: "gpt-6.1-sol", speedObservation: { requested: "fast", state: "unknown" } });
   expect(screen.getByRole("option", { name: "Fast" })).not.toBeDisabled();
   expect(screen.queryByText("Fast unavailable for this model; preference retained")).toBeNull();
-  expect(screen.getByText("Fast requested; effective speed unknown")).toBeInTheDocument();
+  expect(screen.queryByText("Fast requested; effective speed unknown")).toBeNull();
 });
