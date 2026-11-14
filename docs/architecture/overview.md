@@ -27,9 +27,9 @@ Two directions cross the WS boundary: **commands flow in**, **`CoreEvent`s flow 
    • subscribes to EventBus channels; correlates replies by reqId
         │  domain command
         ▼
-  SessionManager ──► MasterAgent.runTurn(text)        (src/core/master-agent.ts)
+  SessionManager ──► MasterAgent.enqueueTurn(text, {images?,speed?})        (src/core/master-agent.ts)
         │                 │
-        │                 ├─► query()            SDK turn (string prompt + resume)
+        │                 ├─► query()            provider turn (finite input + resume)
         │                 ├─► MCP tool servers   memory / repos / fleet (+ capability overlay)
         │                 └─► FleetOrchestrator  spawn/stop/inspect workers
         │                          │
@@ -52,7 +52,7 @@ Key properties:
 
 - **Inbound is schema-validated** (`clientMessageSchema`); **outbound is not** (plain `JSON.stringify` of `ServerMessage`). `reqId` correlates a request with its response; some fire-and-forget messages have none. See [../reference/protocol.md](../reference/protocol.md).
 - **One emit, many channels.** `EventBus.emit` always delivers to the event's `sessionId`; additionally to `@fleet` for any `worker.*` event, and to `@all` for everything. A desktop "mission control" view subscribes to `@all` alone and sees every session and the whole fleet live; per-session subscriptions are deduped against `@all`. Each listener is wrapped in try/catch so one bad listener can't break fan-out. See [../reference/events.md](../reference/events.md).
-- **Master vs worker input models differ** — master gets a string prompt + `resume`; worker gets a streaming `MessageQueue`. This distinction is the spine of the codebase; see [master-worker-turn.md](master-worker-turn.md).
+- **Master vs worker input models differ** — master gets finite text/native image input + `resume`; worker gets a streaming `MessageQueue<AgentInput>`. This distinction is the spine of the codebase; see [master-worker-turn.md](master-worker-turn.md).
 - **Per-session capability overlay.** `makeCanUseTool` and `makeCapabilities` are keyed off the session's `externalKey`, so a Slack-origin session routes approvals to the Slack thread and gains the `read_thread` tool, while every session gains `schedule_*`. Wired in `startDaemon()`.
 
 ## Ports and adapters
@@ -61,12 +61,15 @@ Key properties:
 
 | Port | Real adapter | Fake (tests) |
 |---|---|---|
-| `QueryFn` (SDK `query()`) | `@anthropic-ai/claude-agent-sdk` `query` | `test/helpers/fake-query.ts` (`fakeQuery`) |
+| `AgentBackend` (provider turns/streams) | `ClaudeBackend` / `CodexBackend` | fake backend/query and Codex app-server transports |
+| `ImageResolver` | `ImageStore` (`src/daemon/image-store.ts`) | injected resolver or temporary real ImageStore |
 | `GitOps` (all git/gh shell-outs) | `RealGitOps` (`src/core/git-ops.ts`) | `FakeGitOps` |
 | `Repositories` (SQLite) | `new Repositories(openDb(path))` | `openDb(":memory:")` |
 | `SlackClient` / slack config | bolt Socket Mode (`src/slack/`) | injected resolvers |
 
 **All wiring happens in exactly one place: `startDaemon()` of `src/daemon/server.ts`** — the single composition root. It opens the DB, constructs the `EventBus`, `Settings`, `FleetOrchestrator`, `SessionManager`, the Slack controller, the automation `Scheduler`/`Dispatcher`, the usage collector, and the WS server, then injects the ports into the core as interfaces. To add a dependency, assemble it there and pass it in; the core only ever receives interfaces. This is why unit tests can run the whole engine without a real SDK, git, or network (see [../guides/testing.md](../guides/testing.md)).
+
+The daemon owns immutable private image assets and SQLite metadata, exposing authenticated bounded upload/get. Core sees only the image resolution port; wire events and persisted drafts/history retain refs rather than bytes. Speed selection is separate from the provider report, and results carry accounting quality. See [native images](../reference/images.md) and [speed/accounting](../reference/speed.md).
 
 ## Where to go deeper
 

@@ -23,7 +23,7 @@ The core never imports WS/CLI/Slack/Electron; it receives ports as interfaces, s
 - `fakeQuery(script, opts?)` (`test/helpers/fake-query.ts:56`) — **finite**: it runs through the script once and the generator **terminates**. This matches the **master's** single-shot turn model (string prompt + `resume`).
 - `fakeStreamingQuery(responder)` (`test/helpers/fake-query.ts:83`) — faithful to the streaming-input SDK: it stays alive per `MessageQueue` message until the input is closed. This matches the **worker** model and exposes the "stay idle after a turn" lifecycle.
 
-⚠️ **Caveat:** `fakeQuery` is finite, so the worker reaches `done` when the script ends. A **real** streaming iterator only ends when its input is closed. This gap hides happy-path lifecycle bugs — **don't treat green `fakeQuery` tests as end-to-end proof** of worker lifecycle; use `fakeStreamingQuery` for worker-lifecycle tests.
+⚠️ **Caveat:** `fakeQuery` is finite, so a live worker reaches `stopped` when the script ends. A **real** streaming iterator only ends when its input is closed. This gap hides happy-path lifecycle bugs — **don't treat green `fakeQuery` tests as end-to-end proof** of worker lifecycle; use `fakeStreamingQuery` for worker-lifecycle tests.
 
 ## Capturing `query()` options
 
@@ -74,3 +74,9 @@ npm -w apps/desktop run typecheck
 Node 22 is mandatory — `better-sqlite3` (used by in-memory test DBs) is built for ABI 127; the wrong Node fails to load it. See [AGENTS.md](../../AGENTS.md).
 
 Commit trailer: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+
+## Speed/images integration smoke
+
+After activating Node 22, run `npm run smoke:speed-images`. The runner invokes the existing focused suites rather than copying assertions. `image-pipeline.test.ts` starts the production daemon on an OS-assigned loopback port with a fresh temporary home and real SQLite, authenticates real WebSockets, uploads/reads/sends a native image, rejects tampered refs and oversized frames, restarts, replays refs, and confirms deletion retains assets. Startup auth/model/usage collectors are explicitly mocked, and provider turns use injected fakes; no user daemon or provider account is contacted.
+
+The companion real Connection/desktop WsClient tests cover early queue acceptance, serialized image-only inputs, correlated retry history and Side preparation failure. Focused pricing/version/speed and desktop import/draft/pending/state suites run in the same command. These checks prove transport/persistence/client behavior, not account entitlement, effective Fast performance, or native rendered layout. For rendered inspection, build both projects and use the [isolated image UI fixture](../../scripts/demo/images/README.md). Live adapter probes require separate explicit account authorization and should not be repeated by this smoke command.

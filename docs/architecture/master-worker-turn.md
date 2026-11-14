@@ -8,35 +8,35 @@ The master and the worker both wrap the SDK `query()`, but they feed it **two di
 
 | | Master (`MasterAgent`) | Worker (`Worker`) |
 |---|---|---|
-| Input to `query()` | a **single string** `prompt` per turn | a long-lived **`MessageQueue`** (streaming input) |
+| Input to `query()` | a string, or **finite one-message native image iterable**, per turn | a long-lived **`MessageQueue`** (streaming input) |
 | Continuation | SDK `resume: sdk_session_id` (new `query()` each turn) | same `query()` stays alive; follow up via `send()` |
 | Serialization | per-session `turnChain` promise | SDK pops the queue at turn boundaries |
 | MCP servers | memory/repos/fleet + per-source overlay | **none** (default `claude_code` toolset only) |
 | `cwd` | session cwd | the worker's worktree |
 | Lifecycle end | each turn's generator ends naturally | only ends when the queue is **closed** |
 
-### Master: string prompt + resume
+### Master: finite input + resume
 
-`MasterAgent.runTurn(text, override?)` (`src/core/master-agent.ts:186`) chains onto `turnChain`:
+`MasterAgent.enqueueTurn(text, override?)` validates the complete text/image input and chains onto `turnChain`, returning `{completion: Promise<void>}`. `runTurn` awaits that promise; WS `session.send` acknowledges acceptance immediately:
 
 ```
 this.turnChain = (this.turnChain.then(() => this.doTurn(...))).catch(() => {})
 ```
 
-Turns are **strictly serialized per session**: two concurrent `runTurn` calls run one at a time, and a failed turn does not contaminate the chain (its error still propagates to that caller, but `turnChain` itself is protected by `.catch`). `doTurn` (`master-agent.ts:211`) builds one `query()` call with `prompt: userText` and, if a prior turn established one, `resume: this.sdkSessionId`. The SDK session id is captured from the `result` message (`master-agent.ts:336`) and persisted via `repos.setSdkSessionId`, so the next turn resumes context.
+Turns are **strictly serialized per session**: two concurrent `runTurn` calls run one at a time, and a failed turn does not contaminate the chain (its error still propagates to that caller, but `turnChain` itself is protected by `.catch`). `doTurn` (`master-agent.ts:211`) builds one `query()` call with a string input for text-only turns or native resolved images for an image-bearing turn and, if a prior turn established one, `resume: this.sdkSessionId`. The SDK session id is captured from the `result` message (`master-agent.ts:336`) and persisted via `repos.setSdkSessionId`, so the next turn resumes context.
 
 `idle()` returns `turnChain` and is used by the shutdown drain (`SessionManager.drain`, `session-manager.ts:142`) so `db.close()` runs after the master's DB writes finish.
 
 ### Worker: streaming MessageQueue
 
-`Worker` holds one `MessageQueue` (`src/core/message-queue.ts`) and passes it as `prompt` to `query()` inside `consume()` (`worker.ts:253`). The queue is an `AsyncIterable<SDKUserMessage>`: `push(text)` either hands the message to a waiting iterator or buffers it; `close()` resolves all waiters with `done:true`, which is the **only** way the SDK generator ends (`worker.ts:375`). Because the iterator never ends on its own, a real worker terminates by `stop()` (close + abort), not by running out of input.
+`Worker` holds one `MessageQueue` (`src/core/message-queue.ts`) and passes it as `prompt` to `query()` inside `consume()` (`worker.ts:253`). The provider-neutral queue is an `AsyncIterable<AgentInput>`; the adapter wraps native provider messages: `push(input)` either hands the message to a waiting iterator or buffers it; `close()` resolves all waiters with `done:true`, which is the **only** way the SDK generator ends (`worker.ts:375`). Because the iterator never ends on its own, a real worker terminates by `stop()` (close + abort), not by running out of input.
 
 `start(task?)` (`worker.ts:90`): with a task it pushes it and records the first user message; task-less it goes straight to `idle` and waits for the first `send()`. `resume()` (`worker.ts:106`) restarts a saved SDK session after a daemon restart without a new task (continuing the persisted `seq`).
 
 ## Turn lifecycle
 
 ### Master turn (`doTurn`)
-1. Resolve per-turn `model`/`effort`/`permissionMode` (override → resolver/default), `caps = capabilities?.()`.
+1. Resolve per-turn speed intent, image bytes and `model`/`effort`/`permissionMode` (override → resolver/default), `caps = capabilities?.()`.
 2. Emit `master.status running`, persist session status `running`.
 3. Record the user message (`master.message`) — **unless** `asNotice` (worker-notification turns are recorded as `master.notice`, no relabel). Kick off `maybeLabel` concurrently.
 4. Immediately before `startTurn`, resolve the target's secret-free managed projection, publish desired state, fail before provider spawn if blocked, and pass `runtimeKey` + `capabilities`. Claude materializes/loads the revision synchronously; successful stream creation marks it applied.
@@ -61,7 +61,7 @@ Same message taxonomy, with extra handling:
 
 When the master/worker is mid-turn and a new instruction arrives, the user echo is recorded **at the next turn boundary**, not the moment it is sent. Why: the worker's `MessageQueue` only hands the message to the SDK on the next turn, so recording the echo immediately would wedge it into the middle of the in-progress turn's output.
 
-- **Worker** (`worker.ts:138` `send`): if `idle`, start a new turn immediately (echo + checkpoint now, transition `running`). If `running`, push `deferred.push({text, clientMsgId})`. At the next `result` (`worker.ts:364`), `deferred.shift()` (FIFO) records the user message and re-runs `onTurnStart` so the checkpoint is taken right before the actual turn. The desktop shows a `pendingByWorker` "waiting" bubble meanwhile and reconciles it with the echo via `clientMsgId`.
+- **Worker** (`worker.ts:138` `send`): if `idle`, start a new turn immediately (echo + checkpoint now, transition `running`). If `running`, push a deferred entry containing text, image refs, captured speed and `clientMsgId`. At the next `result` (`worker.ts:364`), `deferred.shift()` (FIFO) records the user message and re-runs `onTurnStart` so the checkpoint is taken right before the actual turn. The desktop shows a `pendingByWorker` "waiting" bubble meanwhile and reconciles it with the echo via `clientMsgId`.
 - **Master** parity: serialization is via `turnChain` (a follow-up `runTurn` simply queues), and worker-completion notifications coalesce via `notifyWorker` (`master-agent.ts:194`) — buffered into **one** follow-up turn flushed when the current turn ends, recorded as `master.notice` (`asNotice`). If that flush turn fails, the lines are persisted to `pending_notifications` for retry (drained by `SessionManager.build`, `session-manager.ts:71`). Stranded rows are also re-drained in-process: every subsequent notification flush prepends them (older first), and every user `runTurn` re-injects them as a follow-up notice turn — a live session no longer needs a daemon restart to retry.
 
 ## Model / effort / name as resolvers
@@ -120,3 +120,11 @@ symlinks outside that owned set are never traversed.
 `SessionManager` (`src/core/session-manager.ts`) owns the live `Map<id, Session>` and lazily rebuilds a cold session from its DB row on `get` (`session-manager.ts:93`). `create`/`getOrCreateByKey` derive `origin`/`originRef` from the `external_key` prefix (`deriveOrigin`: `slack:` / `automation:` / else `ui`). The `UI_FLEET_SESSION_KEY` / `AUTOMATION_FLEET_SESSION_KEY` container sessions are hidden from `list()`.
 
 See also: [fleet-lifecycle.md](./fleet-lifecycle.md), [automation.md](./automation.md), `../reference/events.md`.
+
+## Speed and native images at the turn boundary
+
+Core receives `AgentInput` through an injectable `ImageResolver`; the daemon owns storage and composition. Queue state contains only refs. Validation rejects the whole invalid input before acceptance, and dispatch resolves again before an echo/provider call. The deferred FIFO keeps each message's images and requested speed together. Claude's Worker input pump awaits its flag control before native delivery; a control failure is owned by the adapter and becomes a visible original error. Master/Side image input is finite, preserving natural completion instead of leaving a streaming queue open. Codex sends image data URLs and `serviceTierForTurn` per native turn.
+
+`master.speed` / Worker `speed` are persisted observations, separate from selected preference. Cost results carry captured requested speed and reported/estimated/unavailable quality. Cold-resume incomplete accounting remains incomplete, and budgeted Workers stop at boundaries rather than continuing with an unknown total. Details: [speed](../reference/speed.md), [image retention and retry](../reference/images.md).
+
+Queue acceptance lets the desktop clear the accepted draft and immediately compose a follow-up while work continues. Echoes and pre-echo errors retain `clientMsgId`; a dispatch failure includes refs in `retryInput` so replay can restore the same input. Draft revision guards prevent a late acceptance from clearing a newer draft, and target/generation guards prevent late imports from crossing navigation. This adds no durable server queue. Same-provider forks share native image history and refs; cross-provider forks retain the existing textual summary only, with newly attached images delivered natively.
