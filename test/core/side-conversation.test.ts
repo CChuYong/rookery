@@ -102,6 +102,18 @@ describe("SideConversationManager", () => {
     await expect(manager.create({ sourceKind: "worker", sourceId: "w1" })).rejects.toThrow(/no provider context/);
   });
 
+  it("closes a prepared Side once when cleanup calls overlap and never starts it afterward", async () => {
+    const h = harness();
+    const prepared = await h.manager.prepareStart({ sourceKind: "worker", sourceId: "w1", text: "why?" });
+    await Promise.all([h.manager.close(prepared.id), h.manager.close(prepared.id), h.manager.closeAll()]);
+    prepared.start();
+    await h.manager.close(prepared.id);
+    expect(h.turns).toEqual([]);
+    expect(h.cleanup).toHaveBeenCalledTimes(1);
+    expect(h.emitted).toEqual([expect.objectContaining({ type: "side.status", status: "closed" })]);
+    await expect(h.manager.idle(prepared.id)).rejects.toThrow("unknown Side conversation");
+  });
+
   it("rejects overlapping follow-ups and cleans up only the Side conversation", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

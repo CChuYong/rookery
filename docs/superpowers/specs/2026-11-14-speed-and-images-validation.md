@@ -62,6 +62,26 @@ Final commands ran once after the Task 5 runner changes. All exited 0. Documenta
 | `npm run build` | Passed | `/tmp/task5-root-build.log` |
 | `npm -w apps/desktop run build` | Passed after root build | `/tmp/task5-desktop-build.log` |
 
+## Final review lifecycle fix
+
+The whole-branch review at `ee7c46a` accepted Task 5 evidence and found one P2: a Side fork could finish after its owning Connection was disposed, acknowledge a dead client, and start an unowned provider turn. The final fix records disposal before draining owned Sides, closes a subsequently prepared Side before acknowledgement/execution, and rolls back when acknowledgement throws without attempting another send through the broken sender. Concurrent Side closes share one cleanup task. Master and Worker lifetimes remain independent of client disconnects.
+
+The actual Connection + SideConversationManager regression gates a fake Codex-master fork, disposes before release, then proves **0 provider starts, 1 cleanup, no registered Side and 0 late acknowledgements**, for both text and image-only input. Persistent sender failure settles the request without rejection or a second send; disposal during acknowledgement and overlapping/repeated closes are also covered. Existing unreadable-during-fork rejection and successful acknowledgement-before-first-event/native prepared-byte delivery still pass.
+
+Fresh post-fix checks (Node 22.23.0; earlier evidence above is retained):
+
+| Command | Result | Log |
+|---|---|---|
+| `npx vitest run test/daemon/side-image-start.test.ts test/core/side-conversation.test.ts` before fix | Expected RED: **5 failed / 9 passed** | `/tmp/final-fix-red.log` |
+| `npx vitest run test/daemon/side-image-start.test.ts test/core/side-conversation.test.ts test/daemon/connection.test.ts test/core/image-transport.test.ts test/daemon/desktop-image-acceptance.test.ts test/daemon/image-pipeline.test.ts` | **6 files / 112 tests passed** | `/tmp/final-fix-focused.log` |
+| `npm run typecheck` | Passed | `/tmp/final-fix-root-typecheck.log` |
+| `npm -w apps/desktop run typecheck` | Passed | `/tmp/final-fix-desktop-typecheck.log` |
+| `npm test` | **116 files / 1,464 tests passed** | `/tmp/final-fix-root-suite.log` |
+| `npm run build` | Passed | `/tmp/final-fix-root-build.log` |
+| `npm run smoke:speed-images` | **6 root files / 35 tests + 8 desktop files / 79 tests passed** (114 total) | `/tmp/final-fix-smoke.log` |
+
+The reusable smoke was rerun once after the fix and includes the six new Connection/Side owner-lifetime cases; its existing React `act` warnings remain, with no failed test or unhandled rejection. This server-only lifecycle fix changes no shared wire contracts or renderer code, so the earlier full desktop suite/build and eight visual captures remain applicable. No paid provider probes, native screenshots, user configuration/authentication or user daemon operations were repeated. Scoped independent rereview and the completion audit remain controller-owned.
+
 ## Actual provider acceptance (controller evidence)
 
 The following commands were already executed once, with no tool events, synthetic red-left/blue-right PNG input, isolated configuration/cwd and temporary in-memory or target-local authentication. No auth values or provider session ids are recorded here. **Do not automatically rerun paid probes.** These are actual adapter/provider checks, separate from full daemon and rendered UI tests.
@@ -99,6 +119,21 @@ The controller uses CUA with the portable synthetic [fixture](../../../scripts/d
 | Narrow Side follow-up | `scene-1794662033751.png` | 1840×1400 physical; 920×700 logical | Second image-only input remains separate; completed scrollable history |
 
 All eight saved PNGs were opened and visually inspected by the controller. Their PNG header dimensions were independently checked during Task 5. Controls remained reachable, images contained, and no actionable overlap/cutoff was observed. Side's title wraps and its long context subtitle truncates normally; scrollable history clips old offscreen content as intended. Native picker import, removal/reattach, image-only/mixed sends, full-app draft restoration and Cmd-R committed-history restoration were exercised through CUA. Clipboard/drop/cancel/error paths have automated test coverage; they were **not** manually exercised as OS gestures. These synthetic UI captures verify requested wide/narrow rendering, not live provider behavior.
+
+## Controller decisions
+
+The controller's durable rulings from the implementation ledger are collected here with their tradeoffs:
+
+- Proceed autonomously through design/plan gates under the user's delegated workflow; differing preferences may require rework.
+- Offer Standard/Fast with explicit Standard defaults and defer Ultrafast; this changes implicit inherited provider speed behavior while keeping known pricing and the requested scope.
+- Require verified Codex CLI 0.169.0 for per-turn speed overrides; older installations must upgrade.
+- Keep tier-aware Codex USD estimates instead of native cumulative accounting to avoid fork/resume double counting; subscription usage can differ and the UI labels estimates.
+- Retain immutable image assets under the 1 GiB quota with no implicit GC to protect draft/fork refs; future explicit maintenance may be needed for disk space.
+- Add narrow `session.setSpeed` glue so a selection persists without an empty provider turn; it extends the protocol without redesigning execution.
+- Treat replayed speed observations as historical until fresh execution reports state, rather than adding configuration-version identity; reconnect/config changes initially show unknown effective state.
+- Recognize authoritative Codex catalog ids `priority` and `fast` as Fast capability, preserving the `fast` turn request alias; compatibility depends on ids, never display names.
+- Add validated Master enqueue acceptance plus persisted optional Worker `clientMsgId` to keep long-turn drafts responsive and distinguish repeated image-only echoes after reconnect; internal `runTurn` completion, serialized turns and visible asynchronous failures remain intact, with no durable queue redesign.
+- Correlate pre-echo Master failures by optional `clientMsgId` and retain reference-only retry input so missing assets cannot strand pending bubbles; ordinary post-echo provider failures keep their existing behavior.
 
 ## Retained limitations
 

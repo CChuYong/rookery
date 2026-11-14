@@ -62,6 +62,7 @@ interface SideConversation {
   effort?: string;
   running: boolean;
   closing: boolean;
+  closeTask: Promise<void> | null;
   abort: AbortController | null;
   stream: AgentStream | null;
   task: Promise<void>;
@@ -110,6 +111,7 @@ export class SideConversationManager {
       effort: input.effort?.trim() || source.effort,
       running: false,
       closing: false,
+      closeTask: null,
       abort: null,
       stream: null,
       task: Promise.resolve(),
@@ -172,6 +174,12 @@ export class SideConversationManager {
   async close(id: string): Promise<void> {
     const side = this.conversations.get(id);
     if (!side) return;
+    // Disposal, failed acknowledgement and explicit close can all race to release one Side.
+    await (side.closeTask ??= this.closeSide(side));
+  }
+
+  private async closeSide(side: SideConversation): Promise<void> {
+    const { id } = side;
     side.closing = true;
     await this.stop(id);
     await side.task.catch(() => {});

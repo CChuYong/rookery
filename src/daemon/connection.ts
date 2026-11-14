@@ -147,6 +147,7 @@ function redactWriteOnlyValues(error: unknown, values: Record<string, string> | 
 export class Connection {
   private readonly unsubs = new Map<string, () => void>();
   private readonly ownedSideIds = new Set<string>();
+  private disposed = false;
 
   constructor(
     private readonly socket: ClientSocket,
@@ -291,11 +292,23 @@ export class Connection {
         if (!this.sides) return this.reply({ type: "error", message: "Side conversations unavailable", reqId: msg.reqId });
         const images = acceptImages(this.images, msg.images);
         const prepared = await this.sides.prepareStart({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort, text: msg.text, images });
+        // A Side belongs to this connection, unlike independent Master/Worker execution.
+        // Its asynchronous fork may finish after dispose() has drained the owned ids.
+        if (this.disposed) {
+          await this.sides.close(prepared.id);
+          return;
+        }
         this.ownedSideIds.add(prepared.id);
         // Preparation has resolved every image after the async fork; it can reject only before this ack.
         // Execution performs no further input I/O and emits its first event after the client knows the id.
-        this.reply({ type: "side.started", sideId: prepared.id, reqId: msg.reqId });
-        prepared.start();
+        try {
+          this.reply({ type: "side.started", sideId: prepared.id, reqId: msg.reqId });
+        } catch {
+          this.ownedSideIds.delete(prepared.id);
+          await this.sides.close(prepared.id);
+          return; // The sender failed; a second error reply would fail on the same socket.
+        }
+        if (!this.disposed) prepared.start();
         return;
       }
       case "side.send": {
@@ -863,6 +876,8 @@ export class Connection {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const off of this.unsubs.values()) off();
     this.unsubs.clear();
     for (const id of this.ownedSideIds) void this.sides?.close(id);
