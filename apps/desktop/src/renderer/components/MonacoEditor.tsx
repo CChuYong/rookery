@@ -96,19 +96,19 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       {/* external-change / error banner — reveals via slide-down (Monaco's automaticLayout tracks the reduced height). */}
       <Collapse open={banner !== null}>
         {banner === "changed" ? (
-          <div className="flex items-center justify-between gap-2 border-b border-run/30 bg-run/12 px-3 py-1.5 text-[12px] text-run">
+          <div className="flex items-center justify-between gap-2 border-b border-run/30 bg-run/12 px-3 py-1.5 text-ui text-run">
             <span>{t("monacoEditor.changedOnDisk")}</span>
             <button onClick={reload} className="rounded border border-run/40 px-2 py-0.5 transition-colors hover:bg-run/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.reloadFromDisk")}</button>
           </div>
         ) : banner === "toolarge" ? (
-          <div className="border-b border-line bg-raised px-3 py-1.5 text-[12px] text-muted">{t("monacoEditor.tooLarge")}</div>
+          <div className="border-b border-line bg-raised px-3 py-1.5 text-ui text-muted">{t("monacoEditor.tooLarge")}</div>
         ) : banner === "saveError" ? (
-          <div className="flex items-center justify-between gap-2 border-b border-fail/30 bg-fail/12 px-3 py-1.5 text-[12px] text-fail">
+          <div className="flex items-center justify-between gap-2 border-b border-fail/30 bg-fail/12 px-3 py-1.5 text-ui text-fail">
             <span>{t("monacoEditor.saveError")}</span>
             <button onClick={() => saveRef.current()} className="rounded border border-fail/40 px-2 py-0.5 transition-colors hover:bg-fail/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.saveRetry")}</button>
           </div>
         ) : banner === "error" ? (
-          <div className="border-b border-line bg-raised px-3 py-1.5 text-[12px] text-muted">{t("monacoEditor.openError")}</div>
+          <div className="border-b border-line bg-raised px-3 py-1.5 text-ui text-muted">{t("monacoEditor.openError")}</div>
         ) : null}
       </Collapse>
       <div ref={hostRef} className="min-h-0 flex-1" />

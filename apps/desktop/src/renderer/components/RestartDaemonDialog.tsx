@@ -16,17 +16,17 @@ export function RestartDaemonDialog({ onConfirm, onClose, busy }: { onConfirm: (
   useFocusTrap(panelRef);
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("restartDaemonDialog.title")}
-        className={cn("flex w-full max-w-md flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={cn("flex w-full max-w-md flex-col gap-3 rounded-xl border border-line bg-surface p-5 shadow-lg", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
       >
-        <div className="text-[14px] font-semibold">{t("restartDaemonDialog.title")}</div>
-        <p className="text-[12.5px] leading-relaxed text-muted">{t("restartDaemonDialog.body")}</p>
+        <div className="text-title font-medium">{t("restartDaemonDialog.title")}</div>
+        <p className="text-ui leading-relaxed text-muted">{t("restartDaemonDialog.body")}</p>
         <div className="mt-1 flex justify-end gap-2">
           <Button variant="outline" size="sm" autoFocus onClick={dismiss}>{t("common.cancel")}</Button>
           <Button variant="primary" size="sm" onClick={onConfirm} loading={busy}>{t("restartDaemonDialog.confirm")}</Button>

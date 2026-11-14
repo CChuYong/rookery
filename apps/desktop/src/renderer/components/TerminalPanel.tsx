@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, SquareTerminal, X } from "lucide-react";
 import { useTermStore } from "../store/terminals.js";
 import { TerminalView } from "./TerminalView.js";
 import { useResizableHeight } from "../lib/useResizableHeight.js";
@@ -39,24 +39,42 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
   return (
     <div className={cn("flex flex-col bg-ink", dock ? "h-full" : "shrink-0 border-t border-line")} style={dock ? undefined : { height }}>
       {!dock && <div onPointerDown={startDrag} className={cn("h-1.5 shrink-0 cursor-row-resize hover:bg-accent/30", resizing && "bg-accent/40")} />}
-      <div role="tablist" className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
-        {group.tabs.map((tab) => (
-          <div key={tab.id} className={cn("group flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11px]", tab.id === group.activeTabId ? "bg-raised text-fg" : "text-muted hover:bg-raised/60")}>
-            <button role="tab" aria-selected={tab.id === group.activeTabId} onClick={() => setActive_(sessionId, tab.id)} className={cn("max-w-[120px] truncate", tab.exited && "text-stop line-through")}>{tab.title}</button>
-            <button onClick={() => close(tab.id)} aria-label={t("terminalPanel.closeTerminal")} className="text-muted opacity-0 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={11} /></button>
+      {group.tabs.length === 0 ? (
+        // Empty page: one quiet 30px row (a "New terminal" action + the hint) instead of an empty tab strip over a
+        // placeholder, so the collapsed group (dockview header + this row) is ~60px and reads like an IDE panel.
+        <div className="flex h-[30px] shrink-0 items-center gap-3 px-2">
+          <button
+            onClick={() => void newTab()}
+            aria-label={t("terminalPanel.newTerminal")}
+            className="flex h-6 shrink-0 items-center gap-1.5 rounded-sm px-1.5 text-ui text-fg-dim transition-colors hover:bg-raised hover:text-fg"
+          >
+            <Plus size={14} /> {t("terminalPanel.newTerminal")}
+          </button>
+          <div className="min-w-0 truncate text-meta text-faint">{subId ? t("terminalPanel.emptyHintWorker") : t("terminalPanel.emptyHint")}</div>
+        </div>
+      ) : (
+        <>
+          {/* Terminal tabs: a slim strip on the canvas colour (the dockview group header above already carries the
+              panel's chrome), flat tabs separated by hairlines, the active one in fg with a 1px accent underline. */}
+          <div role="tablist" className="flex h-7 shrink-0 items-center px-1">
+            {group.tabs.map((tab) => {
+              const active = tab.id === group.activeTabId;
+              return (
+                <div key={tab.id} className={cn("group relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-ui", active ? "text-fg" : "text-muted hover:text-fg-dim")}>
+                  <SquareTerminal size={12} className="shrink-0 text-faint" aria-hidden />
+                  <button role="tab" aria-selected={active} onClick={() => setActive_(sessionId, tab.id)} className={cn("max-w-[140px] truncate", tab.exited && "text-stop line-through")}>{tab.title}</button>
+                  <button onClick={() => close(tab.id)} aria-label={t("terminalPanel.closeTerminal")} className="rounded-sm text-muted opacity-0 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={12} /></button>
+                  {active && <span className="pointer-events-none absolute inset-x-2 bottom-0 h-px bg-accent" aria-hidden />}
+                </div>
+              );
+            })}
+            <button onClick={() => void newTab()} aria-label={t("terminalPanel.newTerminal")} title={t("terminalPanel.newTerminal")} className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-sm text-muted hover:bg-raised hover:text-fg"><Plus size={14} /></button>
           </div>
-        ))}
-        <button onClick={() => void newTab()} aria-label={t("terminalPanel.newTerminal")} className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-raised hover:text-accent"><Plus size={13} /></button>
-      </div>
-      <div className="relative min-h-0 flex-1">
-        {group.activeTabId
-          ? <div className="absolute inset-0 p-1.5"><TerminalView id={group.activeTabId} onExit={onExit} /></div>
-          // Worker pages pass subId (and cwd=undefined — main resolves the worktree
-          // path from ROOKERY_HOME+subId, see App.tsx), so the hint should say
-          // "worktree" instead of the master-oriented "session's working folder"
-          // (audit #49b).
-          : <div className="flex h-full items-center justify-center text-[12px] text-muted">{subId ? t("terminalPanel.emptyHintWorker") : t("terminalPanel.emptyHint")}</div>}
-      </div>
+          <div className="relative min-h-0 flex-1">
+            {group.activeTabId && <div className="absolute inset-0 py-1.5 pl-3 pr-1"><TerminalView id={group.activeTabId} onExit={onExit} /></div>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

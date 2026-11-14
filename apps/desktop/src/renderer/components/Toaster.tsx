@@ -39,17 +39,17 @@ function ToastRow({ toast }: { toast: Toast }): JSX.Element {
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       className={cn(
-        "pointer-events-auto flex w-[340px] items-start gap-2 rounded-xl border px-3 py-2.5 text-xs shadow-lg backdrop-blur-sm",
+        "pointer-events-auto flex w-[340px] items-start gap-2 rounded-lg border px-3 py-2.5 text-xs shadow-pop",
         BOX[toast.kind],
         closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "rise-in",
       )}
     >
-      <Icon size={15} className={cn("mt-px shrink-0 badge-pop", ICON_TONE[toast.kind])} />
+      <Icon size={14} className={cn("mt-px shrink-0 badge-pop", ICON_TONE[toast.kind])} />
       <div className="min-w-0 flex-1">
         <div className="font-medium leading-snug text-fg">{toast.text}</div>
-        {toast.detail && <div className="mt-0.5 truncate font-mono text-[11px] text-muted" title={toast.detail}>{toast.detail}</div>}
+        {toast.detail && <div className="mt-0.5 truncate font-mono text-meta text-muted" title={toast.detail}>{toast.detail}</div>}
       </div>
-      <button onClick={animateOut} aria-label={t("common.close")} className="-mr-1 shrink-0 rounded p-0.5 text-muted transition-colors hover:text-fg"><X size={13} /></button>
+      <button onClick={animateOut} aria-label={t("common.close")} className="-mr-1 shrink-0 rounded p-0.5 text-muted transition-colors hover:text-fg"><X size={14} /></button>
     </div>
   );
 }

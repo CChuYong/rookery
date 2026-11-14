@@ -5,7 +5,6 @@ import { useStore } from "../store/store.js";
 import { ActivityPanel } from "../views/ActivityPanel.js";
 import { useResizableWidth } from "../lib/useResizableWidth.js";
 import { ResizeHandle } from "./ResizeHandle.js";
-import { cn } from "../lib/cn.js";
 import type { LogItem } from "../store/reduce.js";
 import { nestedLabel } from "../lib/nested-label.js";
 import { FileTree } from "./FileTree.js";
@@ -54,13 +53,15 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath, loadAge
   // terminal) gets an explicit message instead of looping silently (audit #2).
   const workRootFallback =
     rootState === "missing" ? (
-      <div className="px-3 py-3 text-[12px] text-muted">{t("rightSidebar.workdirMissing")}</div>
+      <div className="px-3 py-3 text-ui text-muted">{t("rightSidebar.workdirMissing")}</div>
     ) : (
       <SkeletonRows rows={8} />
     );
   const widthState = useResizableWidth("rookery.rightWidth", 300, { min: 200, max: 560, side: "right" });
-  // Width enter/exit: on mount, start at width 0 then go to the stored width after rAF → transition-[width] slides it.
-  // On close, open=false makes width 0 → App's useMountTransition keeps it mounted in the meantime. (Intended layout exception since it's a docked flex child.)
+  // Width enter/exit: on mount, start at width 0 then go to the stored width after rAF.
+  // On close, open=false makes width 0 → App's useMountTransition keeps it mounted in the meantime.
+  // The width itself is set instantly (no width transition — the design system reserves transitions for
+  // colour/opacity/transform); the panel reads as settled rather than sliding open.
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     const id = requestAnimationFrame(() => setEntered(true));
@@ -70,24 +71,25 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath, loadAge
   return (
     <>
       <ResizeHandle onPointerDown={widthState.startDrag} />
-      <aside style={{ width }} className={cn("flex shrink-0 flex-col overflow-hidden border-l border-line bg-surface", widthState.resizing ? "" : "transition-[width] duration-[180ms] ease-out motion-reduce:transition-none")}>
+      <aside style={{ width }} className="flex shrink-0 flex-col overflow-hidden bg-sunk">
         {/* Empty bar matching the main-area header height (h-11) — aligns the segment tab line to the same height as the main-area TabBar (consistent hierarchy).
             Color matches the top of the main area (<main bg-ink>) with bg-ink. */}
         <div className="drag h-11 shrink-0 border-b border-line bg-ink" />
+        {/* Orca-style icon tabs (Files / Git / Activity) instead of a filled pill track — the label becomes the
+            native title tooltip + a sr-only accessible name. */}
         <Segment
           items={SEGMENTS}
           value={segment}
           onChange={setSegment}
-          variant="pill"
-          className="h-8 shrink-0 gap-1 border-b border-line px-2"
-          itemClassName="py-1 font-medium"
+          variant="icon"
+          className="h-[34px] shrink-0 items-center gap-1 border-b border-line px-2"
         />
         {/* Replay rise-in on each segment switch (key=segment) — confirms that the visually similar dense panel actually changed. */}
         <div key={segment} className="rise-in min-h-0 flex-1 overflow-y-auto">
           {segment === "files" && (ready ? <FileTree root={root!} pageKey={pageKey} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback)}
           {segment === "git" && (ready ? <GitChanges root={root!} pageKey={pageKey} version={treeVersion} /> : workRootFallback)}
           {segment === "worker" && subId && <ActivityPanel workerId={subId} nestedPanels={nestedPanels} loadAgentHistory={loadAgentHistory} />}
-          {segment === "worker" && !subId && <div className="px-3 py-3 text-[12px] leading-relaxed text-muted">{t("rightSidebar.noNestedAgents")}</div>}
+          {segment === "worker" && !subId && <div className="px-3 py-3 text-ui leading-relaxed text-muted">{t("rightSidebar.noNestedAgents")}</div>}
         </div>
       </aside>
     </>

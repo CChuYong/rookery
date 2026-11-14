@@ -29,20 +29,18 @@ export function SideConversationDrawer({ sourceKind, sideId, openingQuestion, on
       aria-label={t("sideConversation.title")}
       className="absolute inset-0 z-30 flex min-h-0 flex-col border-l border-line bg-surface shadow-2xl md:relative md:inset-auto md:z-auto md:w-[360px] md:shrink-0 md:shadow-none"
     >
-      <header className="flex min-h-14 items-center gap-2 border-b border-line px-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-[13px] font-semibold text-fg">
-            {t("sideConversation.title")}
-            {running && <Loader2 size={12} className="animate-spin text-accent" aria-label={t("sideConversation.answering")} />}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1 text-[10.5px] text-muted">
-            <LockKeyhole size={10} />
+      <header className="flex h-10 shrink-0 items-center gap-2 px-3">
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="text-body font-medium text-fg">{t("sideConversation.title")}</span>
+          {running && <Loader2 size={12} className="animate-spin text-accent" aria-label={t("sideConversation.answering")} />}
+          <span className="flex min-w-0 items-center gap-1 truncate text-meta text-faint">
+            <LockKeyhole size={12} className="shrink-0" />
             {t(sourceKind === "worker" ? "sideConversation.workerContext" : "sideConversation.masterContext")}
-          </div>
+          </span>
         </div>
-        <Button variant="ghost" size="icon" aria-label={t("common.close")} onClick={onClose}><X size={15} /></Button>
+        <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={t("common.close")} onClick={onClose}><X size={14} /></Button>
       </header>
-      <div className="border-b border-line bg-raised/40 px-3 py-1.5 text-[10.5px] text-muted">
+      <div className="border-b border-line bg-raised/40 px-3 py-1.5 text-meta text-muted">
         {t(sourceKind === "worker" ? "sideConversation.workerLive" : "sideConversation.masterLive")}
       </div>
       <MessageList items={items} loaded />

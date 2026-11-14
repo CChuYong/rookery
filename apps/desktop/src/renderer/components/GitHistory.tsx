@@ -32,17 +32,17 @@ export function GitHistory({ root, pageKey, version = 0 }: { root: string; pageK
     return () => { live = false; };
   }, [root, version]);
   if (!commits) return <SkeletonRows rows={8} />;
-  if (commits.length === 0) return <div className="px-3 py-3 text-[12px] text-muted">{t("gitHistory.noCommits")}</div>;
+  if (commits.length === 0) return <div className="px-3 py-3 text-ui text-muted">{t("gitHistory.noCommits")}</div>;
   return (
     <div className="py-1">
       {commits.map((c) => (
         <button key={c.hash} onClick={() => openCommit(pageKey, c.hash, c.subject)} className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded px-2.5 py-1.5 text-left hover:bg-raised">
-          <span className="block max-w-full truncate text-[12px] text-fg-dim" title={c.subject}>{c.subject}</span>
-          <span className="flex min-w-0 max-w-full items-center gap-1.5 text-[10px] text-muted">
+          <span className="block max-w-full truncate text-body text-fg-dim" title={c.subject}>{c.subject}</span>
+          <span className="flex min-w-0 max-w-full items-center gap-1.5 text-meta text-muted">
             <span className="shrink-0 font-mono text-muted/80">{c.shortHash}</span>
-            <span className="shrink-0">·</span>
+            <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
             <span className="min-w-0 truncate">{c.author}</span>
-            <span className="shrink-0">·</span>
+            <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
             <span className="shrink-0">{commitDateLabel(c.date, Date.now(), t, locale)}</span>
           </span>
         </button>

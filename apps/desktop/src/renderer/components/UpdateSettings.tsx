@@ -40,21 +40,23 @@ export function UpdateSettings() {
 
   const working = busy || st?.status === "checking" || st?.status === "downloading";
   return (
-    <section className="mt-8">
-      <h2 className="text-[13px] font-semibold">{t("settings.about")}</h2>
-      <p className="mt-1 text-[11px] leading-relaxed text-muted">{t("settings.aboutDesc")}</p>
-      <div className="mt-3 flex items-center gap-3 rounded-[var(--radius)] border border-line bg-ink/40 px-3 py-2.5">
-        <span className="text-[12px] text-fg-dim">{t("settings.currentVersion")}</span>
-        <span className="font-mono text-[12px] text-fg">v{version || "…"}</span>
-        <div className="ml-auto">
+    <section>
+      <h2 className="border-b border-line pb-2 text-body font-semibold text-fg">{t("settings.about")}</h2>
+      <p className="mt-2 max-w-[70ch] text-ui leading-relaxed text-muted">{t("settings.aboutDesc")}</p>
+      <div className="mt-3 flex items-center justify-between gap-6">
+        <span className="flex flex-col gap-0.5">
+          <span className="text-body font-medium text-fg">{t("settings.currentVersion")}</span>
+          {statusText && <span className="max-w-[70ch] text-ui leading-relaxed text-muted">{statusText}</span>}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="font-mono text-ui tabular-nums text-muted">{`v${version || "…"}`}</span>
           {st?.status === "ready" ? (
             <Button variant="primary" size="sm" onClick={() => window.rookery.update?.install()}>{t("settings.updRestart")}</Button>
           ) : (
             <Button variant="outline" size="sm" disabled={working} onClick={check}>{t("settings.checkUpdate")}</Button>
           )}
-        </div>
+        </span>
       </div>
-      {statusText && <p className="mt-2 text-[11px] text-muted">{statusText}</p>}
     </section>
   );
 }

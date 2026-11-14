@@ -38,7 +38,7 @@ export function ToolBlock({
   const hasDetail = Boolean(input || result);
   const live = status !== "complete";
   const stopped = workflow?.status === "stopped";
-  const dot = err ? "bg-fail" : stopped ? "bg-muted" : status === "complete" ? "bg-pr" : "bg-run led-live";
+  const dot = err ? "bg-fail" : stopped ? "bg-muted" : status === "complete" ? "bg-faint" : "bg-run led-live";
   // dot-settle once only on the in_progress→complete transition (so the working→done beat reads off a persistent node).
   const justDone = useJustEnded(live);
   const filePath = filePathOf(input);
@@ -47,35 +47,35 @@ export function ToolBlock({
   // input argument, available from the start regardless of outcome (audit #47).
   const workerId = (err ? null : spawnedWorkerId(name, result)) ?? workerIdFromInput(name, input);
   return (
-    <div className={cn("relative max-w-[80%] self-start overflow-hidden rounded-[var(--radius)] border border-line border-l-2 border-l-accent/70 bg-surface", live && !err && "sheen", className)}>
-      {/* Header: (toggle button) + (filename chip) + status — the chip is a sibling button separate from the toggle (avoids nested buttons) */}
-      <div className="flex w-full items-center gap-2 px-3 py-2 text-[12.5px]">
+    <div className={cn("w-full self-start", className)}>
+      {/* T3's "Worked for 46s ›" lightness: one flat 24px row, no card/box, no coloured left border. */}
+      <div className="group flex h-6 w-full items-center gap-1.5 rounded px-1 text-ui transition-colors hover:bg-raised/50">
         <button
           onClick={() => hasDetail && setOpen((v) => !v)}
-          className={cn("flex min-w-0 items-center gap-2", hasDetail ? "cursor-pointer" : "cursor-default")}
+          className={cn("flex min-w-0 items-center gap-1.5", hasDetail ? "cursor-pointer" : "cursor-default")}
         >
           {hasDetail ? (
-            <ChevronRight size={12} className={cn("shrink-0 text-muted transition-transform duration-200 ease-out", open && "rotate-90")} />
+            <ChevronRight size={12} className={cn("shrink-0 text-faint transition-transform duration-200 ease-out", open && "rotate-90")} />
           ) : (
             <span className="w-3 shrink-0" />
           )}
           <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", dot, justDone && "dot-settle")} />
           {workflow ? (
-            <span className="flex min-w-0 flex-col items-start">
-              <span className="font-mono text-[9px] uppercase tracking-wide text-muted">{name}</span>
-              <span className="truncate font-medium text-fg-dim">{workflow.workflowName}</span>
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <span className="text-meta text-faint">{name}</span>
+              <span className="truncate text-fg-dim">{workflow.workflowName}</span>
             </span>
           ) : (
-            <span className="truncate font-mono text-fg-dim">{name}</span>
+            <span className="truncate text-fg-dim">{name}</span>
           )}
         </button>
         {filePath && onOpenFile && (
           <button
             onClick={() => onOpenFile(filePath)}
             title={t("toolBlock.openFileTitle", { path: filePath })}
-            className="flex min-w-0 items-center gap-1 rounded-md border border-line bg-ink/40 px-1.5 py-0.5 font-mono text-[11px] text-fg-dim transition-colors hover:bg-raised hover:text-fg"
+            className="flex min-w-0 items-center gap-1 rounded px-1 font-mono text-ui text-faint transition-colors hover:bg-raised hover:text-fg-dim"
           >
-            <FileText size={11} className="shrink-0 text-muted" />
+            <FileText size={12} className="shrink-0 text-faint" />
             <span className="truncate">{basename(filePath)}</span>
           </button>
         )}
@@ -83,13 +83,13 @@ export function ToolBlock({
           <button
             onClick={() => onSelectWorker(workerId)}
             title={t("toolBlock.goToWorkerView")}
-            className="flex min-w-0 items-center gap-1 rounded-md border border-line bg-ink/40 px-1.5 py-0.5 font-mono text-[11px] text-fg-dim transition-colors hover:bg-raised hover:text-fg"
+            className="flex min-w-0 items-center gap-1 rounded px-1 font-mono text-ui text-faint transition-colors hover:bg-raised hover:text-fg-dim"
           >
-            <Boxes size={11} className="shrink-0 text-muted" />
+            <Boxes size={12} className="shrink-0 text-faint" />
             <span className="truncate">{t("toolBlock.viewWorker")}</span>
           </button>
         )}
-        <span className="ml-auto shrink-0 font-mono text-[10px] text-muted">
+        <span className={cn("ml-1 shrink-0 text-meta", err ? "text-fail" : "text-faint")}>
           {workflow
             ? t(`workflowActivity.${workflow.status}`)
             : err
@@ -100,7 +100,7 @@ export function ToolBlock({
         </span>
       </div>
       {workflow && (
-        <div className="border-t border-line/70 px-3 py-2 text-[11px] text-muted">
+        <div className="ml-5 pb-1 text-meta text-muted">
           {workflow.summary && <div className="mb-1 truncate text-fg-dim" title={workflow.summary}>{workflow.summary}</div>}
           <div className="font-mono">
             {t("workflowActivity.activeCount", { count: workflow.counts.active })}
@@ -111,17 +111,17 @@ export function ToolBlock({
         </div>
       )}
       <Collapse open={open && hasDetail}>
-        <div className="space-y-2 border-t border-line px-3 py-2">
+        <div className="ml-5 space-y-2 rounded-md border border-line-soft bg-sunk px-3 py-2">
           {input && (
             <div>
-              <div className="mb-1 eyebrow-sm uppercase text-muted">input</div>
-              <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-fg-dim">{input}</pre>
+              <div className="mb-1 text-meta text-muted">input</div>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-meta leading-relaxed text-fg-dim">{input}</pre>
             </div>
           )}
           {result && (
             <div>
-              <div className="mb-1 eyebrow-sm uppercase text-muted">result</div>
-              <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-fg-dim">{result}</pre>
+              <div className="mb-1 text-meta text-muted">result</div>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-meta leading-relaxed text-fg-dim">{result}</pre>
             </div>
           )}
         </div>

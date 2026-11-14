@@ -36,7 +36,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
       role="menu"
       onKeyDown={onKeyDown}
       style={{ left: x, top: y, transformOrigin: "top left" }}
-      className="menu-pop fixed z-[100] min-w-[150px] rounded-lg border border-line bg-raised p-1 shadow-xl"
+      className="menu-pop fixed z-[100] min-w-[150px] rounded-lg border border-line bg-surface p-1 shadow-pop"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {items.map((it, i) => (
@@ -44,10 +44,10 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
           key={i}
           role="menuitem"
           onClick={() => { onClose(); it.onClick(); }}
-          className={cn("block w-full rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors focus:outline-none", it.danger ? "text-fail hover:bg-fail/15 focus:bg-fail/15" : "text-fg-dim hover:bg-line/50 hover:text-fg focus:bg-line/50 focus:text-fg")}
+          className={cn("flex min-h-6 w-full flex-col justify-center rounded-sm px-2.5 py-1 text-left text-ui transition-colors focus:outline-none focus-visible:outline-none", it.danger ? "text-fail hover:bg-fail/15 focus:bg-fail/15" : "text-fg-dim hover:bg-raised hover:text-fg focus:bg-raised focus:text-fg")}
         >
           {it.label}
-          {it.hint && <span className="mt-0.5 block text-[10.5px] font-normal text-muted">{it.hint}</span>}
+          {it.hint && <span className="mt-0.5 block text-meta font-normal text-muted">{it.hint}</span>}
         </button>
       ))}
     </div>,

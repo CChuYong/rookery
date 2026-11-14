@@ -17,7 +17,7 @@ export function ActivityPanel({
   const t = useT();
   const workflows = useStore((state) => state.workflows[workerId] ?? EMPTY_RUNS);
   const empty = Object.keys(workflows).length === 0 && nestedPanels.length === 0;
-  if (empty) return <div className="px-3 py-3 text-[12px] leading-relaxed text-muted">{t("workflowActivity.empty")}</div>;
+  if (empty) return <div className="px-3 py-2 text-ui text-faint">{t("workflowActivity.empty")}</div>;
   return (
     <div className="flex flex-col">
       <WorkflowRuns workerId={workerId} loadAgentHistory={loadAgentHistory} />

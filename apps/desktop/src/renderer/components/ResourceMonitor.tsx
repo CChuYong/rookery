@@ -13,12 +13,12 @@ function pct(n: number): string {
 // One row of the detail popover. When indent=true it's a sub-row (Main/Renderer/Other).
 function Row({ label, bucket, indent }: { label: string; bucket: ResourceBucket; indent?: boolean }): JSX.Element {
   return (
-    <div className={cn("flex items-baseline justify-between gap-2 px-2 py-1 text-[11px]", indent && "pl-5")}>
+    <div className={cn("flex items-baseline justify-between gap-2 px-2 py-1 text-meta", indent && "pl-5")}>
       <span className={cn("truncate", indent ? "text-muted" : "text-fg-dim")}>{label}</span>
-      <span className="shrink-0 font-mono text-muted">
-        <span className="text-fg-dim">{pct(bucket.cpuPct)}</span>
-        <span className="mx-1 text-muted/50">·</span>
-        <span className="text-fg-dim">{fmtBytes(bucket.memBytes)}</span>
+      <span className="flex shrink-0 items-center gap-1.5 font-mono text-fg-dim">
+        <span className="tabular-nums">{pct(bucket.cpuPct)}</span>
+        <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
+        <span className="tabular-nums">{fmtBytes(bucket.memBytes)}</span>
       </span>
     </div>
   );
@@ -27,8 +27,8 @@ function Row({ label, bucket, indent }: { label: string; bucket: ResourceBucket;
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="eyebrow eyebrow-sm uppercase text-muted/70">{label}</span>
-      <span className="font-mono text-[12px] text-fg-dim">{value}</span>
+      <span className="text-meta text-faint">{label}</span>
+      <span className="font-mono text-ui tabular-nums text-fg-dim">{value}</span>
     </div>
   );
 }
@@ -38,11 +38,13 @@ export function ResourceMonitor({
   collapsed,
   onRefresh,
   onOpenChange,
+  variant = "sidebar",
 }: {
   snapshot: ResourceSnapshot | null;
   collapsed?: boolean;
   onRefresh?: () => void;
   onOpenChange?: (open: boolean) => void;
+  variant?: "sidebar" | "statusbar"; // statusbar: borderless 11px trigger that opens the popover upward (bottom bar has no room below it)
 }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -87,12 +89,15 @@ export function ResourceMonitor({
         onClick={toggle}
         title={t("resourceMonitor.tooltip")}
         className={cn(
-          "no-drag flex items-center gap-1.5 rounded-md border border-line bg-ink/40 font-mono text-[11px] transition-colors hover:bg-raised",
+          "no-drag flex items-center gap-1.5 font-mono transition-colors",
+          variant === "statusbar"
+            ? "h-5 rounded-sm px-1.5 text-meta hover:bg-raised"
+            : "rounded-md border border-line bg-ink/40 text-meta hover:bg-raised",
           hotTone ?? "text-fg-dim",
-          collapsed ? "h-7 w-7 justify-center" : "px-2 py-1",
+          variant === "sidebar" && (collapsed ? "h-7 w-7 justify-center" : "px-2 py-1"),
         )}
       >
-        <Cpu size={13} className={cn("shrink-0", hotTone ?? "text-muted", hot >= 90 && "led-live")} />
+        <Cpu size={variant === "statusbar" ? 12 : 14} className={cn("shrink-0", hotTone ?? "text-muted", hot >= 90 && "led-live")} />
         {!collapsed && <span>{label}</span>}
       </button>
 
@@ -104,12 +109,14 @@ export function ResourceMonitor({
             ref={panelRef}
             tabIndex={-1}
             className={cn(
-              "absolute z-50 w-[300px] rounded-xl border border-line bg-surface p-1.5 shadow-2xl focus:outline-none",
-              collapsed ? "left-full top-0 ml-2" : "left-0 top-full mt-1",
+              "absolute z-50 w-[300px] rounded-lg border border-line bg-surface p-1.5 shadow-pop focus:outline-none",
+              // The status bar sits at the bottom of the viewport, so its popover opens upward; the collapsed
+              // sidebar rail opens to the right (no room below); the full sidebar footer opens downward.
+              variant === "statusbar" ? "bottom-full left-0 mb-1" : collapsed ? "left-full top-0 ml-2" : "left-0 top-full mt-1",
             )}
           >
             <div className="flex items-center justify-between px-2 pb-1.5 pt-1">
-              <span className="text-[12px] font-semibold tracking-[-0.01em]">{t("resourceMonitor.resources")}</span>
+              <span className="text-ui font-medium">{t("resourceMonitor.resources")}</span>
               {onRefresh && (
                 <button
                   ref={refreshRef}
@@ -140,9 +147,9 @@ export function ResourceMonitor({
                 {snapshot.daemon ? (
                   <Row label={t("resourceMonitor.daemon")} bucket={snapshot.daemon} />
                 ) : (
-                  <div className="flex items-baseline justify-between gap-2 px-2 py-1 text-[11px]">
+                  <div className="flex items-baseline justify-between gap-2 px-2 py-1 text-meta">
                     <span className="text-fg-dim">{t("resourceMonitor.daemon")}</span>
-                    <span className="shrink-0 font-mono text-muted/70">{t("resourceMonitor.daemonDown")}</span>
+                    <span className="shrink-0 text-muted/70">{t("resourceMonitor.daemonDown")}</span>
                   </div>
                 )}
               </>

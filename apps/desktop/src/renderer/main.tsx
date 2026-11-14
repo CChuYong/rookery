@@ -1,9 +1,7 @@
 import "./monaco-setup.js";
-import "@fontsource-variable/geist";
+// The UI face is the system font (SF Pro on macOS); Geist Mono is the bundled fallback behind SF Mono.
 import "@fontsource-variable/geist-mono";
-// Korean face — Geist ships no Hangul, so Korean UI fell back to a last-resort system font and lost the signature
-// typeface. Pretendard (OFL) is designed to harmonize with geometric Latin sans; it sits after Geist in --font-sans
-// so Latin glyphs still render in Geist and only Hangul falls through to Pretendard.
+// Korean face — Pretendard (OFL) sits in --font-sans as the Hangul fallback for platforms whose system UI font lacks it.
 import "pretendard/dist/web/variable/pretendardvariable.css";
 import "./globals.css";
 import { createRoot } from "react-dom/client";

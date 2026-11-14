@@ -101,7 +101,7 @@ function errorMessage(error: unknown): string {
 }
 
 function KindIcon({ kind }: { kind: CapabilityKind }): JSX.Element {
-  const size = 15;
+  const size = 14;
   if (kind === "instruction") return <FileText size={size} />;
   if (kind === "skill") return <Sparkles size={size} />;
   if (kind === "command") return <Command size={size} />;
@@ -112,37 +112,39 @@ function KindIcon({ kind }: { kind: CapabilityKind }): JSX.Element {
   return <Box size={size} />;
 }
 
-function stateTone(state: CapabilityState): string {
-  if (state === "applied" || state === "desired") return "border-pr/30 bg-pr/10 text-pr";
-  if (state === "pending-next-turn" || state === "pending-reload") return "border-run/30 bg-run/10 text-run";
-  if (state === "blocked" || state === "error") return "border-fail/30 bg-fail/10 text-fail";
-  return "border-line bg-raised text-muted";
+function stateDotTone(state: CapabilityState): string {
+  if (state === "applied" || state === "desired") return "bg-pr";
+  if (state === "pending-next-turn" || state === "pending-reload") return "bg-run";
+  if (state === "blocked" || state === "error") return "bg-fail";
+  return "bg-stop";
 }
 
 function EntryRow({ entry }: { entry: CapabilityEntry }): JSX.Element {
   const t = useT();
   return (
-    <article data-testid={`capability-${entry.id}`} className="rounded-[var(--radius)] border border-line bg-surface/45 px-3.5 py-3">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 rounded-md border border-line bg-raised p-1.5 text-fg-dim"><KindIcon kind={entry.kind} /></span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <h3 className="text-[13px] font-medium text-fg">{entry.name}</h3>
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{t(KIND_KEYS[entry.kind])}</span>
-            <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", stateTone(entry.state))}>{t(STATE_KEYS[entry.state])}</span>
-          </div>
-          {entry.description && <p className="mt-1 text-[12px] leading-relaxed text-fg-dim">{entry.description}</p>}
-          {entry.detail && <p className="mt-1 break-words font-mono text-[10.5px] leading-relaxed text-muted">{entry.detail}</p>}
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-muted">
-            <span>{entry.source}</span>
-            <span>{t(SCOPE_KEYS[entry.scope])}</span>
-            <span>{t(EVIDENCE_KEYS[entry.evidence])}</span>
-            <span>{entry.provider === "rookery" ? "Rookery" : entry.provider === "claude" ? "Claude" : "Codex"}</span>
-            {entry.managed && <span>{entry.managed.packId} · {entry.managed.scopeKind}</span>}
-          </div>
-        </div>
+    <div data-testid={`capability-${entry.id}`} className="px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-faint"><KindIcon kind={entry.kind} /></span>
+        <h3 className={cn("text-body font-medium text-fg", entry.kind === "command" && "font-mono")}>{entry.name}</h3>
+        <span className="text-meta text-muted">{t(KIND_KEYS[entry.kind])}</span>
+        <span className="inline-flex items-center gap-1.5 text-meta text-fg-dim"><span className={cn("h-1.5 w-1.5 rounded-full", stateDotTone(entry.state))} aria-hidden /> {t(STATE_KEYS[entry.state])}</span>
       </div>
-    </article>
+      {entry.description && <p className="mt-1 line-clamp-2 text-ui text-fg-dim">{entry.description}</p>}
+      {entry.detail && <p className="mt-1 break-words font-mono text-meta text-faint">{entry.detail}</p>}
+      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-ui text-faint">
+        <span>{entry.source}</span>
+        <span>{t(SCOPE_KEYS[entry.scope])}</span>
+        <span>{t(EVIDENCE_KEYS[entry.evidence])}</span>
+        <span>{entry.provider === "rookery" ? "Rookery" : entry.provider === "claude" ? "Claude" : "Codex"}</span>
+        {entry.managed && (
+          <span className="inline-flex items-center gap-1.5">
+            <span>{entry.managed.packId}</span>
+            <span className="h-2.5 w-px bg-line-soft" aria-hidden />
+            <span>{entry.managed.scopeKind}</span>
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -240,32 +242,32 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="drag flex min-h-11 shrink-0 items-center gap-2 border-b border-line px-5 py-2 text-[13px]">
-        <Blocks size={16} className="text-accent" />
-        <span className="font-semibold tracking-[-0.01em]">{t("capabilities.title")}</span>
-        <nav className="no-drag ml-2 flex items-center gap-1" aria-label={t("capabilities.title")}>
+      <header className="drag flex h-10 shrink-0 items-center gap-2 px-5">
+        <Blocks size={14} className="text-faint" />
+        <span className="text-body font-medium text-fg">{t("capabilities.title")}</span>
+        <nav className="no-drag ml-2 flex h-full items-center gap-3" aria-label={t("capabilities.title")}>
           {(["effective", "library", "assignments"] as CenterTab[]).map((item) => (
-            <button key={item} aria-pressed={tab === item} onClick={() => setTab(item)} className={cn("rounded-md px-2.5 py-1 text-[11px] transition-colors", tab === item ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}>{t(`capabilities.${item}`)}</button>
+            <button key={item} aria-pressed={tab === item} onClick={() => setTab(item)} className={cn("relative flex h-full items-center text-ui transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi", tab === item ? "text-fg after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-accent" : "text-muted hover:text-fg-dim")}>{t(`capabilities.${item}`)}</button>
           ))}
         </nav>
         <div className="no-drag ml-auto flex items-center gap-1">
           {tab === "effective" && (
               <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={loading} onClick={() => setRefresh((value) => value + 1)}>
-              <RefreshCw size={14} className={cn(loading && "animate-spin")} />
+              <RefreshCw size={14} className={cn(loading && "animate-spin motion-reduce:animate-none")} />
             </Button>
           )}
-          <button onClick={onClose} aria-label={t("common.close")} className="rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim"><X size={16} /></button>
+          <Button variant="ghost" size="iconSm" aria-label={t("common.close")} onClick={onClose}><X size={14} /></Button>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 px-6 py-6">
           {tab === "effective" && (
-            <section className="rounded-[var(--radius)] border border-line bg-surface/35 p-3">
-              <div className="grid gap-3 md:grid-cols-[minmax(240px,1fr)_150px_150px]">
-                <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
-                  {t("capabilities.targetLabel")}
-                  <Select aria-label={t("capabilities.targetLabel")} value={capabilityTargetChoice(selectedTarget)} onChange={(event) => {
+            <section className="rounded-lg border border-line bg-surface">
+              <div className="flex flex-wrap items-center gap-4 px-3.5 py-3">
+                <label className="flex items-center gap-2 text-body text-fg-dim">
+                  <span className="shrink-0">{t("capabilities.targetLabel")}</span>
+                  <Select size="sm" className="w-56" aria-label={t("capabilities.targetLabel")} value={capabilityTargetChoice(selectedTarget)} onChange={(event) => {
                     const value = event.target.value;
                     const currentPreview = selectedTarget.kind === "rookery" || selectedTarget.kind === "repo"
                       ? selectedTarget
@@ -285,53 +287,36 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                 </label>
                 {preview && (
                   <>
-                    <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
-                      {t("capabilities.providerLabel")}
-                      <Select aria-label={t("capabilities.providerLabel")} value={selectedTarget.provider} onChange={(event) => setSelectedTarget({ ...selectedTarget, provider: event.target.value as "claude" | "codex" })}>
+                    <label className="flex items-center gap-2 text-body text-fg-dim">
+                      <span className="shrink-0">{t("capabilities.providerLabel")}</span>
+                      <Select size="sm" className="w-28" aria-label={t("capabilities.providerLabel")} value={selectedTarget.provider} onChange={(event) => setSelectedTarget({ ...selectedTarget, provider: event.target.value as "claude" | "codex" })}>
                         <option value="claude">Claude</option><option value="codex">Codex</option>
                       </Select>
                     </label>
-                    <label className="flex flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
-                      {t("capabilities.agentLabel")}
-                      <Select aria-label={t("capabilities.agentLabel")} value={selectedTarget.agent} onChange={(event) => setSelectedTarget({ ...selectedTarget, agent: event.target.value as "master" | "worker" })}>
+                    <label className="flex items-center gap-2 text-body text-fg-dim">
+                      <span className="shrink-0">{t("capabilities.agentLabel")}</span>
+                      <Select size="sm" className="w-28" aria-label={t("capabilities.agentLabel")} value={selectedTarget.agent} onChange={(event) => setSelectedTarget({ ...selectedTarget, agent: event.target.value as "master" | "worker" })}>
                         <option value="master">{t("capabilities.agent.master")}</option><option value="worker">{t("capabilities.agent.worker")}</option>
                       </Select>
                     </label>
                   </>
                 )}
               </div>
-            </section>
-          )}
-          {tab === "library" ? (
-            <CapabilityLibraryTab api={api} generation={generation} repos={targets.repos} pickDirectory={pickDirectory} />
-          ) : tab === "assignments" ? (
-            <CapabilityAssignmentsTab api={api} generation={generation} targets={targets} />
-          ) : loading ? (
-            <div className="flex items-center justify-center gap-2 py-24 text-[12.5px] text-muted"><Loader2 size={15} className="animate-spin" /> {t("common.loading")}</div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-              <CircleAlert size={28} className="text-fail" />
-              <p className="text-[12.5px] text-fail">{t("capabilities.loadFailed")}</p>
-              <p className="max-w-xl break-words font-mono text-[11px] text-muted">{error}</p>
-              <Button variant="outline" size="sm" onClick={() => setRefresh((value) => value + 1)}>{t("common.retry")}</Button>
-            </div>
-          ) : snapshot ? (
-            <>
-              <section className="rounded-[var(--radius)] border border-line bg-surface/35 px-4 py-3">
-                <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
+              {snapshot && (
+                <div className="flex flex-wrap items-start gap-x-5 gap-y-1.5 border-t border-line-soft px-3.5 py-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-[15px] font-semibold text-fg">
+                      <h2 className="text-title font-medium text-fg">
                         {snapshot.target.kind === "rookery" ? t("capabilities.targetRookery") : snapshot.target.label}
                       </h2>
-                      <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : snapshot.target.kind === "worker" ? t("capabilities.targetWorker") : snapshot.target.kind === "repo" ? t("capabilities.targetRepo") : t("capabilities.targetRookery")}</span>
-                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("capabilities.preview")}</span>}
-                      <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-fg-dim">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
-                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">{t(`capabilities.agent.${snapshot.target.agent}`)}</span>}
+                      <span className="text-meta text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : snapshot.target.kind === "worker" ? t("capabilities.targetWorker") : snapshot.target.kind === "repo" ? t("capabilities.targetRepo") : t("capabilities.targetRookery")}</span>
+                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="text-meta text-accent">{t("capabilities.preview")}</span>}
+                      <span className="text-meta text-muted">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
+                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="text-meta text-muted">{t(`capabilities.agent.${snapshot.target.agent}`)}</span>}
                     </div>
-                    {snapshot.target.cwd && <p className="mt-1 truncate font-mono text-[11px] text-muted" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>}
+                    {snapshot.target.cwd && <p className="mt-1 truncate font-mono text-ui text-faint" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>}
                     {snapshot.desiredRevision && (
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-muted">
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-meta text-muted">
                         <span>{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</span>
                         {(snapshot.target.kind === "session" || snapshot.target.kind === "worker") && <span>{snapshot.appliedRevision
                           ? t("capabilities.appliedRevision", { revision: snapshot.appliedRevision.slice(0, 12) })
@@ -339,40 +324,60 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                       </div>
                     )}
                   </div>
-                  <p className="font-mono text-[10px] text-muted">{t("capabilities.generatedAt", { time: new Date(snapshot.generatedAt).toLocaleString() })}</p>
+                  <p className="shrink-0 text-right font-mono text-meta text-faint">{t("capabilities.generatedAt", { time: new Date(snapshot.generatedAt).toLocaleString() })}</p>
                 </div>
-              </section>
-
+              )}
+            </section>
+          )}
+          {tab === "library" ? (
+            <CapabilityLibraryTab api={api} generation={generation} repos={targets.repos} pickDirectory={pickDirectory} />
+          ) : tab === "assignments" ? (
+            <CapabilityAssignmentsTab api={api} generation={generation} targets={targets} />
+          ) : loading ? (
+            <div className="flex items-center justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> {t("common.loading")}</div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+              <CircleAlert size={28} className="text-fail" />
+              <p className="text-ui text-fail">{t("capabilities.loadFailed")}</p>
+              <p className="max-w-xl break-words text-meta text-muted">{error}</p>
+              <Button variant="outline" size="sm" onClick={() => setRefresh((value) => value + 1)}>{t("common.retry")}</Button>
+            </div>
+          ) : snapshot ? (
+            <>
               {snapshot.target.kind === "rookery" && (
-                <section className="rounded-[var(--radius)] border border-accent/25 bg-accent/5 px-3.5 py-3 text-[11px] leading-relaxed text-fg-dim">
+                <p className="text-meta leading-relaxed text-fg-dim">
                   {t("capabilities.rookeryScopeOnly")}
-                </section>
+                </p>
               )}
 
-              <section data-testid="capability-summary" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {(Object.keys(counts) as CapabilityState[]).map((state) => (
-                  <div key={state} className="rounded-[var(--radius)] border border-line bg-surface/25 px-3 py-2">
-                    <div className="text-[18px] font-semibold tabular-nums text-fg">{counts[state]}</div>
-                    <div className="text-[10.5px] text-muted">{t(STATE_KEYS[state])}</div>
-                  </div>
-                ))}
+              <section data-testid="capability-summary" className="flex flex-wrap border-y border-line">
+                {(Object.keys(counts) as CapabilityState[]).map((state, index) => {
+                  const value = counts[state];
+                  const isProblem = state === "blocked" || state === "error" || state === "unavailable";
+                  return (
+                    <div key={state} className={cn("flex min-w-[104px] flex-1 flex-col gap-0.5 px-3.5 py-2", index > 0 && "border-l border-line-soft")}>
+                      <span className={cn("font-mono text-title tabular-nums", value === 0 ? "text-faint" : isProblem ? "text-fail" : "text-fg")}>{value}</span>
+                      <span className="text-meta text-muted">{t(STATE_KEYS[state])}</span>
+                    </div>
+                  );
+                })}
               </section>
 
               {workerNeedsReload && (
                 <section data-testid="capability-worker-reload" className="rounded-[var(--radius)] border border-run/30 bg-run/5 px-3.5 py-3">
                   <div className="flex flex-wrap items-start gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-[12px] font-medium text-run"><RefreshCw size={14} /> {t("capabilities.reloadTitle")}</div>
-                      <p className="mt-1 text-[11px] leading-relaxed text-fg-dim">{t("capabilities.reloadDescription")}</p>
-                      {reloadMessage && <p role="status" className="mt-2 text-[11px] text-pr">{reloadMessage}</p>}
-                      {reloadError && <p role="alert" className="mt-2 break-words font-mono text-[10.5px] text-fail">{reloadError}</p>}
+                      <div className="flex items-center gap-2 text-ui font-medium text-run"><RefreshCw size={14} /> {t("capabilities.reloadTitle")}</div>
+                      <p className="mt-1 text-meta leading-relaxed text-fg-dim">{t("capabilities.reloadDescription")}</p>
+                      {reloadMessage && <p role="status" className="mt-2 text-meta text-pr">{reloadMessage}</p>}
+                      {reloadError && <p role="alert" className="mt-2 break-words text-meta text-fail">{reloadError}</p>}
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
                       <Button variant="outline" size="sm" disabled={reloadBusy !== null} onClick={() => void reloadWorker(true)}>
-                        {reloadBusy === "idle" && <Loader2 size={13} className="mr-1.5 animate-spin" />}{t("capabilities.reloadWhenIdle")}
+                        {reloadBusy === "idle" && <Loader2 size={14} className="mr-1.5 animate-spin motion-reduce:animate-none" />}{t("capabilities.reloadWhenIdle")}
                       </Button>
                       <Button size="sm" disabled={reloadBusy !== null} onClick={() => void reloadWorker(false)}>
-                        {reloadBusy === "now" && <Loader2 size={13} className="mr-1.5 animate-spin" />}{t("capabilities.reloadNow")}
+                        {reloadBusy === "now" && <Loader2 size={14} className="mr-1.5 animate-spin motion-reduce:animate-none" />}{t("capabilities.reloadNow")}
                       </Button>
                     </div>
                   </div>
@@ -381,10 +386,10 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
 
               {snapshot.diagnostics.length > 0 && (
                 <section className="rounded-[var(--radius)] border border-run/30 bg-run/5 px-3.5 py-3">
-                  <div className="flex items-center gap-2 text-[12px] font-medium text-run"><CircleAlert size={14} /> {t("capabilities.partialTitle")}</div>
+                  <div className="flex items-center gap-2 text-ui font-medium text-run"><CircleAlert size={14} /> {t("capabilities.partialTitle")}</div>
                   <div className="mt-2 flex flex-col gap-1.5">
                     {snapshot.diagnostics.map((item) => (
-                      <div key={item.id} className="flex flex-wrap gap-x-2 text-[11px] leading-relaxed text-fg-dim">
+                      <div key={item.id} className="flex flex-wrap gap-x-2 text-meta leading-relaxed text-fg-dim">
                         <span className="font-mono text-muted">{item.source}</span>
                         <span>{item.message}</span>
                       </div>
@@ -393,13 +398,13 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                 </section>
               )}
 
-              <nav aria-label={t("capabilities.title")} className="flex flex-wrap gap-1 border-b border-line pb-2">
+              <nav aria-label={t("capabilities.title")} className="flex flex-wrap gap-4 border-b border-line">
                 {CATEGORIES.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => { setExactKind(undefined); setCategory(item.id); }}
                     aria-pressed={selectedCategory === item.id}
-                    className={cn("rounded-md px-2.5 py-1.5 text-[11.5px] transition-colors", selectedCategory === item.id ? "bg-accent/12 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
+                    className={cn("relative pb-2 text-ui transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi", selectedCategory === item.id ? "text-fg after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-accent" : "text-muted hover:text-fg-dim")}
                   >
                     {t(item.labelKey)}
                   </button>
@@ -407,9 +412,9 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               </nav>
 
               {visibleEntries.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted"><ShieldCheck size={26} className="opacity-40" /><p className="text-[12.5px]">{t("capabilities.empty")}</p></div>
+                <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted"><ShieldCheck size={26} className="opacity-40" /><p className="text-ui">{t("capabilities.empty")}</p></div>
               ) : (
-                <section className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                <section className="divide-y divide-line-soft border-y border-line">
                   {visibleEntries.map((entry) => <EntryRow key={entry.id} entry={entry} />)}
                 </section>
               )}

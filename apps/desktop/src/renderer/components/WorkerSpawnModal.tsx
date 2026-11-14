@@ -145,18 +145,22 @@ export function WorkerSpawnModal(p: {
 
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("workerSpawnModal.title")}
-        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
       >
         <div className="shrink-0 px-5 pb-3 pt-5">
-          <div className="mb-1 text-[14px] font-semibold">{t("workerSpawnModal.title")}</div>
-          <div className="mb-3 font-mono text-[11px] text-muted">repo · {p.repo}</div>
+          <div className="mb-1 text-title font-medium text-fg">{t("workerSpawnModal.title")}</div>
+          <div className="mb-3 flex items-center gap-1.5 text-ui text-muted">
+            <span>repo</span>
+            <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
+            <span className="min-w-0 truncate font-mono text-fg-dim">{p.repo}</span>
+          </div>
 
           {/* Source mode — write directly / GitHub issues·PRs / Linear tickets */}
           <Segment
@@ -164,8 +168,8 @@ export function WorkerSpawnModal(p: {
             value={mode}
             onChange={switchMode}
             variant="pill"
-            className="gap-1 rounded-[var(--radius)] border border-line bg-ink/40 p-1"
-            itemClassName="flex-1 justify-center py-1.5 text-[12px] font-medium"
+            className="gap-1 rounded-[var(--radius)] border border-line bg-sunk p-1"
+            itemClassName="flex-1 justify-center py-1.5 text-ui font-medium"
           />
         </div>
 
@@ -258,10 +262,10 @@ export function WorkerSpawnModal(p: {
           {sourceMode && p.searchSource && (
             <div className="flex flex-col gap-1.5">
               {selected ? (
-                <div className="flex items-center gap-2 rounded-[var(--radius)] border border-accent/40 bg-accent/10 px-2.5 py-1.5 text-[12px]">
-                  <span className="shrink-0 font-mono text-[11px] text-accent">{selected.identifier}</span>
+                <div className="flex items-center gap-2 rounded-[var(--radius)] border border-accent/40 bg-accent/10 px-2.5 py-1.5 text-ui">
+                  <span className="shrink-0 font-mono text-meta text-accent">{selected.identifier}</span>
                   <span className="truncate text-fg">{selected.title}</span>
-                  <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={13} /></button>
+                  <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={14} /></button>
                 </div>
               ) : (
                 <>
@@ -286,9 +290,9 @@ export function WorkerSpawnModal(p: {
                   />
                   {dropdownOpen && (
                     // onMouseDown preventDefault: prevents the dropdown from closing first on input blur when a result is clicked, which would swallow the click.
-                    <div id="worker-spawn-source-results" role="listbox" className="max-h-44 overflow-y-auto rounded-[var(--radius)] border border-line bg-ink/40" onMouseDown={(e) => e.preventDefault()}>
-                      {searching && results.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-muted">{t("workerSpawnModal.searching")}</div>}
-                      {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-2.5 py-1.5 text-[11px] text-muted">{t("workerSpawnModal.noResults")}</div>}
+                    <div id="worker-spawn-source-results" role="listbox" className="max-h-44 overflow-y-auto rounded-[var(--radius)] border border-line bg-sunk" onMouseDown={(e) => e.preventDefault()}>
+                      {searching && results.length === 0 && <div className="px-2.5 py-1.5 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
+                      {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-2.5 py-1.5 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
                       {results.map((it, i) => (
                         <button
                           key={`${it.provider}:${it.id}`}
@@ -296,11 +300,11 @@ export function WorkerSpawnModal(p: {
                           role="option"
                           aria-selected={i === highlight}
                           onClick={() => pickSource(it)}
-                          className={cn("flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-accent/10", i === highlight && "bg-accent/10")}
+                          className={cn("flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
                         >
-                          <span className="shrink-0 font-mono text-[11px] text-accent">{it.identifier}</span>
+                          <span className="shrink-0 font-mono text-meta text-accent">{it.identifier}</span>
                           <span className="truncate text-fg">{it.title}</span>
-                          {it.state && <span className="ml-auto shrink-0 text-[10px] text-muted">{it.state}</span>}
+                          {it.state && <span className="ml-auto shrink-0 text-meta text-muted">{it.state}</span>}
                         </button>
                       ))}
                     </div>
@@ -319,7 +323,7 @@ export function WorkerSpawnModal(p: {
             onChange={(e) => setTask(e.target.value)}
           />
           </div>
-          <p className="mt-2 text-[11.5px] text-muted">{t("workerSpawnModal.footerNote")}</p>
+          <p className="mt-2 text-meta text-muted">{t("workerSpawnModal.footerNote")}</p>
         </div>
         <div data-dialog-footer className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-4">
           <Button variant="outline" disabled={spawning} onClick={dismiss}>{t("common.cancel")}</Button>

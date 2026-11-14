@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CheckCircle2, KeyRound, HelpCircle } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { Button } from "../ui/button.js";
 import { useT } from "../i18n/provider.js";
@@ -22,14 +23,16 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
 
   if (item.resolved) {
     return (
-      <div className="max-w-[80%] self-start whitespace-pre-wrap rounded-[var(--radius)] border border-line bg-surface px-3 py-2 text-[12px] text-fg-dim">
-        {item.summary ?? (item.expired ? t("interactionCard.expired") : "✅")}
+      <div className="max-w-[80%] self-start whitespace-pre-wrap rounded-md border border-line-soft bg-surface px-3 py-2 text-ui text-fg-dim">
+        {item.summary ?? (item.expired ? t("interactionCard.expired") : <CheckCircle2 size={14} className="inline-block -mt-0.5 text-pr" aria-hidden />)}
       </div>
     );
   }
 
-  const cardCls = "max-w-[80%] self-start rounded-[var(--radius)] border border-line border-l-2 border-l-accent/70 bg-surface px-3 py-2.5";
-  const sendingHint = sent ? <div className="mt-1.5 text-[11px] text-fg-dim">{t("interactionCard.sending")}</div> : null;
+  // the one spot that keeps a bordered card: an interaction needs a turn's worth of actions and reads as a
+  // distinct decision, not a message line — the accent line is a 2px edge, never a fill.
+  const cardCls = "max-w-[80%] self-start rounded-md border border-line border-l-2 border-l-accent/70 bg-surface px-3 py-2.5";
+  const sendingHint = sent ? <div className="mt-1.5 text-meta text-fg-dim">{t("interactionCard.sending")}</div> : null;
 
   if (item.mode === "approve") {
     const respond = (decision: "allow" | "deny"): void => {
@@ -38,9 +41,11 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
     };
     return (
       <div className={cardCls}>
-        <div className="mb-1.5 text-[13px] text-fg">🔐 {t("interactionCard.approvePrompt")}</div>
-        {item.toolName ? <div className="mb-1 font-mono text-[12px] text-accent">{item.toolName}</div> : null}
-        {item.inputText ? <div className="mb-2 max-h-24 overflow-auto rounded bg-raised px-2 py-1 font-mono text-[11px] text-fg-dim">{item.inputText}</div> : null}
+        <div className="mb-1.5 flex items-center gap-1.5 text-body text-fg">
+          <KeyRound size={14} className="shrink-0 text-muted" aria-hidden /> {t("interactionCard.approvePrompt")}
+        </div>
+        {item.toolName ? <div className="mb-1 font-mono text-ui text-accent">{item.toolName}</div> : null}
+        {item.inputText ? <div className="mb-2 max-h-24 overflow-auto rounded bg-raised px-2 py-1 font-mono text-meta text-fg-dim">{item.inputText}</div> : null}
         <div className="flex gap-2">
           <Button variant="primary" size="sm" disabled={!!sent} loading={sent === "allow"} onClick={() => respond("allow")}>{t("interactionCard.approve")}</Button>
           <Button variant="danger" size="sm" disabled={!!sent} loading={sent === "deny"} onClick={() => respond("deny")}>{t("interactionCard.deny")}</Button>
@@ -77,10 +82,15 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
 
   return (
     <div className={cardCls}>
-      <div className="mb-2 text-[12px] text-fg-dim">❓ {t("interactionCard.askPrompt")}</div>
+      <div className="mb-2 flex items-center gap-1.5 text-ui text-fg-dim">
+        <HelpCircle size={14} className="shrink-0 text-muted" aria-hidden /> {t("interactionCard.askPrompt")}
+      </div>
       {questions.map((q, qi) => (
         <div key={qi} className="mb-2.5">
-          <div className="mb-1 text-[13px] text-fg">{q.header ? <span className="text-fg-dim">{q.header} · </span> : null}{q.question}</div>
+          <div className="mb-1 flex items-baseline gap-1.5 text-body text-fg">
+            {q.header && <span className="text-fg-dim">{q.header}</span>}
+            <span>{q.question}</span>
+          </div>
           <div role="group" aria-label={q.question} className="flex flex-wrap gap-1.5">
             {q.options.map((o, oi) => (
               <Button

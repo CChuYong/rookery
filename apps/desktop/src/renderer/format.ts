@@ -12,7 +12,8 @@ export function contextPct(tokens: number, window: number): number {
 }
 export function fmtUsd(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "$0.00";
-  return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 // Context usage tone (single threshold — used in the session header SessionMetrics). Color-blindness is covered by the text (%) channel.
 export function ctxTone(pct: number): string {

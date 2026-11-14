@@ -2,17 +2,19 @@ import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes 
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/cn.js";
 
-// Single source of truth for form-field geometry + the coral focus ring. Before this, every <select>/<textarea> was an
+// Single source of truth for form-field geometry + the orange focus ring. Before this, every <select>/<textarea> was an
 // inline string that drifted (and often dropped the ring / used a different disabled opacity). Sizes preserve the existing
 // heights (xs = composer controls, sm = spawn modal, md = inputs/settings).
+// Quiet IDE-style field: flat ink background, hairline border, a neutral (not orange) focus ring — the accent is
+// reserved for lines/focus-markers elsewhere, not for every field's focus state.
 const field = cva(
-  "rounded-[var(--radius)] border border-line bg-ink/60 text-fg placeholder:text-muted transition-colors focus:border-accent/60 focus:bg-ink focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:bg-ink/30",
+  "rounded-sm border border-line bg-ink text-fg placeholder:text-faint transition-colors hover:border-thumb-hi focus:border-fg/30 focus:outline-none focus-visible:outline-none focus:ring-1 focus:ring-fg/10 disabled:cursor-not-allowed disabled:opacity-40",
   {
     variants: {
       size: {
-        xs: "h-6 px-1.5 text-[11px]",
-        sm: "h-8 px-2 text-[12px]",
-        md: "h-9 px-3 text-[13px]",
+        xs: "h-7 px-2 text-ui bg-transparent [field-sizing:content]",
+        sm: "h-7 px-2 text-ui",
+        md: "h-7 px-2.5 text-body",
       },
     },
     defaultVariants: { size: "md" },

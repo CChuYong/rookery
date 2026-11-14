@@ -4,60 +4,66 @@ import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { baseName } from "../lib/path.js";
+import { cn } from "../lib/cn.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// T3's hairline table: a bottom rule per row (no grid of borders), numeric-looking cells right-aligned in tabular
+// figures. Markdown gives no column-type metadata, so this is a lightweight heuristic over the cell's own text.
+function isNumericCell(children: unknown): boolean {
+  const text = Array.isArray(children) ? children.join("") : typeof children === "string" ? children : "";
+  return /^[-+~]?[$₩]?[\d,]+(\.\d+)?%?$/.test(text.trim());
+}
 
 // Markdown styles for the dark deck. For block code, pre overrides the inline-chip style of the inner code ([&_code]:...).
 const MD_COMPONENTS: Components = {
   p: (p) => <p className="my-1.5 first:mt-0 last:mb-0" {...p} />,
-  strong: (p) => <strong className="font-semibold text-fg" {...p} />,
+  strong: (p) => <strong className="font-medium text-fg" {...p} />,
   em: (p) => <em className="italic" {...p} />,
   a: (p) => <a className="text-accent underline underline-offset-2 hover:text-accent-hi" target="_blank" rel="noreferrer" {...p} />,
   ul: (p) => <ul className="my-1.5 list-disc space-y-0.5 pl-5 marker:text-muted" {...p} />,
   ol: (p) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5 marker:text-muted" {...p} />,
   li: (p) => <li {...p} />,
   h1: (p) => <h1 className="mb-1.5 mt-3 text-[15px] font-semibold tracking-[-0.01em] first:mt-0" {...p} />,
-  h2: (p) => <h2 className="mb-1.5 mt-3 text-[14px] font-semibold tracking-[-0.01em] first:mt-0" {...p} />,
-  h3: (p) => <h3 className="mb-1 mt-2.5 text-[13.5px] font-semibold first:mt-0" {...p} />,
+  h2: (p) => <h2 className="mb-1.5 mt-3 text-[14px] font-medium tracking-[-0.01em] first:mt-0" {...p} />,
+  h3: (p) => <h3 className="mb-1 mt-2.5 text-body font-medium first:mt-0" {...p} />,
   blockquote: (p) => <blockquote className="my-1.5 border-l-2 border-line pl-3 text-fg-dim" {...p} />,
   hr: () => <hr className="my-3 border-line" />,
-  code: (p) => <code className="rounded bg-ink/70 px-1.5 py-0.5 font-mono text-[12px] text-accent-hi [overflow-wrap:anywhere]" {...p} />,
+  code: (p) => <code className="rounded bg-raised px-1.5 py-0.5 font-mono text-[0.9em] text-fg [overflow-wrap:anywhere]" {...p} />,
   pre: (p) => (
-    <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-ink/70 p-3 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[12px] [&_code]:text-fg-dim" {...p} />
+    <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-ink/70 p-3 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-ui [&_code]:text-fg-dim" {...p} />
   ),
-  table: (p) => <table className="my-2 w-full border-collapse text-[12.5px]" {...p} />,
-  th: (p) => <th className="border border-line px-2 py-1 text-left font-semibold" {...p} />,
-  td: (p) => <td className="border border-line px-2 py-1" {...p} />,
+  table: (p) => <div className="my-2 overflow-x-auto"><table className="w-full border-collapse text-ui [&_code]:whitespace-nowrap [&_code]:[overflow-wrap:normal]" {...p} /></div>,
+  th: (p) => <th className="border-b border-line px-2 py-1.5 text-left font-medium text-fg-dim" {...p} />,
+  td: (p) => <td className={cn("border-b border-line-soft px-2 py-1", isNumericCell(p.children) && "text-right tabular-nums")} {...p} />,
 };
 
-// User-message bubble variant. The bubble is the coral accent surface with dark `text-accent-ink` text, so the
-// dark-deck MD_COMPONENTS colors (text-fg strong, coral links, dark code chips) would be low-contrast or invisible.
-// These inherit the bubble's currentColor and tint code/quotes/rules with accent-ink instead. Mention chips (below)
-// reuse the same bubble-chip tone as the old MentionText.
+// User-message bubble variant. The bubble is now a quiet raised surface (bg-raised/text-fg, same tone as the rest
+// of the deck), so this mostly mirrors MD_COMPONENTS — the one addition is the @/path mention chip renderer (below).
 const MD_BUBBLE_COMPONENTS: Components = {
   p: (p) => <p className="my-1.5 first:mt-0 last:mb-0" {...p} />,
-  strong: (p) => <strong className="font-semibold" {...p} />,
+  strong: (p) => <strong className="font-medium text-fg" {...p} />,
   em: (p) => <em className="italic" {...p} />,
-  a: (p) => <a className="font-medium underline decoration-accent-ink/50 underline-offset-2" target="_blank" rel="noreferrer" {...p} />,
-  ul: (p) => <ul className="my-1.5 list-disc space-y-0.5 pl-5 marker:text-accent-ink/55" {...p} />,
-  ol: (p) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5 marker:text-accent-ink/55" {...p} />,
+  a: (p) => <a className="text-accent underline underline-offset-2 hover:text-accent-hi" target="_blank" rel="noreferrer" {...p} />,
+  ul: (p) => <ul className="my-1.5 list-disc space-y-0.5 pl-5 marker:text-muted" {...p} />,
+  ol: (p) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5 marker:text-muted" {...p} />,
   li: (p) => <li {...p} />,
-  h1: (p) => <h1 className="mb-1.5 mt-3 text-[15px] font-semibold tracking-[-0.01em] first:mt-0" {...p} />,
-  h2: (p) => <h2 className="mb-1.5 mt-3 text-[14px] font-semibold tracking-[-0.01em] first:mt-0" {...p} />,
-  h3: (p) => <h3 className="mb-1 mt-2.5 text-[13.5px] font-semibold first:mt-0" {...p} />,
-  blockquote: (p) => <blockquote className="my-1.5 border-l-2 border-accent-ink/30 pl-3 opacity-85" {...p} />,
-  hr: () => <hr className="my-3 border-accent-ink/25" />,
-  code: (p) => <code className="rounded bg-accent-ink/12 px-1.5 py-0.5 font-mono text-[12px] [overflow-wrap:anywhere]" {...p} />,
+  h1: (p) => <h1 className="mb-1.5 mt-3 text-[15px] font-medium tracking-[-0.01em] first:mt-0" {...p} />,
+  h2: (p) => <h2 className="mb-1.5 mt-3 text-[14px] font-medium tracking-[-0.01em] first:mt-0" {...p} />,
+  h3: (p) => <h3 className="mb-1 mt-2.5 text-body font-medium first:mt-0" {...p} />,
+  blockquote: (p) => <blockquote className="my-1.5 border-l-2 border-line pl-3 text-fg-dim" {...p} />,
+  hr: () => <hr className="my-3 border-line" />,
+  code: (p) => <code className="rounded bg-ink/40 px-1.5 py-0.5 font-mono text-[0.9em] text-fg [overflow-wrap:anywhere]" {...p} />,
   pre: (p) => (
-    <pre className="my-2 overflow-x-auto rounded-lg border border-accent-ink/20 bg-accent-ink/10 p-3 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-[12px]" {...p} />
+    <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-ink/40 p-3 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-ui [&_code]:text-fg-dim" {...p} />
   ),
-  table: (p) => <table className="my-2 w-full border-collapse text-[12.5px]" {...p} />,
-  th: (p) => <th className="border border-accent-ink/25 px-2 py-1 text-left font-semibold" {...p} />,
-  td: (p) => <td className="border border-accent-ink/25 px-2 py-1" {...p} />,
-  // @/path mentions injected by rehypeMentions below → render as the shortened filename chip (matches the old MentionText bubble tone).
+  table: (p) => <div className="my-2 overflow-x-auto"><table className="w-full border-collapse text-ui [&_code]:whitespace-nowrap [&_code]:[overflow-wrap:normal]" {...p} /></div>,
+  th: (p) => <th className="border-b border-line px-2 py-1.5 text-left font-medium text-fg-dim" {...p} />,
+  td: (p) => <td className={cn("border-b border-line-soft px-2 py-1", isNumericCell(p.children) && "text-right tabular-nums")} {...p} />,
+  // @/path mentions injected by rehypeMentions below → render as the shortened filename chip.
   span: (p: any) =>
     String(p.className ?? "").includes("md-mention")
-      ? <span title={p.title} className="mx-px inline-flex items-baseline rounded bg-accent-ink/12 px-1 py-px text-[0.92em] font-medium">{p.children}</span>
+      ? <span title={p.title} className="mx-px inline-flex items-baseline rounded bg-accent/15 px-1 py-px text-[0.92em] font-medium text-accent-hi">{p.children}</span>
       : <span {...p} />,
 };
 
@@ -108,12 +114,23 @@ export const UserMarkdown = memo(function UserMarkdown({ content }: { content: s
   );
 });
 
+// Codex emits block directives such as `::codex-inline-vis{file="report.html"}` that GFM renders as raw text. Show the
+// referenced file as inline code (and drop directives that carry no file) instead of leaking the directive syntax.
+const DIRECTIVE_LINE = /^::[\w-]+\{([^}\n]*)\}[ \t]*$/gm;
+export function stripDirectives(md: string): string {
+  if (!md.includes("::")) return md;
+  return md.replace(DIRECTIVE_LINE, (_line, attrs: string) => {
+    const file = /\bfile="([^"]+)"/.exec(attrs)?.[1];
+    return file ? `\`${file}\`` : "";
+  });
+}
+
 // memo: skip re-parsing when children are unchanged — prevents re-parsing other (finalized) messages on every streamed token.
 export const Markdown = memo(function Markdown({ children }: { children: string }): JSX.Element {
   return (
-    <div className="text-[13.5px] leading-relaxed">
+    <div className="text-prose leading-[1.65]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-        {children}
+        {stripDirectives(children)}
       </ReactMarkdown>
     </div>
   );
@@ -155,9 +172,9 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ content }: { 
   );
   useEffect(() => { seen.current = count.current; }, [content]); // update only after commit (avoid render side effects)
   return (
-    <div className="md-streaming text-[13.5px] leading-relaxed">
+    <div className="md-streaming text-prose leading-[1.65]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[plugin]} components={MD_COMPONENTS}>
-        {content}
+        {stripDirectives(content)}
       </ReactMarkdown>
     </div>
   );

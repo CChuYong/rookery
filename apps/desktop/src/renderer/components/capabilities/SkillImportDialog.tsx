@@ -23,7 +23,7 @@ function errorMessage(error: unknown): string {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
-    <label className="flex min-w-0 flex-col gap-1 text-[10.5px] font-medium text-fg-dim">
+    <label className="flex min-w-0 flex-col gap-1 text-meta font-medium text-fg-dim">
       <span>{label}</span>
       {children}
     </label>
@@ -59,11 +59,11 @@ export function SkillImportDialog(props: SkillImportDialogProps): JSX.Element {
   useFocusTrap(panelRef);
 
   return (
-    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="skill-import-title" className={cn("flex max-h-[92vh] w-[min(620px,96vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}>
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim p-5", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="skill-import-title" className={cn("flex max-h-[92vh] w-[min(620px,96vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}>
         <div className="flex shrink-0 items-start gap-3 border-b border-line px-5 py-4">
-          <div className="min-w-0 flex-1"><h2 id="skill-import-title" className="text-[15px] font-semibold text-fg">{t("capabilityCatalog.skillTitle")}</h2><p className="mt-1 text-[11px] text-muted">{t("capabilityCatalog.skillDescription")}</p></div>
-          <Button variant="ghost" size="iconSm" aria-label={t("common.close")} disabled={busy} onClick={dismiss}><X size={15} /></Button>
+          <div className="min-w-0 flex-1"><h2 id="skill-import-title" className="text-title font-medium text-fg">{t("capabilityCatalog.skillTitle")}</h2><p className="mt-1 text-meta text-muted">{t("capabilityCatalog.skillDescription")}</p></div>
+          <Button variant="ghost" size="iconSm" aria-label={t("common.close")} disabled={busy} onClick={dismiss}><X size={14} /></Button>
         </div>
         <form className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4" onSubmit={(event) => { event.preventDefault(); submit(); }}>
           <Field label={t("capabilityCatalog.name")}>
@@ -76,15 +76,15 @@ export function SkillImportDialog(props: SkillImportDialogProps): JSX.Element {
             <Textarea className="w-full" rows={3} size="sm" value={description} onChange={(event) => setDescription(event.target.value)} />
           </Field>
           <div>
-            <span className="text-[10.5px] font-medium text-fg-dim">{t("capabilityCatalog.skillDirectory")}</span>
+            <span className="text-meta font-medium text-fg-dim">{t("capabilityCatalog.skillDirectory")}</span>
             <div className="mt-1 flex items-center gap-2">
               <Input className="min-w-0 flex-1" size="sm" readOnly aria-label={t("capabilityCatalog.skillDirectory")} value={sourcePath} />
-              <Button className="shrink-0" type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void props.pickDirectory().then((selected) => { if (selected) setSourcePath(selected); }); }}><FolderOpen size={13} /> {t("capabilityCatalog.chooseDirectory")}</Button>
+              <Button className="shrink-0" type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void props.pickDirectory().then((selected) => { if (selected) setSourcePath(selected); }); }}><FolderOpen size={14} /> {t("capabilityCatalog.chooseDirectory")}</Button>
             </div>
           </div>
-          {error && <p role="alert" className="rounded-md border border-fail/30 bg-fail/5 p-3 text-[11px] text-fail">{error}</p>}
+          {error && <p role="alert" className="rounded-md border border-fail/30 bg-fail/5 p-3 text-meta text-fail">{error}</p>}
         </form>
-        <div className="flex shrink-0 items-center gap-3 border-t border-line px-5 py-3"><p className="min-w-0 flex-1 text-[10.5px] text-run">{t("capabilityCatalog.skillTrustNotice")}</p><Button variant="outline" disabled={busy} onClick={dismiss}>{t("common.cancel")}</Button><Button variant="primary" loading={busy} onClick={submit}>{t("capabilityCatalog.importSkill")}</Button></div>
+        <div className="flex shrink-0 items-center gap-3 border-t border-line px-5 py-3"><p className="min-w-0 flex-1 text-meta text-run">{t("capabilityCatalog.skillTrustNotice")}</p><Button variant="outline" disabled={busy} onClick={dismiss}>{t("common.cancel")}</Button><Button variant="primary" loading={busy} onClick={submit}>{t("capabilityCatalog.importSkill")}</Button></div>
       </div>
     </div>
   );

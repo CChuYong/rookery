@@ -19,6 +19,10 @@ import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLa
 // Exported so App's startSession can restore/clear it around session.create (audit #5).
 export const NEW_SESSION_DRAFT_KEY = "newSession";
 
+// Overrides the shared Select/Input's bordered field chrome down to a borderless ghost text button — the same
+// look as the Composer's own model/effort/permission chips, so the whole control row reads as one language.
+const CHIP_FIELD = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
+
 export function NewSessionPage(p: {
   repos: Array<{ name: string; path: string }>;
   defaultModel: string;
@@ -76,9 +80,10 @@ export function NewSessionPage(p: {
   const browseDir = p.browseDir ? (dir: string) => p.browseDir!(dir, cwd || undefined) : undefined;
   const folderName = cwd ? baseName(cwd) : (p.defaultFolder ? baseName(p.defaultFolder) : t("newSessionPage.defaultFolder"));
 
-  // Working-folder picker inserted at the left of the composer's control row (on the same line as the model/effort and send button).
+  // Working-folder picker inserted at the left of the composer's control row — a borderless ghost text button,
+  // matching the model/effort/provider selects in the same row (no bordered chips everywhere).
   const folderPicker = (
-    <button onClick={() => void pick()} title={cwd || p.defaultFolder || t("newSessionPage.daemonDefaultFolder")} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-line px-2 py-1 text-[11px] text-fg-dim transition-colors hover:bg-raised hover:text-fg">
+    <button onClick={() => void pick()} title={cwd || p.defaultFolder || t("newSessionPage.daemonDefaultFolder")} className="flex h-6 max-w-[200px] items-center gap-1.5 rounded px-1.5 text-ui text-fg-dim transition-colors hover:bg-raised hover:text-fg">
       <Folder size={12} className="shrink-0" /> <span className="truncate">{folderName}</span>
     </button>
   );
@@ -87,8 +92,10 @@ export function NewSessionPage(p: {
   // folder picker — the Composer's own model/effort controls live inside a shared component (not a standalone
   // <Select> like the modal), so rather than changing Composer's API, codex's free-text model field + its own
   // effort <Select> render here too and the Composer's `controls` prop is omitted entirely when codex (see below).
+  // CHIP_FIELD overrides the shared Select/Input's bordered chrome to the same borderless text-button look as the
+  // Composer's own model/effort/permission selects (one visual language across the whole control row).
   const providerSelector = (
-    <Select size="xs" className="w-auto min-w-0 text-fg-dim" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
+    <Select size="xs" className={CHIP_FIELD} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
       <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
       <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
     </Select>
@@ -109,7 +116,7 @@ export function NewSessionPage(p: {
       {codexModels != null ? (
         <Select
           size="xs"
-          className="w-28 min-w-0 text-fg-dim"
+          className={cn(CHIP_FIELD, "w-28")}
           value={codexModel}
           onChange={(e) => {
             const nm = e.target.value;
@@ -130,10 +137,10 @@ export function NewSessionPage(p: {
           {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
         </Select>
       ) : (
-        <Input size="xs" className="w-28 min-w-0 text-fg-dim" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
+        <Input size="xs" className={cn(CHIP_FIELD, "w-28")} value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
       )}
       {effortSupported(effortModel) && (
-        <Select size="xs" className="min-w-0 text-fg-dim" value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
+        <Select size="xs" className={CHIP_FIELD} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
           {codexEffortOptions.map((ef) => (
             <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
           ))}
@@ -144,27 +151,29 @@ export function NewSessionPage(p: {
 
   return (
     <>
-      <div className="drag flex h-11 shrink-0 items-center gap-2 border-b border-line px-5 text-[13px]">
-        <span className="font-semibold tracking-[-0.01em]">{t("newSessionPage.title")}</span>
+      <div className="drag flex h-10 shrink-0 items-center gap-2 px-4 text-body">
+        <span className="font-medium text-fg">{t("newSessionPage.title")}</span>
         {p.onClose && (
-          <button onClick={p.onClose} aria-label={t("common.close")} className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim">
-            <X size={16} />
+          <button onClick={p.onClose} aria-label={t("common.close")} className="no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim">
+            <X size={14} />
           </button>
         )}
       </div>
+      {/* No centred hero — the composer sits in the lower-middle of an otherwise empty thread (T3's empty state),
+          not a big headline floating mid-screen. justify-end anchors the whole column toward the bottom. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
-        <div className="mx-auto flex w-full max-w-[680px] flex-1 flex-col justify-center gap-6 py-10">
+        <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col justify-center gap-4 pb-[12vh] pt-10">
           {/* First-run / auth-blocked guard: with no API key and no Claude login, every turn would fail — guide the user before they send. */}
           {p.authStatus?.method === "none" && (
-            <div className="flex items-start gap-3 rounded-xl border border-run/30 bg-run/10 px-4 py-3 text-left">
+            <div className="flex items-start gap-3 rounded-lg border border-run/30 bg-run/10 px-4 py-3 text-left">
               <AlertTriangle size={18} className="mt-0.5 shrink-0 text-run" />
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold text-fg">{t("newSessionPage.authBlockedTitle")}</div>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-fg-dim">{t("newSessionPage.authBlockedBody")}</p>
+                <div className="text-body font-medium text-fg">{t("newSessionPage.authBlockedTitle")}</div>
+                <p className="mt-0.5 text-ui leading-relaxed text-fg-dim">{t("newSessionPage.authBlockedBody")}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-[11px] text-fg-dim">claude login</code>
+                  <code className="rounded bg-ink px-1.5 py-0.5 font-mono text-meta text-fg-dim">claude login</code>
                   {p.onOpenSettings && (
-                    <button onClick={p.onOpenSettings} className="text-[12px] font-medium text-accent transition-colors hover:text-accent-hi">
+                    <button onClick={p.onOpenSettings} className="text-ui font-medium text-accent transition-colors hover:text-accent-hi">
                       {t("newSessionPage.authBlockedCta")}
                     </button>
                   )}
@@ -172,8 +181,9 @@ export function NewSessionPage(p: {
               </div>
             </div>
           )}
-          <div className="text-center text-[26px] font-semibold tracking-[-0.02em] text-fg-dim">
-            <span className="breathe inline-block text-accent">✻</span> {t("newSessionPage.heading")}
+          {/* One quiet line above the composer — no hero glyph, no 24px display type. */}
+          <div className="text-title font-medium text-fg-dim">
+            <span className="breathe hidden">✻</span>{t("newSessionPage.heading")}
           </div>
 
           <Composer
@@ -189,22 +199,24 @@ export function NewSessionPage(p: {
             onDropFiles={p.onDropFiles}
             onEscape={p.onClose}
             leftSlot={<>{folderPicker}{providerSelector}{codexControls}</>}
-            className="rounded-2xl border-line bg-surface/70 px-3 py-2.5"
+            className="px-3 py-3"
             initialText={initialText}
             onDraftChange={onDraftChange}
           />
 
           {p.repos.length > 0 ? (
-            <div className="flex flex-col items-center gap-2">
-              <p className="text-[11px] text-muted">{t("newSessionPage.pickRepoFolder")}</p>
-              <div className="flex flex-wrap justify-center gap-1.5">
+            // "Working folder" row — plain text label + the registered repos as 24px ghost text buttons
+            // (current selection = a neutral bg-raised lift, never an accent-filled chip).
+            <div className="flex flex-col items-start gap-1.5">
+              <p className="text-ui text-muted">{t("newSessionPage.pickRepoFolder")}</p>
+              <div className="flex flex-wrap gap-1">
                 {p.repos.map((r) => (
                   <button
                     key={r.name}
                     title={r.path}
                     onClick={() => setCwd(r.path)}
-                    className={cn("flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.97] motion-reduce:active:scale-100",
-                      cwd === r.path ? "border-accent/60 bg-accent/15 text-fg" : "border-line bg-ink/40 text-fg-dim hover:bg-raised hover:text-fg")}
+                    className={cn("flex h-6 items-center gap-1.5 rounded px-2 text-ui transition-colors",
+                      cwd === r.path ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised hover:text-fg")}
                   >
                     <Folder size={12} /> {r.name}
                   </button>
@@ -215,13 +227,13 @@ export function NewSessionPage(p: {
             // Empty-repo CTA (audit #58) — the repo picker used to just vanish here, leaving a blank space below
             // the composer with no hint that registering a repo is the prerequisite for spawning workers.
             p.onRegisterRepo && (
-              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line px-5 py-4 text-center">
-                <FolderGit2 size={18} className="text-muted" />
-                <p className="text-[12.5px] font-medium text-fg-dim">{t("newSessionPage.noReposTitle")}</p>
-                <p className="max-w-[320px] text-[11.5px] leading-relaxed text-muted">{t("newSessionPage.noReposBody")}</p>
+              <div className="flex flex-col items-start gap-1.5 rounded-lg border border-dashed border-line px-4 py-3 text-left">
+                <FolderGit2 size={16} className="text-muted" />
+                <p className="text-ui font-medium text-fg-dim">{t("newSessionPage.noReposTitle")}</p>
+                <p className="max-w-[320px] text-meta leading-relaxed text-muted">{t("newSessionPage.noReposBody")}</p>
                 <button
                   onClick={p.onRegisterRepo}
-                  className="mt-1 flex items-center gap-1.5 rounded-lg border border-dashed border-line px-2.5 py-1.5 text-[12px] text-muted transition-colors hover:border-accent/40 hover:text-fg-dim"
+                  className="mt-0.5 flex h-6 items-center gap-1.5 rounded px-1.5 text-ui text-muted transition-colors hover:bg-raised hover:text-fg-dim"
                 >
                   <Folder size={12} /> {t("newSessionPage.registerRepo")}
                 </button>

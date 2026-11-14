@@ -83,23 +83,23 @@ export function CheckpointMenu({
   return (
     <div className="relative">
       <Button variant="ghost" size="sm" onClick={toggle} title={t("checkpointMenu.buttonTitle")} aria-haspopup="menu" aria-expanded={open}>
-        <History size={13} /> {t("checkpointMenu.restore")}
+        <History size={14} /> {t("checkpointMenu.restore")}
       </Button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl">
-            <div className="px-2 py-1 text-[10.5px] leading-relaxed text-muted">
+          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop">
+            <div className="px-2 py-1 text-meta leading-relaxed text-muted">
               {t("checkpointMenu.hint")}
             </div>
             {items === null && !loadError && <SkeletonRows rows={3} />}
             {loadError && (
               // The single "couldn't load" string doubles as the retry button's label (no dedicated retry key in the catalog).
-              <button onClick={load} className="w-full rounded-md px-2 py-1.5 text-left text-[12px] text-fail hover:bg-fail/10">
+              <button onClick={load} className="w-full rounded-md px-2 py-1.5 text-left text-ui text-fail hover:bg-fail/10">
                 {t("checkpointMenu.loadFailed")}
               </button>
             )}
-            {items !== null && items.length === 0 && <div className="px-2 py-1.5 text-[12px] text-muted">{t("checkpointMenu.empty")}</div>}
+            {items !== null && items.length === 0 && <div className="px-2 py-1.5 text-ui text-muted">{t("checkpointMenu.empty")}</div>}
             {items?.map((c) => (
               <button
                 key={c.seq}
@@ -117,11 +117,11 @@ export function CheckpointMenu({
                     );
                   } else setArmed(c.seq);
                 }}
-                className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-[12px] disabled:opacity-60 ${armed === c.seq ? "bg-fail/15 text-fail" : "text-fg-dim hover:bg-line/40"}`}
+                className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-ui disabled:opacity-60 ${armed === c.seq ? "bg-fail/15 text-fail" : "text-fg-dim hover:bg-line/40"}`}
               >
                 <span className="font-mono">{t("checkpointMenu.turn", { turn: c.seq + 1 })}</span>
-                <span className="flex shrink-0 items-center gap-1 text-[10.5px] text-muted">
-                  {restoring === c.seq ? <Loader2 size={11} className="animate-spin" aria-hidden /> : armed === c.seq ? t("checkpointMenu.confirmRestore") : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
+                <span className="flex shrink-0 items-center gap-1 text-meta text-muted">
+                  {restoring === c.seq ? <Loader2 size={12} className="animate-spin" aria-hidden /> : armed === c.seq ? t("checkpointMenu.confirmRestore") : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
                 </span>
               </button>
             ))}

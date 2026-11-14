@@ -23,19 +23,20 @@ export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { to
   const errors = tools.filter((t) => t.ok === false).length;
   const names = [...new Set(tools.map((t) => t.name))].slice(0, 4).join(", ");
   return (
-    <div className={cn("max-w-[80%] self-start", className)}>
+    <div className={cn("w-full self-start", className)}>
+      {/* same flat one-line row as a single ToolBlock — no box, no coloured border, just the aggregate dot + count. */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className={cn("relative flex w-full items-center gap-2 overflow-hidden rounded-[var(--radius)] border border-line bg-surface px-3 py-2 text-[12px] hover:bg-raised/40", running && "sheen")}
+        className="group flex h-6 w-full items-center gap-1.5 rounded px-1 text-ui transition-colors hover:bg-raised/50"
       >
-        <ChevronRight size={12} className={cn("shrink-0 text-muted transition-transform duration-200 ease-out", open && "rotate-90")} />
-        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", running ? "bg-run led-live" : errors ? "bg-fail" : "bg-pr", justSettled && "dot-settle")} />
-        <span className="shrink-0 font-medium text-fg-dim">{t("toolGroup.toolCalls", { count: tools.length })}</span>
-        <span className="truncate font-mono text-[10.5px] text-muted">{names}</span>
-        {errors > 0 && <span className="ml-auto shrink-0 font-mono text-[10px] text-fail">{errors} error</span>}
+        <ChevronRight size={12} className={cn("shrink-0 text-faint transition-transform duration-200 ease-out", open && "rotate-90")} />
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", running ? "bg-run led-live" : errors ? "bg-fail" : "bg-faint", justSettled && "dot-settle")} />
+        <span className="shrink-0 text-fg-dim">{t("toolGroup.toolCalls", { count: tools.length })}</span>
+        <span className="truncate text-meta text-faint">{names}</span>
+        {errors > 0 && <span className="ml-1 shrink-0 text-meta text-fail">{errors} error</span>}
       </button>
       <Collapse open={open}>
-        <div className="mt-1 flex flex-col gap-1 pl-3">
+        <div className="ml-5 flex flex-col gap-0.5 pt-0.5">
           {tools.map((t, i) => (
             <ToolBlock key={i} name={t.name} status={t.status} ok={t.ok} input={t.input} result={t.result} elapsedSec={t.elapsedSec} workflow={t.workflow} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} />
           ))}

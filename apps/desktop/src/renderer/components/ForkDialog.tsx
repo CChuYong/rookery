@@ -86,29 +86,29 @@ export function ForkDialog(p: {
 
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t(isMaster ? "forkDialog.titleMaster" : "forkDialog.titleWorker")}
-        className={cn("w-[420px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={cn("w-[420px] rounded-xl border border-line bg-surface p-5 shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
       >
-        <div className="mb-1 text-[14px] font-semibold">{t(isMaster ? "forkDialog.titleMaster" : "forkDialog.titleWorker")}</div>
-        <div className="mb-3 text-[11.5px] text-muted">{t(isMaster ? "forkDialog.subtitleMaster" : "forkDialog.subtitleWorker")}</div>
+        <div className="mb-1 text-title font-medium text-fg">{t(isMaster ? "forkDialog.titleMaster" : "forkDialog.titleWorker")}</div>
+        <div className="mb-3 text-body text-muted">{t(isMaster ? "forkDialog.subtitleMaster" : "forkDialog.subtitleWorker")}</div>
 
         <div className="flex flex-col gap-2">
           {/* Target backend — default = the other provider (the handoff intent). */}
-          <div className="text-[11px] font-medium text-muted">{t("forkDialog.provider")}</div>
+          <div className="text-ui text-muted">{t("forkDialog.provider")}</div>
           <Segment
             items={PROVIDERS}
             value={provider}
             onChange={setProvider}
             variant="pill"
             aria-label={t("forkDialog.provider")}
-            className="gap-1 rounded-[var(--radius)] border border-line bg-ink/40 p-1"
-            itemClassName="flex-1 justify-center py-1.5 text-[12px] font-medium"
+            className="gap-1 rounded-[var(--radius)] border border-line bg-sunk p-1"
+            itemClassName="flex-1 justify-center py-1.5 text-ui font-medium"
           />
 
           <div className="flex gap-2">
@@ -163,11 +163,11 @@ export function ForkDialog(p: {
           </div>
 
           {/* Same/cross-provider note (informational). */}
-          <p className="text-[11px] leading-relaxed text-muted">{crossProvider ? t("forkDialog.crossNote") : t("forkDialog.sameNote")}</p>
+          <p className="text-meta leading-relaxed text-muted">{crossProvider ? t("forkDialog.crossNote") : t("forkDialog.sameNote")}</p>
 
           {/* Codex auth-probe gate — mirrors the SettingsPage readiness card colours (stop dot for not-ready). */}
           {codexBlocked && (
-            <div className="flex items-start gap-2 rounded-[var(--radius)] border border-stop/40 bg-stop/10 px-2.5 py-2 text-[11.5px] text-fg">
+            <div className="flex items-start gap-2 rounded-[var(--radius)] border border-stop/40 bg-stop/10 px-2.5 py-2 text-meta text-fg">
               <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-stop" />
               <span className="leading-relaxed">{t("forkDialog.codexNotReady")}</span>
             </div>

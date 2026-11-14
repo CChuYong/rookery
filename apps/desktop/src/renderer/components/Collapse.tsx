@@ -23,13 +23,13 @@ export function Collapse({
   return (
     <div
       className={cn(
-        "collapse-anim grid transition-[grid-template-rows]",
+        "collapse-anim grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows]",
         open ? "ease-out grid-rows-[1fr] opacity-100" : "ease-in grid-rows-[0fr] opacity-0",
         className,
       )}
       style={{ transitionDuration: `${durationMs}ms` }}
     >
-      <div className="min-h-0 overflow-hidden">{open || wasOpen.current ? children : null}</div>
+      <div className="min-h-0 min-w-0 overflow-hidden">{open || wasOpen.current ? children : null}</div>
     </div>
   );
 }

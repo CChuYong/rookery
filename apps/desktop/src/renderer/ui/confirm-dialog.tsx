@@ -38,10 +38,10 @@ export function ConfirmDialog({
   useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: confirmAndClose });
   useFocusTrap(panelRef);
   return createPortal(
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-black/55 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
+    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-scrim", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
       <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={cn("w-[360px] rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1.5 text-[14px] font-semibold">{title}</div>
-        <p className="text-[12.5px] leading-relaxed text-muted">{body}</p>
+        <div className="mb-1.5 text-title font-medium">{title}</div>
+        <p className="text-ui leading-relaxed text-muted">{body}</p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="outline" size="sm" autoFocus onClick={dismiss}>{t("common.cancel")}</Button>
           <Button variant={variant === "danger" ? "dangerSolid" : "primary"} size="sm" onClick={confirmAndClose}>{confirmLabel}</Button>

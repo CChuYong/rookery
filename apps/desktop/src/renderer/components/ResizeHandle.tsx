@@ -16,7 +16,7 @@ export function ResizeHandle({
       onPointerDown={onPointerDown}
       className={cn("no-drag group relative z-20 flex w-1.5 shrink-0 cursor-col-resize items-stretch", className)}
     >
-      <div className="m-auto h-full w-px bg-line transition-colors group-hover:bg-accent/60 group-active:bg-accent" />
+      <div className="m-auto h-full w-px bg-transparent transition-colors group-hover:bg-thumb-hi group-active:bg-accent" />
     </div>
   );
 }

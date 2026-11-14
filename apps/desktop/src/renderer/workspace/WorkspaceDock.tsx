@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { DockviewReact } from "dockview-react";
-import type { DockviewReadyEvent, DockviewApi, Direction, SerializedDockview } from "dockview";
+import type { DockviewReadyEvent, DockviewApi, Direction, SerializedDockview, DockviewTheme } from "dockview";
 import { useT } from "../i18n/provider.js";
 import { useWsStore, type Tab } from "../store/workspace.js";
 import { useTermStore } from "../store/terminals.js";
@@ -12,6 +12,10 @@ import { fixedPanelTitle } from "./panel-titles.js";
 import { dockComponents } from "./panels.js";
 import { RookeryTab } from "./RookeryTab.js";
 import "./dockview-theme.css";
+
+// dockview v7 applies its own theme class to the shell (default: Abyss, a navy palette) and that class wins over
+// ancestor variables, so the Rookery theme must be passed explicitly for the token overrides to take effect.
+const ROOKERY_DOCK_THEME: DockviewTheme = { name: "rookery", className: "dockview-theme-dark dockview-theme-rookery", colorScheme: "dark" };
 import "dockview-react/dist/styles/dockview.css";
 
 const EDITOR_PREFIX = "panel:editor:";
@@ -62,7 +66,13 @@ export function WorkspaceDock({ pageKey, agentKind, compact = false }: { pageKey
   };
 
   const seed = (api: DockviewApi): void => {
-    for (const sp of defaultPanels(agentKind)) addFixed(api, sp.kind, sp.anchor, sp.direction as Direction | undefined);
+    // The terminal starts closed on a fresh page (open it from the header toggle or Ctrl+`); a page that already had
+    // terminals open in a previous run keeps it. The spec stays in defaultPanels so reopen() knows where it goes.
+    const openTerminals = useTermStore.getState().layout[pageKey]?.count ?? 0;
+    for (const sp of defaultPanels(agentKind)) {
+      if (sp.kind === "terminal" && openTerminals === 0) continue;
+      addFixed(api, sp.kind, sp.anchor, sp.direction as Direction | undefined);
+    }
   };
 
   // Re-add a hidden fixed panel (audit #48) at its normal seed position when
@@ -288,6 +298,17 @@ export function WorkspaceDock({ pageKey, agentKind, compact = false }: { pageKey
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageKey]);
 
+  // Ctrl+` toggles this page's terminal (VS Code's binding), the keyboard twin of the header's terminal toggle.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!e.ctrlKey || e.metaKey || e.altKey || e.code !== "Backquote") return;
+      e.preventDefault();
+      useDockPanelsStore.getState().toggle_(pageKey, "terminal");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pageKey]);
+
   useEffect(() => {
     const api = apiRef.current;
     if (api && !disposedRef.current) applyResponsiveCompact(api, compact);
@@ -298,7 +319,7 @@ export function WorkspaceDock({ pageKey, agentKind, compact = false }: { pageKey
 
   return (
     <div className="dockview-theme-dark dockview-theme-rookery min-h-0 w-full flex-1">
-      <DockviewReact components={dockComponents} defaultTabComponent={RookeryTab} onReady={onReady} />
+      <DockviewReact components={dockComponents} defaultTabComponent={RookeryTab} onReady={onReady} theme={ROOKERY_DOCK_THEME} />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import type { ReactNode } from "react";
 import { ChevronRight, Info } from "lucide-react";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
 import { cn } from "../lib/cn.js";
@@ -19,21 +20,39 @@ function fmtReset(unixSec: number): string {
 }
 
 // Single-line % gauge (server-side OAuth utilization).
-function Meter({ label, pct, sub }: { label: string; pct: number; sub?: string }): JSX.Element {
+function Meter({ label, pct, sub }: { label: string; pct: number; sub?: ReactNode }): JSX.Element {
   const w = Math.max(0, Math.min(100, pct));
   const near = w >= 90; // approaching limit → red pulse + text marker (for color-blind accessibility)
   const tone = near ? "bg-fail" : w >= 70 ? "bg-run" : "bg-accent";
   return (
     <div className="px-2 py-1.5">
-      <div className="flex items-baseline justify-between gap-2 text-[10.5px]">
+      <div className="flex items-baseline justify-between gap-1.5 text-meta">
         <span className="truncate text-muted">{label}</span>
-        <span className="shrink-0 font-mono text-fg-dim">
-          {Math.round(pct)}%{sub ? <span className="text-muted"> · {sub}</span> : null}{near ? <span className="text-fail"> · limit</span> : null}
+        <span className="flex shrink-0 items-center gap-1.5 text-fg-dim">
+          <span className="tabular-nums">{Math.round(pct)}%</span>
+          {sub != null && (
+            <>
+              <span className="w-2 shrink-0" aria-hidden />
+              <span className="inline-flex items-center gap-1.5 font-mono text-muted">{sub}</span>
+            </>
+          )}
+          {/* "limit" is a word, not a figure — kept out of the mono run above (REFLEX 64). */}
+          {near && (
+            <>
+              <span className="w-2 shrink-0" aria-hidden />
+              <span className="text-fail">limit</span>
+            </>
+          )}
         </span>
       </div>
-      {/* When near, drop overflow-hidden so the led-live glow shows outside the track. text-fail sets the pulse color to red. */}
+      {/* When near, drop overflow-hidden so the led-live glow shows outside the track. text-fail sets the pulse
+          color to red. The fill never animates width (Floor: no width/height transitions) — a fixed full-width
+          bar is scaled from the left instead. */}
       <div className={cn("mt-1 h-1 w-full rounded-full bg-line", !near && "overflow-hidden")}>
-        <div className={cn("usage-fill h-full rounded-full transition-[width,background-color] duration-500 ease-out", tone, near && "led-live text-fail")} style={{ width: `${w}%` }} />
+        <div
+          className={cn("usage-fill h-full w-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", tone, near && "led-live text-fail")}
+          style={{ transform: `scaleX(${w / 100})` }}
+        />
       </div>
     </div>
   );
@@ -42,14 +61,43 @@ function Meter({ label, pct, sub }: { label: string; pct: number; sub?: string }
 // Single-line number without a gauge (ccusage tokens/$).
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
-    <div className="flex items-baseline justify-between gap-2 px-2 py-1 text-[10.5px]">
+    <div className="flex items-baseline justify-between gap-2 px-2 py-1 text-meta">
       <span className="truncate text-muted">{label}</span>
       <span className="shrink-0 font-mono text-fg-dim">{value}</span>
     </div>
   );
 }
 
-function UsagePanelImpl({ usage, loadFailed, compact = false }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean }): JSX.Element {
+// Status-bar meter: `label 31%` + a fixed 40x3px bar (neutral fill, warn colour only past the near-limit threshold).
+// No width/height transition — the fill is a fixed-width bar scaled from the left (Floor: never animate width/height).
+function MeterInline({ label, pct }: { label: string; pct: number }): JSX.Element {
+  const w = Math.max(0, Math.min(100, pct));
+  const near = w >= 90;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+      <span className="truncate text-faint">{label}</span>
+      <span className="h-[3px] w-10 shrink-0 overflow-hidden rounded-full bg-line">
+        <span
+          className={cn("block h-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", near ? "bg-fail" : "bg-fg-dim")}
+          style={{ transform: `scaleX(${w / 100})` }}
+        />
+      </span>
+      <span className="tabular-nums">{Math.round(pct)}%</span>
+    </span>
+  );
+}
+
+// Status-bar stat: plain `label value` pair, value in mono (parity with MeterInline's % figure).
+function StatInline({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+      <span className="truncate text-faint">{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </span>
+  );
+}
+
+function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar" }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar" }): JSX.Element {
   const t = useT();
   // Provider tab: Claude is the default (user direction); not persisted (YAGNI).
   const [tab, setTab] = useState<"claude" | "codex">("claude");
@@ -59,13 +107,55 @@ function UsagePanelImpl({ usage, loadFailed, compact = false }: { usage: UsageSn
   const hasAny = !!(p || usage?.session || wk || usage?.today);
   const cdx = usage?.codex;
   const showBody = !compact || expanded;
+
+  if (variant === "statusbar") {
+    if (!usage) return <span className="text-faint">{loadFailed ? t("usagePanel.loadFailed") : t("usagePanel.loading")}</span>;
+    const showTabs = !!cdx; // only worth a tab switch once there's a second provider's data to switch to
+    return (
+      <span className="inline-flex shrink-0 items-center gap-3 text-meta">
+        {showTabs && (
+          <span className="inline-flex shrink-0 items-center gap-0.5">
+            {(["claude", "codex"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={tab === k}
+                onClick={() => setTab(k)}
+                className={cn("rounded-sm px-1 text-meta leading-none transition-colors", tab === k ? "text-fg-dim" : "text-faint hover:text-muted")}
+              >
+                {t(k === "claude" ? "usagePanel.tabClaude" : "usagePanel.tabCodex")}
+              </button>
+            ))}
+          </span>
+        )}
+        {tab === "claude" ? (
+          <>
+            {p?.fiveHour != null && <MeterInline label={t("usagePanel.session5h")} pct={p.fiveHour} />}
+            {p?.sevenDay != null && <MeterInline label={t("usagePanel.weekly")} pct={p.sevenDay} />}
+            {!p && usage.session && <StatInline label={t("usagePanel.session5h")} value={usd(usage.session.costUSD)} />}
+            {!p && wk && <StatInline label={t("usagePanel.weekly")} value={usd(wk.costUSD)} />}
+            {usage.today && <StatInline label={t("usagePanel.today")} value={usd(usage.today.costUSD)} />}
+          </>
+        ) : cdx ? (
+          <>
+            {cdx.fiveHour && <MeterInline label={t("usagePanel.session5h")} pct={cdx.fiveHour.usedPercent} />}
+            {cdx.sevenDay && <MeterInline label={t("usagePanel.weekly")} pct={cdx.sevenDay.usedPercent} />}
+            {cdx.todayTokens != null && <StatInline label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}
+          </>
+        ) : (
+          <span className="text-faint">{t("usagePanel.codexUnavailable")}</span>
+        )}
+      </span>
+    );
+  }
+
   return (
     <div className="border-t border-line pt-1">
       {/* Always-rendered header (audit #55/#56): per-tab title + provider tab toggle. */}
-      <div className="flex items-center gap-1 px-2 pt-1 text-[10.5px] text-muted">
+      <div className="flex items-center gap-1 px-2 pt-1 text-meta text-muted">
         <span className="min-w-0 flex-1 truncate">{t(tab === "claude" ? "usagePanel.title" : "usagePanel.titleCodex")}</span>
         <Tooltip label={t(tab === "claude" ? "usagePanel.titleHint" : "usagePanel.titleHintCodex")} side="top">
-          <Info size={11} tabIndex={0} aria-label={t(tab === "claude" ? "usagePanel.titleHint" : "usagePanel.titleHintCodex")} className="shrink-0 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-accent/50" />
+          <Info size={12} tabIndex={0} aria-label={t(tab === "claude" ? "usagePanel.titleHint" : "usagePanel.titleHintCodex")} className="shrink-0 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-accent/50" />
         </Tooltip>
         {compact && (
           <button
@@ -85,7 +175,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false }: { usage: UsageSn
               type="button"
               aria-pressed={tab === k}
               onClick={() => setTab(k)}
-              className={cn("rounded px-1.5 py-0.5 text-[10px] leading-none transition-colors", tab === k ? "bg-line text-fg" : "text-muted hover:text-fg-dim")}
+              className={cn("rounded px-1.5 py-0.5 text-meta leading-none transition-colors", tab === k ? "bg-line text-fg" : "text-muted hover:text-fg-dim")}
             >
               {t(k === "claude" ? "usagePanel.tabClaude" : "usagePanel.tabCodex")}
             </button>
@@ -96,16 +186,16 @@ function UsagePanelImpl({ usage, loadFailed, compact = false }: { usage: UsageSn
       {showBody && <>
         {/* Shared pre-load states (gate on the snapshot itself, not per-tab). */}
         {!usage && !loadFailed && <SkeletonRows rows={2} className="px-2 py-1.5" />}
-        {!usage && loadFailed && <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.loadFailed")}</div>}
+        {!usage && loadFailed && <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.loadFailed")}</div>}
 
         {usage && tab === "claude" && (
           <>
-            {!hasAny && <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.loading")}</div>}
+            {!hasAny && <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.loading")}</div>}
             {hasAny && (
               <>
                 {/* Server-side % (official, same source as /usage) */}
-                {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} pct={p.fiveHour} sub={usage.session ? `${fmtTok(usage.session.totalTokens)} · ${usd(usage.session.costUSD)}` : undefined} />}
-                {p?.sevenDay != null && <Meter label={t("usagePanel.weekly")} pct={p.sevenDay} sub={wk ? `${fmtTok(wk.totalTokens)} · ${usd(wk.costUSD)}` : undefined} />}
+                {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} pct={p.fiveHour} sub={usage.session ? <>{fmtTok(usage.session.totalTokens)}<span className="w-2 shrink-0" aria-hidden />{usd(usage.session.costUSD)}</> : undefined} />}
+                {p?.sevenDay != null && <Meter label={t("usagePanel.weekly")} pct={p.sevenDay} sub={wk ? <>{fmtTok(wk.totalTokens)}<span className="w-2 shrink-0" aria-hidden />{usd(wk.costUSD)}</> : undefined} />}
                 {p?.sevenDayOpus != null && <Meter label={t("usagePanel.weeklyOpus")} pct={p.sevenDayOpus} />}
                 {p?.sevenDaySonnet != null && <Meter label={t("usagePanel.weeklySonnet")} pct={p.sevenDaySonnet} />}
 
@@ -129,7 +219,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false }: { usage: UsageSn
               {cdx.todayTokens != null && <Stat label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}
             </>
           ) : (
-            <div className="px-2 py-1.5 text-[10.5px] text-muted">{t("usagePanel.codexUnavailable")}</div>
+            <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.codexUnavailable")}</div>
           )
         )}
       </>}

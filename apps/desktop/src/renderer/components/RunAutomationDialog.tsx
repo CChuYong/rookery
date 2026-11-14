@@ -33,24 +33,28 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
   useFocusTrap(panelRef);
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("runAutomationDialog.title")}
-        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-surface", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
       >
         <div className="shrink-0 px-5 pb-3 pt-5">
-          <div className="text-[14px] font-semibold">{t("runAutomationDialog.title")} · {automation.name}</div>
-          <p className="mt-3 text-[12px] text-muted">{t("runAutomationDialog.desc")}</p>
+          <div className="flex items-center gap-2 text-title font-medium text-fg">
+            <span>{t("runAutomationDialog.title")}</span>
+            <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
+            <span className="min-w-0 truncate text-fg-dim">{automation.name}</span>
+          </div>
+          <p className="mt-2 text-body leading-relaxed text-muted">{t("runAutomationDialog.desc")}</p>
         </div>
         <div data-dialog-scroll-body className="min-h-0 overflow-y-auto px-5 pb-4">
           <div className="flex flex-col gap-2.5">
             {names.map((n) => (
               <label key={n} className="flex flex-col gap-1">
-                <span className="font-mono text-[11px] text-muted">{`{{${n}}}`}</span>
+                <span className="font-mono text-meta text-muted">{`{{${n}}}`}</span>
                 {n === "message" ? (
                   <Textarea autoFocus rows={3} className="resize-y" value={vals[n] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [n]: e.target.value }))} />
                 ) : (

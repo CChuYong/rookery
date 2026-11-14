@@ -65,7 +65,7 @@ function MessageListImpl({
           <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center">
             <button onClick={onRetryHistory} className="flex flex-col items-center gap-2.5 text-fail transition-colors hover:underline">
               <MessageSquareDashed size={28} className="opacity-40" />
-              <span className="text-[13px]">{t("messageList.loadFailed")}</span>
+              <span className="text-body">{t("messageList.loadFailed")}</span>
             </button>
           </div>
         );
@@ -79,7 +79,7 @@ function MessageListImpl({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center text-muted">
         <MessageSquareDashed size={28} className="opacity-40" />
-        <p className="text-[13px]">{t(kind === "worker" ? "messageList.emptyHintWorker" : "messageList.emptyHintMaster")}</p>
+        <p className="text-body">{t(kind === "worker" ? "messageList.emptyHintWorker" : "messageList.emptyHintMaster")}</p>
       </div>
     );
   }
@@ -100,11 +100,11 @@ function MessageListImpl({
     }
     if (it.kind === "message") {
       if (it.role === "user") {
-        // user message: keep the right-aligned bubble.
+        // user message: a quiet raised bubble, right-aligned, narrower than the full column (T3's chat bubble).
         rows.push(
           <div
             key={i}
-            className="max-w-[80%] self-end [overflow-wrap:anywhere] rounded-2xl rounded-br-md bg-accent px-3.5 py-2.5 text-[13.5px] leading-relaxed text-accent-ink shadow-[0_1px_10px_-3px_color-mix(in_srgb,var(--color-accent)_40%,transparent)]"
+            className="max-w-[80%] self-end [overflow-wrap:anywhere] rounded-md bg-raised px-3 py-2 text-prose leading-[1.6] text-fg"
           >
             {/* markdown on the bubble (remarkBreaks keeps casual newlines; rehypeMentions keeps @file chips) */}
             <UserMarkdown content={it.content} />
@@ -120,7 +120,7 @@ function MessageListImpl({
       // informational system push (compaction/retry/fallback) — centered, subtle chip.
       // translate coded notices to the active locale; fall back to the pre-rendered text.
       rows.push(
-        <div key={i} className="my-0.5 self-center rounded-full border border-line bg-raised/60 px-2.5 py-0.5 text-[11px] text-muted">
+        <div key={i} className="my-0.5 self-center rounded px-2 py-0.5 text-meta text-muted">
           {it.code ? t(it.code, it.params) : it.text}
         </div>,
       );
@@ -135,14 +135,14 @@ function MessageListImpl({
             key={i}
             onClick={() => onSelectWorker(wid)}
             title={t("messageList.jumpToWorker")}
-            className="group flex items-center gap-1.5 self-start rounded-md px-1 py-0.5 font-mono text-[11.5px] text-muted transition-colors hover:bg-raised/60 hover:text-fg-dim"
+            className="group flex h-6 items-center gap-1.5 self-start rounded px-1 font-mono text-meta text-muted transition-colors hover:bg-raised/50 hover:text-fg-dim"
           >
             <span className={dotCls} />
             <span className="text-fg-dim group-hover:underline">{wid}</span>
             <span title={t(statusLabelKey(it.status))}>{tail}</span>
           </button>
         ) : (
-          <div key={i} className="flex items-center gap-1.5 self-start font-mono text-[11.5px] text-muted">
+          <div key={i} className="flex h-6 items-center gap-1.5 self-start font-mono text-meta text-muted">
             <span className={dotCls} />
             <span className="text-fg-dim">{wid}</span>
             <span title={t(statusLabelKey(it.status))}>{tail}</span>
@@ -187,13 +187,14 @@ function MessageListImpl({
           setAtBottom(bottom);
         }}
         // [&>*]:shrink-0 — prevents the flexbox bug where direct children get vertically squished when the window shrinks (the container scrolls instead).
-        className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-5 py-5 [&>*]:shrink-0"
+        // mx-auto max-w-[720px] — a centered reading column (T3 Code), not edge-to-edge prose.
+        className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-2.5 overflow-y-auto px-6 py-5 [&>*]:shrink-0"
       >
         {rows}
         {waiting && (
-          <div role="status" className="rise-in flex items-center gap-2 self-start rounded-2xl rounded-bl-md border border-line bg-raised px-3.5 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.22)]">
+          <div role="status" className="rise-in flex h-6 items-center gap-1.5 self-start px-1">
             <span className="h-1.5 w-1.5 rounded-full bg-accent text-accent led-live" />
-            <span className="font-mono text-[11px] text-muted">{t("messageList.thinking")}</span>
+            <span className="text-ui text-muted">{t("messageList.thinking")}</span>
           </div>
         )}
       </div>
@@ -202,7 +203,7 @@ function MessageListImpl({
           onClick={toBottom}
           aria-label={t("messageList.scrollToBottom")}
           // fade-in only (opacity) — avoids conflicting with the centering -translate-x-1/2 transform.
-          className="fade-in absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-raised/90 px-2.5 py-1 text-[11px] text-fg-dim shadow-md backdrop-blur transition-colors hover:text-fg"
+          className="fade-in absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-raised px-2.5 py-1 text-meta text-fg-dim shadow-md transition-colors hover:text-fg"
         >
           <ArrowDown size={12} /> {t("messageList.scrollToBottom")}
         </button>

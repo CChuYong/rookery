@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal } from "lucide-react";
+import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
@@ -25,12 +25,9 @@ function srcOf(origin: string): Exclude<SourceKind, "all"> {
 
 function OriginBadge({ origin }: { origin: string }): JSX.Element {
   const s = srcOf(origin);
-  const style =
-    s === "slack" ? "border-nochg/30 bg-nochg/12 text-nochg"
-    : s === "automation" ? "border-pr/30 bg-pr/12 text-pr"
-    : "border-line bg-raised text-muted";
+  const tone = s === "slack" ? "text-nochg" : s === "automation" ? "text-pr" : "text-faint";
   const label = s === "slack" ? "slack" : s === "automation" ? "auto" : "ui";
-  return <span className={cn("shrink-0 rounded border px-1 py-px font-mono text-[9px] uppercase tracking-wide", style)}>{label}</span>;
+  return <span className={cn("shrink-0 text-meta", tone)}>{label}</span>;
 }
 
 const SOURCE_LABEL_KEY: Record<SourceKind, string> = {
@@ -51,7 +48,8 @@ function SourceSegment(p: { sources: Array<Exclude<SourceKind, "all">>; counts: 
       value={p.current}
       onChange={p.onPick}
       variant="underline"
-      className="gap-1 px-2 pb-1.5 pt-1"
+      className="gap-0.5 overflow-x-auto px-1.5 pb-1.5 pt-1 [scrollbar-width:none]"
+      itemClassName="px-1.5"
       indicatorClassName="bottom-0.5"
     />
   );
@@ -189,6 +187,7 @@ function SessionsImpl(p: {
     const isActive = s.id === p.activeId;
     // Only rows without an explicit title get the disambiguating subline — a real title is already distinguishing.
     const fallbackNamed = isFallbackNamed(s);
+    const folder = baseName(s.cwd);
     if (renaming?.id === s.id) {
       return (
         <div key={s.id} className="px-1 py-1">
@@ -201,7 +200,7 @@ function SessionsImpl(p: {
               else if (e.key === "Escape") setRenaming(null);
             }}
             onBlur={() => { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }}
-            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-[12.5px] text-fg outline-none"
+            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-ui text-fg outline-none"
           />
         </div>
       );
@@ -213,18 +212,27 @@ function SessionsImpl(p: {
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: s.id, x: e.clientX, y: e.clientY }); }}
           className={cn(
             // Row scale shared with RepoTree.tsx (audit #76) — one sidebar-list token set for both tabs.
-            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-3 pr-2.5 text-left text-[12.5px] transition-colors",
-            isActive ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised hover:text-fg",
+            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-2.5 text-left text-body transition-colors",
+            // Selected = lifted background + a 2px accent inset rule on the left (the ledger's own selection mark,
+            // not a per-row status rail — a running/attention state already has its own dot further along the row).
+            isActive ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised/60 hover:text-fg",
           )}
         >
-          <span className={cn("absolute left-0.5 top-1.5 bottom-1.5 w-[2.5px] rounded-full transition-colors duration-200", isActive ? "bg-accent" : s.status === "active" ? "bg-pr/70" : "bg-stop")} />
           {/* master turn in progress = live pulse (same signature as the worker tree) */}
           {p.running?.[s.id] && <span title={t("sessions.workingDot")} className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className={cn("truncate", p.attention?.[s.id] && !isActive && "font-semibold text-fg")}>{name}</span>
-            {/* fallback-named row (no explicit title) → a dim relative-time subline breaks the wall of identical
-                folder-name labels (audit #46, secondary-text scope; auto-title from the first message is deferred). */}
-            {fallbackNamed && <span className="truncate text-[10.5px] leading-tight text-muted/70">{activityLabel(new Date(s.lastActivity).getTime(), Date.now(), t, locale)}</span>}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className={cn("truncate", p.attention?.[s.id] && !isActive && "font-medium text-fg")}>{name}</span>
+            {/* Two-line row (T3-style): the second line carries context in the meta size. A titled session shows the
+                repo folder it works in; a fallback-named row (its name already IS the folder) shows its relative time
+                instead, which breaks the wall of identical folder-name labels (audit #46). */}
+            {fallbackNamed ? (
+              <span className="truncate text-meta leading-tight text-faint">{activityLabel(new Date(s.lastActivity).getTime(), Date.now(), t, locale)}</span>
+            ) : folder && folder !== name ? (
+              // the folder line is skipped when the title already says the same thing
+              <span className="flex min-w-0 items-center gap-1 text-meta leading-tight text-faint">
+                <Folder size={12} className="shrink-0" aria-hidden /><span className="truncate">{folder}</span>
+              </span>
+            ) : null}
           </span>
           {/* right-side indicators (badge/unread) yield space to the action buttons on hover. Provider badge shows in every
               view (codex-only; a mixed claude/codex list must be scannable at a glance); the origin badge only in 'All'. */}
@@ -242,7 +250,7 @@ function SessionsImpl(p: {
               onClick={(e) => { e.stopPropagation(); p.onPin!(s.id, !s.pinned); }}
               className={cn("rounded p-1 hover:bg-line/60", s.pinned ? "text-accent" : "text-muted hover:text-fg-dim")}
             >
-              <Pin size={13} className={s.pinned ? "fill-current" : ""} />
+              <Pin size={14} className={s.pinned ? "fill-current" : ""} />
             </button>
           )}
           {p.onDelete && (
@@ -251,7 +259,7 @@ function SessionsImpl(p: {
               onClick={(e) => { e.stopPropagation(); setConfirm({ id: s.id, name }); }}
               className="rounded p-1 text-muted hover:bg-line/60 hover:text-fail"
             >
-              <Trash2 size={13} />
+              <Trash2 size={14} />
             </button>
           )}
           <button
@@ -260,7 +268,7 @@ function SessionsImpl(p: {
             onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4 }); }}
             className="rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           >
-            <MoreHorizontal size={13} />
+            <MoreHorizontal size={14} />
           </button>
         </div>
       </div>
@@ -273,7 +281,7 @@ function SessionsImpl(p: {
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
       {/* sticky header — the tab area is opaque (nothing shows through), and the thin frosted fade below it appears naturally only 'when not at the top'. */}
       {showSegment && (
-        <div className="sticky top-0 z-10 bg-surface">
+        <div className="sticky top-0 z-10 bg-sunk">
           {p.compact ? (
             <Select
               size="xs"
@@ -290,23 +298,23 @@ function SessionsImpl(p: {
           ) : (
             <SourceSegment sources={presentSources} counts={counts} current={effectiveSource} onPick={(k) => p.onFilter?.({ source: k })} t={t} />
           )}
-          <div className={cn("pointer-events-none absolute inset-x-0 top-full h-2.5 bg-gradient-to-b from-surface to-transparent backdrop-blur-sm transition-opacity duration-200", scrolled ? "opacity-100" : "opacity-0")} />
+          <div className={cn("pointer-events-none absolute inset-x-0 top-full h-2.5 bg-gradient-to-b from-sunk to-transparent transition-opacity duration-200", scrolled ? "opacity-100" : "opacity-0")} />
         </div>
       )}
 
       {!(p.loaded ?? true) && p.loadFailed ? (
-        <div className="flex items-center justify-between gap-2 px-2 py-3 text-[12px] leading-relaxed">
+        <div className="flex items-center justify-between gap-2 px-2 py-3 text-ui leading-relaxed">
           <span className="text-fail">{t("sessions.loadFailed")}</span>
-          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
+          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-meta text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
         </div>
       ) : (
-        (p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-[12px] leading-relaxed text-muted">{t("sessions.empty")}</div>
+        (p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-ui leading-relaxed text-muted">{t("sessions.empty")}</div>
       )}
 
       {pinnedItems.length > 0 && (
         <div>
-          <div className="eyebrow flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 eyebrow-sm font-medium uppercase text-muted">
-            <Pin size={10} className="shrink-0 fill-current opacity-70" />
+          <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 text-meta font-medium text-faint">
+            <Pin size={12} className="shrink-0 fill-current opacity-70" />
             <span>{t("sessions.pinnedSection")}</span>
           </div>
           {pinnedItems.map(Row)}
@@ -316,15 +324,15 @@ function SessionsImpl(p: {
       {effectiveSource === "automation" ? (
         <>
           {focusedAuto && (
-            <button onClick={() => p.onFilter?.({ source: "automation" })} className="px-2.5 pb-1 pt-1.5 text-left text-[11px] text-muted hover:text-fg-dim">
+            <button onClick={() => p.onFilter?.({ source: "automation" })} className="px-2.5 pb-1 pt-1.5 text-left text-meta text-muted hover:text-fg-dim">
               {t("sessions.allAutomations")}
             </button>
           )}
           {groupByAutomation(rest, p.automations ?? [], t).map((g) => (
             <div key={g.ref}>
-              <div className="eyebrow flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 eyebrow-sm font-medium uppercase text-muted">
-                <span className="min-w-0 truncate normal-case tracking-normal">{g.name}</span>
-                <span className="shrink-0 text-fg-dim/50">{t("sessions.runs", { count: g.items.length })}</span>
+              <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2.5 text-meta font-medium text-faint">
+                <span className="min-w-0 truncate">{g.name}</span>
+                <span className="shrink-0 text-faint/70">{t("sessions.runs", { count: g.items.length })}</span>
               </div>
               {g.items.map(Row)}
             </div>
@@ -333,7 +341,7 @@ function SessionsImpl(p: {
       ) : (
         groupByDay(rest, t).map((g) => (
           <div key={g.key}>
-            <div className="eyebrow px-2.5 pb-1 pt-2.5 eyebrow-sm font-medium uppercase text-muted">{g.label}</div>
+            <div className="px-2.5 pb-1 pt-2.5 text-meta font-medium text-faint">{g.label}</div>
             {g.items.map(Row)}
           </div>
         ))
@@ -377,9 +385,9 @@ function ArchivedSection({ items, render }: { items: Session[]; render: (s: Sess
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-1">
-      <button onClick={() => setOpen((v) => !v)} className="eyebrow flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 eyebrow-sm font-medium uppercase text-muted hover:text-fg-dim">
-        <ChevronRight size={11} className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-90")} />
-        <Archive size={11} /> {t("sessions.archivedSection", { count: items.length })}
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 text-meta font-medium text-faint hover:text-fg-dim">
+        <ChevronRight size={12} className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-90")} />
+        <Archive size={12} /> {t("sessions.archivedSection", { count: items.length })}
       </button>
       <Collapse open={open}><div className="opacity-80">{items.map(render)}</div></Collapse>
     </div>

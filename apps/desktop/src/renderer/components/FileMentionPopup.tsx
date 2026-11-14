@@ -38,11 +38,11 @@ export function FileMentionPopup({
           }}
         >
           <Icon icon={e.isDir ? FOLDER_ICON : fileIcon(e.name)} width={15} height={15} className="shrink-0" />
-          <span className="truncate text-[12px] text-fg">
+          <span className="truncate text-ui text-fg">
             {e.name}
             {e.isDir ? "/" : ""}
           </span>
-          {!e.isDir && e.size !== undefined && <span className="ml-auto shrink-0 text-[11px] text-muted">{humanSize(e.size)}</span>}
+          {!e.isDir && e.size !== undefined && <span className="ml-auto shrink-0 text-meta text-muted">{humanSize(e.size)}</span>}
         </button>
       ))}
     </div>

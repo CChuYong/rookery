@@ -110,14 +110,15 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
 
   return (
     <div className="relative flex items-center">
-      <div className="no-drag flex h-6 items-center overflow-hidden rounded-md border border-line bg-raised/40">
+      {/* quiet ghost split button — no permanent border/fill, just the two hover targets with a hairline between them. */}
+      <div className="no-drag flex h-6 items-center overflow-hidden rounded-md">
         <button
           onClick={() => selected && choose(selected.id, false)}
           aria-label={t("openInAppMenu.openCurrentFolder")}
           title={selected ? t("openInAppMenu.openInApp", { name: selected.name }) : t("openInAppMenu.openInOtherApp")}
           className="flex h-full w-6 items-center justify-center text-muted transition-colors hover:bg-raised hover:text-fg-dim"
         >
-          {selected ? <AppGlyph app={selected} size={16} /> : <AppWindow size={14} />}
+          {selected ? <AppGlyph app={selected} size={14} /> : <AppWindow size={14} />}
         </button>
         <button
           ref={triggerRef}
@@ -126,11 +127,11 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
           aria-haspopup="menu"
           aria-expanded={open}
           title={t("openInAppMenu.selectOtherApp")}
-          className={cn("flex h-full items-center gap-1 border-l border-line px-1.5 text-[10.5px] transition-colors", open ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised hover:text-fg-dim")}
+          className={cn("flex h-full items-center gap-1 border-l border-line px-1.5 text-meta transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
         >
           {/* short text label (audit #59) — the icon+chevron split button used to be unlabeled and read as a stray glyph in the header */}
           <span>{t("openInAppMenu.label")}</span>
-          <ChevronDown size={11} />
+          <ChevronDown size={12} />
         </button>
       </div>
       {open && createPortal(
@@ -141,20 +142,20 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
             onKeyDown={onMenuKeyDown}
             role="menu"
             style={menuPosition}
-            className="menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-xl"
+            className="menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop"
           >
-            {apps === null && <div className="px-2 py-1.5 text-[12px] text-muted">{t("openInAppMenu.detectingApps")}</div>}
+            {apps === null && <div className="px-2 py-1.5 text-ui text-muted">{t("openInAppMenu.detectingApps")}</div>}
             {apps?.map((a) => (
               <button
                 key={a.id}
                 role="menuitemradio"
                 aria-checked={selected?.id === a.id}
                 onClick={() => choose(a.id, true)}
-                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[12.5px] text-fg-dim hover:bg-line/40"
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-ui text-fg-dim hover:bg-line/40"
               >
                 <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center"><AppGlyph app={a} size={18} /></span>
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                {selected?.id === a.id && <Check size={13} className="shrink-0 text-accent" />}
+                {selected?.id === a.id && <Check size={14} className="shrink-0 text-accent" />}
               </button>
             ))}
           </div>
