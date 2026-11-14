@@ -15,6 +15,12 @@ export function fmtUsd(n: number): string {
   if (n < 0.01) return `$${n.toFixed(4)}`;
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+// Space-constrained variant: exact below $1,000, then one decimal of thousands/millions ("$15.8k", "$1.2M").
+export function fmtUsdCompact(n: number): string {
+  if (!Number.isFinite(n) || n < 1000) return fmtUsd(n);
+  if (n < 1_000_000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${(n / 1_000_000).toFixed(1)}M`;
+}
 // Context usage tone (single threshold — used in the session header SessionMetrics). Color-blindness is covered by the text (%) channel.
 export function ctxTone(pct: number): string {
   return pct >= 85 ? "text-fail" : pct >= 65 ? "text-run" : "text-fg-dim";

@@ -41,7 +41,7 @@ export function StatusBar(p: {
     cn("no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded-sm transition-colors", active ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim");
 
   return (
-    <div className="flex h-6 shrink-0 items-center gap-3 bg-sunk px-2 text-meta text-fg-dim">
+    <div className="flex h-6 shrink-0 items-center gap-3 whitespace-nowrap bg-sunk px-2 text-meta text-fg-dim">
       {/* Daemon state appears only when it needs attention (starting / down); a healthy daemon stays out of the way. */}
       {p.daemon !== "up" && (
         <span className={item} title={`daemon · ${p.daemonStatusText}`}>
@@ -56,7 +56,10 @@ export function StatusBar(p: {
         {p.slack !== "up" && <span className="truncate text-muted">{p.slackStatusText}</span>}
       </span>
 
-      <UsagePanel usage={p.usage} loadFailed={p.usageLoadFailed} variant="statusbar" />
+      {/* the usage strip is the one item that gives way in a narrow window, so the right-hand entry points never clip */}
+      <span className="flex min-w-0 shrink items-center overflow-hidden">
+        <UsagePanel usage={p.usage} loadFailed={p.usageLoadFailed} variant="statusbar" />
+      </span>
 
       <ResourceMonitor snapshot={p.resources} onRefresh={p.onResourceRefresh} onOpenChange={p.onResourceOpenChange} variant="statusbar" />
 
@@ -71,22 +74,22 @@ export function StatusBar(p: {
 
       {/* right-aligned cluster — always-reachable entry points (audit #22), moved out of the sidebar footer */}
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <Tooltip label={t("app.capabilityCenter")} side="top">
+        <Tooltip label={t("app.capabilityCenter")} side="top" align="end">
           <button onClick={p.onToggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={iconBtn(p.capabilityActive)}>
             <Blocks size={12} />
           </button>
         </Tooltip>
-        <Tooltip label={t("app.automation")} side="top">
+        <Tooltip label={t("app.automation")} side="top" align="end">
           <button onClick={p.onToggleAutomation} aria-label={t("app.automation")} className={iconBtn(p.automationActive)}>
             <Clock size={12} />
           </button>
         </Tooltip>
-        <Tooltip label={t("app.restartDaemon")} side="top">
+        <Tooltip label={t("app.restartDaemon")} side="top" align="end">
           <button onClick={p.onRestart} disabled={p.restarting} aria-label={t("app.restartDaemon")} className={cn(iconBtn(false), "disabled:opacity-40")}>
             <RotateCcw size={12} className={cn(p.restarting && "animate-spin motion-reduce:animate-none")} />
           </button>
         </Tooltip>
-        <Tooltip label={t("app.settings")} side="top">
+        <Tooltip label={t("app.settings")} side="top" align="end">
           <button onClick={p.onToggleSettings} aria-label={t("app.settings")} className={iconBtn(p.settingsActive)}>
             <Settings size={12} />
           </button>

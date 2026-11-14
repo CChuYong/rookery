@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { ContextMenu } from "../components/ContextMenu.js";
@@ -37,9 +37,12 @@ const SOURCE_LABEL_KEY: Record<SourceKind, string> = {
 // Source segment (tab-in-tab). Present sources = peer tabs (with counts). 'All' is not a peer but a "show everything",
 // so it's a secondary tier item — it sits after a divider + smaller, dimmer text (no count) and outside the
 // sliding indicator's tracking, to drop it down one level in the hierarchy (Segment's underline variant, audit #52).
-function SourceSegment(p: { sources: Array<Exclude<SourceKind, "all">>; counts: Record<SourceKind, number>; current: SourceKind; onPick: (k: SourceKind) => void; t: TFunc }): JSX.Element {
+function SourceSegment(p: { sources: Array<Exclude<SourceKind, "all">>; counts: Record<SourceKind, number>; current: SourceKind; onPick: (k: SourceKind) => void; t: TFunc; showCounts: boolean }): JSX.Element {
   const items: Array<SegmentItem<SourceKind>> = [
-    ...p.sources.map((k) => ({ value: k, label: p.t(SOURCE_LABEL_KEY[k]), count: p.counts[k] })),
+    // without room for the counts they move into the tab's tooltip rather than pushing a tab out of view
+    ...p.sources.map((k) => (p.showCounts
+      ? { value: k, label: p.t(SOURCE_LABEL_KEY[k]), count: p.counts[k] }
+      : { value: k, label: p.t(SOURCE_LABEL_KEY[k]), title: `${p.t(SOURCE_LABEL_KEY[k])} · ${p.counts[k]}` })),
     { value: "all" as const, label: p.t("sessions.sourceAll"), tier: "secondary" as const },
   ];
   return (
@@ -160,6 +163,45 @@ function SessionsImpl(p: {
   const counts: Record<SourceKind, number> = { all: active.length, ui: 0, slack: 0, automation: 0 };
   for (const s of active) counts[srcOf(s.origin)]++;
   const presentSources = (["ui", "slack", "automation"] as Array<Exclude<SourceKind, "all">>).filter((k) => counts[k] > 0);
+
+  // The source tabs (UI / Slack / Automation / All + counts) do not always fit the sidebar width. Rather than let the
+  // row scroll sideways and hide a tab, step down: full → labels only (counts move to the tooltip) → the select the
+  // compact sidebar uses. The width each step needed is remembered so the row steps back up when there is room again.
+  const segWrapRef = useRef<HTMLDivElement | null>(null);
+  const segNeedRef = useRef({ full: 0, labels: 0 });
+  const segmentContent = `${locale}:${counts.ui}:${counts.slack}:${counts.automation}:${!!p.compact}`;
+  const segContentRef = useRef(segmentContent);
+  const [segMode, setSegMode] = useState<"full" | "labels" | "select">("full");
+  const segOverflow = segMode === "select";
+  useLayoutEffect(() => {
+    const wrap = segWrapRef.current;
+    if (!wrap || p.compact) return;
+    // Counts, source availability and translated labels change intrinsic widths.
+    // Re-measure from the full layout instead of retaining stale fallback thresholds.
+    if (segContentRef.current !== segmentContent) {
+      segContentRef.current = segmentContent;
+      segNeedRef.current = { full: 0, labels: 0 };
+      if (segMode !== "full") { setSegMode("full"); return; }
+    }
+    const measure = (): void => {
+      const list = wrap.querySelector<HTMLElement>('[role="tablist"]');
+      const need = segNeedRef.current;
+      if (list && list.scrollWidth > list.clientWidth + 1) {
+        if (segMode === "full") { need.full = list.scrollWidth; setSegMode("labels"); }
+        else if (segMode === "labels") { need.labels = list.scrollWidth; setSegMode("select"); }
+      } else if (segMode === "select" && need.labels > 0 && wrap.clientWidth >= need.labels) {
+        setSegMode("labels");
+      } else if (segMode === "labels" && need.full > 0 && wrap.clientWidth >= need.full) {
+        setSegMode("full");
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [segMode, segmentContent, p.compact]);
+
   // If the desired source is empty (e.g. default ui but there are no ui sessions), fall back to the first present source → so an empty tab isn't shown by default.
   const effectiveSource: SourceKind =
     filter.source === "all" ? "all"
@@ -213,6 +255,9 @@ function SessionsImpl(p: {
           className={cn(
             // Row scale shared with RepoTree.tsx (audit #76) — one sidebar-list token set for both tabs.
             "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-2.5 text-left text-body transition-colors",
+            // The hover actions are absolutely positioned over the row's right edge: reserve their width while they show,
+            // so the title truncates under them instead of being painted over.
+            "group-hover:pr-[4.75rem] group-focus-within:pr-[4.75rem]",
             // Selected = lifted background + a 2px accent inset rule on the left (the ledger's own selection mark,
             // not a per-row status rail — a running/attention state already has its own dot further along the row).
             isActive ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised/60 hover:text-fg",
@@ -236,9 +281,9 @@ function SessionsImpl(p: {
           </span>
           {/* right-side indicators (badge/unread) yield space to the action buttons on hover. Provider badge shows in every
               view (codex-only; a mixed claude/codex list must be scannable at a glance); the origin badge only in 'All'. */}
-          {s.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><ProviderBadge provider={s.provider} /></span>}
-          {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><OriginBadge origin={s.origin} /></span>}
-          {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0" />}
+          {s.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><ProviderBadge provider={s.provider} /></span>}
+          {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><OriginBadge origin={s.origin} /></span>}
+          {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0 group-focus-within:opacity-0" />}
         </button>
         {/* hover actions (Pin / More / delete) — a 'sibling' of the main button (no nested buttons), absolutely positioned on the right. Shown only on group-hover/focus.
             The '⋯' opens the SAME right-click menu, but reachable by left-click/Enter (audit #45: the menu was previously right-click-only, and macOS has no
@@ -281,8 +326,8 @@ function SessionsImpl(p: {
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
       {/* sticky header — the tab area is opaque (nothing shows through), and the thin frosted fade below it appears naturally only 'when not at the top'. */}
       {showSegment && (
-        <div className="sticky top-0 z-10 bg-sunk">
-          {p.compact ? (
+        <div ref={segWrapRef} className="sticky top-0 z-10 bg-sunk">
+          {p.compact || segOverflow ? (
             <Select
               size="xs"
               aria-label={t("sessions.sourceFilter")}
@@ -296,7 +341,7 @@ function SessionsImpl(p: {
               <option value="all">{t("sessions.sourceAll")} · {counts.all}</option>
             </Select>
           ) : (
-            <SourceSegment sources={presentSources} counts={counts} current={effectiveSource} onPick={(k) => p.onFilter?.({ source: k })} t={t} />
+            <SourceSegment sources={presentSources} counts={counts} current={effectiveSource} onPick={(k) => p.onFilter?.({ source: k })} t={t} showCounts={segMode === "full"} />
           )}
           <div className={cn("pointer-events-none absolute inset-x-0 top-full h-2.5 bg-gradient-to-b from-sunk to-transparent transition-opacity duration-200", scrolled ? "opacity-100" : "opacity-0")} />
         </div>

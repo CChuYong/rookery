@@ -22,6 +22,7 @@ export default {
   "workerSpawnModal.searching": "검색 중…",
   "workerSpawnModal.noResults": "결과 없음",
   "workerSpawnModal.labelPlaceholder": "label (선택)",
+  "workerSpawnModal.costBudgetPlaceholder": "예산 $",
   "workerSpawnModal.taskPlaceholderSource": "선택한 이슈·티켓 내용이 채워져요. 추가 지시를 더해도 좋아요…  (⌘/Ctrl+Enter로 spawn)",
   "workerSpawnModal.taskPlaceholderDirect": "이 레포에서 시킬 작업을 적어주세요…  (⌘/Ctrl+Enter로 spawn) (비워두면 빈 워커로 떠서 첫 메시지로 시작)",
   "workerSpawnModal.footerNote": "worktree(rookery/<id>)를 만들어 그 안에서 작업합니다. 모델/effort는 spawn 시점에 고정돼요.",

@@ -145,7 +145,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
           <span
             className={cn(
               "absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-0.5 text-meta font-medium leading-none",
-              urgent > 0 ? "bg-accent text-white" : "bg-raised text-muted ring-1 ring-line",
+              urgent > 0 ? "bg-accent text-white" : "bg-line text-fg ring-1 ring-sunk",
             )}
           >
             {items.length > 99 ? "99+" : items.length}

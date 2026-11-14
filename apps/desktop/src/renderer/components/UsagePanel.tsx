@@ -75,7 +75,7 @@ function MeterInline({ label, pct }: { label: string; pct: number }): JSX.Elemen
   const near = w >= 90;
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-      <span className="truncate text-faint">{label}</span>
+      <span className="truncate text-muted">{label}</span>
       <span className="h-[3px] w-10 shrink-0 overflow-hidden rounded-full bg-line">
         <span
           className={cn("block h-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", near ? "bg-fail" : "bg-fg-dim")}
@@ -91,7 +91,7 @@ function MeterInline({ label, pct }: { label: string; pct: number }): JSX.Elemen
 function StatInline({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-      <span className="truncate text-faint">{label}</span>
+      <span className="truncate text-muted">{label}</span>
       <span className="tabular-nums">{value}</span>
     </span>
   );
