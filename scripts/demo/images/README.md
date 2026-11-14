@@ -17,3 +17,5 @@ Select either synthetic session or the `Image follow-ups` Worker. Import a synth
 Use the existing CDP client (`scripts/demo/cdp.mjs`, port 19239 by default) to capture 1440×1000 and 920×700 windows, and inspect both the default dock layout and the static layout fallback. To test rejection, drop SVG, a >3 MiB file or >4 images; the input must remain retryable. Deleting only a fixture asset under `home/images/<id>` exercises the missing-history placeholder/retry. No screenshot or fixture should contain user data.
 
 Automated integration equivalents: `test/daemon/desktop-image-acceptance.test.ts`, `apps/desktop/test/composer-images.test.tsx`, `message-images.test.tsx`, and `store-pending.test.ts`.
+
+The launcher pins HTTP/WS and the debugger to loopback, removes inherited dev-renderer/debugger variables, and overwrites app/provider homes and ports. The server emits synthetic running → assistant/result → idle completion events (and stores completed Master/Worker history), so completed-state captures do not display a perpetual Thinking indicator. Codex fixture costs remain explicitly estimated and speed observations remain unknown. No provider runs.

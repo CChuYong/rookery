@@ -73,3 +73,14 @@ it('does not clear a newer identical draft after an old acceptance finishes acro
  clearAcceptedDraft('s','repeat',[],accepted);
  expect(useDraftStore.getState().byPage.s.text).toBe('repeat');
 });
+it('keeps stable Side drafts only while their source target exists',async()=>{
+ const {sideDraftKey}=await import('../src/renderer/store/drafts.js');
+ let state=emptyDraftState();
+ state=setDraft(state,sideDraftKey('master','alive'),'master follow-up');
+ state=setDraft(state,sideDraftKey('worker','alive'),'worker follow-up');
+ state=setDraft(state,sideDraftKey('master','dead'),'remove');
+ state=setDraft(state,'side:legacy-ephemeral','unreachable legacy');
+ const pruned=pruneDrafts(state,new Set(['alive']));
+ expect(Object.keys(pruned.byPage)).toEqual(['side:master:alive','side:worker:alive']);
+ expect(pruned.byPage[sideDraftKey('master','alive')].text).toBe('master follow-up');
+});

@@ -295,12 +295,13 @@ it("starts a new Master with image-only draft and keeps a failed creation draft"
   expect(useDraftStore.getState().byPage.newSession.images).toEqual([image]);
 });
 it("Side follow-up accepts image-only draft", async () => {
-  useDraftStore.getState().setDraft_("side:side", "", [image]);
+  useDraftStore.getState().setDraft_("side:master:source", "", [image]);
   const send = vi.fn().mockResolvedValue(undefined);
   render(
     <SideConversationDrawer
       sideId="side"
       sourceKind="master"
+      sourceId="source"
       openingQuestion="question"
       onSend={send}
       onStop={vi.fn()}
@@ -397,14 +398,188 @@ it.each([
     );
   },
 );
-it('closing Side while it prepares preserves the source image draft and closes the late Side',async()=>{
- let opened!:(id:string)=>void;
- const start=vi.fn(()=>new Promise<string>(resolve=>{opened=resolve;}));const close=vi.fn();
- useDraftStore.getState().setDraft_('cancel-side','question',[image]);
- render(<ConversationPane kind="master" id="cancel-side" onSend={vi.fn()} onSideStart={start} onSideClose={close}/>);
- fireEvent.click(screen.getByRole('button',{name:'별도로 질문하기'}));
- fireEvent.click(screen.getByRole('button',{name:'닫기'}));
- await act(async()=>opened('late-side'));
- expect(close).toHaveBeenCalledWith('late-side');expect(useDraftStore.getState().byPage['cancel-side']).toEqual({text:'question',images:[image]});
- expect(screen.getByRole('textbox')).toHaveTextContent('question');expect(screen.getByText('diagram.png')).toBeInTheDocument();
+it("closing Side while it prepares preserves the source image draft and closes the late Side", async () => {
+  let opened!: (id: string) => void;
+  const start = vi.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        opened = resolve;
+      }),
+  );
+  const close = vi.fn();
+  useDraftStore.getState().setDraft_("cancel-side", "question", [image]);
+  render(
+    <ConversationPane
+      kind="master"
+      id="cancel-side"
+      onSend={vi.fn()}
+      onSideStart={start}
+      onSideClose={close}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+  fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+  await act(async () => opened("late-side"));
+  expect(close).toHaveBeenCalledWith("late-side");
+  expect(useDraftStore.getState().byPage["cancel-side"]).toEqual({
+    text: "question",
+    images: [image],
+  });
+  expect(screen.getByRole("textbox")).toHaveTextContent("question");
+  expect(screen.getByText("diagram.png")).toBeInTheDocument();
+});
+it.each(["path", "image"] as const)(
+  "ignores a delayed %s picker result from an earlier draft generation across acceptance",
+  async (kind) => {
+    let select!: (value: unknown) => void, accept!: () => void;
+    const pick = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          select = resolve;
+        }),
+    );
+    window.rookery.pickAttachment =
+      pick as typeof window.rookery.pickAttachment;
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          accept = resolve;
+        }),
+    );
+    render(<Composer onSend={send} initialText="submitted" />);
+    fireEvent.click(screen.getByRole("button", { name: "파일 첨부" }));
+    fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+    expect(screen.getByRole("button", { name: "파일 첨부" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "파일 첨부" }));
+    expect(pick).toHaveBeenCalledTimes(1);
+    await act(async () => accept());
+    setPromptEditorText(screen.getByRole("textbox"), "new draft");
+    await act(async () =>
+      select(
+        kind === "path"
+          ? { path: "/repo/late.ts" }
+          : {
+              name: "late.png",
+              mediaType: "image/png",
+              byteLength: 3,
+              base64: "cG5n",
+            },
+      ),
+    );
+    expect(screen.getByRole("textbox")).toHaveTextContent("new draft");
+    expect(screen.queryByText("late.ts")).toBeNull();
+    expect(
+      requests.filter((request) => request.type === "image.upload"),
+    ).toHaveLength(0);
+  },
+);
+it("does not apply a delayed ordinary picker while submission is pending", async () => {
+  let select!: (value: unknown) => void, accept!: () => void;
+  window.rookery.pickAttachment = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        select = resolve;
+      }),
+  ) as typeof window.rookery.pickAttachment;
+  render(
+    <Composer
+      initialText="submitted"
+      onSend={() =>
+        new Promise<void>((resolve) => {
+          accept = resolve;
+        })
+      }
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "파일 첨부" }));
+  fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+  await act(async () => select({ path: "/repo/late.ts" }));
+  expect(screen.queryByText("late.ts")).toBeNull();
+  await act(async () => accept());
+  expect(screen.getByRole("textbox").textContent).toBe("");
+});
+it.each([
+  ["master", true],
+  ["master", false],
+  ["worker", true],
+  ["worker", false],
+] as const)(
+  "%s Side follow-up survives navigation/pruning/reload (failed send: %s)",
+  async (sourceKind, failed) => {
+    const { pruneDrafts } = await import("../src/renderer/store/drafts.js");
+    const send = vi.fn().mockRejectedValue(new Error("offline"));
+    const { unmount } = render(
+      <SideConversationDrawer
+        sourceKind={sourceKind}
+        sourceId="source"
+        sideId="old"
+        openingQuestion="initial"
+        onSend={send}
+        onStop={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    // Enter through the actual editable draft rather than relying on the internal storage key.
+    setPromptEditorText(screen.getByRole("textbox"), "follow-up");
+    window.rookery.pickAttachment = vi.fn(async () => ({
+      name: "diagram.png",
+      mediaType: "image/png",
+      byteLength: 3,
+      base64: "cG5n",
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "파일 첨부" }));
+    await waitFor(() => expect(release).toBeDefined());
+    await act(async () => release!());
+    if (failed) {
+      fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toBeInTheDocument(),
+      );
+    }
+    unmount();
+    useDraftStore.setState((state) => pruneDrafts(state, new Set(["source"])));
+    const persisted = localStorage.getItem("rookery.drafts")!;
+    useDraftStore.setState({ byPage: {} });
+    localStorage.setItem("rookery.drafts", persisted);
+    await useDraftStore.persist.rehydrate();
+    render(
+      <SideConversationDrawer
+        sourceKind={sourceKind}
+        sourceId="source"
+        sideId="new"
+        openingQuestion="reopened"
+        onSend={send}
+        onStop={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("textbox")).toHaveTextContent("follow-up");
+    expect(screen.getByText("diagram.png")).toBeInTheDocument();
+    expect(persisted).not.toContain("base64");
+  },
+);
+it("keeps Side drafts isolated by stable source target when the runtime thread changes", () => {
+  useDraftStore.getState().setDraft_("side:master:a", "draft A", [image]);
+  useDraftStore.getState().setDraft_("side:master:b", "draft B");
+  const props = {
+    sourceKind: "master" as const,
+    openingQuestion: "initial",
+    onSend: vi.fn(),
+    onStop: vi.fn(),
+    onClose: vi.fn(),
+  };
+  const { rerender } = render(
+    <SideConversationDrawer {...props} sourceId="a" sideId="runtime-a" />,
+  );
+  expect(screen.getByRole("textbox")).toHaveTextContent("draft A");
+  rerender(
+    <SideConversationDrawer {...props} sourceId="b" sideId="runtime-b" />,
+  );
+  expect(screen.getByRole("textbox")).toHaveTextContent("draft B");
+  expect(screen.queryByText("diagram.png")).toBeNull();
+  rerender(
+    <SideConversationDrawer {...props} sourceId="a" sideId="new-runtime-a" />,
+  );
+  expect(screen.getByRole("textbox")).toHaveTextContent("draft A");
+  expect(screen.getByText("diagram.png")).toBeInTheDocument();
 });

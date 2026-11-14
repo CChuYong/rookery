@@ -8,6 +8,7 @@ import { WebSocketServer } from "ws";
 import { openDb } from "../../../dist/persistence/db.js";
 import { Repositories } from "../../../dist/persistence/repositories.js";
 import { ImageStore } from "../../../dist/daemon/image-store.js";
+import { completionEvents } from "./completion.mjs";
 const dir =
   process.env.ROOKERY_IMAGE_FIXTURE_DIR ||
   fs.mkdtempSync(path.join(os.tmpdir(), "rookery-image-ui-"));
@@ -55,6 +56,7 @@ fixture.responses["fleet.list"].fleet = [
   },
 ];
 fixture.workerHistory[workerId] = [];
+const sides = new Map();
 function broadcast(event) {
   for (const client of wss.clients)
     client.send(JSON.stringify({ type: "event", event }));
@@ -104,6 +106,19 @@ wss.on("connection", (ws) =>
         const master = msg.type === "session.send";
         const id = master ? msg.sessionId : msg.id;
         reply({ type: "fleet.ack", action: "send", id });
+        const row = master
+          ? fixture.responses["session.list"].sessions.find(
+              (row) => row.id === id,
+            )
+          : fixture.responses["fleet.list"].fleet.find((row) => row.id === id);
+        const completion = completionEvents({
+          kind: master ? "master" : "worker",
+          id,
+          provider: row?.provider,
+          speed: msg.speed ?? row?.speed ?? "standard",
+        });
+        if (row) row.status = "running";
+        event(completion[0]);
         const history = master
           ? (fixture.sessionHistory[id] ||= [])
           : (fixture.workerHistory[id] ||= []);
@@ -137,11 +152,31 @@ wss.on("connection", (ws) =>
                 type: "worker.event",
                 sessionId: "aabbccdd",
                 workerId: id,
-                seq: history.length,
+                seq: history.length - 1,
                 data,
                 clientMsgId: msg.clientMsgId,
               },
         );
+        for (const frame of completion.slice(1)) {
+          if (master && frame.type !== "master.status")
+            history.push({
+              seq: history.length,
+              type: frame.type,
+              payload: frame,
+              createdAt: new Date().toISOString(),
+            });
+          if (!master && frame.type === "worker.event") {
+            frame.seq = history.length;
+            history.push({
+              seq: frame.seq,
+              type: frame.data.kind,
+              payload: frame.data,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          event(frame);
+        }
+        if (row) row.status = "idle";
         return;
       }
       if (msg.type === "side.start") {
@@ -149,14 +184,28 @@ wss.on("connection", (ws) =>
           ? store.validate(msg.images)
           : undefined;
         const sideId = randomUUID();
-        reply({ type: "side.started", sideId });
-        event({
-          type: "side.status",
-          sideId,
+        const row =
+          msg.sourceKind === "worker"
+            ? fixture.responses["fleet.list"].fleet.find(
+                (row) => row.id === msg.sourceId,
+              )
+            : fixture.responses["session.list"].sessions.find(
+                (row) => row.id === msg.sourceId,
+              );
+        const source = {
           sourceKind: msg.sourceKind,
           sourceId: msg.sourceId,
-          status: "idle",
+          provider: row?.provider,
+          speed: row?.speed ?? "standard",
+        };
+        sides.set(sideId, source);
+        const completion = completionEvents({
+          kind: "side",
+          id: sideId,
+          ...source,
         });
+        reply({ type: "side.started", sideId });
+        event(completion[0]);
         event({
           type: "side.event",
           sideId,
@@ -169,18 +218,26 @@ wss.on("connection", (ws) =>
             ...(images ? { images } : {}),
           },
         });
+        for (const frame of completion.slice(1)) event(frame);
         return;
       }
       if (msg.type === "side.send") {
         const images = msg.images?.length
           ? store.validate(msg.images)
           : undefined;
+        const source = sides.get(msg.sideId);
+        if (!source) throw Error("Unknown synthetic Side");
+        const completion = completionEvents({
+          kind: "side",
+          id: msg.sideId,
+          ...source,
+        });
         reply({ type: "fleet.ack", action: "send", id: msg.sideId });
-        return event({
+        event(completion[0]);
+        event({
           type: "side.event",
           sideId: msg.sideId,
-          sourceKind: "master",
-          sourceId: "aabbccdd",
+          ...source,
           data: {
             kind: "message",
             role: "user",
@@ -188,6 +245,8 @@ wss.on("connection", (ws) =>
             ...(images ? { images } : {}),
           },
         });
+        for (const frame of completion.slice(1)) event(frame);
+        return;
       }
       if (msg.type.endsWith(".setSpeed"))
         return reply({
@@ -211,7 +270,13 @@ wss.on("connection", (ws) =>
 server.listen(port, "127.0.0.1", () => {
   fs.writeFileSync(
     path.join(dir, "fixture-server.json"),
-    JSON.stringify({ port, dir }),
+    JSON.stringify({ port: server.address().port, dir }),
   );
-  console.log(JSON.stringify({ fixture: "rookery-images", dir, port }));
+  console.log(
+    JSON.stringify({
+      fixture: "rookery-images",
+      dir,
+      port: server.address().port,
+    }),
+  );
 });

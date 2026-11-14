@@ -1,5 +1,11 @@
+import { useCallback, useMemo } from "react";
 import type { ImageRef } from "@daemon/core/image-input.js";
-import { useDraftStore, EMPTY_DRAFT, clearAcceptedDraft } from "../store/drafts.js";
+import {
+  useDraftStore,
+  EMPTY_DRAFT,
+  clearAcceptedDraft,
+  sideDraftKey,
+} from "../store/drafts.js";
 import type { SpeedPreference } from "@daemon/core/speed.js";
 import { SpeedControl } from "./SpeedControl.js";
 import { latestSpeedObservation } from "../lib/speed.js";
@@ -19,6 +25,7 @@ export interface SideConversationDrawerProps {
   provider?: string;
   model?: string;
   sourceKind: "master" | "worker";
+  sourceId: string;
   sideId: string | null;
   openingQuestion: string;
   openingImages?: ImageRef[];
@@ -27,13 +34,47 @@ export interface SideConversationDrawerProps {
   onClose: () => void;
 }
 
-export function SideConversationDrawer({ speed, defaultSpeed, provider, model, sourceKind, sideId, openingQuestion, openingImages, onSend, onStop, onClose }: SideConversationDrawerProps): JSX.Element {
+export function SideConversationDrawer({
+  speed,
+  defaultSpeed,
+  provider,
+  model,
+  sourceKind,
+  sourceId,
+  sideId,
+  openingQuestion,
+  openingImages,
+  onSend,
+  onStop,
+  onClose,
+}: SideConversationDrawerProps): JSX.Element {
   const t = useT();
-  const side = useStore((s) => sideId ? s.sideConversations[sideId] : undefined);
+  const side = useStore((s) =>
+    sideId ? s.sideConversations[sideId] : undefined,
+  );
   const status = side?.status ?? "opening";
-  const items = side?.items ?? (openingQuestion || openingImages?.length ? [{ images:openingImages, kind: "message", role: "user", content: openingQuestion } as LogItem] : EMPTY);
-  const draftKey = `side:${sideId ?? "opening"}`;
-  const initialDraft = useDraftStore.getState().byPage[draftKey] ?? EMPTY_DRAFT;
+  const items =
+    side?.items ??
+    (openingQuestion || openingImages?.length
+      ? [
+          {
+            images: openingImages,
+            kind: "message",
+            role: "user",
+            content: openingQuestion,
+          } as LogItem,
+        ]
+      : EMPTY);
+  const draftKey = sideDraftKey(sourceKind, sourceId);
+  const initialDraft = useMemo(
+    () => useDraftStore.getState().byPage[draftKey] ?? EMPTY_DRAFT,
+    [draftKey],
+  );
+  const onDraftChange = useCallback(
+    (text: string, images?: ImageRef[]) =>
+      useDraftStore.getState().setDraft_(draftKey, text, images),
+    [draftKey],
+  );
   const running = status === "opening" || status === "running";
 
   return (
@@ -43,32 +84,82 @@ export function SideConversationDrawer({ speed, defaultSpeed, provider, model, s
     >
       <header className="flex h-10 shrink-0 items-center gap-2 px-3">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="text-body font-medium text-fg">{t("sideConversation.title")}</span>
-          {running && <Loader2 size={12} className="animate-spin text-accent" aria-label={t("sideConversation.answering")} />}
+          <span className="text-body font-medium text-fg">
+            {t("sideConversation.title")}
+          </span>
+          {running && (
+            <Loader2
+              size={12}
+              className="animate-spin text-accent"
+              aria-label={t("sideConversation.answering")}
+            />
+          )}
           <span className="flex min-w-0 items-center gap-1 truncate text-meta text-faint">
             <LockKeyhole size={12} className="shrink-0" />
-            {t(sourceKind === "worker" ? "sideConversation.workerContext" : "sideConversation.masterContext")}
+            {t(
+              sourceKind === "worker"
+                ? "sideConversation.workerContext"
+                : "sideConversation.masterContext",
+            )}
           </span>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={t("common.close")} onClick={onClose}><X size={14} /></Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          aria-label={t("common.close")}
+          onClick={onClose}
+        >
+          <X size={14} />
+        </Button>
       </header>
       <div className="border-b border-line bg-raised/40 px-3 py-1.5 text-meta text-muted">
-        {t(sourceKind === "worker" ? "sideConversation.workerLive" : "sideConversation.masterLive")}
+        {t(
+          sourceKind === "worker"
+            ? "sideConversation.workerLive"
+            : "sideConversation.masterLive",
+        )}
       </div>
       <MessageList items={items} loaded />
       <div className="border-t border-line bg-surface p-2.5">
         <Composer
-          leftSlot={speed !== undefined ? <SpeedControl speed={speed} defaultSpeed={defaultSpeed} provider={provider} model={model ?? ""} observation={latestSpeedObservation(items)} /> : undefined}
+          leftSlot={
+            speed !== undefined ? (
+              <SpeedControl
+                speed={speed}
+                defaultSpeed={defaultSpeed}
+                provider={provider}
+                model={model ?? ""}
+                observation={latestSpeedObservation(items)}
+              />
+            ) : undefined
+          }
           key={draftKey}
           initialText={initialDraft.text}
           initialImages={initialDraft.images}
-          onDraftChange={(text, images) => useDraftStore.getState().setDraft_(draftKey,text,images)}
-          onDropFiles={(files) => files.map(file=>window.rookery.getPathForFile(file)).filter(Boolean)}
-          onSend={async (text,images) => { if (sideId) { await (images?.length ? onSend(sideId, text, images) : onSend(sideId, text)); clearAcceptedDraft(draftKey,text,images); } }}
+          onDraftChange={onDraftChange}
+          onDropFiles={(files) =>
+            files
+              .map((file) => window.rookery.getPathForFile(file))
+              .filter(Boolean)
+          }
+          onSend={async (text, images) => {
+            if (sideId) {
+              const acceptedDraft = useDraftStore.getState().byPage[draftKey];
+              await (images?.length
+                ? onSend(sideId, text, images)
+                : onSend(sideId, text));
+              clearAcceptedDraft(draftKey, text, images, acceptedDraft);
+            }
+          }}
           busy={running}
           onStop={sideId ? () => onStop(sideId) : undefined}
           disabled={!sideId || status === "closed"}
-          placeholder={running ? t("sideConversation.waitingPlaceholder") : t("sideConversation.followupPlaceholder")}
+          placeholder={
+            running
+              ? t("sideConversation.waitingPlaceholder")
+              : t("sideConversation.followupPlaceholder")
+          }
           className="bg-ink/30"
         />
       </div>

@@ -111,6 +111,7 @@ export function ConversationPane({
       {side && (
         <SideConversationDrawer
           sourceKind={kind}
+          sourceId={id}
           speed={rest.controls?.speed ?? rest.controls?.defaultSpeed}
           defaultSpeed={rest.controls?.defaultSpeed}
           provider={rest.controls?.provider}

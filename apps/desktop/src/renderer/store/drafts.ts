@@ -72,11 +72,23 @@ export function setDraft(
   };
 }
 
+// A Side runtime is ephemeral; its unsent draft belongs to the stable source conversation.
+export function sideDraftKey(
+  kind: "master" | "worker",
+  sourceId: string,
+): string {
+  return `side:${kind}:${sourceId}`;
+}
+function sideDraftSource(key: string): string | undefined {
+  return /^side:(?:master|worker):(.+)$/.exec(key)?.[1];
+}
+
 // Remove drafts not in the known page keys (session ids ∪ live worker ids) — prevents dead-worker drafts from piling up (same convention as pruneWsPages).
 export function pruneDrafts(s: DraftState, knownKeys: Set<string>): DraftState {
   const byPage: DraftState["byPage"] = {};
   for (const [k, v] of Object.entries(s.byPage))
-    if (knownKeys.has(k)) byPage[k] = v;
+    if (knownKeys.has(k) || knownKeys.has(sideDraftSource(k) ?? ""))
+      byPage[k] = v;
   return { ...s, byPage };
 }
 

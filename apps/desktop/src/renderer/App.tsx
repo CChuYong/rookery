@@ -456,7 +456,7 @@ export function App(): JSX.Element {
     // NEW_SESSION_DRAFT_KEY is a fixed page key (not a session/worker id) — include it so pruneDrafts doesn't
     // treat it as a dead page and wipe the New Session draft on every boot (audit #5 review).
     const known = new Set<string>([...s.sessions.map((x) => x.id), ...Object.keys(s.fleet), NEW_SESSION_DRAFT_KEY]);
-    // Prune dead pages (workspace tabs and composer drafts).
+    // Prune dead pages; draft pruning also retains Side drafts whose stable source target still exists.
     useWsStore.setState((w) => pruneWsPages(w, known));
     useTermStore.setState((t) => pruneLayout(t, known));
     useDraftStore.setState((d) => pruneDrafts(d, known));

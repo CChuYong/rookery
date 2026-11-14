@@ -134,12 +134,17 @@ export function Composer({
   const imagesRef = useRef(images); imagesRef.current = images;
   const [importing, setImporting] = useState(false);
   const importLock = useRef(false);
+  const [picking, setPicking] = useState(false);
+  const pickerLock = useRef(false);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const disabledRef = useRef(disabled); disabledRef.current = disabled;
+  const draftGeneration = useRef(0);
   const [error, setError] = useState<string>();
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const importFiles = async (files: Parameters<typeof importImage>[0][]) => {
-    if (!files.length || disabled || importLock.current || sending) return;
+    if (!files.length || disabledRef.current || importLock.current || sendingRef.current) return;
     importLock.current = true; setImporting(true); setError(undefined);
     try {
       checkImageBatch(imagesRef.current, files.map(file => 'size' in file ? file.size : file.byteLength));
@@ -195,18 +200,21 @@ export function Composer({
   }, [text, images, onDraftChange]);
 
   const submitTo = async (side = false) => {
-    if (disabled || importing || importLock.current || sending) return;
+    if (disabledRef.current || importing || importLock.current || sendingRef.current) return;
     const msg = (promptRef.current?.getText() ?? "").trim();
     if (!msg && !images.length && (!allowEmpty || side)) return;
     const command = !side && onCommandAction ? matchCommandAction(msg, commands) : null;
     if (command && command.candidate.action.type !== "insert-prompt") {
       if (images.length) { setError(t("images.command")); return; }
       if (command.candidate.action.type === "open-panel" && !command.argument) return;
+      draftGeneration.current++;
       onCommandAction?.(command.candidate.action, command.argument);
       promptRef.current?.clear(); return;
     }
     const send = side ? onSideSend : onSend;
     if (!send) return;
+    draftGeneration.current++;
+    sendingRef.current = true;
     setSending(true); setError(undefined);
     try {
       const result = images.length ? send(msg, images) : send(msg);
@@ -214,7 +222,7 @@ export function Composer({
       // Acceptance may navigate/unmount. The owning draft is cleared by the send path in that case.
       if (alive.current) { promptRef.current?.clear(); setImages([]); }
     } catch { if (alive.current) setError(t("images.sendFailed")); }
-    finally { if (alive.current) setSending(false); }
+    finally { sendingRef.current = false; if (alive.current) setSending(false); }
   };
   const submit = () => { void submitTo(); };
   const submitSide = () => { void submitTo(true); };
@@ -228,24 +236,27 @@ export function Composer({
 
   // File selection → attach.
   const attach = async () => {
-    // Only bytes returned directly from a native selection are readable through IPC.
-    if (window.rookery?.pickAttachment) {
-      try {
-        const selected = await window.rookery.pickAttachment();
-        if (!alive.current || !selected) return;
-        if ('path' in selected) addAttachments([selected.path]);
-        else await importFiles([selected]);
-      } catch (error) {
-        if (alive.current) {
-          const message = error instanceof Error ? error.message : "";
-          setError(t(/unsupported/i.test(message) ? "images.type" : /size limit/i.test(message) ? "images.size" : "images.failed"));
-        }
+    if (disabledRef.current || sendingRef.current || importLock.current || pickerLock.current) return;
+    pickerLock.current = true; setPicking(true);
+    const generation = draftGeneration.current;
+    const canApply = () => alive.current && !disabledRef.current && !sendingRef.current && generation === draftGeneration.current;
+    try {
+      // The native bridge reads only its dialog selection. Old selections cannot mutate a submitted draft.
+      const selected = window.rookery?.pickAttachment
+        ? await window.rookery.pickAttachment()
+        : onAttachFile ? await onAttachFile().then(path => path ? {path} : null) : null;
+      if (!canApply() || !selected) return;
+      if ('path' in selected) addAttachments([selected.path]);
+      else await importFiles([selected]);
+    } catch (error) {
+      if (canApply()) {
+        const message = error instanceof Error ? error.message : "";
+        setError(t(/unsupported/i.test(message) ? "images.type" : /size limit/i.test(message) ? "images.size" : "images.failed"));
       }
-      return;
+    } finally {
+      pickerLock.current = false;
+      if (alive.current) setPicking(false);
     }
-    if (!onAttachFile) return;
-    const path = await onAttachFile();
-    if (alive.current && path) addAttachments([path]);
   };
   const onDrop = (event: DragEvent) => {
     event.preventDefault(); setDragOver(false);
@@ -371,7 +382,7 @@ export function Composer({
             </Button>
           )}
           {(onAttachFile || window.rookery?.pickAttachment) && (
-            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled} onClick={() => void attach()}>
+            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled || sending || importing || picking} onClick={() => void attach()}>
               <Paperclip size={14} />
             </Button>
           )}

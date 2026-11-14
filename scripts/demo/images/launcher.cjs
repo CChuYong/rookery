@@ -12,10 +12,15 @@ if (!dir || !fs.existsSync(path.join(dir, "fixture-server.json")))
 const fixture = JSON.parse(
   fs.readFileSync(path.join(dir, "fixture-server.json"), "utf8"),
 );
-app.commandLine.appendSwitch(
-  "remote-debugging-port",
-  process.env.ROOKERY_IMAGE_FIXTURE_DEBUG_PORT || "19239",
-);
+const debugPort = process.env.ROOKERY_IMAGE_FIXTURE_DEBUG_PORT || "19239";
+if (
+  !/^\d+$/.test(debugPort) ||
+  Number(debugPort) < 1024 ||
+  Number(debugPort) > 65535
+)
+  throw Error("Invalid fixture debug port");
+app.commandLine.appendSwitch("remote-debugging-port", debugPort);
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 for (const part of [
   "electron-data",
   "electron-session",
@@ -28,6 +33,8 @@ app.setPath("userData", path.join(dir, "electron-data"));
 app.setPath("sessionData", path.join(dir, "electron-session"));
 app.setAppLogsPath(path.join(dir, "logs"));
 Object.assign(process.env, {
+  ROOKERY_HOST: "127.0.0.1",
+  ROOKERY_DEBUG_PORT: debugPort,
   ROOKERY_HOME: path.join(dir, "home"),
   ROOKERY_PORT: String(fixture.port),
   ROOKERY_DAEMON_ENTRY: path.join(dir, "no-real-daemon.cjs"),
@@ -35,6 +42,16 @@ Object.assign(process.env, {
   CODEX_HOME: path.join(dir, "codex"),
   CLAUDE_CONFIG_DIR: path.join(dir, "claude"),
 });
+// These inherited switches can select a dev renderer, remote debugger, or injected Node startup code.
+for (const key of [
+  "ELECTRON_RENDERER_URL",
+  "ELECTRON_REMOTE_DEBUGGING_PORT",
+  "ELECTRON_REMOTE_DEBUGGING_ADDRESS",
+  "NODE_OPTIONS",
+  "NODE_INSPECT_RESUME_ON_START",
+  "VSCODE_INSPECTOR_OPTIONS",
+])
+  delete process.env[key];
 for (const key of Object.keys(process.env))
   if (
     /^(ANTHROPIC_|OPENAI_|SLACK_|ROOKERY_CAP_SECRET_|CLAUDE_CODE_OAUTH)/.test(
