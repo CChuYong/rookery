@@ -25,6 +25,24 @@ export interface SideSource {
   sessionKey?: string;
 }
 
+export interface SideCreateInput {
+  sourceKind: SideSourceKind;
+  sourceId: string;
+  model?: string;
+  effort?: string | null;
+}
+
+export interface SideStartInput extends SideCreateInput {
+  text: string;
+  images?: ImageRef[];
+}
+
+export interface PreparedSideStart {
+  id: string;
+  // Input bytes are already resolved. Emits the first events only after the caller acknowledges the id.
+  start(): void;
+}
+
 export interface SideConversationDeps {
   images?: ImageResolver;
   bus: EventBus;
@@ -68,7 +86,7 @@ export class SideConversationManager {
     private readonly idgen: () => string = () => randomUUID(),
   ) {}
 
-  async create(input: { sourceKind: SideSourceKind; sourceId: string; model?: string; effort?: string | null }): Promise<{ id: string }> {
+  private async fork(input: SideCreateInput): Promise<SideConversation> {
     const source = this.deps.resolveSource(input.sourceKind, input.sourceId);
     if (!source) throw new Error(`unknown source: ${input.sourceKind} ${input.sourceId}`);
     if (!source.sdkSessionId) throw new Error("source has no provider context yet — wait for its first turn to start");
@@ -79,10 +97,10 @@ export class SideConversationManager {
     try {
       forked = await this.deps.forkSession(source, id);
     } catch (error) {
-      this.deps.cleanup?.(id, source);
+      try { this.deps.cleanup?.(id, source); } catch { /* preserve the fork failure */ }
       throw error;
     }
-    this.conversations.set(id, {
+    return {
       id,
       source: { ...source, ...(source.provider === "codex" && source.sourceKind === "master" ? { sessionKey: id } : {}) },
       sdkSessionId: forked.sessionId,
@@ -95,22 +113,50 @@ export class SideConversationManager {
       abort: null,
       stream: null,
       task: Promise.resolve(),
-    });
-    return { id };
+    };
+  }
+
+  async create(input: SideCreateInput): Promise<{ id: string }> {
+    const side = await this.fork(input);
+    this.conversations.set(side.id, side);
+    return { id: side.id };
+  }
+
+  async prepareStart(input: SideStartInput): Promise<PreparedSideStart> {
+    const side = await this.fork(input);
+    try {
+      // Forking is asynchronous: revalidate and resolve the initial input AFTER it completes.
+      // Keep this Side unregistered until preparation succeeds so a rejection emits no orphan events.
+      const start = this.prepareTurn(side, input.text, input.images);
+      this.conversations.set(side.id, side);
+      return { id: side.id, start };
+    } catch (error) {
+      try { this.deps.cleanup?.(side.id, side.source); } catch { /* preserve the input failure */ }
+      throw error;
+    }
   }
 
   send(id: string, text: string, imageRefs?: ImageRef[]): void {
-    const side = this.require(id);
+    this.prepareTurn(this.require(id), text, imageRefs)();
+  }
+
+  private prepareTurn(side: SideConversation, text: string, imageRefs?: ImageRef[]): () => void {
+    const id = side.id;
     if (side.closing) throw new Error(`Side conversation ${id} is closing`);
     if (side.running) throw new Error(`Side conversation ${id} is already running`);
     const prompt = text.trim();
     const images = acceptImages(this.deps.images, imageRefs);
     if (!prompt && !images.length) throw new Error("Side question cannot be empty");
     const input = resolveInput(prompt, images, this.deps.images);
-    side.running = true;
-    this.emitData(side, { kind: "message", role: "user", content: prompt, ...(images.length ? { images } : {}) });
-    this.emitStatus(side, "running");
-    side.task = this.runTurn(side, input);
+    side.running = true; // reserve the turn; no events/provider call until start() runs
+    let started = false;
+    return () => {
+      if (started || side.closing) return;
+      started = true;
+      this.emitData(side, { kind: "message", role: "user", content: prompt, ...(images.length ? { images } : {}) });
+      this.emitStatus(side, "running");
+      side.task = this.runTurn(side, input);
+    };
   }
 
   async idle(id: string): Promise<void> {

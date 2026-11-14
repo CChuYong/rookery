@@ -29,7 +29,7 @@ import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
 import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
 import type { WorkflowActivityProvider } from "../core/workflow-activity.js";
-import type { SideSourceKind } from "../core/side-conversation.js";
+import type { SideStartInput, PreparedSideStart } from "../core/side-conversation.js";
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
@@ -131,7 +131,7 @@ export interface ClientSocket {
 }
 
 export interface SideConversationController {
-  create(input: { sourceKind: SideSourceKind; sourceId: string; model?: string; effort?: string | null }): Promise<{ id: string }>;
+  prepareStart(input: SideStartInput): Promise<PreparedSideStart>;
   send(id: string, text: string, images?: ImageRef[]): void;
   stop(id: string): Promise<void>;
   close(id: string): Promise<void>;
@@ -288,12 +288,12 @@ export class Connection {
       case "side.start": {
         if (!this.sides) return this.reply({ type: "error", message: "Side conversations unavailable", reqId: msg.reqId });
         const images = acceptImages(this.images, msg.images);
-        const { id } = await this.sides.create({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort });
-        this.ownedSideIds.add(id);
-        // Ordering is load-bearing: tell the client the id before send() can emit the first side.event.
-        this.reply({ type: "side.started", sideId: id, reqId: msg.reqId });
-        if (images.length) this.sides.send(id, msg.text, images);
-        else this.sides.send(id, msg.text);
+        const prepared = await this.sides.prepareStart({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort, text: msg.text, images });
+        this.ownedSideIds.add(prepared.id);
+        // Preparation has resolved every image after the async fork; it can reject only before this ack.
+        // Execution performs no further input I/O and emits its first event after the client knows the id.
+        this.reply({ type: "side.started", sideId: prepared.id, reqId: msg.reqId });
+        prepared.start();
         return;
       }
       case "side.send": {

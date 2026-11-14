@@ -421,9 +421,13 @@ describe("Connection", () => {
     const order: string[] = [];
     const socket: ClientSocket = { send: (data) => order.push(`reply:${(JSON.parse(data) as { type: string }).type}`) };
     let n = 0;
+    const send = vi.fn((id: string, text: string) => { order.push(`send:${id}:${text}`); });
     const sides = {
-      create: vi.fn(async () => ({ id: `side-${++n}` })),
-      send: vi.fn((id: string, text: string) => { order.push(`send:${id}:${text}`); }),
+      prepareStart: vi.fn(async (input: { text: string }) => {
+        const id = `side-${++n}`;
+        return { id, start: () => send(id, input.text) };
+      }),
+      send,
       stop: vi.fn(async () => {}),
       close: vi.fn(async () => {}),
     };
@@ -431,7 +435,7 @@ describe("Connection", () => {
       undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, sides);
 
     await conn.handleRaw(JSON.stringify({ type: "side.start", sourceKind: "worker", sourceId: "w1", text: "why", model: "m2", effort: "high", reqId: "q1" }));
-    expect(sides.create).toHaveBeenCalledWith({ sourceKind: "worker", sourceId: "w1", model: "m2", effort: "high" });
+    expect(sides.prepareStart).toHaveBeenCalledWith({ sourceKind: "worker", sourceId: "w1", model: "m2", effort: "high", text: "why", images: [] });
     expect(order.slice(0, 2)).toEqual(["reply:side.started", "send:side-1:why"]);
 
     await conn.handleRaw(JSON.stringify({ type: "side.send", sideId: "side-1", text: "more", reqId: "q2" }));
