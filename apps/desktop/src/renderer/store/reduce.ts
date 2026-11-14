@@ -20,6 +20,7 @@ export type LogItem =
 
 // The worker row's single source of truth is the protocol WorkerRow. archived always arrives on fleet.list but is omitted when building worker.* events, so it's optional.
 // permissionMode is required here (the worker composer's selector reads it) — defaulted to "bypassPermissions" wherever the source (event/list) doesn't carry it.
+// `tasks` (inherited from WorkerRow) = the worker's listed background tasks, seeded by fleet.list and kept live by worker.tasks.
 export interface FleetRow extends WorkerRow { archived?: boolean; permissionMode: string; bg?: { count: number; types: string[] } }
 
 export interface AppState {
@@ -405,6 +406,15 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       const nextRow = { ...prev, status: e.status, ...(e.bg ? { bg: e.bg } : {}) };
       if (!e.bg) delete nextRow.bg;
       return { ...state, pendingByWorker, fleet: { ...state.fleet, [e.workerId]: nextRow }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status: e.status }) } };
+    }
+    case "worker.tasks": {
+      // Listed background tasks (Claude workers only) — replaces the set wholesale; [] clears it. Update existing rows
+      // only, so a late event can't resurrect a deleted/discarded worker.
+      const prev = state.fleet[e.workerId];
+      if (!prev || state.deletingWorkers[e.workerId]) return state;
+      const nextRow: FleetRow = { ...prev, ...(e.tasks.length ? { tasks: e.tasks } : {}) };
+      if (!e.tasks.length) delete nextRow.tasks;
+      return { ...state, fleet: { ...state.fleet, [e.workerId]: nextRow } };
     }
     case "worker.label": {
       // Auto-generated label update — update only existing rows (don't resurrect discarded rows).

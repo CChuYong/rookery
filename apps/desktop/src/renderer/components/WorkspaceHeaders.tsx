@@ -1,4 +1,5 @@
-import { SquareTerminal, PanelRight, Ticket, RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { SquareTerminal, PanelRight, Ticket, RotateCcw, ChevronDown } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { baseName } from "../lib/path.js";
 import { StatusBadge, ProviderBadge } from "./StatusBadge.js";
@@ -7,6 +8,7 @@ import type { Checkpoint } from "./CheckpointMenu.js";
 import { SessionMetrics } from "./SessionMetrics.js";
 import { MetricsView } from "./MetricsView.js";
 import { OpenInAppMenu } from "./OpenInAppMenu.js";
+import { ContextMenu } from "./ContextMenu.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
 import { useT } from "../i18n/provider.js";
@@ -27,12 +29,50 @@ function WorkerMetrics({ workerId }: { workerId: string }): JSX.Element | null {
 
 // Keep the primary Worker status badge authoritative while adding a compact explanation for its background state.
 // This child subscribes directly so workflow heartbeats do not pull the whole App through a render.
-function WorkerActivityReason({ worker }: { worker: FleetRow }): JSX.Element | null {
+function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStopTask?: (taskId: string) => void }): JSX.Element | null {
   const t = useT();
   const activeWorkflows = useStore((state) => Object.values(state.workflows[worker.id] ?? {}).filter((run) => run.status === "running").length);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   // Text-only badge (a dot for state, no bordered chip) — the status badge already carries the colored chrome.
   if (activeWorkflows > 0) {
     return <span className="workspace-header-activity flex shrink-0 items-center gap-1 font-mono text-meta text-run"><span className="h-1 w-1 shrink-0 rounded-full bg-run led-live" />{t("workspaceHeaders.workflowTasks", { count: activeWorkflows })}</span>;
+  }
+  // Listed background tasks (Claude only — codex workers never carry tasks) arrive in any status, running included,
+  // so this ghost button shows whenever the set is non-empty and opens a per-task Stop menu.
+  const tasks = worker.tasks ?? [];
+  if (tasks.length > 0) {
+    return (
+      <>
+        <button
+          aria-label={t("workspaceHeaders.tasksMenu")}
+          aria-haspopup="menu"
+          aria-expanded={menu !== null}
+          // While open, keep this mousedown from reaching the menu's outside-click close so the click below toggles it shut.
+          onMouseDown={(e) => { if (menu) e.stopPropagation(); }}
+          onClick={(e) => {
+            if (menu) { setMenu(null); return; }
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({ x: r.left, y: r.bottom + 2 });
+          }}
+          className="workspace-header-activity no-drag inline-flex shrink-0 items-center gap-0.5 rounded px-1 font-mono text-meta text-muted transition-colors hover:text-fg-dim"
+        >
+          {t("workspaceHeaders.backgroundTasks", { count: tasks.length })}
+          <ChevronDown size={12} strokeWidth={1.5} />
+        </button>
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            onClose={() => setMenu(null)}
+            items={tasks.map((task) => ({
+              label: t("workspaceHeaders.stopTask", { type: task.type, description: task.description }),
+              onClick: () => onStopTask?.(task.id),
+              hint: task.type,
+            }))}
+          />
+        )}
+      </>
+    );
   }
   if (worker.status === "background" && worker.bg?.count) {
     return <span className="workspace-header-activity shrink-0 font-mono text-meta text-muted">{t("workspaceHeaders.backgroundTasks", { count: worker.bg.count })}</span>;
@@ -87,10 +127,11 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
 }
 
 // Worker (sub) view header: status badge + label + branch + (checkpoints/toggles).
-export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, onFetchCheckpoints, onRestore, dock }: {
+export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, onFetchCheckpoints, onRestore, onStopTask, dock }: {
   worker: FleetRow; termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean;
   onToggleTerm: () => void; onToggleRight: () => void;
-  onFetchCheckpoints: () => Promise<Checkpoint[]>; onRestore: (seq: number) => Promise<void>; dock?: boolean;
+  onFetchCheckpoints: () => Promise<Checkpoint[]>; onRestore: (seq: number) => Promise<void>;
+  onStopTask?: (taskId: string) => void; dock?: boolean;
 }): JSX.Element {
   const t = useT();
   const repoName = baseName(worker.repoPath);
@@ -104,7 +145,7 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
           controls do — background adds both the widest status label AND the activity chip, which used to push the
           controls past the header's overflow:hidden edge and make them unclickable. */}
       <span className="workspace-header-status shrink-0"><StatusBadge status={worker.status} /></span>
-      <WorkerActivityReason worker={worker} />
+      <WorkerActivityReason worker={worker} onStopTask={onStopTask} />
       <span className="workspace-header-provider shrink-0"><ProviderBadge provider={worker.provider} /></span>
       {/* the "WORKER" eyebrow is a semantic label, not a visual one — kept for screen readers (sr-only) so the
           container-query hook (workspace-header-eyebrow) still has a node when narrow widths drop it entirely. */}

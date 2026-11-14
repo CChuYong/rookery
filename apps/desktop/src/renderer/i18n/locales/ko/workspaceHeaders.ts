@@ -13,4 +13,6 @@ export default {
   "workspaceHeaders.sessionEyebrow": "세션",
   "workspaceHeaders.workflowTasks": "Workflow · {count}",
   "workspaceHeaders.backgroundTasks": "백그라운드 · {count}",
+  "workspaceHeaders.stopTask": "중지: {description}",
+  "workspaceHeaders.tasksMenu": "백그라운드 작업",
 } satisfies Catalog;
