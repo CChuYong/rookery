@@ -1,9 +1,0 @@
-{"t":0,"agent":"system","event":"skill_invoked","skill_name":"sdd-implementer"}
-{"t":0,"agent":"a8188b1","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
-{"t":0,"agent":"aee2b8b","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
-{"t":0,"agent":"ae406d4","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
-{"t":0,"agent":"af23d50","agent_type":"workflow-subagent","event":"agent_start","parent_mode":"none"}
-{"t":0,"agent":"af23d50","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":1031403}
-{"t":0,"agent":"aee2b8b","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":1187164}
-{"t":0,"agent":"ae406d4","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":1301212}
-{"t":0,"agent":"a8188b1","agent_type":"workflow-subagent","event":"agent_stop","success":true,"duration_ms":1318656}

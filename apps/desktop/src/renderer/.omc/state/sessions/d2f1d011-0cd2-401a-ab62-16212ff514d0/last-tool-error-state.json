@@ -1,7 +1,0 @@
-{
-  "tool_name": "StructuredOutput",
-  "tool_input_preview": "{\"input\":{\"real\":true,\"severity\":\"low\",\"effort\":\"S\",\"reason\":\"InteractionCard.tsx 44행(승인: text-body text-fg, mb-1.5)과 85행(질문: text-ui text-fg-dim, mb-2) 코드로 직접 확인됨 — 같은 컴포넌트의 두 변형 헤더가 실제로 크기/색/여백이 다름(...",
-  "error": "Output does not match required schema: root: must have required property 'real', root: must have required property 'severity', root: must have required property 'effort', root: must have required property 'reason', root: must NOT have additional properties ('input' is not allowed)",
-  "timestamp": "2026-11-14T09:43:39.685Z",
-  "retry_count": 3
-}
