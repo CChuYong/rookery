@@ -57,7 +57,7 @@ contextBridge.exposeInMainWorld("rookery", {
   ws: {
     resolveRoot: (opts: unknown) => ipcRenderer.invoke("ws:resolveRoot", opts) as Promise<string>,
     list: (dir: string) => ipcRenderer.invoke("ws:list", dir) as Promise<Array<{ name: string; isDir: boolean }>>,
-    read: (path: string) => ipcRenderer.invoke("ws:read", path) as Promise<{ content: string; tooLarge: boolean }>,
+    read: (path: string) => ipcRenderer.invoke("ws:read", path) as Promise<{ content: string; tooLarge: boolean; readOnly?: true }>,
     readImage: (path: string) => ipcRenderer.invoke("ws:readImage", path) as Promise<{ dataUrl?: string; tooLarge?: boolean; unsupported?: boolean }>,
     write: (path: string, content: string) => ipcRenderer.invoke("ws:write", path, content) as Promise<{ ok: boolean }>,
     mkdir: (p: string) => ipcRenderer.invoke("ws:mkdir", p) as Promise<{ ok: boolean }>,

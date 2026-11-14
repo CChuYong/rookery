@@ -62,6 +62,16 @@ export class WorkspaceManager {
     throw new Error(mt("workspace.outsideRoot", { path: target }));
   }
 
+  // Read-only access may leave the work roots: opening a file the agent mentioned (e.g. /tmp/x, a sibling repo) is a
+  // local single-user action, the same trust boundary browse() already uses. Writes/renames/trash/git stay confined.
+  // Only absolute paths qualify, so a relative/".." input can't be resolved against an unexpected base.
+  private readable(target: string): { path: string; readOnly: boolean } {
+    try { return { path: this.guard(target), readOnly: false }; } catch (err) {
+      if (!path.isAbsolute(target)) throw err;
+      return { path: path.resolve(target), readOnly: true };
+    }
+  }
+
   // git-family cwd isolation: before passing cwd to exec, check it is inside an allowed root (same invariant as the fs guard).
   // Since cwd is a directory, t===r (the root itself) also passes. If outside, throw → blocks running git from an arbitrary path.
   private guardCwd(cwd: string): string {
@@ -147,18 +157,20 @@ export class WorkspaceManager {
     return path.resolve(base, dir);
   }
 
-  async read(p: string): Promise<{ content: string; tooLarge: boolean }> {
-    this.guard(p);
+  // readOnly: true when the file is outside every work root — the editor opens it but cannot save it (write() stays guarded).
+  async read(p: string): Promise<{ content: string; tooLarge: boolean; readOnly?: true }> {
+    const { readOnly } = this.readable(p);
+    const flag = readOnly ? { readOnly: true as const } : {};
     const st = await this.d.fs.stat(p);
-    if (st.size > this.maxBytes) return { content: "", tooLarge: true };
+    if (st.size > this.maxBytes) return { content: "", tooLarge: true, ...flag };
     const buf = await this.d.fs.readFile(p);
-    if (buf.includes(0)) return { content: "", tooLarge: true }; // NUL → binary
-    return { content: buf.toString("utf8"), tooLarge: false };
+    if (buf.includes(0)) return { content: "", tooLarge: true, ...flag }; // NUL → binary
+    return { content: buf.toString("utf8"), tooLarge: false, ...flag };
   }
 
   // Reads an image file as a base64 data URL (renderer previews it via <img>). In dev the origin is http so file:// can't be used, hence the data URL.
   async readImage(p: string): Promise<{ dataUrl?: string; tooLarge?: boolean; unsupported?: boolean }> {
-    this.guard(p);
+    this.readable(p);
     const mime = IMAGE_MIME[p.split(".").pop()?.toLowerCase() ?? ""];
     if (!mime) return { unsupported: true };
     const st = await this.d.fs.stat(p);
@@ -230,7 +242,7 @@ export class WorkspaceManager {
   }
 
   watchFile(p: string): void {
-    try { this.guard(p); } catch { return; } // Don't watch paths outside the work folder (silently — this is fire-and-forget IPC, so throwing would become uncaught)
+    try { this.readable(p); } catch { return; } // relative paths outside the work folder are skipped silently (fire-and-forget IPC — a throw would be uncaught)
     const existing = this.watchers.get(p);
     if (existing) { existing.count++; return; } // Already watching → just increment refcount (avoid duplicate watch)
     const w = this.d.watch(p, () => this.d.send("fs:changed", { path: p }));

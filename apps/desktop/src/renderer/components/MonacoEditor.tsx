@@ -20,6 +20,9 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
   // The save command, re-bound to the latest closure on every effect run — the saveError banner's retry button
   // reaches through this ref since the button lives outside the effect that creates the editor instance.
   const saveRef = useRef<() => void>(() => {});
+  // Files outside every work root open read-only (main refuses writes there); the editor mirrors that instead of
+  // letting the user type into a buffer that can never be saved.
+  const [readOnly, setReadOnly] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -33,10 +36,12 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
     const id = `file:${path}`;
 
     const load = async (): Promise<void> => {
-      let r: { content: string; tooLarge: boolean };
+      let r: { content: string; tooLarge: boolean; readOnly?: true };
       try { r = await window.rookery.ws.read(path); }
       catch { if (!disposed) setBanner("error"); return; } // outside the work folder / read failure → banner (so the reject doesn't leak as unhandled)
       if (disposed) return;
+      setReadOnly(r.readOnly === true);
+      ed.updateOptions({ readOnly: r.readOnly === true });
       if (r.tooLarge) { setBanner("toolarge"); return; }
       savedRef.current = r.content;
       ed.setValue(r.content);
@@ -47,6 +52,7 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
 
     ed.onDidChangeModelContent(() => setDirty(pageKey, id, ed.getValue() !== savedRef.current));
     const save = (): void => {
+      if (ed.getOption(monaco.editor.EditorOption.readOnly)) return; // outside the work folder: nothing to save
       const value = ed.getValue();
       lastWrittenRef.current = value; // synchronous record — even if the watcher echo arrives before the write's .then, it's recognized as a self-write
       void window.rookery.ws.write(path, value).then((res) => {
@@ -94,6 +100,9 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {/* external-change / error banner — reveals via slide-down (Monaco's automaticLayout tracks the reduced height). */}
+      {readOnly && (
+        <div className="border-b border-line bg-raised px-3 py-1.5 text-ui text-muted">{t("monacoEditor.readOnlyOutside")}</div>
+      )}
       <Collapse open={banner !== null}>
         {banner === "changed" ? (
           <div className="flex items-center justify-between gap-2 border-b border-run/30 bg-run/12 px-3 py-1.5 text-ui text-run">

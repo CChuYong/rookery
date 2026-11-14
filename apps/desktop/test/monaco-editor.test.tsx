@@ -9,7 +9,8 @@ const latestEditor = () => instances[instances.length - 1]!;
 
 const SAVE_ERROR = "저장하지 못했어요 — 편집 내용이 디스크에 반영되지 않았어요";
 const SAVE_RETRY = "다시 저장";
-const OPEN_ERROR = "이 파일을 열 수 없어요 — 현재 작업 폴더 밖이거나 읽기에 실패했어요.";
+const OPEN_ERROR = "이 파일을 열 수 없어요 — 읽기에 실패했어요.";
+const READ_ONLY = "읽기 전용 — 작업 폴더 밖 파일이라 여기서는 저장할 수 없어요.";
 
 function mockWs(over: Record<string, unknown> = {}) {
   (window as unknown as { rookery: unknown }).rookery = {
@@ -55,5 +56,25 @@ describe("MonacoEditor save-failure feedback (#10)", () => {
     render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
     expect(await screen.findByText(OPEN_ERROR)).toBeInTheDocument();
     expect(screen.queryByText(SAVE_ERROR)).toBeNull();
+  });
+
+  it("opens a file outside the work folder read-only: banner shown, editor locked, Cmd+S does nothing", async () => {
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(async () => ({ content: "outside", tooLarge: false, readOnly: true })), write });
+    render(<MonacoEditor pageKey="p1" path="/tmp/write-test.txt" />);
+    expect(await screen.findByText(READ_ONLY)).toBeInTheDocument();
+    expect(latestEditor().getValue()).toBe("outside");
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+    expect(screen.queryByText(OPEN_ERROR)).toBeNull();
+  });
+
+  it("files inside the work folder stay editable with no read-only banner", async () => {
+    mockWs();
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    await waitFor(() => expect(latestEditor().getValue()).toBe("hello"));
+    expect(latestEditor().readOnly).toBe(false);
+    expect(screen.queryByText(READ_ONLY)).toBeNull();
   });
 });
