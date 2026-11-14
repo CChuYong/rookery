@@ -881,8 +881,13 @@ export class FleetOrchestrator {
       .filter((x) => (filter?.repoPath ? x.repoPath === filter.repoPath : true));
   }
 
+  // Listed (user-visible) background tasks of a LIVE worker; [] when detached/unknown or the provider has none.
+  backgroundTasks(id: string): BackgroundTaskView[] {
+    return this.entries.get(id)?.agent?.backgroundTasks?.() ?? [];
+  }
+
   private listedTasksOf(id: string): { tasks?: BackgroundTaskView[] } {
-    const tasks = this.entries.get(id)?.agent?.backgroundTasks?.() ?? [];
+    const tasks = this.backgroundTasks(id);
     return tasks.length > 0 ? { tasks } : {};
   }
 

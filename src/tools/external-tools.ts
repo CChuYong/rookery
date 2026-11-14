@@ -7,6 +7,7 @@ import type { Repositories } from "../persistence/repositories.js";
 import type { SessionManager } from "../core/session-manager.js";
 import { EXTERNAL_FLEET_SESSION_KEY } from "../core/session-manager.js";
 import { isSafeGitRef } from "../core/git-ref.js";
+import { formatBackgroundTasks } from "./background-tasks-format.js";
 import { spawnWorkerImpl, formatTranscript } from "./fleet-tools.js";
 
 // Byte cap on transcript output returned to an external client (mirrors fleet-tools' own cap).
@@ -65,7 +66,7 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
     async (args) => {
       audit("get_worker_status");
       try {
-        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})`);
+        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})${formatBackgroundTasks(fleet.backgroundTasks(args.id))}`);
       } catch (err) {
         return errorText(String(err));
       }

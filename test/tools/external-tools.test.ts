@@ -76,6 +76,32 @@ describe("external tools (rookery-as-MCP)", () => {
     expect(out.content[0]!.text).toContain("unknown repo");
   });
 
+  it("get_worker_status appends the worker's listed background tasks", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: EXTERNAL_FLEET_SESSION_KEY, cwd: "/x" });
+    const factory = (): WorkerLike => ({
+      start: () => {}, send: () => {}, stop: async () => {}, status: () => "background", waitUntilSettled: async () => {},
+      backgroundTasks: () => [{ id: "b1", type: "local_bash", description: "npm run dev" }],
+    });
+    const fo = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const { id } = await fo.spawn({ homeSessionId: EXTERNAL_FLEET_SESSION_KEY, repoPath: "/code/app", label: "app", task: "do it" });
+    const sessions = { getOrCreateByKey: () => repos.getSession(EXTERNAL_FLEET_SESSION_KEY)! } as unknown as SessionManager;
+    const status = externalToolDefs({ fleet: fo, repos, sessions }, "readonly").find((d) => d.name === "get_worker_status")!;
+    const out = ((await status.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out.endsWith("background tasks:\n- local_bash: npm run dev")).toBe(true);
+  });
+
+  it("get_worker_status output is unchanged when the worker has no background tasks", async () => {
+    const { repos, fo, sessions } = harness();
+    repos.createSession({ id: EXTERNAL_FLEET_SESSION_KEY, cwd: "/x" });
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const { id } = await fo.spawn({ homeSessionId: EXTERNAL_FLEET_SESSION_KEY, repoPath: "/code/app", label: "app", task: "do it" });
+    const status = externalToolDefs({ fleet: fo, repos, sessions }, "readonly").find((d) => d.name === "get_worker_status")!;
+    const out = ((await status.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out).toBe(`${id}: running (claude)`);
+  });
+
   it("interrupt_worker appends a still-queued note when the fleet's interrupt resolves a non-empty receipt", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: EXTERNAL_FLEET_SESSION_KEY, cwd: "/x" });

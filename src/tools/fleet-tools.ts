@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { FleetOrchestrator } from "../core/fleet-orchestrator.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { isSafeGitRef } from "../core/git-ref.js";
+import { formatBackgroundTasks } from "./background-tasks-format.js";
 
 // Byte cap on transcript output that gets re-injected into the master context (symmetric with view_subagent_diff). Row count is capped by listWorkerEvents.
 const TRANSCRIPT_MAX_BYTES = 256 * 1024;
@@ -148,7 +149,7 @@ export function fleetToolDefs(
     { id: z.string() },
     async (args) => {
       try {
-        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})`);
+        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})${formatBackgroundTasks(fleet.backgroundTasks(args.id))}`);
       } catch (err) {
         return errorText(String(err));
       }
