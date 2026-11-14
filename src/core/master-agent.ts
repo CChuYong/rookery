@@ -1,3 +1,4 @@
+import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccuracy } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { AgentBackend, InterruptReceipt, ProviderMcpServer, ProviderPermissionCallback, ProviderToolDef } from "./agent-backend.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
@@ -31,6 +32,7 @@ export interface MasterAgentDeps {
   repos: Repositories;
   bus: EventBus;
   backend: AgentBackend;
+  speed?: () => SpeedPreference;
   model: () => string; // Resolved per turn → a Settings model change is reflected even in a live (cached) session.
   effort: () => string; // Global default effort. Used when there is no per-turn override.
   name: () => string; // The value the master uses as its own name in the system prompt. Resolved per turn (Settings changes apply immediately).
@@ -60,6 +62,7 @@ export interface TurnCapabilities {
 
 // Per-UI-session override (unspecified → global default). Slack always uses the defaults.
 export interface TurnOverride {
+  speed?: SpeedPreference | null;
   model?: string;
   effort?: string;
   permissionMode?: string; // Unspecified → bypassPermissions (current). Selected per UI session.
@@ -152,6 +155,7 @@ export class MasterAgent {
   private pendingNotifications: WorkerNotification[] = [];
   private notifyFlushScheduled = false;
   // Session cumulative cost/turns (in-memory). Each turn's result gives only that turn's values, so accumulate for the UI session total.
+  private costAccuracy?: CostAccuracy;
   private cumCostUsd = 0;
   private cumTurns = 0;
   // Provider-reported running cost total last observed (see Worker.providerCostTotalUsd). Persisted in
@@ -180,7 +184,8 @@ export class MasterAgent {
     try {
       const last = opts.deps.repos.lastSessionEventPayload(opts.sessionId, "master.result");
       if (last) {
-        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number; costAccuracy?: CostAccuracy };
+        this.costAccuracy = p.costAccuracy;
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
         this.providerCostTotalUsd = providerCostTotalOf(last);
@@ -272,6 +277,7 @@ export class MasterAgent {
   // Even if two runTurn calls happen concurrently they run one at a time, and a failed turn
   // does not contaminate the chain, but its error is propagated to that caller.
   async runTurn(userText: string, override?: TurnOverride): Promise<void> {
+    if (override?.speed !== undefined) this.opts.deps.repos.setSessionSpeed(this.opts.sessionId, override.speed);
     const gen = this.stopGeneration;
     this.queuedByGen.set(gen, (this.queuedByGen.get(gen) ?? 0) + 1);
     const result = this.turnChain.then(() => {
@@ -324,6 +330,7 @@ export class MasterAgent {
     const { repos, bus, fleet } = this.opts.deps;
     // Per-turn override (UI) takes precedence; otherwise the global default (Slack/default entry point).
     // Treat empty/whitespace strings as "unspecified" — with only `??`, model:'' would be passed to query() as an empty model and the SDK would fail.
+    const speed = override?.speed === null ? resolveSpeed(this.opts.deps.speed) : override?.speed ?? this.opts.deps.repos.getSession(this.opts.sessionId)?.speed ?? resolveSpeed(this.opts.deps.speed);
     const model = override?.model?.trim() || this.opts.deps.model();
     const effort = override?.effort?.trim() || this.opts.deps.effort();
     // Per-session permission mode (re-evaluated each turn). Unspecified → current bypassPermissions. The protocol enum guarantees value validity.
@@ -381,6 +388,7 @@ export class MasterAgent {
       const stream = this.opts.deps.backend.startTurn(promptText, {
         cwd: this.opts.cwd,
         model,
+        speed,
         abortController: abort, // Abort signal — abort() from stop()
         effort,
         // A headless daemon has no TTY to approve permission prompts, so the master also auto-approves.
@@ -484,12 +492,15 @@ export class MasterAgent {
           bus.emit({ type: "master.system", sessionId, text: ev.text });
         } else if (ev.kind === "tool_progress") {
           bus.emit({ type: "master.tool", sessionId, toolId: ev.toolUseId, name: "", phase: "progress", elapsedSec: ev.elapsedSec });
+        } else if (ev.kind === "speed") {
+          this.recordEvent({ type: "master.speed", sessionId, observation: ev.observation });
         } else if (ev.kind === "turn_end") {
           // Carry cumulative cost/turns for the session (context tokens/window are the current turn's values).
           // ev.costUsd is THIS turn's incremental cost (the Claude SDK reports a running total per result —
           // probed on 0.3.303: resumed turns $0.03168 → $0.03421 → $0.03619 — which the adapter differences
           // against costBaselineUsd). The raw total is kept as the next baseline and persisted with the result.
           this.cumCostUsd += ev.costUsd;
+          this.costAccuracy = mergeCostAccuracy(this.costAccuracy, ev.costAccuracy);
           if (ev.costTotalUsd !== undefined) this.providerCostTotalUsd = ev.costTotalUsd;
           this.cumTurns += ev.numTurns;
           this.recordEvent({
@@ -497,6 +508,8 @@ export class MasterAgent {
             sessionId,
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
+            costAccuracy: this.costAccuracy,
+            requestedSpeed: ev.requestedSpeed,
             numTurns: this.cumTurns,
             // Only persisted for turns that reported a provider total (Claude): a Codex turn must not re-persist an inherited value.
             ...(ev.costTotalUsd !== undefined && this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
@@ -513,9 +526,10 @@ export class MasterAgent {
             this.recordEvent({ type: "master.notice", sessionId, code: "notice.turnCap", params, text: t(DEFAULT_LOCALE, "notice.turnCap", params) });
           }
           // costBudgetUsd: warning-only for master (no abort) — mirror maxTurns above, but on the LIFETIME cost total.
+          if (this.costAccuracy === "unavailable") this.recordEvent({ type: "master.notice", sessionId, code: "notice.costUnavailable", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
           if (override?.costBudgetUsd != null && this.cumCostUsd >= override.costBudgetUsd) {
             const params = { spent: this.cumCostUsd.toFixed(2), budget: override.costBudgetUsd.toFixed(2) };
-            this.recordEvent({ type: "master.notice", sessionId, code: "notice.costBudget", params, text: t(DEFAULT_LOCALE, "notice.costBudget", params) });
+            this.recordEvent({ type: "master.notice", sessionId, code: this.costAccuracy === "estimated" ? "notice.costBudgetEstimated" : "notice.costBudget", params, text: t(DEFAULT_LOCALE, this.costAccuracy === "estimated" ? "notice.costBudgetEstimated" : "notice.costBudget", params) });
           }
         }
       }

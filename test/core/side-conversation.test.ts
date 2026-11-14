@@ -129,3 +129,17 @@ describe("SideConversationManager", () => {
     expect(() => manager.send(id, "after close")).toThrow(/unknown Side conversation/);
   });
 });
+
+it("inherits source speed at each Side turn and retains observation/accounting fields", async () => {
+  const h = harness([{kind: "speed", observation: {requested: "fast", state: "unknown"}}, {kind: "turn_end", subtype: "success", costUsd: .01, costAccuracy: "estimated", requestedSpeed: "fast", numTurns: 1, durationMs: 1, contextTokens: 0, contextWindow: 0}]);
+  let speed: "standard" | "fast" = "fast";
+  h.source.speed = () => speed;
+  const {id} = await h.manager.create({sourceKind: "worker", sourceId: "w1"});
+  h.manager.send(id, "q1"); await h.manager.idle(id);
+  expect((h.turns[0]!.opts.speed as () => string)()).toBe("fast");
+  speed = "standard";
+  h.manager.send(id, "q2"); await h.manager.idle(id);
+  expect((h.turns[1]!.opts.speed as () => string)()).toBe("standard");
+  expect(h.emitted).toContainEqual(expect.objectContaining({type: "side.event", data: {kind: "speed", observation: {requested: "fast", state: "unknown"}}}));
+  expect(h.emitted).toContainEqual(expect.objectContaining({type: "side.event", data: expect.objectContaining({kind: "result", costAccuracy: "estimated", requestedSpeed: "fast"})}));
+});

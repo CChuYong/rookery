@@ -50,13 +50,15 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     ]));
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events).toEqual([
+      { kind: "speed", observation: { requested: "standard", state: "unknown" } },
       { kind: "system_text", text: "init" },
       { kind: "thinking_delta", text: "hmm" },
       { kind: "message", role: "assistant", text: "hello", parentToolUseId: null },
       { kind: "tool_use", id: "t1", name: "mcp__fleet__spawn_worker", input: { repo: "r" }, parentToolUseId: null },
       { kind: "tool_result", toolUseId: "t1", isError: false, content: "ok", parentToolUseId: null },
+      { kind: "speed", observation: { requested: "standard", state: "unknown" } },
       { kind: "session_id", sessionId: "sdk-1" },
-      { kind: "turn_end", subtype: "success", costUsd: 0.5, costTotalUsd: 0.5, numTurns: 2, durationMs: 10, contextTokens: 150, contextWindow: 200000 },
+      { kind: "turn_end", costAccuracy: "reported", requestedSpeed: "standard", subtype: "success", costUsd: 0.5, costTotalUsd: 0.5, numTurns: 2, durationMs: 10, contextTokens: 150, contextWindow: 200000 },
     ]);
   });
 
@@ -66,9 +68,10 @@ describe("ClaudeBackend.startTurn — event translation", () => {
       { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-early" },
     ]));
     const events = await collect(backend.startTurn("hi", baseOpts()));
-    expect(events[0]).toEqual({ kind: "session_id", sessionId: "sdk-early" });
+    expect(events[0]).toEqual({ kind: "speed", observation: {requested: "standard", state: "unknown"} });
+    expect(events[1]).toEqual({ kind: "session_id", sessionId: "sdk-early" });
     // init with no other classification also surfaces as system_text (subtype fallback)
-    expect(events[1]).toEqual({ kind: "system_text", text: "init" });
+    expect(events[2]).toEqual({ kind: "system_text", text: "init" });
   });
 
   it("classifies system pushes (compact_boundary → notice push; commands_changed → commands push)", async () => {
@@ -93,8 +96,9 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events).toEqual([
       { kind: "message", role: "assistant", text: "nested says hi", parentToolUseId: "p1" },
+      { kind: "speed", observation: { requested: "standard", state: "unknown" } },
       { kind: "session_id", sessionId: "sdk-1" },
-      { kind: "turn_end", subtype: "success", costUsd: 0.1, costTotalUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
+      { kind: "turn_end", costAccuracy: "reported", requestedSpeed: "standard", subtype: "success", costUsd: 0.1, costTotalUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
     ]);
   });
 
@@ -333,8 +337,9 @@ describe("ClaudeBackend.openSession", () => {
     expect((captured.options as Record<string, unknown>).forwardSubagentText).toBe(true);
     expect(events).toEqual([
       { kind: "message", role: "assistant", text: "echo:task one", parentToolUseId: null },
+      { kind: "speed", observation: { requested: "standard", state: "unknown" } },
       { kind: "session_id", sessionId: "sdk-w" },
-      { kind: "turn_end", subtype: "success", costUsd: 0.1, costTotalUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
+      { kind: "turn_end", costAccuracy: "reported", requestedSpeed: "standard", subtype: "success", costUsd: 0.1, costTotalUsd: 0.1, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 },
     ]);
   });
 
@@ -624,4 +629,63 @@ describe("ClaudeBackend — informational drop rules", () => {
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events.map((e) => (e as { push?: { params?: { text: string } } }).push?.params?.text)).toEqual(["careful", "try this", "gray"]);
   });
+});
+
+it("sets an explicit Claude speed overlay and decodes provider state", async () => {
+ let settings: unknown;
+ const q = rawQuery([{ type: "system", subtype: "init", fast_mode_state: "cooldown", fast_mode_disabled_reason: "future_reason" }]);
+ const b = new ClaudeBackend(((input: Parameters<QueryFn>[0]) => { settings = input.options?.settings; return q(input); }) as QueryFn);
+ const events = await collect(b.startTurn("go", baseOpts({ speed: "fast" })));
+ expect(settings).toEqual({ fastMode: true });
+ expect(events).toContainEqual({ kind: "speed", observation: { requested: "fast", state: "cooldown", reason: "future_reason" } });
+});
+it("applies streaming speed before delivering each follow-up and surfaces errors", async () => {
+ const order: string[] = [];
+ const q = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+   for await (const m of input.prompt as AsyncIterable<{message: {content: string}}>) order.push(m.message.content);
+ })(), { interrupt: async () => {}, applyFlagSettings: async ({fastMode}: {fastMode: boolean}) => { order.push(String(fastMode)); } })) as unknown as QueryFn;
+ let speed = "standard";
+ const input = (async function* () { yield "one"; speed = "fast"; yield "two"; })();
+ await collect(new ClaudeBackend(q).openSession(input, baseOpts({ speed: () => speed })));
+ expect(order).toEqual(["false", "one", "true", "two"]);
+});
+
+it.each([['on', 'fast'], ['off', 'standard'], ['cooldown', 'cooldown'], [undefined, 'unknown']])("decodes Claude state %s without inventing availability", async (raw, state) => {
+  const events = await collect(new ClaudeBackend(rawQuery([{type: "system", subtype: "init", fast_mode_state: raw}, {type: "result", fast_mode_state: raw}])).startTurn("go", baseOpts({speed: "fast"})));
+  expect(events.filter(e => e.kind === "speed")).toEqual([
+    {kind: "speed", observation: {requested: "fast", state}},
+    {kind: "speed", observation: {requested: "fast", state}},
+  ]);
+});
+
+it("propagates Claude flag-control failures rather than delivering the next input", async () => {
+  let delivered = false;
+  const query = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+    for await (const _message of input.prompt as AsyncIterable<unknown>) delivered = true;
+  })(), {interrupt: async () => {}, applyFlagSettings: async () => { throw new Error("account rejected fast mode"); }})) as unknown as QueryFn;
+  const stream = new ClaudeBackend(query).openSession((async function* () { yield "never"; })(), baseOpts({speed: "fast"}));
+  await expect(collect(stream)).rejects.toThrow("account rejected fast mode");
+  expect(delivered).toBe(false);
+  await expect(stream.setSpeed!("fast")).rejects.toThrow("account rejected fast mode");
+});
+
+it("defers a busy Claude stream speed control until the next input without changing current result intent", async () => {
+  const flags: boolean[] = [];
+  const query = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+    for await (const _message of input.prompt as AsyncIterable<unknown>) {
+      yield {type: "assistant", message: {content: [{type: "text", text: "busy"}]}};
+      yield {type: "result", subtype: "success", total_cost_usd: .1};
+    }
+  })(), {interrupt: async () => {}, applyFlagSettings: async ({fastMode}: {fastMode: boolean}) => { flags.push(fastMode); }})) as unknown as QueryFn;
+  const stream = new ClaudeBackend(query).openSession((async function* () { yield "one"; yield "two"; })(), baseOpts());
+  const results: AgentEvent[] = [];
+  for await (const event of stream) {
+    if (event.kind === "message" && results.length === 0) {
+      await stream.setSpeed!("fast");
+      expect(flags).toEqual([false]);
+    }
+    if (event.kind === "turn_end") results.push(event);
+  }
+  expect(results).toMatchObject([{requestedSpeed: "standard"}, {requestedSpeed: "fast"}]);
+  expect(flags).toEqual([false, true]);
 });

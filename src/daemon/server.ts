@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "../core/speed.js";
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
@@ -206,6 +207,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     spawn: realCodexSpawn(() => settings.codexBin()),
     defaultModel: () => settings.codexWorkerModel(),
     // Effort guard: consult the first-success model/list cache (declared below; only read at turn time).
+    modelServiceTiers: (model) => codexModelsProvider.cached()?.find((m) => m.id === model)?.serviceTiers?.map((tier) => tier.id),
     modelEfforts: (model) => codexModelsProvider.cached()?.find((m) => m.id === model)?.supportedEfforts,
     apiKey: codexApiKey,
     // Per-turn inactivity watchdog (P2.5 Track B — docs/2026-07-06-p25-codex-hardening.md): resolved
@@ -267,7 +269,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
   };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
   const workflows = new ClaudeWorkflowRegistry({ files: realClaudeWorkflowFiles, bus });
-  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; costBudgetUsd?: number; provider?: string; handoffSeed?: string; handoffFromProvider?: string }): WorkerLike =>
+  const subFactory = (o: { id: string; sessionId: string; repoPath: string; label: string; sdkSessionId?: string | null; speed?: SpeedPreference | null; model?: string; effort?: string; permissionMode?: string; onTurnStart?: () => void; maxTurns?: number; costBudgetUsd?: number; provider?: string; handoffSeed?: string; handoffFromProvider?: string }): WorkerLike =>
     new Worker({
       id: o.id,
       sessionId: o.sessionId,
@@ -280,6 +282,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         backend: workerBackends[o.provider ?? "claude"] ?? backend,
         model: o.model ?? (o.provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
         effort: o.effort ?? settings.workerEffort(),
+        speed: () => settings.speed(o.provider ?? "claude", "worker"),
         permissionMode: o.permissionMode, onTurnStart: o.onTurnStart, maxTurns: o.maxTurns,
         // explicit spawn override wins; else the settings default; else unlimited (null/0/negative/malformed → null via the getter).
         costBudgetUsd: o.costBudgetUsd ?? settings.workerCostBudgetUsd() ?? undefined,
@@ -376,7 +379,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     seedCodexHomeFromSource(config.home, sourceSessionId, newSessionId, forkedUuid);
     return { sessionId: forkedUuid };
   };
-  const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,
+  const sessions = new SessionManager({ repos, bus, backends: { claude: backend, codex: codexBackend }, masterModel: () => settings.masterModel(), masterModelByProvider: { codex: () => settings.codexMasterModel() }, masterSpeed: (provider) => settings.speed(provider, "master"), masterEffort: () => settings.masterEffort(), masterName: () => settings.masterName(), fleet, summarizeLabel, onSessionDelete,
     // Fork routing by provider: codex routes through forkCodexMaster (per-session CODEX_HOME
     // relocation, see above); claude keeps the SDK's own (eager) forkSession.
     forkSession: (provider, id, opts) => (provider === "codex" ? forkCodexMaster(id, opts) : sdkForkSession(id, opts)),
@@ -415,6 +418,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
           costBaselineUsd: providerCostTotalOf(repos.lastSessionEventPayload(row.id, "master.result")),
           model: provider === "codex" ? settings.codexMasterModel() : settings.masterModel(),
           effort: settings.masterEffort(),
+          speed: () => repos.getSession(sourceId)?.speed ?? settings.speed(provider, "master"),
         };
       }
       const row = repos.getWorker(sourceId);
@@ -425,6 +429,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
         costBaselineUsd: providerCostTotalOf(repos.lastWorkerEventPayload(row.id, "result")),
         model: row.model || (provider === "codex" ? settings.codexWorkerModel() : settings.workerModel()),
         effort: row.effort || settings.workerEffort(),
+        speed: () => repos.getWorker(sourceId)?.speed ?? settings.speed(provider, "worker"),
       };
     },
     forkSession: (source, sideId) => {

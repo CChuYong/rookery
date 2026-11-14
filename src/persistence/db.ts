@@ -231,6 +231,11 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
       ) STRICT;
     `);
   },
+  (db) => {
+    db.exec(`ALTER TABLE sessions ADD COLUMN speed TEXT CHECK (speed IN ('standard', 'fast'));
+      ALTER TABLE workers ADD COLUMN speed TEXT CHECK (speed IN ('standard', 'fast'));
+      ALTER TABLE automations ADD COLUMN speed TEXT CHECK (speed IN ('standard', 'fast'));`);
+  },
 ];
 
 export function currentVersion(db: DB): number {

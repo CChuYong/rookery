@@ -4,21 +4,26 @@ import type { CodexSpawn } from "./codex/codex-transport.js";
 // One available Codex model (from the app-server's `model/list` catalog). Mirrors ModelInfo's role
 // for the Claude models.list path, but richer (per-model reasoning-effort options) — see messages.ts's
 // structurally-identical re-declaration (protocol stays transport-agnostic, no core import there).
-export interface CodexModelInfo { id: string; displayName: string; defaultEffort: string; supportedEfforts: string[]; isDefault: boolean; }
+export interface CodexModelInfo { id: string; displayName: string; defaultEffort: string; supportedEfforts: string[]; isDefault: boolean; serviceTiers?: Array<{ id: string; name: string; description: string }>; }
 
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 // Maps one raw `model/list` data[] row (camelCase, ts-rs) → CodexModelInfo. Drops rows without an id.
 function mapModel(m: unknown): CodexModelInfo | null {
-  const o = m as { id?: unknown; displayName?: unknown; defaultReasoningEffort?: unknown; supportedReasoningEfforts?: unknown; isDefault?: unknown; hidden?: unknown };
+  const o = m as { id?: unknown; displayName?: unknown; defaultReasoningEffort?: unknown; supportedReasoningEfforts?: unknown; isDefault?: unknown; hidden?: unknown; serviceTiers?: unknown };
   const id = typeof o.id === "string" ? o.id : "";
   if (!id) return null;
   if (o.hidden === true) return null; // defense-in-depth: drop hidden rows even if includeHidden:false ever leaks one (spec §①)
   const supported = Array.isArray(o.supportedReasoningEfforts)
     ? o.supportedReasoningEfforts.map((e) => (typeof e === "object" && e && typeof (e as { reasoningEffort?: unknown }).reasoningEffort === "string" ? (e as { reasoningEffort: string }).reasoningEffort : "")).filter(Boolean)
     : [];
-  return { id, displayName: typeof o.displayName === "string" ? o.displayName : id, defaultEffort: typeof o.defaultReasoningEffort === "string" ? o.defaultReasoningEffort : "", supportedEfforts: supported, isDefault: o.isDefault === true };
+  const serviceTiers = Array.isArray(o.serviceTiers) ? o.serviceTiers.flatMap((v) => {
+    if (!v || typeof v !== "object" || typeof (v as { id?: unknown }).id !== "string") return [];
+    const tier = v as { id: string; name?: unknown; description?: unknown };
+    return [{ id: tier.id, name: typeof tier.name === "string" ? tier.name : tier.id, description: typeof tier.description === "string" ? tier.description : "" }];
+  }) : undefined;
+  return { ...(serviceTiers ? { serviceTiers } : {}), id, displayName: typeof o.displayName === "string" ? o.displayName : id, defaultEffort: typeof o.defaultReasoningEffort === "string" ? o.defaultReasoningEffort : "", supportedEfforts: supported, isDefault: o.isDefault === true };
 }
 
 // Provider for the desktop Codex model/effort picker: spawns a short-lived `codex app-server` child,

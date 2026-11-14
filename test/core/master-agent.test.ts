@@ -140,12 +140,13 @@ describe("MasterAgent", () => {
     const evs = d.repos.listSessionEvents("s1");
     const types = evs.map((e) => e.type);
     // the user message (persist-only) + assistant text + tool start/end + second assistant + result are all retained.
-    expect(types).toEqual(["master.message", "master.message", "master.tool", "master.tool", "master.message", "master.result"]);
+    expect(types).toEqual(["master.message", "master.message", "master.tool", "master.tool", "master.message", "master.speed", "master.result"]);
     const payloads = evs.map((e) => JSON.parse(e.payload_json));
     expect(payloads[0]).toMatchObject({ type: "master.message", role: "user", content: "해줘" });
     expect(payloads[2]).toMatchObject({ type: "master.tool", toolId: "t1", phase: "start" });
     expect(payloads[3]).toMatchObject({ type: "master.tool", toolId: "t1", phase: "end", ok: true });
-    expect(payloads[5]).toMatchObject({ type: "master.result" });
+    expect(payloads[5]).toMatchObject({ type: "master.speed" });
+    expect(payloads[6]).toMatchObject({ type: "master.result" });
   });
 
   it("nested Task-subagent traffic (parent_tool_use_id) is not recorded as the master's own activity (audit #23)", async () => {

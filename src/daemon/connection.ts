@@ -210,7 +210,7 @@ export class Connection {
     switch (msg.type) {
       case "session.create": {
         // No explicit cwd (desktop "New Session" with no folder picked) → the configured default folder, else process.cwd().
-        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()), { provider: msg.provider });
+        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()), { provider: msg.provider, speed: msg.speed });
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
@@ -219,7 +219,7 @@ export class Connection {
         // find-or-create by external key (e.g. Slack thread_ts). Same key → always the same session.
         // provider is honored only on FIRST creation of the key (fixed for the session's lifetime),
         // mirroring session.create — otherwise a keyed session opened over the wire is permanently claude (finding [24]).
-        const session = this.sessions.getOrCreateByKey(msg.key, msg.cwd ?? process.cwd(), msg.provider);
+        const session = this.sessions.getOrCreateByKey(msg.key, msg.cwd ?? process.cwd(), msg.provider, msg.speed);
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
@@ -227,7 +227,7 @@ export class Connection {
       case "session.fork": {
         // Fork a master session → a new session with the original's SDK context + copied transcript. Replies like session.create so the client navigates to it.
         try {
-          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider });
+          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider, speed: msg.speed });
           this.subscribe(session.id);
           this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         } catch (err) {
@@ -255,7 +255,7 @@ export class Connection {
         this.subscribe(session.id);
         // Per-UI-session model/effort/permissionMode overrides (if present). Otherwise the global defaults (Slack also uses this path).
         // A runTurn throw is caught by the outer try/catch and replied as error+reqId.
-        await session.master.runTurn(msg.text, { model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
+        await session.master.runTurn(msg.text, { speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
         // Ack when a reqId is present so request()-style clients get a settled promise; fire-and-forget (no reqId) stays unchanged for old clients.
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sessionId });
         return;
@@ -495,7 +495,7 @@ export class Connection {
       case "worker.fork": {
         // Fork a worker → a new worker carrying the source's SDK context + full worktree state + transcript. Replies like fleet.spawn so the client navigates to it.
         try {
-          const { id } = await this.fleet.fork(msg.id, { provider: msg.provider, model: msg.model, effort: msg.effort });
+          const { id } = await this.fleet.fork(msg.id, { speed: msg.speed, provider: msg.provider, model: msg.model, effort: msg.effort });
           this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
         } catch (err) {
           this.reply({ type: "error", message: err instanceof Error ? err.message : String(err), reqId: msg.reqId });
@@ -506,8 +506,13 @@ export class Connection {
         // Deliver a follow-up message to a running worker (streaming input). Throws if the agent is terminated/unknown
         // or mid-restore, and the outer try/catch responds with error+reqId. On success, ack when a reqId is present so
         // request()-style clients (desktop) get a settled promise instead of a silently-dropped frame.
-        this.fleet.send(msg.id, msg.text, msg.clientMsgId);
+        this.fleet.send(msg.id, msg.text, msg.clientMsgId, msg.speed);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.id });
+        return;
+      }
+      case "worker.setSpeed": {
+        await this.fleet.setSpeed(msg.id, msg.speed);
+        if (msg.reqId) this.reply({ type: "fleet.ack", action: "setSpeed", id: msg.id, reqId: msg.reqId });
         return;
       }
       case "worker.setModel": {
@@ -762,7 +767,7 @@ export class Connection {
         const home = this.sessions.getOrCreateByKey(UI_FLEET_SESSION_KEY, repo.path);
         const label = msg.label?.trim() || msg.task?.trim().slice(0, 40) || "worker";
         try {
-          const { id } = await this.fleet.spawn({ homeSessionId: home.id, repoPath: repo.path, label, task: msg.task, base: spawnBase, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, ticketKey: msg.ticketKey, ticketUrl: msg.ticketUrl, provider: msg.provider, costBudgetUsd: msg.costBudgetUsd ?? undefined });
+          const { id } = await this.fleet.spawn({ homeSessionId: home.id, repoPath: repo.path, label, task: msg.task, base: spawnBase, speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, ticketKey: msg.ticketKey, ticketUrl: msg.ticketUrl, provider: msg.provider, costBudgetUsd: msg.costBudgetUsd ?? undefined });
           this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
         } catch (err) {
           this.reply({ type: "error", message: `fleet.spawn: ${String(err)}`, reqId: msg.reqId });

@@ -1,6 +1,8 @@
+import type { SpeedObservation, SpeedPreference, CostAccuracy } from "./speed.js";
 import type { WorkflowAgentSummary, WorkflowRunSummary } from "./workflow-activity.js";
 
 export type WorkerEventData =
+  | { kind: "speed"; observation: SpeedObservation }
   | { kind: "system"; text: string }
   | { kind: "message"; role: "assistant" | "user"; content: string }
   | { kind: "message_delta"; text: string } // token-level delta (not persisted, for live streaming)
@@ -9,7 +11,7 @@ export type WorkerEventData =
   | { kind: "tool_use"; id: string; name: string; input: string }
   | { kind: "tool_result"; id: string; isError: boolean; content: string }
   | { kind: "tool_progress"; id: string; elapsedSec: number } // elapsed seconds of an in-progress tool (live only)
-  | { kind: "result"; subtype: string; costUsd: number; numTurns: number; durationMs?: number; contextTokens?: number; contextWindow?: number; terminalReason?: string; providerCostTotalUsd?: number }
+  | { kind: "result"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs?: number; contextTokens?: number; contextWindow?: number; terminalReason?: string; providerCostTotalUsd?: number }
   | { kind: "notice"; text: string } // informational system push (compaction/retry/fallback) — shown as a single-line chip in the conversation
   | { kind: "error"; message: string };
 
@@ -24,6 +26,7 @@ export interface InteractionQuestion {
 }
 
 export type CoreEvent =
+  | { type: "master.speed"; sessionId: string; observation: SpeedObservation }
   | { type: "master.message"; sessionId: string; role: "assistant" | "user"; content: string; clientMsgId?: string }
   | { type: "master.message.delta"; sessionId: string; delta: string }
   | { type: "master.thinking.delta"; sessionId: string; delta: string } // master thinking-summary delta (live)
@@ -34,7 +37,7 @@ export type CoreEvent =
   | { type: "master.notice"; sessionId: string; text: string; code?: string; params?: Record<string, string | number> }
   // SDK pushes command/skill list changes (commands_changed) → refresh the / candidates if in the active context.
   | { type: "commands.changed"; sessionId: string; scopeId: string; commands: import("./commands.js").SlashCommandInfo[] }
-  | { type: "master.result"; sessionId: string; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; providerCostTotalUsd?: number }
+  | { type: "master.result"; sessionId: string; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; providerCostTotalUsd?: number }
   // Master turn progress state (running↔idle) — corresponds to the worker's worker.status. Live pulse in the UI session list.
   | { type: "master.status"; sessionId: string; status: "running" | "idle" }
   // Ephemeral read-only fork used by the desktop's Side drawer. sessionId is the owning master
@@ -47,7 +50,7 @@ export type CoreEvent =
   // shows the row immediately), reconciled to running/idle once the agent boots. Omitted (back-compat) ⇒ treated as "running".
   // provider: the AgentBackend the worker runs on ('claude' | 'codex'). Carried on the live spawn event so the desktop shows the
   // Codex badge for the worker's whole run — without it the badge only appeared once fleet.list reconciled (reconnect/terminal). Omitted ⇒ claude.
-  | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; task?: string; branch?: string; status?: string; provider?: string; ticketKey?: string | null; ticketUrl?: string | null }
+  | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; task?: string; branch?: string; status?: string; provider?: string; speed?: SpeedPreference | null; ticketKey?: string | null; ticketUrl?: string | null }
   // clientMsgId: a live-only correlation key carried only on the user echo — used to reconcile the desktop pending bubble (absent from the persisted payload).
   | { type: "worker.event"; sessionId: string; workerId: string; seq: number; data: WorkerEventData; clientMsgId?: string }
   // Native nested subagent (SDK subagent spawned by a worker via Task) activity — live only (not persisted), grouped by parentToolUseId.

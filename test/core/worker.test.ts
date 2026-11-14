@@ -126,10 +126,10 @@ describe("Worker", () => {
     expect(agent.status()).toBe("stopped"); // natural fake-stream end lands stopped (done retired 2026-07-11)
     // Persisted events: first user instruction + assistant message + result + the stream-end notice (done retired 2026-07-11)
     const persisted = repos.listWorkerEvents("a1");
-    expect(persisted.map((e) => e.type)).toEqual(["message", "message", "result", "notice"]);
+    expect(persisted.map((e) => e.type)).toEqual(["message", "message", "speed", "result", "notice"]);
     // Emitted worker.event: user message + assistant message + result + stream-end notice = 4
     const msgEvents = events.filter((e) => e.type === "worker.event");
-    expect(msgEvents.length).toBe(4);
+    expect(msgEvents.length).toBe(5);
     // status transition event
     expect(events.some((e) => e.type === "worker.status")).toBe(true);
     // The result's session_id is persisted → resume is possible after restart
@@ -773,7 +773,7 @@ describe("Worker", () => {
       return p.role === "user" ? `U:${p.content}` : `${e.type}:${p.content ?? p.subtype ?? ""}`;
     });
     // task → turn0 reply → turn0 result → msg1 (after the boundary!) → turn1 reply → turn1 result
-    expect(order).toEqual(["U:task", "message:reply:task", "result:success", "U:msg1", "message:reply:msg1", "result:success"]);
+    expect(order).toEqual(["U:task", "message:reply:task", "speed:", "result:success", "U:msg1", "message:reply:msg1", "speed:", "result:success"]);
   });
 
   it("flushes multiple mid-turn messages in FIFO order, each before its own turn", async () => {
@@ -808,7 +808,7 @@ describe("Worker", () => {
       return p.role === "user" ? `U:${p.content}` : `${e.type}:${p.content ?? p.subtype ?? ""}`;
     });
     // Each message right before its own turn: m1 → turn1, m2 → turn2.
-    expect(order).toEqual(["U:task", "message:reply:task", "result:success", "U:m1", "message:reply:m1", "result:success", "U:m2", "message:reply:m2", "result:success"]);
+    expect(order).toEqual(["U:task", "message:reply:task", "speed:", "result:success", "U:m1", "message:reply:m1", "speed:", "result:success", "U:m2", "message:reply:m2", "speed:", "result:success"]);
   });
 
   it("carries clientMsgId on the live user echo event (for desktop pending reconcile)", async () => {

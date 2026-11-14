@@ -6,7 +6,7 @@ import type { CodexClient } from "./codex-client.js";
 export type CodexVersion = readonly [major: number, minor: number, patch: number];
 
 // Oldest CLI the curated protocol types are written against and tested to work with.
-export const MIN_CODEX_VERSION: CodexVersion = [0, 146, 1];
+export const MIN_CODEX_VERSION: CodexVersion = [0, 169, 0];
 // First CLI that accepts `thread/resume|fork { excludeTurns }` WITHOUT the experimentalApi
 // capability (bisected live: 0.150.1 rejects with -32600 "requires experimentalApi capability",
 // 0.151.0 accepts). Older CLIs must not be sent the param.

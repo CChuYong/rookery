@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { Repositories } from "../persistence/repositories.js";
 import type { EventBus } from "./events.js";
@@ -42,6 +43,7 @@ export interface SessionManagerDeps {
   // Per-provider master model resolver overrides (e.g. { codex: () => settings.codexMasterModel() }).
   // Falls back to masterModel when the session's provider has no entry here.
   masterModelByProvider?: Record<string, string | (() => string)>;
+  masterSpeed?: (provider: string) => SpeedPreference;
   masterEffort?: string | (() => string); // global default effort resolver (defaults to "high" if unspecified)
   masterName?: string | (() => string); // bot name resolver (defaults to "rookery" if unspecified)
   fleet: FleetOrchestrator;
@@ -109,7 +111,7 @@ export class SessionManager {
       sessionId: id,
       cwd,
       sdkSessionId,
-      deps: { repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities, managedCapabilities, capabilityRuntime },
+      deps: { speed: () => this.deps.masterSpeed?.(provider) ?? "standard", repos, bus, backend, model, effort, name, fleet, summarizeLabel, canUseTool, capabilities, managedCapabilities, capabilityRuntime },
     });
     const session: Session = { id, cwd, master };
     this.sessions.set(id, session);
@@ -127,27 +129,27 @@ export class SessionManager {
   // settings.slackProvider()==="codex"; P3: automation-origin now passes it too via runAutomationAction.
   // Note: an existing keyed session's provider is fixed at creation and not retroactively changed by a
   // later call's arg — see getOrCreateByKey below.)
-  create(cwd: string, opts: { externalKey?: string; origin?: string; originRef?: string | null; provider?: string } = {}): Session {
+  create(cwd: string, opts: { externalKey?: string; origin?: string; originRef?: string | null; provider?: string; speed?: SpeedPreference | null } = {}): Session {
     const id = this.idgen();
     const src = opts.origin ? { origin: opts.origin, originRef: opts.originRef ?? null } : deriveOrigin(opts.externalKey ?? null);
-    this.deps.repos.createSession({ id, cwd, externalKey: opts.externalKey, origin: src.origin, originRef: src.originRef, provider: opts.provider });
+    this.deps.repos.createSession({ id, cwd, externalKey: opts.externalKey, origin: src.origin, originRef: src.originRef, provider: opts.provider, speed: opts.speed });
     return this.build(id, cwd, null, opts.externalKey ?? null);
   }
 
   // provider (P2.5 Track C): only used on first creation of this key — an existing keyed session's
   // provider is fixed at creation time and is not retroactively changed by a later call's arg.
-  getOrCreateByKey(externalKey: string, cwd: string, provider?: string): Session {
+  getOrCreateByKey(externalKey: string, cwd: string, provider?: string, speed?: SpeedPreference | null): Session {
     const existing = this.deps.repos.getSessionByExternalKey(externalKey);
     // A keyed session (e.g. a Slack thread reply) racing its own deletion must error rather than resurrect the
     // mid-teardown session or spawn a duplicate keyed one — the caller (Slack) surfaces the error.
     if (existing && this.deleting.has(existing.id)) throw new Error(`session ${existing.id} is being deleted`);
     if (existing) return this.get(existing.id)!;
-    return this.create(cwd, { externalKey, provider }); // origin is derived from the key prefix (slack/automation)
+    return this.create(cwd, { externalKey, provider, speed }); // origin is derived from the key prefix (slack/automation)
   }
 
   // Fork a master session: copy its SDK conversation into a new branch + duplicate its transcript, so the fork carries
   // full context and shows the same history, then diverges from the next turn. The original is untouched.
-  async fork(sessionId: string, target?: { provider?: string }): Promise<Session> {
+  async fork(sessionId: string, target?: { provider?: string; speed?: SpeedPreference | null }): Promise<Session> {
     const row = this.deps.repos.getSession(sessionId);
     if (!row) throw new Error(`unknown session: ${sessionId}`);
     const srcProvider = row.provider || "claude";
@@ -166,7 +168,7 @@ export class SessionManager {
         throw new Error("nothing to hand off — this session has no conversation yet");
       }
       const forkLabel = `${label} (→ ${target.provider})`;
-      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider: target.provider });
+      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider: target.provider, speed: target?.speed === undefined ? row.speed : target.speed });
       this.deps.repos.copySessionEvents(sessionId, id);
       this.deps.repos.setSessionHandoffFrom(id, srcProvider);
       this.deps.repos.setSessionLabel(id, forkLabel);
@@ -186,7 +188,7 @@ export class SessionManager {
     });
     try {
       // A fork is always a plain ui session, but INHERITS the source's provider — a codex master's fork must also run on codex.
-      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider });
+      this.deps.repos.createSession({ id, cwd: row.cwd, origin: "ui", originRef: null, provider, speed: target?.speed === undefined ? row.speed : target.speed });
       this.deps.repos.setSdkSessionId(id, forkedUuid);
       this.deps.repos.copySessionEvents(sessionId, id);
       this.deps.repos.setSessionLabel(id, forkLabel);
@@ -290,7 +292,7 @@ export class SessionManager {
     if (timer) clearTimeout(timer);
   }
 
-  list(): Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider: string }> {
+  list(): Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider: string; speed?: SpeedPreference | null }> {
     return this.deps.repos
       .listSessionsWithActivity()
       .filter((r) => r.external_key !== UI_FLEET_SESSION_KEY && r.external_key !== AUTOMATION_FLEET_SESSION_KEY && r.external_key !== EXTERNAL_FLEET_SESSION_KEY) // hide UI/automation/external fleet container sessions
@@ -307,6 +309,7 @@ export class SessionManager {
           pinned: !!r.pinned_at, // pinned flag — UI splits into a 'pinned' section at the top
           origin: src.origin, // ui | slack | automation
           originRef: src.originRef, // slack=thread key, automation=automation id, ui=null
+          speed: r.speed ?? null,
           provider: r.provider || "claude", // which AgentBackend runs this master session ('claude' | 'codex')
         };
       });

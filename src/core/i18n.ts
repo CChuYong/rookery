@@ -4,6 +4,8 @@ export type Locale = "ko" | "en";
 type Params = Record<string, string | number>;
 
 export const KO = {
+  "cli.costUnavailable": "비용 추정 불가",
+  "cli.costEstimated": "추정 {cost}",
   // notice.* — master/system informational pushes (also mirrored in the desktop renderer notice.* catalog; keep keys + param names in sync)
   "notice.compact": "🗜 컨텍스트 압축됨 ({trigger}, {span} tok)",
   "notice.apiRetry": "⏳ API 재시도 {attempt}/{max} ({error})",
@@ -16,6 +18,10 @@ export const KO = {
   "notice.interrupted": "⏹ 중단됨",
   "notice.queuedCancelled": "⏹ 대기 중이던 요청 {count}개를 취소했어요",
   "notice.turnCap": "턴 한도 도달 (maxTurns={max}, num_turns={turns}) — 세션 중단을 고려하세요.",
+  "notice.costUnavailable": "비용을 추정할 수 없어요. 계속하기 전에 모델과 속도별 요금을 확인하세요. 알려진 지출에 이번 턴은 포함되지 않아요.",
+  "notice.costUnavailableStopped": "비용을 추정할 수 없어 예산이 설정된 워커를 다음 턴 전에 중단했어요.",
+  "notice.costBudgetEstimated": "추정 비용 예산 도달 ({spent}/{budget} USD) — 세션 중단을 고려하세요.",
+  "notice.costBudgetEstimatedWorker": "추정 비용 예산 도달 ({spent}/{budget} USD) — 워커를 중단해요.",
   "notice.costBudget": "비용 예산 도달 ({spent}/{budget} USD) — 세션 중단을 고려하세요.",
   "notice.workerDone": "✅ 워커 {label} 완료{provider}",
   "notice.workerFailed": "⚠️ 워커 {label} 실패{provider}",
@@ -57,6 +63,8 @@ export const KO = {
 } as const;
 
 export const EN: Record<keyof typeof KO, string> = {
+  "cli.costUnavailable": "cost unavailable",
+  "cli.costEstimated": "estimated {cost}",
   "notice.compact": "🗜 Context compacted ({trigger}, {span} tok)",
   "notice.apiRetry": "⏳ API retry {attempt}/{max} ({error})",
   "notice.modelFallback": "↪ Model fallback: {from} → {to} ({reason})",
@@ -68,6 +76,10 @@ export const EN: Record<keyof typeof KO, string> = {
   "notice.interrupted": "⏹ Stopped",
   "notice.queuedCancelled": "⏹ Cancelled {count} queued request(s)",
   "notice.turnCap": "Turn cap reached (maxTurns={max}, num_turns={turns}) — consider stopping this session.",
+  "notice.costUnavailable": "Cost estimate unavailable; review model/tier pricing before continuing. Known spend excludes this turn.",
+  "notice.costUnavailableStopped": "Cost estimate unavailable — stopping budgeted worker before another turn.",
+  "notice.costBudgetEstimated": "Estimated cost budget reached ({spent}/{budget} USD) — consider stopping this session.",
+  "notice.costBudgetEstimatedWorker": "Estimated cost budget reached ({spent}/{budget} USD) — stopping worker.",
   "notice.costBudget": "Cost budget reached ({spent}/{budget} USD) — consider stopping this session.",
   "notice.workerDone": "✅ Worker {label} done{provider}",
   "notice.workerFailed": "⚠️ Worker {label} failed{provider}",

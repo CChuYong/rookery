@@ -1557,3 +1557,21 @@ describe("Connection automation.resolveSlackRefs", () => {
     expect(sent.at(-1)).toMatchObject({ type: "automation.resolveSlackRefs.result", reqId: "q4" });
   });
 });
+
+it("persists wire speed intent and replays observations with accounting quality", async () => {
+  const h = setup();
+  await h.conn.handleRaw(JSON.stringify({type: "session.create", cwd: "/x", speed: "fast"}));
+  const created = parsed(h.sent).find(m => m.type === "session.created")!;
+  const sessionId = created.sessionId as string;
+  expect(h.repos.getSession(sessionId)?.speed).toBe("fast");
+  await h.conn.handleRaw(JSON.stringify({type: "session.send", sessionId, text: "go", speed: "standard", reqId: "send"}));
+  expect(h.repos.getSession(sessionId)?.speed).toBe("standard");
+  expect(h.repos.listSessionEvents(sessionId).map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({type: "master.speed", observation: {requested: "standard", state: "unknown"}}));
+  expect(h.repos.listSessionEvents(sessionId).map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({type: "master.result", requestedSpeed: "standard", costAccuracy: "reported"}));
+  h.repos.createWorker({id: "w-speed", sessionId, repoPath: "/x", label: "w"});
+  await h.conn.handleRaw(JSON.stringify({type: "worker.setSpeed", id: "w-speed", speed: "fast", reqId: "speed"}));
+  expect(h.repos.getWorker("w-speed")?.speed).toBe("fast");
+  expect(parsed(h.sent)).toContainEqual({type: "fleet.ack", action: "setSpeed", id: "w-speed", reqId: "speed"});
+  await h.conn.handleRaw(JSON.stringify({type: "session.list", reqId: "list"}));
+  expect(parsed(h.sent).find(m => m.type === "session.list.result")).toMatchObject({sessions: [expect.objectContaining({id: sessionId, speed: "standard"})]});
+});

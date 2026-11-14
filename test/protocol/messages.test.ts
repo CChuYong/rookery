@@ -496,3 +496,17 @@ describe("protocol", () => {
     expect(JSON.parse(serializeServerMessage(nullModels))).toEqual(nullModels);
   });
 });
+
+it("accepts nullable Standard/Fast intent at supported boundaries and rejects unsupported speeds", () => {
+  const messages = [
+    {type: "session.create"}, {type: "session.send", sessionId: "s", text: "go"},
+    {type: "session.fork", sessionId: "s"}, {type: "worker.send", id: "w", text: "go"},
+    {type: "worker.setSpeed", id: "w"}, {type: "worker.fork", id: "w", reqId: "q"},
+    {type: "fleet.spawn", repo: "r", reqId: "q"},
+  ];
+  for (const message of messages) {
+    for (const speed of ["standard", "fast", null]) expect(parseClientMessage(JSON.stringify({...message, speed}))).toMatchObject({speed});
+    expect(() => parseClientMessage(JSON.stringify({...message, speed: "ultrafast"}))).toThrow();
+  }
+  expect(parseClientMessage(JSON.stringify({type: "settings.set", reqId: "q", settings: {masterSpeed: "fast", codexWorkerSpeed: null}}))).toMatchObject({settings: {masterSpeed: "fast", codexWorkerSpeed: null}});
+});

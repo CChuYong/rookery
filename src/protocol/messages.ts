@@ -239,6 +239,7 @@ const automationBaseSchema = z.object({
   trigger: triggerSchema,
   action: actionSchema,
   model: z.string().nullable().optional(),
+  speed: z.enum(["standard", "fast"]).nullable().optional(),
   effort: automationEffortField, // validated provider-aware in the superRefine below
   permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).nullable().optional(),
   maxTurns: z.number().int().positive().nullable().optional(),
@@ -273,16 +274,18 @@ const automationPatchSchema = automationBaseSchema.superRefine((v, ctx) => {
   if (v.effort != null && !isValidAutomationEffort(v.effort, "codex")) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "invalid effort", path: ["effort"] });
 });
 
+const speedField = z.enum(["standard", "fast"]).nullable().optional();
+
 const clientMessageBaseSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("session.create"), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("session.create"), speed: speedField, cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   // provider absent = same-provider native fork (backward compatible). provider set & different = cross-provider
   // handoff (docs/2026-07-08-cross-provider-fork-design.md). Master model/effort are a client-side per-session
   // override applied after the fork (no session column), so they are not carried here.
-  z.object({ type: z.literal("session.fork"), sessionId: z.string(), reqId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
-  z.object({ type: z.literal("session.open"), key: z.string(), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("session.fork"), speed: speedField, sessionId: z.string(), reqId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
+  z.object({ type: z.literal("session.open"), speed: speedField, key: z.string(), cwd: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.attach"), sessionId: z.string() }),
   // model/effort/permissionMode: per-session UI overrides (independent of the default settings). If unspecified, fall back to the global defaults (permissionMode is bypassPermissions).
-  z.object({ type: z.literal("session.send"), sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("session.send"), speed: speedField, sessionId: z.string(), text: z.string(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan"]).optional(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
   z.object({ type: z.literal("session.stop"), sessionId: z.string(), reqId: z.string().optional() }),
   // Ephemeral read-only conversation forked from a master/worker provider session. It reuses the
   // source cwd (including a worker's live worktree) but never creates a session/worker/worktree row.
@@ -326,7 +329,8 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.history"), reqId: z.string(), id: z.string() }),
   z.object({ type: z.literal("workflow.list"), reqId: z.string(), workerId: z.string() }),
   z.object({ type: z.literal("workflow.agent.history"), reqId: z.string(), workerId: z.string(), taskId: z.string(), agentId: z.string() }),
-  z.object({ type: z.literal("worker.send"), id: z.string(), text: z.string(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("worker.send"), speed: speedField, id: z.string(), text: z.string(), clientMsgId: z.string().optional(), reqId: z.string().optional() }),
+  z.object({ type: z.literal("worker.setSpeed"), id: z.string(), speed: z.enum(["standard", "fast"]).nullable(), reqId: z.string().optional() }),
   // Live-change the model of a running worker (query.setModel).
   z.object({ type: z.literal("worker.setModel"), id: z.string(), model: z.string(), reqId: z.string().optional() }),
   // Live-change the permission mode of a running worker (query.setPermissionMode). Only bypassPermissions/plan (no default/acceptEdits).
@@ -339,8 +343,8 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker.restore"), reqId: z.string(), id: z.string(), seq: z.number() }),
   // provider set & different from the source = cross-provider handoff; workers persist model/effort (columns),
   // so those ride along here (unlike session.fork). Absent provider = same-provider native fork.
-  z.object({ type: z.literal("worker.fork"), reqId: z.string(), id: z.string(), provider: z.enum(["claude", "codex"]).optional(), model: z.string().optional(), effort: z.string().optional() }),
-  z.object({ type: z.literal("fleet.spawn"), reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
+  z.object({ type: z.literal("worker.fork"), speed: speedField, reqId: z.string(), id: z.string(), provider: z.enum(["claude", "codex"]).optional(), model: z.string().optional(), effort: z.string().optional() }),
+  z.object({ type: z.literal("fleet.spawn"), speed: speedField, reqId: z.string(), repo: z.string(), task: z.string().optional(), label: z.string().optional(), model: z.string().optional(), effort: z.string().optional(), permissionMode: z.enum(["bypassPermissions", "plan"]).optional(), base: z.string().optional(), ticketKey: z.string().optional(), ticketUrl: z.string().optional(), provider: z.enum(["claude", "codex"]).optional(), costBudgetUsd: z.number().positive().nullable().optional() }),
   // Structured slash actions/skills. Existing targets are authoritative; cwd/provider are cold-preview hints only.
   z.object({ type: z.literal("commands.list"), reqId: z.string(), cwd: z.string().optional(), sessionId: z.string().optional(), workerId: z.string().optional(), provider: z.enum(["claude", "codex"]).optional() }),
   z.object({
@@ -412,6 +416,10 @@ const clientMessageBaseSchema = z.discriminatedUnion("type", [
       codexBin: z.string().nullable().optional(), // codex CLI binary/path used to spawn `codex app-server`
       codexTurnIdleTimeoutMs: z.string().nullable().optional(), // per-turn codex watchdog inactivity timeout (ms); 0 disables
       codexHandshakeTimeoutMs: z.string().nullable().optional(), // pre-turn codex handshake+thread-start timeout (ms); 0 disables
+      masterSpeed: speedField,
+      workerSpeed: speedField,
+      codexMasterSpeed: speedField,
+      codexWorkerSpeed: speedField,
       masterEffort: effortField,
       workerEffort: effortField,
       slackCwd: z.string().nullable().optional(), // Slack session cwd
@@ -470,6 +478,8 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
 // Worker row — the single definition for fleet/worker lists (previously inlined and duplicated across worker.list.result and fleet.list.result).
 // pr_url removed because, with no automatic PR pipeline, it was always null (P1 leftover cleanup).
 export interface WorkerRow {
+  speed?: "standard" | "fast" | null;
+  costAccuracy?: "reported" | "estimated" | "unavailable";
   id: string;
   label: string;
   repoPath: string;
@@ -496,6 +506,7 @@ export interface IntegrationsStatus {
 // core/codex-models-provider.ts's CodexModelInfo, but re-declared here (not imported) so the protocol
 // stays transport-agnostic (no core import in messages.ts).
 export interface CodexModelInfo {
+  serviceTiers?: Array<{ id: string; name: string; description: string }>;
   id: string;
   displayName: string;
   defaultEffort: string;
@@ -514,7 +525,7 @@ export interface CodexAuthStatus {
 export type ServerMessage =
   | { type: "session.created"; sessionId: string; cwd: string; reqId?: string }
   | { type: "side.started"; sideId: string; reqId: string }
-  | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string }>; reqId?: string }
+  | { type: "session.list.result"; sessions: Array<{ id: string; cwd: string; status: string; lastActivity: string; origin: string; originRef: string | null; label: string | null; archived: boolean; pinned: boolean; provider?: string; speed?: "standard" | "fast" | null }>; reqId?: string }
   | { type: "worker.list.result"; sessionId: string; reqId?: string; workers: WorkerRow[] }
   | { type: "event"; event: CoreEvent }
   | { type: "error"; message: string; reqId?: string }
@@ -578,6 +589,7 @@ export interface RequestResultMap {
   "worker.archive": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.delete": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.send": Extract<ServerMessage, { type: "fleet.ack" }>;
+  "worker.setSpeed": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.setModel": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.setPermissionMode": Extract<ServerMessage, { type: "fleet.ack" }>;
   "worker.restore": Extract<ServerMessage, { type: "fleet.ack" }>;

@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { AgentBackend, AgentStream } from "./agent-backend.js";
 import type { EventBus, WorkerEventData } from "./events.js";
@@ -17,6 +18,7 @@ export interface SideSource {
   // running total, so this baseline keeps the Side's cost display to its own turns.
   costBaselineUsd?: number;
   model: string;
+  speed?: SpeedPreference | (() => SpeedPreference);
   effort?: string;
   // Codex master forks use an ephemeral per-Side CODEX_HOME keyed by side id. Workers and Claude omit it.
   sessionKey?: string;
@@ -36,6 +38,7 @@ interface SideConversation {
   sdkSessionId: string;
   costBaselineUsd?: number; // running provider total; starts at the source's, advanced per Side turn
   model: string;
+  speed?: SpeedPreference | (() => SpeedPreference);
   effort?: string;
   running: boolean;
   closing: boolean;
@@ -83,6 +86,7 @@ export class SideConversationManager {
       sdkSessionId: forked.sessionId,
       ...(source.costBaselineUsd !== undefined ? { costBaselineUsd: source.costBaselineUsd } : {}),
       model: input.model?.trim() || source.model,
+      speed: source.speed,
       effort: input.effort?.trim() || source.effort,
       running: false,
       closing: false,
@@ -155,6 +159,7 @@ export class SideConversationManager {
         cwd: side.source.cwd,
         model: side.model,
         effort: side.effort,
+        speed: side.speed,
         permissionMode: "plan",
         systemPromptAppend: SIDE_SYSTEM_PROMPT,
         resume: side.sdkSessionId,
@@ -181,9 +186,11 @@ export class SideConversationManager {
           this.emitData(side, { kind: "tool_progress", id: event.toolUseId, elapsedSec: event.elapsedSec });
         } else if (event.kind === "push" && event.push.kind !== "commands") {
           this.emitData(side, { kind: "notice", text: event.push.text });
+        } else if (event.kind === "speed") {
+          this.emitData(side, { kind: "speed", observation: event.observation });
         } else if (event.kind === "turn_end") {
           if (event.costTotalUsd !== undefined) side.costBaselineUsd = event.costTotalUsd;
-          this.emitData(side, { kind: "result", subtype: event.subtype, costUsd: event.costUsd, numTurns: event.numTurns, durationMs: event.durationMs, contextTokens: event.contextTokens, contextWindow: event.contextWindow });
+          this.emitData(side, { kind: "result", subtype: event.subtype, costUsd: event.costUsd, costAccuracy: event.costAccuracy, requestedSpeed: event.requestedSpeed, numTurns: event.numTurns, durationMs: event.durationMs, contextTokens: event.contextTokens, contextWindow: event.contextWindow });
         }
       }
     } catch (error) {

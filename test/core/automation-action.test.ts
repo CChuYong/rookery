@@ -244,3 +244,11 @@ describe("applyVars — worker trigger tokens", () => {
     expect(out).toMatch(/<untrusted-worker-tail id="[A-Za-z0-9_-]+">\n\n<\/untrusted-worker-tail/);
   });
 });
+
+it("forwards persisted speed intent to both automation action kinds", async () => {
+  const h = deps();
+  await runAutomationAction(base({speed: "fast"}), {}, h.d);
+  expect(h.runTurn).toHaveBeenCalledWith("x", expect.objectContaining({speed: "fast"}));
+  await runAutomationAction(base({speed: "standard", action: {kind: "worker", repo: "app-api", task: "go"}}), {}, h.d);
+  expect(h.spawn).toHaveBeenCalledWith(expect.objectContaining({speed: "standard"}));
+});

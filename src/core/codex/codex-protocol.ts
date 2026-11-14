@@ -3,7 +3,7 @@
 // History: 0.142.5 (2026-07-06) -> 0.144.1 (2026-07-11, multi-agent/collab item vocabulary)
 // -> 0.163.0 (2026-10-19) -> 0.169.0 (2026-11-14, additive only: optional item lifecycle timestamps,
 // ThreadUsage.nativeUsageUsdMicros, contentTokenCount, new CodexErrorInfo/PlanType variants, a
-// `humanCommand` approval kind behind an experimental capability rookery does not request). Minimum supported CLI: 0.146.1 (enforced from the `initialize`
+// `humanCommand` approval kind behind an experimental capability rookery does not request). Minimum supported CLI: 0.169.0 (enforced from the `initialize`
 // userAgent, see codex-version.ts). Fields newer than the minimum are optional and gated by version.
 // Regenerate with that command after any CLI bump and diff against these types.
 // Inbound decode is TOLERANT by design: unknown notification methods, unknown item
@@ -51,6 +51,7 @@ export interface CodexThreadStartParams {
 export interface CodexThreadResumeParams extends CodexThreadStartParams { threadId: string; excludeTurns?: boolean }
 export interface CodexThreadForkParams { threadId: string; excludeTurns?: boolean }
 export interface CodexTurnStartParams {
+  serviceTierForTurn?: "default" | "fast";
   threadId: string;
   input: CodexTextInput[];
   model?: string;

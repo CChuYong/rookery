@@ -117,7 +117,7 @@ describe("CodexBackend.openSession — translation", () => {
     // costUsd is no longer a placeholder 0 now that RATES is filled: the fake mirrors `last` into
     // `total` when a step omits it, so this fresh session's single update bills its full delta from
     // the zero baseline — (900-100)*5.00/1M + 100*0.50/1M + 0*30.00/1M = 0.00405.
-    expect(events.at(-1)).toEqual({ kind: "turn_end", subtype: "success", costUsd: 0.00405, numTurns: 1, durationMs: 42, contextTokens: 1000, contextWindow: 272000 });
+    expect(events.at(-1)).toEqual({ kind: "turn_end", costAccuracy: "estimated", requestedSpeed: "standard", subtype: "success", costUsd: 0.00405, numTurns: 1, durationMs: 42, contextTokens: 1000, contextWindow: 272000 });
   });
 
   it("maps codex item/commandExecution/outputDelta to a tool_progress heartbeat (finding [19])", async () => {
@@ -625,9 +625,8 @@ describe("CodexBackend — pricing aggregation", () => {
     const q = new MessageQueue(); q.push("x"); q.close();
     const events = await collect(b.openSession(q, baseOpts({ model: "gpt-5.5", resume: "th-1" })));
     const end = events.find((e) => e.kind === "turn_end") as { costUsd: number };
-    // only the second update's delta bills: input 1000 (cached 500), output 100
-    // cost = 500*5.00/1M + 500*0.50/1M + 100*30.00/1M = 0.0025 + 0.00025 + 0.003
-    expect(end.costUsd).toBeCloseTo(0.00575, 10);
+    // Cold resume cannot separate the first request from history; incomplete totals are unavailable.
+    expect(end).toMatchObject({ costUsd: 0, costAccuracy: "unavailable" });
   });
 
   it("accumulator resets per turn and clamps negative deltas to 0", async () => {
@@ -1314,17 +1313,14 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
     const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }], { userAgent: ua("0.146.0") });
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
     const q = new MessageQueue(); q.push("x"); q.close();
-    await expect(collect(b.openSession(q, baseOpts()))).rejects.toThrow(/older than the minimum supported 0\.146\.1/);
+    await expect(collect(b.openSession(q, baseOpts()))).rejects.toThrow(/older than the minimum supported 0\.169\.0/);
     expect(fake.requests.some((r) => r.method === "thread/start")).toBe(false);
   });
 
   it("sends excludeTurns on thread/resume only from CLI 0.151.0", async () => {
-    expect(await runResume(ua("0.163.0"))).toMatchObject({ threadId: "th-1", excludeTurns: true });
-    expect(await runResume(ua("0.151.0"))).toMatchObject({ excludeTurns: true });
-    expect(await runResume(ua("0.150.1"))).not.toHaveProperty("excludeTurns");
-    expect(await runResume(ua("0.146.1"))).not.toHaveProperty("excludeTurns");
+    expect(await runResume(ua("0.169.0"))).toMatchObject({ threadId: "th-1", excludeTurns: true });
+    await expect(runResume(ua("0.168.0"))).rejects.toThrow(/minimum supported 0\.169\.0/);
     expect(await runResume("fake")).not.toHaveProperty("excludeTurns"); // unparseable → allowed, conservative
-    expect(await runResume(ua("0.151.0-alpha.2"))).not.toHaveProperty("excludeTurns"); // pre-release of the gate version
     expect(await runResume(ua("0.0.0"))).not.toHaveProperty("excludeTurns"); // dev build
   });
 
@@ -1335,14 +1331,14 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
       const res = await b.forkSession("th-1");
       return { res, params: fake.requests.find((r) => r.method === "thread/fork")!.params as Record<string, unknown> };
     };
-    expect((await fork(ua("0.163.0"))).params).toMatchObject({ threadId: "th-1", excludeTurns: true });
-    expect((await fork(ua("0.146.1"))).params).not.toHaveProperty("excludeTurns");
+    expect((await fork(ua("0.169.0"))).params).toMatchObject({ threadId: "th-1", excludeTurns: true });
+    await expect(fork(ua("0.168.0"))).rejects.toThrow(/minimum supported/);
     const old = fakeCodexSpawn(() => [], { userAgent: ua("0.145.0") });
     await expect(new CodexBackend({ spawn: old.spawn, defaultModel: () => "gpt-5.5" }).forkSession("th-1")).rejects.toThrow(/older than the minimum/);
   });
 
   it("falls back once without excludeTurns when the child rejects it as experimental (resume + fork)", async () => {
-    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }], { userAgent: ua("0.163.0"), rejectExcludeTurns: true });
+    const { backend: b, requests } = backend(() => [{ kind: "turnEnd" }], { userAgent: ua("0.169.0"), rejectExcludeTurns: true });
     const q = new MessageQueue(); q.push("x"); q.close();
     const events = await collect(b.openSession(q, baseOpts({ resume: "th-1" })));
     const resumes = requests.filter((r) => r.method === "thread/resume");
@@ -1351,7 +1347,7 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
     expect(resumes[1]!.params).not.toHaveProperty("excludeTurns");
     expect(events[0]).toEqual({ kind: "session_id", sessionId: "th-1" });
 
-    const fake = fakeCodexSpawn(() => [], { userAgent: ua("0.163.0"), rejectExcludeTurns: true });
+    const fake = fakeCodexSpawn(() => [], { userAgent: ua("0.169.0"), rejectExcludeTurns: true });
     const res = await new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-6.1-sol" }).forkSession("th-1");
     expect(res.sessionId).toBe("th-1-fork");
     const forks = fake.requests.filter((r) => r.method === "thread/fork");
@@ -1389,4 +1385,44 @@ describe("CodexBackend — CLI version policy + excludeTurns gating", () => {
       expect(await run(() => undefined, "ultra")).toMatchObject({ effort: "ultra" });
     });
   });
+});
+
+it("sends a non-sticky explicit tier on every Codex turn", async () => {
+ const { backend: b, requests } = backend(() => [{kind: "turnEnd"}]);
+ let speed = "fast";
+ const input = (async function* () { yield "one"; speed = "standard"; yield "two"; })();
+ const events = await collect(b.openSession(input, baseOpts({ speed: () => speed })));
+ expect(requests.filter(r => r.method === "turn/start").map(r => r.params.serviceTierForTurn)).toEqual(["fast", "default"]);
+ expect(events).toContainEqual({ kind: "speed", observation: { requested: "fast", state: "unknown" } });
+});
+
+it("rejects authoritative catalog exclusion before executing Fast, and permits unknown capability", async () => {
+  const fake = fakeCodexSpawn(() => [{kind: "turnEnd"}]);
+  const b = new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5", modelServiceTiers: () => ["default"]});
+  await expect(collect(b.startTurn("go", baseOpts({speed: "fast"})))).rejects.toThrow("Fast speed is unavailable");
+  expect(fake.requests.some(r => r.method === "turn/start")).toBe(false);
+  const unknown = backend(() => [{kind: "turnEnd"}]);
+  await expect(collect(unknown.backend.startTurn("go", baseOpts({speed: "fast"})))).resolves.toContainEqual({kind: "speed", observation: {requested: "fast", state: "unknown"}});
+});
+
+it("keeps Fast billing captured when a busy caller selects Standard for the next turn", async () => {
+  const fake = fakeCodexSpawn(() => [{kind: "agentMessage", text: "busy"}, {kind: "tokenUsage", last: {inputTokens: 1000}}, {kind: "turnEnd"}]);
+  const stream = new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5"}).startTurn("go", baseOpts({speed: "fast"}));
+  const events: AgentEvent[] = [];
+  for await (const event of stream) { events.push(event); if (event.kind === "message") await stream.setSpeed!("standard"); }
+  expect(events.at(-1)).toMatchObject({kind: "turn_end", requestedSpeed: "fast", costUsd: .0125, costAccuracy: "estimated"});
+});
+
+it("does not infer a long-context surcharge from cumulative turn tokens", async () => {
+  const {backend: b} = backend(() => [
+    {kind: "tokenUsage", last: {inputTokens: 200_000}, total: {inputTokens: 200_000}},
+    {kind: "tokenUsage", last: {inputTokens: 200_000}, total: {inputTokens: 400_000}},
+    {kind: "turnEnd"},
+  ]);
+  expect((await collect(b.startTurn("go", baseOpts({speed: "fast"})))).at(-1)).toMatchObject({costUsd: 5, costAccuracy: "estimated"});
+});
+
+it.each([false, true])("marks missing usage or an observed long request unavailable (%s)", async (long) => {
+  const {backend: b} = backend(() => long ? [{kind: "tokenUsage", last: {inputTokens: 272_001}}, {kind: "turnEnd"}] : [{kind: "turnEnd"}]);
+  expect((await collect(b.startTurn("go", baseOpts({speed: "fast"})))).at(-1)).toMatchObject({costUsd: 0, costAccuracy: "unavailable"});
 });

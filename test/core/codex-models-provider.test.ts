@@ -124,3 +124,12 @@ describe("makeCodexModelsProvider", () => {
     expect(calls).toBe(2); // re-spawned after the failure
   });
 });
+
+it("preserves authoritative service tiers and distinguishes absent from excluded Fast", async () => {
+  const tiers = [{id: "default", name: "Standard", description: "regular"}, {id: "fast", name: "Fast", description: "faster"}];
+  const fake = fakeCodexSpawn(() => [], {modelList: [{...GPT_5_5, serviceTiers: tiers}, {id: "excluded", serviceTiers: []}, {id: "unknown"}]});
+  const rows = await makeCodexModelsProvider({spawn: fake.spawn}).list();
+  expect(rows?.[0]?.serviceTiers).toEqual(tiers);
+  expect(rows?.[1]?.serviceTiers).toEqual([]);
+  expect(rows?.[2]).not.toHaveProperty("serviceTiers");
+});

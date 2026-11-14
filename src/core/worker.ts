@@ -1,3 +1,5 @@
+import { t, DEFAULT_LOCALE } from "./i18n.js";
+import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccuracy } from "./speed.js";
 import type { AgentBackend, AgentStream, InterruptReceipt } from "./agent-backend.js";
 import { MessageQueue } from "./message-queue.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
@@ -52,6 +54,7 @@ export interface WorkerDeps {
   repos: Repositories;
   bus: EventBus;
   backend: AgentBackend;
+  speed?: () => SpeedPreference;
   model: string;
   permissionMode?: string; // SDK permission mode at spawn time (defaults to "bypassPermissions"). Changeable live via setPermissionMode.
   effort?: string; // effort fixed at spawn time (falls back to SDK default if absent). Not passed for Haiku models.
@@ -103,7 +106,7 @@ export class Worker {
   private abort = new AbortController();
   private seq = 0;
   // instructions that arrived while running (not yet echoed) — flushed one at a time in FIFO order at the next result boundary (parity with the master's turnChain deferral).
-  private readonly deferred: Array<{ text: string; clientMsgId?: string }> = [];
+  private readonly deferred: Array<{ text: string; clientMsgId?: string; speed?: SpeedPreference | null }> = [];
   // accumulated thinking-summary deltas — persisted as a single coalesced entry at message/tool/turn boundaries (same as the master). Live flows only as deltas.
   private readonly thinking = new ThinkingCoalescer();
   private state: WorkerStatus = "running";
@@ -133,6 +136,8 @@ export class Worker {
   private currentPermissionMode: string; // changeable live via setPermissionMode (query.setPermissionMode). Held value at start time.
   // cumulative cost/turns — isomorphic to the master (cumCostUsd/cumTurns): accumulates over the worker's entire lifetime,
   // even after restart (resume() re-seeds them from the last persisted result — audit #28).
+  private turnSpeed?: SpeedPreference;
+  private costAccuracy?: CostAccuracy;
   private cumCostUsd = 0;
   private cumTurns = 0;
   // Provider-reported running cost total last observed (turn_end.costTotalUsd) — the baseline handed back on
@@ -228,7 +233,12 @@ export class Worker {
     this.record({ kind: "notice", text });
   }
 
+  private resolveTurnSpeed(override?: SpeedPreference | null): SpeedPreference {
+    return override === null ? resolveSpeed(this.opts.deps.speed) : override ?? this.opts.deps.repos.getWorker(this.opts.id)?.speed ?? resolveSpeed(this.opts.deps.speed);
+  }
+
   start(task?: string): void {
+    this.turnSpeed = this.resolveTurnSpeed();
     this.opts.deps.repos.setWorkerModel(this.opts.id, this.currentModel); // persist current model (for UI display)
     this.opts.deps.repos.setWorkerPermissionMode(this.opts.id, this.currentPermissionMode); // persist current permission mode (for UI display)
     if (!task) {
@@ -255,12 +265,21 @@ export class Worker {
     try {
       const last = this.opts.deps.repos.lastWorkerEventPayload(this.opts.id, "result");
       if (last) {
-        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number; costAccuracy?: CostAccuracy };
+        this.costAccuracy = p.costAccuracy;
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
         this.providerCostTotalUsd = providerCostTotalOf(last);
       }
     } catch { /* corrupt row — start from 0 */ }
+    if (this.costAccuracy === "unavailable" && this.opts.deps.costBudgetUsd != null) {
+      this.record({ kind: "notice", text: t(DEFAULT_LOCALE, "notice.costUnavailableStopped") });
+      this.transition("stopped");
+      this.queue.close();
+      this.abort.abort();
+      this.loop = Promise.resolve();
+      return;
+    }
     this.opts.deps.repos.setWorkerModel(this.opts.id, this.currentModel);
     this.opts.deps.repos.setWorkerPermissionMode(this.opts.id, this.currentPermissionMode);
     // Background tasks died with the previous process (children of the SDK subprocess) — resume always
@@ -271,6 +290,10 @@ export class Worker {
   }
 
   // hot-swap the model while running: applied from the next turn via the SDK live control (query.setModel). best-effort.
+  async setSpeed(speed: SpeedPreference | null): Promise<void> {
+    this.opts.deps.repos.setWorkerSpeed(this.opts.id, speed);
+  }
+
   async setModel(model: string): Promise<void> {
     this.currentModel = model;
     this.opts.deps.repos.setWorkerModel(this.opts.id, model);
@@ -292,15 +315,17 @@ export class Worker {
     }
   }
 
-  send(text: string, clientMsgId?: string): void {
+  send(text: string, clientMsgId?: string, speed?: SpeedPreference | null): void {
     if (this.reloadingCapabilities) throw new Error(`Worker ${this.opts.id} capability reload in progress; retry`);
     if (this.capabilityReloadFailure) throw new Error(`Worker ${this.opts.id} capability reload failed; retry reload first`);
     // additional instructions are allowed while running (turn in progress), background (bg tasks running), or idle (waiting). Not for a terminated agent.
     if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
+    if (speed !== undefined) this.opts.deps.repos.setWorkerSpeed(this.opts.id, speed);
     this.abortLoopStreak = 0; // a human is actively driving → a fresh instruction breaks any prior abort streak (no false circuit-breaker trip on legit interrupt+redirect)
     this.clearWakeWatchdog(); // a human send takes over → this run is no longer a bare auto-wake (a real turn is coming)
     if (!this.turnActive) {
       // no in-flight turn (idle OR background — the streaming queue is open either way) → enqueue + start a new turn immediately.
+      this.turnSpeed = this.resolveTurnSpeed(speed);
       this.queue.push(this.withHandoffSeed(text)); // handoff worker's first turn arrives here (materialized idle); seed the backend text only
       this.opts.deps.onTurnStart?.();
       this.record({ kind: "message", role: "user", content: text }, clientMsgId);
@@ -311,7 +336,7 @@ export class Worker {
       // while running: DON'T enqueue yet — hold in `deferred` and release (enqueue + echo) at the next result boundary.
       // Enqueuing mid-turn lets the SDK read-ahead and COALESCE this message into the in-flight turn (answering it in the
       // same turn). Then the deferred echo has no following turn, so the worker never leaves "running" → stuck "thinking".
-      this.deferred.push({ text, clientMsgId });
+      this.deferred.push({ text, clientMsgId, speed });
     }
   }
 
@@ -559,6 +584,7 @@ export class Worker {
         cwd: this.opts.repoPath,
         model: this.currentModel,
         effort: this.opts.deps.effort,
+        speed: () => this.turnSpeed ?? this.resolveTurnSpeed(),
         permissionMode: this.currentPermissionMode,
         systemPromptAppend: WORKER_FENCE_INSTRUCTION,
         resume: this.sdkSessionId,
@@ -689,6 +715,8 @@ export class Worker {
             if (this.bgTasks.size > 0) this.clearIdleGrace();
             this.reconcile();
           }
+        } else if (ev.kind === "speed") {
+          this.record({ kind: "speed", observation: ev.observation });
         } else if (ev.kind === "turn_end") {
           this.clearWakeWatchdog(); // a real turn_end arrived → the wake (if any) did not fizzle
           this.flushThinking(); // persist the trailing thinking summary of a step that ended without an answer
@@ -698,12 +726,15 @@ export class Worker {
           // $0.00881 → $0.01624 → $0.01964; a fork continues from the source's total), and the adapter
           // differences it against the baseline we pass in (costBaselineUsd). Keep the raw total as the next baseline.
           this.cumCostUsd += ev.costUsd;
+          this.costAccuracy = mergeCostAccuracy(this.costAccuracy, ev.costAccuracy);
           if (ev.costTotalUsd !== undefined) this.providerCostTotalUsd = ev.costTotalUsd;
           this.cumTurns += ev.numTurns;
           this.record({
             kind: "result",
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
+            costAccuracy: this.costAccuracy,
+            requestedSpeed: ev.requestedSpeed,
             numTurns: this.cumTurns,
             // Only persisted for turns that reported a provider total (Claude): a Codex turn must not re-persist an inherited value.
             ...(ev.costTotalUsd !== undefined && this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
@@ -748,8 +779,9 @@ export class Worker {
           // cost-budget guard: LIFETIME total (this.cumCostUsd, just incremented above), unlike maxTurns which is per-send.
           // null/undefined → unlimited. Mutually exclusive with the maxTurns cap above (both terminal; whichever crosses first stops).
           const budget = this.opts.deps.costBudgetUsd;
-          if (budget != null && this.cumCostUsd >= budget) {
-            this.record({ kind: "notice", text: `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
+          if (this.costAccuracy === "unavailable") this.record({ kind: "notice", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
+          if (budget != null && (this.costAccuracy === "unavailable" || this.cumCostUsd >= budget)) {
+            this.record({ kind: "notice", text: this.costAccuracy === "unavailable" ? t(DEFAULT_LOCALE, "notice.costUnavailableStopped") : this.costAccuracy === "estimated" ? t(DEFAULT_LOCALE, "notice.costBudgetEstimatedWorker", { spent: this.cumCostUsd.toFixed(2), budget: budget.toFixed(2) }) : `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
             void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop
             queue.close();
             abort.abort();
@@ -762,6 +794,7 @@ export class Worker {
           const next = this.deferred.shift();
           if (next) {
             this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
+            this.turnSpeed = this.resolveTurnSpeed(next.speed);
             queue.push(next.text); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
             this.record({ kind: "message", role: "user", content: next.text }, next.clientMsgId);
             // turnActive stays true — the flushed instruction's turn starts immediately.

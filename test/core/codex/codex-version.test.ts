@@ -23,21 +23,11 @@ describe("codex version policy", () => {
     expect(compareVersions([1, 0, 0], [0, 999, 9])).toBe(1);
   });
 
-  it("accepts the minimum, gates excludeTurns on 0.151.0, rejects older", () => {
-    expect(evaluateInitialize(ua("0.146.1"))).toEqual({ version: MIN_CODEX_VERSION, supportsExcludeTurns: false });
-    expect(evaluateInitialize(ua("0.150.1")).supportsExcludeTurns).toBe(false);
-    expect(evaluateInitialize(ua("0.151.0"))).toEqual({ version: EXCLUDE_TURNS_MIN_VERSION, supportsExcludeTurns: true });
-    expect(evaluateInitialize(ua("0.163.0")).supportsExcludeTurns).toBe(true);
-    expect(() => evaluateInitialize(ua("0.146.0"))).toThrow(CodexVersionError);
-    expect(() => evaluateInitialize(ua("0.144.1"))).toThrow(/0\.146\.1/);
-  });
-
-  it("feature gate is strict semver (0.151.0-alpha < 0.151.0) while the min check is lenient", () => {
-    expect(evaluateInitialize(ua("0.151.0-alpha.4")).supportsExcludeTurns).toBe(false);
-    expect(evaluateInitialize(ua("0.151.1-alpha.1")).supportsExcludeTurns).toBe(true);
-    expect(evaluateInitialize(ua("0.152.0-rc.1")).supportsExcludeTurns).toBe(true);
-    // pre-release of the minimum is NOT rejected
-    expect(evaluateInitialize(ua("0.146.1-alpha.3"))).toMatchObject({ version: [0, 146, 1], supportsExcludeTurns: false });
+  it("requires 0.169.0 and preserves the actionable upgrade error", () => {
+    expect(MIN_CODEX_VERSION).toEqual([0,169,0]);
+    expect(evaluateInitialize(ua("0.169.0"))).toEqual({version: MIN_CODEX_VERSION, supportsExcludeTurns: true});
+    expect(evaluateInitialize(ua("0.169.0-alpha.3")).supportsExcludeTurns).toBe(true);
+    for (const old of ["0.146.1", "0.151.0", "0.163.0", "0.168.9"]) expect(() => evaluateInitialize(ua(old))).toThrow(/minimum supported 0\.169\.0.*Upgrade/);
   });
 
   it("treats the 0.0.0 dev-build placeholder as unknown: allowed (warned), excludeTurns off", () => {

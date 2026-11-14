@@ -70,7 +70,7 @@ describe("FleetOrchestrator", () => {
   it("fork() duplicates a worker's SDK session + worktree state + transcript into a new idle worker", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "home", cwd: "/x" });
-    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build feature", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build feature", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", speed: "fast" });
     repos.setWorkerSdkSessionId("src", "src-sdk");
     repos.addWorkerEvent({ workerId: "src", seq: 0, type: "message", payloadJson: '{"kind":"message"}' });
     const bus = new EventBus();
@@ -88,6 +88,7 @@ describe("FleetOrchestrator", () => {
     expect(git.calls).toContain("addWorktree /repo /wt/fk0 rookery/fk0 rookery/src"); // branch from the src's HEAD
     expect(git.calls).toContain("restoreCheckpoint /wt/fk0 snap0"); // overlay uncommitted state
     const w = repos.getWorker("fk0")!;
+    expect(w.speed).toBe("fast");
     expect(w.sdk_session_id).toBe("forked-uuid");
     expect(w.label).toBe("build feature (fork)");
     expect(w.base).toBe("origin/main"); // diff base = source's base
@@ -122,7 +123,7 @@ describe("FleetOrchestrator", () => {
   it("cross-provider fork() snapshots the worktree, swaps provider, sets the handoff marker, no native fork", async () => {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "home", cwd: "/x" });
-    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build feature", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", provider: "claude" });
+    repos.createWorker({ id: "src", sessionId: "home", repoPath: "/repo", label: "build feature", worktreePath: "/wt/src", branch: "rookery/src", base: "origin/main", provider: "claude", speed: "standard" });
     repos.setWorkerSdkSessionId("src", "src-sdk");
     repos.addWorkerEvent({ workerId: "src", seq: 0, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: "did work" }) });
     const bus = new EventBus();
@@ -139,6 +140,7 @@ describe("FleetOrchestrator", () => {
     const spawned = events.find((e) => e.type === "worker.spawned") as { provider?: string } | undefined;
     expect(spawned?.provider).toBe("codex"); // the fork's badge shows live, not only after reconnect
     const w = repos.getWorker(id)!;
+    expect(w.speed).toBe("standard");
     expect(w.provider).toBe("codex");
     expect(w.handoff_from_provider).toBe("claude");
     expect(w.sdk_session_id).toBeNull(); // no native handle across providers

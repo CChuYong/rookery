@@ -1,3 +1,4 @@
+import type { SpeedPreference, SpeedObservation, CostAccuracy } from "./speed.js";
 import type { SystemPush } from "./system-push.js";
 import type { ResolvedAgentCapabilities } from "./capabilities/types.js";
 import type { WorkflowLaunch, WorkflowTaskUpdate } from "./workflow-activity.js";
@@ -25,6 +26,7 @@ export type ProviderPermissionCallback = unknown;
 export type ProviderToolDef = { name: string; description: string; inputSchema: Record<string, unknown>; handler: (args: never, extra: unknown) => Promise<unknown> };
 
 export type AgentEvent =
+  | { kind: "speed"; observation: SpeedObservation }
   // Provider session id, emitted EARLY (on the init system message) and again on turn end —
   // an interrupt before the first turn end must not orphan resume (see worker.ts/master-agent.ts capture comments).
   | { kind: "session_id"; sessionId: string }
@@ -61,7 +63,7 @@ export type AgentEvent =
   // when they resume/fork the session. Absent on Codex (it emits per-turn deltas) and on zeroed results.
   // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried
   // for observability only, never branched on (live-verified 2026-07-11: bg detection rests on task frames).
-  | { kind: "turn_end"; subtype: string; costUsd: number; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number };
+  | { kind: "turn_end"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number };
 
 // The SDK's typed interrupt receipt (0.3.205+ Query.interrupt() resolution), neutralized.
 // still_queued: uuids of async user messages that survive the interrupt. [] does NOT mean
@@ -72,8 +74,10 @@ export interface InterruptReceipt {
 }
 
 // One live agent stream: async-iterate the events; control the underlying session via the methods.
-// Controls are best-effort: adapters must resolve (not throw) when the underlying session lacks a control.
+// Model/permission controls are best-effort when unsupported. Speed is optional; a supported
+// speed control propagates real provider errors so requested changes cannot silently fail.
 export interface AgentStream extends AsyncIterable<AgentEvent> {
+  setSpeed?(speed: SpeedPreference): Promise<void>;
   interrupt(): Promise<InterruptReceipt | undefined>;
   setModel(model: string): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
@@ -87,6 +91,7 @@ export interface AgentStream extends AsyncIterable<AgentEvent> {
 }
 
 export interface AgentSessionOptions {
+  speed?: SpeedPreference | (() => SpeedPreference);
   cwd: string;
   model: string;
   effort?: string; // adapter decides applicability (e.g. Haiku rejects effort — a 400)

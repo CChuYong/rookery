@@ -162,3 +162,11 @@ describe("runCli localization (client-local strings)", () => {
     }
   });
 });
+
+it("labels estimated and unavailable accounting without presenting unknown spend as $0", () => {
+  const master = (costAccuracy: string) => JSON.stringify({type: "event", event: {type: "master.result", costUsd: 0, numTurns: 1, costAccuracy}});
+  expect(renderServerMessage(master("unavailable"))).not.toContain("$0");
+  expect(renderServerMessage(master("estimated"))).toMatch(/estimated|추정/);
+  const worker = JSON.stringify({type: "event", event: {type: "worker.event", workerId: "w", data: {kind: "result", subtype: "success", costUsd: 0, numTurns: 1, costAccuracy: "unavailable"}}});
+  expect(renderServerMessage(worker)).not.toContain("$0");
+});
