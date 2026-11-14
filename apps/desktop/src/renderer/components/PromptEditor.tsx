@@ -363,7 +363,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
   return (
     <div className="relative">
       {slashOpen && (
-        <div className="pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop">
+        <div className="pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-raised p-1 shadow-pop">
           {slashMatches.map((command, index) => (
             <button
               key={command.name}
@@ -373,10 +373,12 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => pickCommand(command)}
             >
-              <span className="font-mono text-ui text-fg">
-                /{command.name}{command.argumentHint ? <span className="ml-1 text-muted">{command.argumentHint}</span> : null}
+              {/* one line: the name never shrinks, a long argument hint truncates instead of wrapping over three lines */}
+              <span className="flex w-full min-w-0 items-baseline font-mono text-ui text-fg">
+                <span className="shrink-0">/{command.name}</span>
+                {command.argumentHint ? <span title={command.argumentHint} className="ml-1 min-w-0 truncate text-muted">{command.argumentHint}</span> : null}
               </span>
-              {command.description && <span className="line-clamp-1 text-meta text-muted">{command.description}</span>}
+              {command.description && <span className="line-clamp-1 w-full text-meta text-muted">{command.description}</span>}
             </button>
           ))}
         </div>
@@ -390,7 +392,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
         />
       )}
       {isEmpty && props.placeholder ? (
-        <div className="pointer-events-none absolute left-0 top-0 select-none text-prose leading-relaxed text-faint">
+        <div className="pointer-events-none absolute inset-x-0 top-0 select-none truncate text-prose leading-relaxed text-faint">
           {props.placeholder}
         </div>
       ) : null}

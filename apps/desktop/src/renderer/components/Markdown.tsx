@@ -14,6 +14,12 @@ function isNumericCell(children: unknown): boolean {
   const text = Array.isArray(children) ? children.join("") : typeof children === "string" ? children : "";
   return /^[-+~]?[$₩]?[\d,]+(\.\d+)?%?$/.test(text.trim());
 }
+// A short single token (a date like 2026-06, an id, a unit) should never break across lines — the browser would
+// otherwise split it at the hyphen in a squeezed column. The table scrolls sideways instead.
+function isShortToken(children: unknown): boolean {
+  const text = (Array.isArray(children) ? children.join("") : typeof children === "string" ? children : "").trim();
+  return text.length > 0 && text.length <= 12 && !/\s/.test(text);
+}
 
 // Markdown styles for the dark deck. For block code, pre overrides the inline-chip style of the inner code ([&_code]:...).
 const MD_COMPONENTS: Components = {
@@ -34,8 +40,8 @@ const MD_COMPONENTS: Components = {
     <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-ink/70 p-3 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-ui [&_code]:text-fg-dim" {...p} />
   ),
   table: (p) => <div className="my-2 overflow-x-auto"><table className="w-full border-collapse text-ui [&_code]:whitespace-nowrap [&_code]:[overflow-wrap:normal]" {...p} /></div>,
-  th: (p) => <th className="border-b border-line px-2 py-1.5 text-left font-medium text-fg-dim" {...p} />,
-  td: (p) => <td className={cn("border-b border-line-soft px-2 py-1", isNumericCell(p.children) && "text-right tabular-nums")} {...p} />,
+  th: (p) => <th className="whitespace-nowrap border-b border-line px-2 py-1.5 text-left font-medium text-fg-dim" {...p} />,
+  td: (p) => <td className={cn("border-b border-line-soft px-2 py-1 [overflow-wrap:normal] [word-break:keep-all]", isNumericCell(p.children) ? "whitespace-nowrap text-right tabular-nums" : isShortToken(p.children) && "whitespace-nowrap")} {...p} />,
 };
 
 // User-message bubble variant. The bubble is now a quiet raised surface (bg-raised/text-fg, same tone as the rest
@@ -58,8 +64,8 @@ const MD_BUBBLE_COMPONENTS: Components = {
     <pre className="my-2 overflow-x-auto rounded-lg border border-line bg-ink/40 p-3 [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-ui [&_code]:text-fg-dim" {...p} />
   ),
   table: (p) => <div className="my-2 overflow-x-auto"><table className="w-full border-collapse text-ui [&_code]:whitespace-nowrap [&_code]:[overflow-wrap:normal]" {...p} /></div>,
-  th: (p) => <th className="border-b border-line px-2 py-1.5 text-left font-medium text-fg-dim" {...p} />,
-  td: (p) => <td className={cn("border-b border-line-soft px-2 py-1", isNumericCell(p.children) && "text-right tabular-nums")} {...p} />,
+  th: (p) => <th className="whitespace-nowrap border-b border-line px-2 py-1.5 text-left font-medium text-fg-dim" {...p} />,
+  td: (p) => <td className={cn("border-b border-line-soft px-2 py-1 [overflow-wrap:normal] [word-break:keep-all]", isNumericCell(p.children) ? "whitespace-nowrap text-right tabular-nums" : isShortToken(p.children) && "whitespace-nowrap")} {...p} />,
   // @/path mentions injected by rehypeMentions below → render as the shortened filename chip.
   span: (p: any) =>
     String(p.className ?? "").includes("md-mention")

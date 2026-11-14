@@ -41,6 +41,13 @@ const EMPTY_LOG: LogItem[] = [];
 // Disambiguating subline for a fleet row still on its spawn-time repo-name label (audit #46) — a dim relative-time
 // line under the label. Subscribes narrowly to just this one worker's log (mirrors WorkerCost's per-row live read)
 // so activity elsewhere in the fleet doesn't re-render every row; renders nothing until a timestamp is available.
+// Worker labels come from model output / ticket titles and can carry stray control characters (a leading \b was
+// seen in the wild), which render as an odd indent. Stripped for display only.
+function cleanLabel(label: string, fallback: string): string {
+  // eslint-disable-next-line no-control-regex
+  return label.replace(/[\u0000-\u001f\u007f]/g, "").trim() || fallback;
+}
+
 function WorkerActivity({ workerId, fleetTs }: { workerId: string; fleetTs?: number }): JSX.Element | null {
   const t = useT();
   const locale = useLocale();
@@ -162,26 +169,26 @@ function RepoTreeImpl(p: {
               ? <Loader2 size={12} className="shrink-0 animate-spin text-accent" />
               : isLive(sub.status) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-run led-live" />}
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className={cn("truncate", p.attention?.[sub.id] && !active && "font-medium text-fg")}>{sub.label}</span>
+              <span title={cleanLabel(sub.label, sub.id)} className={cn("truncate", p.attention?.[sub.id] && !active && "font-medium text-fg")}>{cleanLabel(sub.label, sub.id)}</span>
             </span>
-            {/* right-side indicators (provider/cost) yield to the '⋯' overflow button on hover — otherwise the
-                absolutely-positioned button overlaps them (audit final-review F1). Same idiom as Sessions.tsx's
-                OriginBadge/unread-dot hover yield. */}
-            {sub.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0"><ProviderBadge provider={sub.provider} /></span>}
-            <span className="shrink-0 transition-opacity group-hover:opacity-0"><WorkerCost workerId={sub.id} fleetCost={sub.costUsd} /></span>
+            {/* Cost stays visible on hover: the '⋯' overflow button sits on line 2 (over the state tag, which yields),
+                so nothing is ever painted over line 1. The compact form keeps a 5-figure spend from eating the title. */}
+            <WorkerCost workerId={sub.id} fleetCost={sub.costUsd} compact />
           </span>
           {/* line 2: branch/id (mono, faint) + the state word (right, in its own colour) */}
           <span className={cn("flex w-full min-w-0 items-center gap-1.5", (isProvisioning(sub.status) || isLive(sub.status)) && "pl-3")}>
             <span className="min-w-0 flex-1 truncate font-mono text-meta text-faint" title={sub.branch || sub.id}>{shortBranch(sub.branch || sub.id)}</span>
             {fallback && <span className="shrink-0 text-meta text-faint"><WorkerActivity workerId={sub.id} fleetTs={sub.lastActivityTs} /></span>}
+            {/* the provider badge lives on the meta line so the title keeps the whole first line */}
+            {sub.provider === "codex" && <ProviderBadge provider={sub.provider} />}
             {/* colorblind-safe short tag stays as the visible glyph (dot alt-channel), carrying the state's own color
                 (not mono — it's a status word, not a measurement) — but the title carries the full localized word,
                 same label source as the header StatusBadge, so tree and header never disagree (audit #50: tree used
                 to say 'ORPH' while the header said 'orphaned'). */}
-            <span title={t(statusLabelKey(sub.status))} className={cn("shrink-0 text-meta font-medium transition-opacity group-hover:opacity-0", railClass(sub.status).replace("bg-", "text-"))}>{statusTag(sub.status)}</span>
+            <span title={t(statusLabelKey(sub.status))} className={cn("shrink-0 text-meta font-medium transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", railClass(sub.status).replace("bg-", "text-"))}>{statusTag(sub.status)}</span>
             {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}
             {p.attention?.[sub.id] && !active && (
-              <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full transition-opacity group-hover:opacity-0", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
+              <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
             )}
           </span>
         </button>
@@ -191,7 +198,7 @@ function RepoTreeImpl(p: {
           title={t("common.moreActions")}
           aria-label={t("common.moreActions")}
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: sub.id, x: r.left, y: r.bottom + 4 }); }}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+          className="absolute bottom-0.5 right-1.5 rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
         >
           <MoreHorizontal size={14} />
         </button>
@@ -206,7 +213,7 @@ function RepoTreeImpl(p: {
       <>
         <ChevronRight size={12} className={cn("shrink-0 text-muted transition-transform duration-200 ease-out", !foldable && "invisible", open && "rotate-90")} />
         <FolderGit2 size={14} className="shrink-0 text-muted" />
-        <span className="truncate text-body font-medium text-fg">{title}</span>
+        <span title={title} className="truncate text-body font-medium text-fg">{title}</span>
         <span className="ml-auto shrink-0 pl-1 text-meta tabular-nums text-faint">{subs.length}</span>
       </>
     );

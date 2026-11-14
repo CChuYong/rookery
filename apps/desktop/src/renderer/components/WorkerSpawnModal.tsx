@@ -240,7 +240,7 @@ export function WorkerSpawnModal(p: {
               className="w-28"
               value={costBudget}
               onChange={(e) => setCostBudget(e.target.value)}
-              placeholder="default"
+              placeholder={t("workerSpawnModal.costBudgetPlaceholder")}
               title={t("workerSpawnModal.costBudget")}
             />
           </div>

@@ -22,6 +22,7 @@ export default {
   "workerSpawnModal.searching": "Searching…",
   "workerSpawnModal.noResults": "No results",
   "workerSpawnModal.labelPlaceholder": "label (optional)",
+  "workerSpawnModal.costBudgetPlaceholder": "budget $",
   "workerSpawnModal.taskPlaceholderSource": "The selected issue/ticket fills in here. Feel free to add more instructions…  (⌘/Ctrl+Enter to spawn)",
   "workerSpawnModal.taskPlaceholderDirect": "Describe what to do in this repo…  (⌘/Ctrl+Enter to spawn) (leave empty to spawn an idle worker and start it with your first message)",
   "workerSpawnModal.footerNote": "Creates a worktree (rookery/<id>) and works inside it. Model/effort are locked in at spawn time.",

@@ -103,13 +103,14 @@
   color: var(--color-fg);
   box-shadow: inset 0 -1px 0 var(--color-fg-dim);
 }
-/* The inspector tabs' close × takes no width (it overlays the tab's right edge on hover), so the three labels fit. */
+/* The inspector tabs' close × takes no width, so the three labels fit: on hover it replaces the tab's leading icon
+   (it used to overlay the right edge, which painted over the label's last letters — "Files" read "Fil ×"). */
 .dockview-theme-rookery .rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"]) {
   position: relative;
 }
 .dockview-theme-rookery .rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"]) .tab-close {
   position: absolute;
-  right: 2px;
+  left: 6px;
   margin: 0;
   background-color: var(--color-surface);
 }

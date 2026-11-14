@@ -267,7 +267,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               <div className="flex flex-wrap items-center gap-4 px-3.5 py-3">
                 <label className="flex items-center gap-2 text-body text-fg-dim">
                   <span className="shrink-0">{t("capabilities.targetLabel")}</span>
-                  <Select size="sm" className="w-56" aria-label={t("capabilities.targetLabel")} value={capabilityTargetChoice(selectedTarget)} onChange={(event) => {
+                  <Select size="sm" className="w-[min(24rem,60%)]" aria-label={t("capabilities.targetLabel")} value={capabilityTargetChoice(selectedTarget)} onChange={(event) => {
                     const value = event.target.value;
                     const currentPreview = selectedTarget.kind === "rookery" || selectedTarget.kind === "repo"
                       ? selectedTarget
