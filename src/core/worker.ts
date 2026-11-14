@@ -1014,6 +1014,11 @@ export class Worker {
             // nothing deferred → derive: background while bg tasks still run, else idle (ALL work complete).
             // The streaming session stays alive either way and can receive further instructions.
             this.turnActive = false;
+            // A steer accepted into this turn was not consumed by it (Claude: pushed after the model's last tool
+            // step) — the provider answers it as its own follow-up turn. Hold with the settle-grace instead of
+            // blipping idle (a notify:true master / worker-settled trigger would fire one beat early): the
+            // follow-up turn's init resolves it near-instantly, expiry with no turn settles truthfully.
+            if (ev.steerPending) this.armIdleGrace();
             this.reconcile();
           }
         }

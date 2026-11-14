@@ -210,8 +210,12 @@ Isolated daemon (port 8899, temp `ROOKERY_HOME`), Claude SDK CLI 2.1.325, Codex 
   (`turnActive` stays true until `result`), so it is echoed once, then the SDK emits `result` for the old turn and
   answers the message as a new turn with its own `result`. Observed `worker.status`: `running → idle → running →
   idle`, with about 1.4 s (Haiku) or 3.0 s (Sonnet) of `idle` between. Nothing is lost or stuck, but the transient
-  `idle` would wake a master armed with `notify:true` and could fire an `idle` worker-settled trigger. Reported as a
-  bug for routing; not fixed here.
+  `idle` would wake a master armed with `notify:true` and could fire an `idle` worker-settled trigger. **Fixed
+  (Task 10):** the adapter stamps each steered push with a `uuid`; the SDK's `result.user_message_uuids` lists every
+  uuid-stamped input the turn consumed, folded steers included, and omits one left for the next turn (live-probed on
+  SDK 0.3.325 with Haiku). Such a `turn_end` carries `steerPending`, and the worker holds `running` with the
+  settle-grace (`settleGraceMs`, 3000 ms) instead of emitting `idle`; the follow-up turn's `init` resolves it, and
+  expiry with no turn settles truthfully. An absorbed steer settles at its turn end with no delay. Codex is unchanged.
 - **Codex.** `turn/steer` mid-turn was accepted and delivered as a real user message in the same turn (rollout:
   user message right after the original task, one `task_complete`). gpt-6.1-terra acted on it; gpt-6-luna (low)
   received it but ignored it. At the end of a turn (11 probes with a 0–150 ms delay after the final assistant text)

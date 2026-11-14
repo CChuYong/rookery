@@ -4,6 +4,7 @@ import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
 import type { CoreEvent } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
+import { WorkerNotifier } from "../../src/core/worker-notifier.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, withoutSteer, withoutStreamMethods, type FakeStep } from "../helpers/fake-query.js";
@@ -2055,7 +2056,7 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     resolve: (refs) => refs.map(() => ({ mediaType: "image/png" as const, data: "eHl6" })),
   };
   // A hand-driven stream: the test pushes provider events; every input the worker enqueues is captured in `pulled`.
-  function mk(steer?: Steer, extra: { steerTimeoutMs?: number } = {}) {
+  function mk(steer?: Steer, extra: { steerTimeoutMs?: number; settleGraceMs?: number } = {}) {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
@@ -2095,7 +2096,7 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     const users = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; role?: string; content?: string; clientMsgId?: string; text?: string; images?: unknown[] }).filter((p) => p.kind === "message" && p.role === "user");
     const notices = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; text?: string }).filter((p) => p.kind === "notice").map((p) => p.text ?? "");
     const pulledText = () => pulled.map((p) => (typeof p === "string" ? p : p.text));
-    return { repos, agent, emit, flush, users, notices, pulled, pulledText, statuses };
+    return { repos, bus, agent, emit, flush, users, notices, pulled, pulledText, statuses };
   }
   function held() {
     let resolve!: (v: boolean) => void;
@@ -2405,6 +2406,74 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     await agent.stop();
   });
 
+  // The real Claude adapter decides steerPending from result.user_message_uuids (live-verified on SDK 0.3.325: an
+  // absorbed steer's uuid is listed on that turn's result; an end-of-turn steer's uuid only on its follow-up turn's).
+  function adapterRig(absorb: boolean) {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    type In = { uuid?: string; priority?: string; message?: { content?: unknown } };
+    const textOf = (um: In) => { const c = um?.message?.content; return typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("") : ""; };
+    const result = (uuids?: string[]) => ({ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null, ...(uuids ? { user_message_uuid: uuids.at(-1), user_message_uuids: uuids } : {}) });
+    const gated = ((input: { prompt?: AsyncIterable<In> }) => {
+      async function* gen(): AsyncGenerator<unknown> {
+        const it = input.prompt![Symbol.asyncIterator]();
+        for (let turn = 0; ; turn++) {
+          const next = await it.next();
+          if (next.done) return;
+          yield { type: "system", subtype: "init", session_id: "sdk-1" };
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${textOf(next.value)}` }] } };
+          if (turn === 0) {
+            await gate;
+            if (absorb) {
+              // fold the steered message into this turn (the SDK does this at a tool boundary) → one combined result
+              const steered = await it.next();
+              yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `folded:${textOf(steered.value!)}` }] } };
+              yield result([steered.value!.uuid!]);
+              continue;
+            }
+            yield result(); // a uuid-less opener: the live result carries no list
+            continue;
+          }
+          yield result(next.value.uuid ? [next.value.uuid] : undefined);
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as unknown as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gated), wakeWatchdogMs: 200, settleGraceMs: 10_000 } });
+    return { repos, agent, statuses, release };
+  }
+
+  it("through the Claude adapter: an end-of-turn steer answered as its own turn emits no transient idle", async () => {
+    const x = adapterRig(false);
+    x.agent.start("task");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("reply:task")));
+    x.agent.send("redirect", "c-9");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes('"content":"redirect"')));
+    x.release();
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("reply:redirect")) && x.agent.status() === "idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  it("through the Claude adapter: an absorbed steer settles at that turn's end without the hold", async () => {
+    const x = adapterRig(true);
+    x.agent.start("task");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("reply:task")));
+    x.agent.send("redirect", "c-9");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes('"content":"redirect"')));
+    x.release();
+    // settleGraceMs is 10 s: reaching idle within until()'s budget proves no hold was taken
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("folded:redirect")) && x.agent.status() === "idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
   it("recover (abandon) during in-flight steer drops it with a notice and nothing else", async () => {
     const h = held();
     const x = mk(vi.fn<Steer>(() => h.promise));
@@ -2416,5 +2485,112 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     await x.flush();
     expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (recovered): redirect"))).toHaveLength(1);
     expect(x.users().some((u) => u.content === "redirect")).toBe(false);
+  });
+
+  // Task 10 (live-found on Claude): a steer accepted after the model's last tool step is not folded into the running
+  // turn — the SDK answers it as its own follow-up turn. The adapter flags that turn_end (steerPending); the worker
+  // must hold "running" instead of emitting a transient idle that wakes a notify:true master early.
+  const steerPendingEnd = (): AgentEvent => ({ ...turnEnd(), steerPending: true });
+  const init: AgentEvent = { kind: "system_text", text: "init" };
+
+  it("an accepted steer answered as a separate turn emits no transient idle", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd()); // the old turn's own result: the steered message was not consumed by it
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(init); // the SDK starts the follow-up turn for the steered message
+    x.emit(said("BRAVO"));
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle"]); // started running; the only status change is the final idle
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1);
+    await x.agent.stop();
+  });
+
+  it("the hold expires to a truthful idle when no follow-up turn comes", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 30 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    await new Promise((r) => setTimeout(r, 60)); // past the hold with no frames
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  it("an absorbed steer settles at the turn end without delay", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(turnEnd()); // one combined result: the adapter saw the steered message consumed (no steerPending)
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("a notify:true arm is not fired between the turn and the steer's follow-up turn", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    const deliver = vi.fn();
+    new WorkerNotifier({ bus: x.bus, repos: x.repos, deliver }).start();
+    x.agent.start("task");
+    await x.flush();
+    x.repos.setWorkerNotifyArmed("a1", true);
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    expect(deliver).not.toHaveBeenCalled();
+    x.emit(init);
+    x.emit(said("BRAVO"));
+    x.emit(turnEnd());
+    await x.flush();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]![1].status).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("a send during the hold starts its own turn and ends the hold", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    x.agent.send("more"); // no turn is tracked during the hold → immediate path, not a steer
+    await x.flush();
+    expect(x.pulledText()).toContain("more");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  it("stop during the hold lands stopped and the expired hold never resurrects it", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 20 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    await x.agent.stop();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(x.agent.status()).toBe("stopped");
+    expect(x.statuses).toEqual(["stopped"]);
   });
 });

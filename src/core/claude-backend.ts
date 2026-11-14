@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentInput } from "./image-input.js";
 import { resolveSpeed, type SpeedPreference, type SpeedObservation } from "./speed.js";
 import { query as sdkQuery, createSdkMcpServer, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -32,6 +33,7 @@ export async function* claudeUserMessages(input: AsyncIterable<AgentInput>): Asy
       ] },
       parent_tool_use_id: null,
       ...(typeof text !== "string" && text.priority ? { priority: text.priority } : {}),
+      ...(typeof text !== "string" && text.uuid ? { uuid: text.uuid } : {}),
     };
     yield msg;
   }
@@ -375,8 +377,10 @@ class ClaudeStream implements AgentStream {
     const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set(), costWatermark: this.initialCostWatermark, requestedSpeed: this.speed.current };
     for await (const msg of this.inputScope ? this.inputScope.messages(this.q) : this.q) {
       state.requestedSpeed = this.speed.current;
-      if ((msg as { type?: string }).type === "result" && !(msg as { parent_tool_use_id?: string }).parent_tool_use_id) this.speed.turnActive = false;
-      yield* translate(msg, state);
+      const turnResult = (msg as { type?: string }).type === "result" && !(msg as { parent_tool_use_id?: string }).parent_tool_use_id;
+      if (turnResult) this.speed.turnActive = false;
+      const steerPending = turnResult && this.steerLeftForNextTurn(msg);
+      for (const ev of translate(msg, state)) yield steerPending && ev.kind === "turn_end" ? { ...ev, steerPending: true } : ev;
     }
   }
 
@@ -385,6 +389,12 @@ class ClaudeStream implements AgentStream {
     const r = (await this.q.interrupt()) as { still_queued?: string[] } | undefined | void;
     const sq = r && typeof r === "object" ? r.still_queued : undefined;
     return Array.isArray(sq) ? { stillQueued: sq } : undefined;
+  }
+
+  // Called once per main-thread result: whether a steered input accepted during this turn was left unconsumed.
+  // Only the streaming worker session steers (ClaudeSessionStream overrides this).
+  protected steerLeftForNextTurn(_result: unknown): boolean {
+    return false;
   }
 
   // Optional live controls: fakes (and other providers) may lack them — mirror the old `this.query?.x` guards.
@@ -428,17 +438,37 @@ class ClaudeSessionStream extends ClaudeStream {
     super(q, initialCostWatermark, speed, inputScope);
   }
 
+  // uuids of steered inputs accepted since the last main-thread result (see steerLeftForNextTurn).
+  private readonly steered = new Set<string>();
+
   // The SDK reads the streaming input ahead and folds a message that arrives mid-turn into the
   // in-flight turn, so steering is just a priority-tagged push. Never throws: false = caller queues.
+  // The push is uuid-stamped so the turn's result can tell whether the message was consumed.
   async steer(input: AgentInput): Promise<boolean> {
     if (!this.speed.turnActive || !this.target) return false;
     const base = typeof input === "string" ? { text: input, images: [] } : input;
+    const uuid = randomUUID();
     try {
-      this.target.push({ ...base, priority: CLAUDE_STEER_PRIORITY });
-      return true;
+      this.target.push({ ...base, priority: CLAUDE_STEER_PRIORITY, uuid });
     } catch {
       return false; // input closed (stream stopping/replaced)
     }
+    this.steered.add(uuid);
+    return true;
+  }
+
+  // The SDK folds a "next" message only at a tool boundary. One pushed after the model's last tool step stays in
+  // the input and runs as its OWN follow-up turn after this result (live-verified on SDK 0.3.325): the result's
+  // user_message_uuids lists every uuid-stamped input the turn consumed, folded ones included, and omits a steer
+  // left for the next turn (a uuid-less opener's result carries no list at all). Each steer is judged at the
+  // first result after it was accepted only, so a producer that never reports the list holds at most once.
+  protected override steerLeftForNextTurn(result: unknown): boolean {
+    if (this.steered.size === 0) return false;
+    const r = result as { user_message_uuid?: unknown; user_message_uuids?: unknown };
+    const consumed = Array.isArray(r.user_message_uuids) ? r.user_message_uuids : typeof r.user_message_uuid === "string" ? [r.user_message_uuid] : [];
+    const pending = [...this.steered].some((id) => !consumed.includes(id));
+    this.steered.clear();
+    return pending;
   }
 }
 

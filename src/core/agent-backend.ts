@@ -66,7 +66,10 @@ export type AgentEvent =
   // when they resume/fork the session. Absent on Codex (it emits per-turn deltas) and on zeroed results.
   // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried
   // for observability only, never branched on (live-verified 2026-07-11: bg detection rests on task frames).
-  | { kind: "turn_end"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number };
+  | { kind: "turn_end"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number;
+    // true: an input steered into this turn was NOT consumed by it — the provider will answer it as its own
+    // follow-up turn (Claude, after the model's last tool step). Consumers must not treat this boundary as settled.
+    steerPending?: true };
 
 // The SDK's typed interrupt receipt (0.3.205+ Query.interrupt() resolution), neutralized.
 // still_queued: uuids of async user messages that survive the interrupt. [] does NOT mean
