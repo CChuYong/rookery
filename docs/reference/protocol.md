@@ -8,7 +8,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 
 - **Inbound (client→server):** validated with the zod `clientMessageSchema` (discriminated union on `type`) via `parseClientMessage`. A parse failure replies `{type:"error", message:"invalid message: …"}`. Handler throws are caught and replied as `{type:"error", message, reqId?}` (so a hung `request()` never results).
 - **Outbound (server→client):** `ServerMessage`, just `JSON.stringify`'d by `serializeServerMessage` — **no schema validation**.
-- **`reqId` correlation:** request-style messages carry a `reqId`; the matching `ServerMessage` echoes it. `RequestResultMap` is the 1:1 type map between request `type` and its reply `ServerMessage` (must stay in sync with `connection.ts`). Fire-and-forget messages (`session.send`/`attach`, `worker.send`/`setModel`/`setPermissionMode`, `interaction.respond`, all `*.subscribe`) have no `reqId` and no reply. Mutations without a dedicated ack reply with `fleet.ack`.
+- **`reqId` correlation:** request-style messages carry a `reqId`; the matching `ServerMessage` echoes it. `RequestResultMap` is the 1:1 type map between request `type` and its reply `ServerMessage` (must stay in sync with `connection.ts`). Messages with optional `reqId` (including `session.send`, `worker.send` and worker setters) reply only when supplied; subscribe/attach remain fire-and-forget. Mutations without a dedicated ack reply with `fleet.ack`.
 - **Channels / live events:** `events.subscribe` subscribes the connection to `@all` (every event); `fleet.subscribe` to `@fleet` (worker events); session-bearing messages (`session.create/open/attach/send`) auto-subscribe that session id. Subscribing `@all` dedupes/replaces narrower subscriptions. Live events arrive as `{type:"event", event: CoreEvent}`.
 - **Auth:** WS connections require the `~/.rookery/ws-token` shared secret + a local-Origin gate (`timingSafeEqual`). See AGENTS.md §"Daemon / Protocol".
 
@@ -18,10 +18,17 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 
 | `type` | reqId | Key fields | Purpose | Reply |
 |---|---|---|---|---|
-| `session.create` | opt | `cwd?` | create a master session | `session.created` |
-| `session.open` | opt | `key`, `cwd?` | find-or-create by external key (e.g. Slack thread) | `session.created` |
+| `session.create` | opt | `cwd?`, `provider?`, `speed?` | create a master session | `session.created` |
+| `session.open` | opt | `key`, `cwd?`, `provider?`, `speed?` | find-or-create by external key (e.g. Slack thread) | `session.created` |
 | `session.attach` | — | `sessionId` | subscribe to a session's events | (none) |
-| `session.send` | — | `sessionId`, `text`, `model?`, `effort?`, `permissionMode?`, `clientMsgId?` | run a master turn (per-session overrides) | (none; streams events) |
+| `session.send` | opt | `sessionId`, `text`, `images?`, `speed?`, `model?`, `effort?`, `permissionMode?`, `clientMsgId?` | validate/enqueue a master turn (per-session overrides); completion streams events | `fleet.ack` at acceptance when `reqId` is supplied |
+| `session.setSpeed` | opt | `sessionId`, `speed: standard\|fast\|null` | persist next-turn preference; never starts/interrupts work | `fleet.ack` |
+| `session.fork` | opt | `sessionId`, `provider?`, `speed?` | native same-provider fork or textual cross-provider handoff | `session.created` |
+| `image.upload` | ✓ | `name`, `mediaType`, `base64` | bounded private immutable asset upload | `image.upload.result` |
+| `image.get` | ✓ | `id` (UUID only) | lazy authenticated asset read | `image.get.result` |
+| `side.start` | ✓ | `sourceKind`, `sourceId`, `text`, `images?`, `model?`, `effort?` | prepare and fork a Side; inherits source speed | `side.started` |
+| `side.send` | opt | `sideId`, `text`, `images?` | native Side follow-up | `fleet.ack` |
+| `side.stop` / `side.close` | opt | `sideId` | interrupt / close Side | `fleet.ack` |
 | `session.stop` | opt | `sessionId` | interrupt the in-progress master turn | `fleet.ack` (action `stop`) |
 | `interaction.respond` | opt | `requestId`, `decision?`, `answers?` | answer a master canUseTool card | (none; `interaction.resolved` event) |
 | `session.delete` | ✓ | `sessionId` | delete a session | `fleet.ack` (`delete`) |
@@ -37,9 +44,11 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `worker.history` | ✓ | `id` | replay persisted `worker_events` | `worker.history.result` |
 | `workflow.list` | ✓ | `workerId` | snapshot daemon-live Dynamic Workflow runs for reconnect | `workflow.list.result` |
 | `workflow.agent.history` | ✓ | `workerId`, `taskId`, `agentId` | load one validated, bounded workflow-agent transcript by ids | `workflow.agent.history.result` |
-| `worker.send` | opt | `id`, `text`, `clientMsgId?` | follow-up to a running worker | (none) |
-| `worker.setModel` | opt | `id`, `model` | live-change worker model | (none) |
-| `worker.setPermissionMode` | opt | `id`, `permissionMode` (`bypassPermissions\|plan`) | live-change worker permission mode | (none) |
+| `worker.send` | opt | `id`, `text`, `images?`, `speed?`, `clientMsgId?` | validate/queue one complete follow-up | `fleet.ack` |
+| `worker.setSpeed` | opt | `id`, `speed: standard\|fast\|null` | persist next-turn preference | `fleet.ack` |
+| `worker.fork` | ✓ | `id`, `provider?`, `model?`, `effort?`, `speed?` | fork and preserve requested intent | `fleet.spawn.result` |
+| `worker.setModel` | opt | `id`, `model` | live-change worker model | `fleet.ack` |
+| `worker.setPermissionMode` | opt | `id`, `permissionMode` (`bypassPermissions\|plan`) | live-change worker permission mode | `fleet.ack` |
 | `worker.interrupt` | opt | `id` | interrupt worker turn (session preserved) | `fleet.ack` (`interrupt`) |
 | `worker.checkpoints` | ✓ | `id` | list worktree checkpoints | `worker.checkpoints.result` |
 | `worker.restore` | ✓ | `id`, `seq` | restore worker to a checkpoint | `fleet.ack` (`restore`) |
@@ -47,7 +56,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `fleet.diff` | ✓ | `id` | worktree diff of a worker | `fleet.diff.result` |
 | `fleet.stop` | ✓ | `id` | stop worker (keep worktree) | `fleet.ack` (`stop`) |
 | `fleet.discard` | ✓ | `id` | discard worker (remove worktree+branch) | `fleet.ack` (`discard`) |
-| `fleet.spawn` | ✓ | `repo`, `task?`, `label?`, `model?`, `effort?`, `permissionMode?`, `base?`, `ticketKey?`, `ticketUrl?` | spawn a worker from the UI | `fleet.spawn.result` |
+| `fleet.spawn` | ✓ | `repo`, `task?`, `label?`, `model?`, `effort?`, `permissionMode?`, `base?`, `ticketKey?`, `ticketUrl?`, `provider?`, `speed?`, `costBudgetUsd?` | spawn a worker from the UI | `fleet.spawn.result` |
 | `fleet.subscribe` | — | — | subscribe to `@fleet` | (none) |
 | `events.subscribe` | — | — | subscribe to `@all` (+ initial `slack.status`) | (none; events) |
 | `repos.list` | ✓ | — | list registered repos with authoritative ids | `repos.list.result` |
@@ -59,7 +68,8 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `source.search` | ✓ | `provider` (`github\|linear`), `query`, `repo?` | search a source provider | `source.search.result` |
 | `integrations.status` | ✓ | — | gh/linear connection status | `integrations.status.result` |
 | `auth.status` | ✓ | — | active Claude auth (api-key vs OAuth) | `auth.status.result` |
-| `commands.list` | ✓ | `sessionId?`, `workerId?`, `cwd?`, `provider?` | executable slash actions/skills for one context (`sessionId` and `workerId` are mutually exclusive) | `commands.result` |
+| `commands.list` | ✓ | `sessionId?`, `workerId?`, `cwd?`, `provider?` | executable slash actions/skills for one context (`sessionId` and `workerId` are mutually exclusive) | `codex.models.result` | `reqId`, `models: CodexModelInfo[]\|null` | model/effort catalog with `id,displayName,defaultEffort,supportedEfforts,isDefault,serviceTiers?`; each tier is `{id,name,description}`; null allows legacy free-text fallback |
+| `commands.result` |
 | `capabilities.snapshot` | ✓ | `target: {kind:"rookery",provider,agent}\|{kind:"repo",id,provider,agent}\|{kind:"session"\|"worker",id}` | read a preview or live target's effective capability inventory | `capabilities.snapshot.result` |
 | `capabilities.library` | ✓ | — | list sanitized packs, bindings, secret metadata, and generation | `capabilities.library.result` |
 | `capabilities.mcp.create` | ✓ | `input:{id,displayName,description,mcpServer,secretValues?}` | register one untrusted MCP Catalog entry without a binding | `capabilities.catalog.create.result` |
@@ -77,6 +87,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `capabilities.worker.reload` | ✓ | `workerId`, `whenIdle?` | replace a worker provider stream now, schedule at idle, or record next-start for a detached worker | `capabilities.worker.reload.result` |
 | `usage.get` | ✓ | — | usage snapshot | `usage.result` |
 | `models.list` | ✓ | — | available models (live or static) | `models.result` |
+| `codex.models.list` | ✓ | — | fetch first-success cached app-server catalog, preserving optional service tiers | `codex.models.result` |
 | `settings.get` | ✓ | — | read settings | `settings.result` |
 | `settings.set` | ✓ | `settings` (see below) | write settings; secrets handled separately | `settings.result` |
 | `slack.set` | opt | `enabled` | turn the Slack bot on/off | `slack.ack` |
@@ -97,20 +108,23 @@ Notes:
 - **Capability secret boundary:** `value` exists only on `capabilities.secret.set` and authenticated MCP creation `secretValues` maps. Library and mutation replies expose only `{key, configured}`; generated pack documents contain secret references, never expanded values. The daemon rejects undeclared keys and redacts submitted values from correlated creation errors.
 - **Worker capability reload:** `whenIdle:false` rejects a busy worker. `whenIdle:true` acknowledges with `mode:"scheduled"` and begins only after the active turn settles. An idle live worker returns `mode:"reloading"` after replacement completes; a detached resumable worker returns `mode:"next-start"` without materializing it. Only the short replacement phase rejects `worker.send`.
 - **Repo-shared authority:** registered repos may declare schema 1 `packs[]` in `.rookery/capabilities.json`, with each `{path, disabled?}` contained below `.rookery/capabilities/`. Discovery never creates bindings or trust. `CapabilityLibrarySnapshot.diagnostics[]` isolates index/pack failures, and exact-digest trust automatically stops matching after content changes.
-- **`settings.set` `settings` object:** `masterName`, `masterModel`, `workerModel`, `masterEffort`, `workerEffort`, `slackCwd`, `slackAllowedUsers`, `slackAllowAll`, `slackRefuseReply`, `slackRefusalMessage`, `slackLocale`, `usageRefreshMs`, `hasAcceptedDataNotice` (echoed back), and write-only secrets **not echoed**: `linearApiKey`, `anthropicApiKey`, `slackBotToken`, `slackAppToken`. `null`/empty string clears a key (reverts to config default). `effort` fields are membership-validated against `low\|medium\|high\|xhigh\|max`. Changing a Slack token triggers `slack.reconcile()`.
-- **`automation` / `patch` (`automationInputSchema`):** `name`, `enabled?`, `trigger` (discriminated on `kind`: `cron`{`cron`,`timezone`} validated by `isValidCron` in `superRefine`, or `slack`{`channels?`,`keyword?`,`fromUsers?`}), `action` (`master`{`prompt`,`cwd`,`sessionMode:reuse\|fresh`} or `worker`{`repo`,`task`,`base?`}), `model?`, `effort?`, `permissionMode?`, `maxTurns?`.
+- **`settings.set` `settings` object:** `masterName`, `masterModel`, `workerModel`, `masterEffort`, `workerEffort`, `masterSpeed`, `workerSpeed`, `codexMasterSpeed`, `codexWorkerSpeed`, `slackCwd`, `slackAllowedUsers`, `slackAllowAll`, `slackRefuseReply`, `slackRefusalMessage`, `slackLocale`, `usageRefreshMs`, `hasAcceptedDataNotice` (echoed back), and write-only secrets **not echoed**: `linearApiKey`, `anthropicApiKey`, `slackBotToken`, `slackAppToken`. `null` clears a key (reverts to its default); speed fields accept only `standard`, `fast` or null, not empty strings. `effort` fields are membership-validated against `low\|medium\|high\|xhigh\|max`. Changing a Slack token triggers `slack.reconcile()`.
+- **`automation` / `patch` (`automationInputSchema`):** `name`, `enabled?`, `trigger` (discriminated on `kind`: `cron`{`cron`,`timezone`} validated by `isValidCron` in `superRefine`, or `slack`{`channels?`,`keyword?`,`fromUsers?`}), `action` (`master`{`prompt`,`cwd`,`sessionMode:reuse\|fresh`} or `worker`{`repo`,`task`,`base?`}), `model?`, `effort?`, `speed?`, `provider?`, `permissionMode?`, `maxTurns?`, `costBudgetUsd?`.
 - **`automation.run` `vars`:** partial `{message, channel, user, ts, threadTs, team}`.
 
 ## Server → Client messages
 
 | `type` | Key fields | Purpose |
 |---|---|---|
+| `image.upload.result` | `reqId`, `image: ImageRef` | authoritative asset metadata |
+| `image.get.result` | `reqId`, `image: ImageRef`, `base64` | bounded asset bytes; never transcript history |
+| `side.started` | `reqId`, `sideId` | prepared initial Side accepted before first event |
 | `session.created` | `sessionId`, `cwd`, `reqId?` | reply to `session.create`/`session.open` |
-| `session.list.result` | `sessions[]` (`id,cwd,status,lastActivity,origin,originRef,label,archived,pinned`), `reqId?` | session list |
+| `session.list.result` | `sessions[]` (`id,cwd,status,lastActivity,origin,originRef,label,archived,pinned,provider?,speed?`), `reqId?` | session list |
 | `worker.list.result` | `sessionId`, `workers: WorkerRow[]`, `reqId?` | per-session fleet list |
 | `fleet.list.result` | `reqId`, `fleet: (WorkerRow & {archived})[]` | full fleet list |
 | `fleet.diff.result` | `reqId`, `id`, `diff` | worktree diff text |
-| `fleet.ack` | `reqId`, `action`, `id` | generic mutation ack (stop/discard/delete/archive/rename/pin/restore/interrupt/run) |
+| `fleet.ack` | `reqId`, `action`, `id` | generic mutation ack (stop/discard/delete/archive/rename/pin/restore/interrupt/run/send/setSpeed) |
 | `fleet.spawn.result` | `reqId`, `id` | new worker id |
 | `repos.list.result` | `reqId`, `repos[]` (`id,name,path,description,base`) | repo list with ids used by capability scopes |
 | `repo.branches.result` | `reqId`, `branches[]` | branch list |
@@ -153,3 +167,13 @@ in-process `generation` as an invalidation signal and refetch. Claude applicatio
 emits target-routed `capabilities.runtime`; clients increment their local invalidation
 clock and refetch the authoritative snapshot. Neither event carries pack bodies,
 instructions, public config, command lines, or secret values.
+
+## Speed, image and acceptance contracts
+
+`speed` is optional nullable `standard|fast`: null inherits the provider/role default; omitted sends preserve existing target intent. Selection setters persist intent only. Catalog `serviceTiers` metadata is preserved by `codex.models.list`; a supported request is not proof of effective Fast. CLI minimum is 0.169.0. Result events expose `requestedSpeed` and `costAccuracy`; see [speed.md](speed.md).
+
+`ImageRef = {id,name,mediaType,byteLength,width,height}` is authoritative store metadata. `session.send`, `worker.send`, `side.start` and `side.send` support empty text with images. The entire list must validate before acceptance; missing/tampered refs return a correlated error rather than silently dropping images. Upload/get accept no path or URL. Product bounds: 4 images/message, 3 MiB/image, 8 MiB/message, 8000 pixels/dimension, 20M pixels/image, 16 MiB inbound WS and 1 GiB retained assets. PNG/JPEG/WebP/GIF bytes are preserved. There is no implicit GC, including after target deletion. See [images.md](images.md).
+
+For `session.send`, `fleet.ack` means validated insertion into the serialized turn chain, **not provider completion**. Execution streams independently. Internal `runTurn` callers still await completion. `clientMsgId` identifies one whole text+image pending input and is persisted in its echo. Dispatch can later fail (for example an accepted queued file becomes unreadable); correlated errors persist reference-only `retryInput {text,images?}` for retry/restoration after reconnect. A terminal Worker rejects sends and requires existing recovery; missing bytes must be reattached. Server queues are not durable across daemon restart.
+
+History carries refs only, while desktop v2 drafts also retain refs only. Same-provider forks reuse refs and native history. Cross-provider handoff summarizes historical text and does not replay old vision inputs; newly submitted images are native. Side preparation resolves its initial images after the awaited fork and before acknowledgement; a failure cleans up the unregistered fork and yields one correlated error.

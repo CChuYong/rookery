@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "../core/speed.js";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -129,6 +130,7 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
       task: z.string(),
       base: z.string().optional(),
       model: z.string().optional().describe("Override the worker model; omit to use the default."),
+      speed: z.enum(["standard", "fast"]).optional().describe("Speed preference for the next turn; omit to use configured defaults."),
       effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max; codex workers also accept ultra); omit to use the default."),
       provider: z.enum(["claude", "codex"]).optional().describe("Agent backend (default claude)."),
     },
@@ -149,11 +151,11 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
     "send_worker",
     "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved) — steer it, correct it, or ask it to commit/push and open its own PR. " +
       "Does NOT interrupt a mid-turn worker: the instruction is queued for the next turn boundary. To make it drop what it is doing, call interrupt_worker first.",
-    { id: z.string(), text: z.string().describe("The instruction to send.") },
+    { speed: z.enum(["standard", "fast"]).optional(), id: z.string(), text: z.string().describe("The instruction to send.") },
     async (args) => {
       audit("send_worker");
       try {
-        fleet.send(args.id, args.text);
+        fleet.send(args.id, args.text, undefined, args.speed);
         return text(`Sent to ${args.id}.`);
       } catch (err) {
         return errorText(`send failed: ${String(err)}`);

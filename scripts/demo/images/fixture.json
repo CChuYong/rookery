@@ -1,0 +1,283 @@
+{
+  "responses": {
+    "settings.get": {
+      "type": "settings.result",
+      "settings": {
+        "masterSpeed": "standard",
+        "workerSpeed": "standard",
+        "codexMasterSpeed": "standard",
+        "codexWorkerSpeed": "standard",
+        "masterName": "rookery",
+        "masterModel": "claude-opus-5-5",
+        "workerModel": "claude-opus-4-8",
+        "masterEffort": "high",
+        "workerEffort": "high",
+        "codexWorkerModel": "gpt-6.1-sol",
+        "codexMasterModel": "gpt-6.1-sol",
+        "codexBin": "codex",
+        "codexTurnIdleTimeoutMs": "0",
+        "codexHandshakeTimeoutMs": "30000",
+        "slackCwd": "/tmp/rookery-speed-images-fixtures/sample",
+        "slackAllowedUsers": "",
+        "slackAllowAll": "0",
+        "slackRefuseReply": "1",
+        "slackRefusalMessage": "Sorry, you're not authorized to use this bot.",
+        "slackLocale": "ko",
+        "slackProvider": "claude",
+        "usageRefreshMs": "120000",
+        "hasAcceptedDataNotice": "1",
+        "onboardingDone": "1",
+        "defaultSessionCwd": "/tmp/rookery-speed-images-fixtures/sample",
+        "workerSlackRelayEnabled": "0",
+        "workerSlackRelayChannel": "",
+        "workerCostBudgetUsd": "",
+        "mcpExposure": "off"
+      }
+    },
+    "session.list": {
+      "type": "session.list.result",
+      "sessions": [
+        {
+          "id": "aabbccdd",
+          "label": "Claude speed controls",
+          "provider": "claude",
+          "cwd": "/tmp/rookery-speed-images-fixtures/sample",
+          "status": "active",
+          "lastActivity": "2026-11-14T11:39:08.789Z",
+          "origin": "ui",
+          "originRef": null,
+          "archived": false,
+          "pinned": false,
+          "speed": "fast"
+        },
+        {
+          "id": "11223344",
+          "label": "Codex requested Fast",
+          "provider": "codex",
+          "cwd": "/tmp/rookery-speed-images-fixtures/sample",
+          "status": "active",
+          "lastActivity": "2026-11-14T11:39:08.789Z",
+          "origin": "ui",
+          "originRef": null,
+          "archived": false,
+          "pinned": false,
+          "speed": "fast"
+        }
+      ]
+    },
+    "fleet.list": {
+      "type": "fleet.list.result",
+      "fleet": []
+    },
+    "repos.list": {
+      "type": "repos.list.result",
+      "repos": [
+        {
+          "name": "visual-qa",
+          "path": "/tmp/rookery-speed-images-fixtures/sample",
+          "description": "Synthetic workspace",
+          "base": "main"
+        }
+      ]
+    },
+    "commands.list": {
+      "type": "commands.result",
+      "commands": []
+    },
+    "models.list": {
+      "type": "models.result",
+      "models": [
+        {
+          "id": "claude-opus-5-5",
+          "displayName": "Claude Opus 5.5"
+        }
+      ]
+    },
+    "codex.models.list": {
+      "type": "codex.models.result",
+      "models": [
+        {
+          "id": "gpt-6.1-sol",
+          "displayName": "GPT-6.1 Sol",
+          "defaultEffort": "high",
+          "supportedEfforts": [
+            "low",
+            "high"
+          ],
+          "isDefault": true,
+          "serviceTiers": [
+            {
+              "id": "priority",
+              "name": "Fast",
+              "description": "Faster responses with increased usage"
+            }
+          ]
+        }
+      ]
+    },
+    "automation.list": {
+      "type": "automation.list.result",
+      "automations": []
+    },
+    "workflow.list": {
+      "type": "workflow.list.result",
+      "runs": []
+    },
+    "mcp.status": {
+      "type": "mcp.status.result",
+      "scope": "off",
+      "url": null
+    },
+    "auth.status": {
+      "type": "auth.status.result",
+      "method": "oauth",
+      "apiKeyPresent": false,
+      "apiKeyHint": null,
+      "oauthPresent": true,
+      "overridesSubscription": false
+    },
+    "codex.authStatus": {
+      "type": "codex.authStatus.result",
+      "status": {
+        "method": "chatgpt",
+        "ready": true,
+        "hint": null
+      }
+    },
+    "integrations.status": {
+      "type": "integrations.status.result",
+      "github": {
+        "available": false
+      },
+      "linear": {
+        "configured": false
+      }
+    },
+    "usage.get": {
+      "type": "usage.result",
+      "usage": {
+        "pct": {
+          "fiveHour": 23,
+          "sevenDay": 31
+        },
+        "today": {
+          "costUSD": 1.24,
+          "totalTokens": 4800
+        }
+      }
+    }
+  },
+  "sessionHistory": {
+    "11223344": [
+      {
+        "seq": 0,
+        "type": "master.message",
+        "payload": {
+          "type": "master.message",
+          "sessionId": "11223344",
+          "role": "user",
+          "content": "Check the release notes and summarize the changes."
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      },
+      {
+        "seq": 1,
+        "type": "master.message",
+        "payload": {
+          "type": "master.message",
+          "sessionId": "11223344",
+          "role": "assistant",
+          "content": "The release notes are ready. This conversation uses synthetic test data to inspect speed controls and cost reporting."
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      },
+      {
+        "seq": 2,
+        "type": "master.speed",
+        "payload": {
+          "type": "master.speed",
+          "sessionId": "11223344",
+          "observation": {
+            "requested": "fast",
+            "state": "unknown"
+          }
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      },
+      {
+        "seq": 3,
+        "type": "master.result",
+        "payload": {
+          "type": "master.result",
+          "sessionId": "11223344",
+          "subtype": "success",
+          "costUsd": 0.042,
+          "numTurns": 1,
+          "durationMs": 2800,
+          "contextTokens": 3200,
+          "contextWindow": 200000,
+          "costAccuracy": "estimated",
+          "requestedSpeed": "fast"
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      }
+    ],
+    "aabbccdd": [
+      {
+        "seq": 0,
+        "type": "master.message",
+        "payload": {
+          "type": "master.message",
+          "sessionId": "aabbccdd",
+          "role": "user",
+          "content": "Check the release notes and summarize the changes."
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      },
+      {
+        "seq": 1,
+        "type": "master.message",
+        "payload": {
+          "type": "master.message",
+          "sessionId": "aabbccdd",
+          "role": "assistant",
+          "content": "The release notes are ready. This conversation uses synthetic test data to inspect speed controls and cost reporting."
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      },
+      {
+        "seq": 2,
+        "type": "master.speed",
+        "payload": {
+          "type": "master.speed",
+          "sessionId": "aabbccdd",
+          "observation": {
+            "requested": "fast",
+            "state": "cooldown",
+            "reason": "pending"
+          }
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      },
+      {
+        "seq": 3,
+        "type": "master.result",
+        "payload": {
+          "type": "master.result",
+          "sessionId": "aabbccdd",
+          "subtype": "success",
+          "costUsd": 0.042,
+          "numTurns": 1,
+          "durationMs": 2800,
+          "contextTokens": 3200,
+          "contextWindow": 200000,
+          "costAccuracy": "reported",
+          "requestedSpeed": "fast"
+        },
+        "createdAt": "2026-11-14T11:39:08.789Z"
+      }
+    ]
+  },
+  "workerHistory": {},
+  "liveEvents": []
+}

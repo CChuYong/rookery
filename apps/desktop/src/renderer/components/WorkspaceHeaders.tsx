@@ -21,7 +21,8 @@ const EMPTY: LogItem[] = [];
 
 function WorkerMetrics({ workerId }: { workerId: string }): JSX.Element | null {
   const items = useStore((st) => st.workerLogs[workerId] ?? EMPTY);
-  return <MetricsView items={items} />;
+  const provider = useStore((s) => s.fleet[workerId]?.provider);
+  return <MetricsView items={items} provider={provider} />;
 }
 
 // Keep the primary Worker status badge authoritative while adding a compact explanation for its background state.

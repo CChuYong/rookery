@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { turnCostUsd, isRatedModel } from "../../../src/core/codex/codex-pricing.js";
+import { turnCostUsd, isRatedModel, estimateTurnCost } from "../../../src/core/codex/codex-pricing.js";
 
 describe("codex-pricing", () => {
   it("isRatedModel reports whether a model has a pricing entry (finding [18])", () => {
@@ -28,7 +28,19 @@ describe("codex-pricing", () => {
     for (const m of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"]) expect(isRatedModel(m)).toBe(true);
     expect(isRatedModel("gpt-9-unknown")).toBe(false);
   });
-  it("does not bill cacheWriteInputTokens (no published price)", () => {
-    expect(turnCostUsd("gpt-6-sol", { inputTokens: 1_000_000, cachedInputTokens: 0, cacheWriteInputTokens: 500_000, outputTokens: 0 })).toBeCloseTo(2.0, 10);
+  it("keeps the legacy numeric helper compatible; richer accounting declines cache-write retention ambiguity", () => {
+    // Aggregate of short requests, not one million-token context.
+ const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, cacheWriteInputTokens: 500_000, outputTokens: 0 };
+    expect(turnCostUsd("gpt-6-sol", usage)).toBeCloseTo(2.0, 10);
+    expect(estimateTurnCost("gpt-6-sol", usage).accuracy).toBe("unavailable");
   });
 });
+
+ it("prices explicit Fast rates and refuses uncovered tiers", () => {
+ // Aggregate of short requests, not one million-token context.
+ const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };
+ expect(estimateTurnCost("gpt-5.5", usage, "fast")).toMatchObject({ costUsd: 12.5, accuracy: "estimated" });
+ expect(estimateTurnCost("gpt-5.5", usage, "standard")).toMatchObject({ costUsd: 5, accuracy: "estimated" });
+ expect(estimateTurnCost("gpt-5.5-pro", usage, "fast").accuracy).toBe("unavailable");
+ expect(estimateTurnCost("unknown", usage, "fast").accuracy).toBe("unavailable");
+ });

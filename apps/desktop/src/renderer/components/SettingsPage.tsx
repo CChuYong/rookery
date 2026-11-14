@@ -1,3 +1,4 @@
+import { SpeedControl } from "./SpeedControl.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SlackStatus } from "@daemon/core/events.js";
@@ -201,7 +202,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 {/* Worker model/effort defaults moved to Models → per provider. The cost budget is
                     provider-agnostic (applies to Claude AND Codex workers), so it stays here in General. */}
                 <Section title={t("settings.workerBudget")}>
-                  <Row label={t("settings.workerCostBudgetUsd")} hint={t("settings.workerCostBudgetUsdHint")}>
+                  <Row label={t("settings.workerCostBudgetUsd")} hint={<>{t("settings.workerCostBudgetUsdHint")} {t("speed.budgetEstimated")}</>}>
                     <Input type="number" className="w-[120px] tabular-nums" value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
                   </Row>
                 </Section>
@@ -473,6 +474,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   )}
                 </div>
 
+                <Section title={t("speed.label")} desc={t("speed.hint")}>
+                  <Row label={t("speed.masterDefault")}><SpeedControl speed={f.masterSpeed ?? "standard"} provider="claude" model={f.masterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, masterSpeed: speed ?? "standard" })} /></Row>
+                  <Row label={t("speed.workerDefault")}><SpeedControl speed={f.workerSpeed ?? "standard"} provider="claude" model={f.workerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, workerSpeed: speed ?? "standard" })} /></Row>
+                </Section>
                 {/* Claude worker defaults — moved from General so the Claude sub-tab is provider-complete. */}
                 <Section title={t("settings.workerModelEffort")} desc={t("settings.workerModelEffortDesc")}>
                   <Row label={t("settings.workerModel")} hint={t("settings.applyNewWorker")}>
@@ -531,6 +536,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   );
                 })()}
 
+                <Row label={t("speed.masterDefault")} hint={t("speed.hint")}><SpeedControl speed={f.codexMasterSpeed ?? "standard"} provider="codex" model={f.codexMasterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, codexMasterSpeed: speed ?? "standard" })} /></Row>
+                <Row label={t("speed.workerDefault")}><SpeedControl speed={f.codexWorkerSpeed ?? "standard"} provider="codex" model={f.codexWorkerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, codexWorkerSpeed: speed ?? "standard" })} /></Row>
+                <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>
                 <WideRow label={t("settings.codexBin")} hint={t("settings.codexBinHint")}>
                   <Input className="font-mono text-ui" value={f.codexBin ?? ""} placeholder="codex" onChange={(e) => setF({ ...f, codexBin: e.target.value })} />
                 </WideRow>

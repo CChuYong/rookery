@@ -1,3 +1,5 @@
+import type { ImageRef } from "../core/image-input.js";
+import type { SpeedPreference, CostAccuracy } from "../core/speed.js";
 import type { DB } from "./db.js";
 import type {
   CapabilityAgentKind,
@@ -12,6 +14,7 @@ import type {
 } from "../core/capabilities/types.js";
 
 export interface SessionRow {
+  speed?: SpeedPreference | null;
   id: string;
   cwd: string;
   status: string;
@@ -35,6 +38,7 @@ export interface MessageRow {
   created_at: string;
 }
 export interface WorkerRow {
+  speed?: SpeedPreference | null;
   id: string;
   session_id: string;
   repo_path: string;
@@ -140,6 +144,7 @@ export type AutomationAction =
   | { kind: "master"; prompt: string; cwd: string; sessionMode: "reuse" | "fresh"; targetSessionId?: string }
   | { kind: "worker"; repo: string; task: string; base?: string };
 export interface Automation {
+  speed?: SpeedPreference | null;
   id: string; name: string; enabled: boolean;
   trigger: AutomationTrigger; action: AutomationAction;
   model: string | null; effort: string | null;
@@ -156,6 +161,7 @@ export interface Automation {
   corrupt?: true;
 }
 export interface AutomationInput {
+  speed?: SpeedPreference | null;
   name: string; enabled?: boolean; trigger: AutomationTrigger; action: AutomationAction;
   model?: string | null; effort?: string | null;
   permissionMode?: string | null; maxTurns?: number | null;
@@ -197,6 +203,18 @@ export class Repositories {
     private readonly db: DB,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
+
+  addImage(image: ImageRef): void {
+    this.db.prepare('INSERT INTO images(id,name,media_type,byte_length,width,height,created_at) VALUES (?,?,?,?,?,?,?)').run(image.id, image.name, image.mediaType, image.byteLength, image.width, image.height, this.now());
+  }
+
+  getImage(id: string): ImageRef | undefined {
+    return this.db.prepare('SELECT id,name,media_type AS mediaType,byte_length AS byteLength,width,height FROM images WHERE id = ?').get(id) as ImageRef | undefined;
+  }
+
+  imageBytes(): number {
+    return (this.db.prepare('SELECT COALESCE(SUM(byte_length),0) AS bytes FROM images').get() as { bytes: number }).bytes;
+  }
 
   onRepoChanged(listener: (change: RepoChange) => void): () => void {
     this.repoChangeListeners.add(listener);
@@ -428,14 +446,22 @@ export class Repositories {
     return row?.secret_value;
   }
 
-  createSession(input: { id: string; cwd: string; externalKey?: string; origin?: string; originRef?: string | null; provider?: string }): SessionRow {
+  createSession(input: { id: string; cwd: string; externalKey?: string; origin?: string; originRef?: string | null; provider?: string; speed?: SpeedPreference | null }): SessionRow {
     const ts = this.now();
     this.db
       .prepare(
-        "INSERT INTO sessions(id, cwd, status, sdk_session_id, external_key, origin, origin_ref, provider, created_at, updated_at) VALUES (?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO sessions(id, cwd, status, sdk_session_id, external_key, origin, origin_ref, provider, speed, created_at, updated_at) VALUES (?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(input.id, input.cwd, input.externalKey ?? null, input.origin ?? null, input.originRef ?? null, input.provider ?? "claude", ts, ts);
+      .run(input.id, input.cwd, input.externalKey ?? null, input.origin ?? null, input.originRef ?? null, input.provider ?? "claude", input.speed ?? null, ts, ts);
     return this.getSession(input.id)!;
+  }
+
+  setSessionSpeed(id: string, speed: SpeedPreference | null): void {
+    this.db.prepare("UPDATE sessions SET speed = ?, updated_at = ? WHERE id = ?").run(speed, this.now(), id);
+  }
+
+  setWorkerSpeed(id: string, speed: SpeedPreference | null): void {
+    this.db.prepare("UPDATE workers SET speed = ?, updated_at = ? WHERE id = ?").run(speed, this.now(), id);
   }
 
   getSession(id: string): SessionRow | undefined {
@@ -602,22 +628,26 @@ export class Repositories {
   // lastActivityTs = ms of the last 'message' event (created_at is ISO → MAX is latest, Date.parse → ms, matching the
   // renderer). costUsd = the last 'result' event's cumulative total (non-decreasing → MAX). Absent metric = no such event;
   // a worker with neither is omitted from the map.
-  workerActivityAndCost(): Map<string, { lastActivityTs?: number; costUsd?: number }> {
+  workerActivityAndCost(): Map<string, { lastActivityTs?: number; costUsd?: number; costAccuracy?: CostAccuracy }> {
     const rows = this.db
       .prepare(
         "SELECT worker_id AS id, " +
           "MAX(CASE WHEN type = 'message' THEN created_at END) AS last_msg, " +
-          "MAX(CASE WHEN type = 'result' THEN json_extract(payload_json, '$.costUsd') END) AS cost_usd " +
+          "MAX(CASE WHEN type = 'result' THEN json_extract(payload_json, '$.costUsd') END) AS cost_usd, " +
+          "MAX(CASE WHEN type = 'result' AND json_extract(payload_json, '$.costAccuracy') = 'unavailable' THEN 1 ELSE 0 END) AS unavailable, " +
+          "MAX(CASE WHEN type = 'result' AND json_extract(payload_json, '$.costAccuracy') = 'estimated' THEN 1 ELSE 0 END) AS estimated " +
           "FROM worker_events GROUP BY worker_id",
       )
-      .all() as Array<{ id: string; last_msg: string | null; cost_usd: number | null }>;
-    const out = new Map<string, { lastActivityTs?: number; costUsd?: number }>();
+      .all() as Array<{ id: string; last_msg: string | null; cost_usd: number | null; unavailable: number; estimated: number }>;
+    const out = new Map<string, { lastActivityTs?: number; costUsd?: number; costAccuracy?: CostAccuracy }>();
     for (const r of rows) {
-      const entry: { lastActivityTs?: number; costUsd?: number } = {};
+      const entry: { lastActivityTs?: number; costUsd?: number; costAccuracy?: CostAccuracy } = {};
       if (r.last_msg != null) {
         const ms = Date.parse(r.last_msg);
         if (!Number.isNaN(ms)) entry.lastActivityTs = ms;
       }
+      if (r.unavailable) entry.costAccuracy = "unavailable";
+      else if (r.estimated) entry.costAccuracy = "estimated";
       if (r.cost_usd != null) entry.costUsd = Number(r.cost_usd);
       if (entry.lastActivityTs !== undefined || entry.costUsd !== undefined) out.set(r.id, entry);
     }
@@ -636,15 +666,16 @@ export class Repositories {
     ticketUrl?: string;
     provider?: string;
     costBudgetUsd?: number;
+    speed?: SpeedPreference | null;
   }): WorkerRow {
     const ts = this.now();
     this.db
       .prepare(
         // Born 'provisioning': the row is inserted before `git worktree add` runs, so the UI can show the worker while a large
         // repo's worktree is still being created. The orchestrator reconciles it to running/idle once the agent boots.
-        "INSERT INTO workers(id, session_id, repo_path, label, status, worktree_path, branch, base, ticket_key, ticket_url, provider, cost_budget_usd, created_at, updated_at) VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO workers(id, session_id, repo_path, label, status, worktree_path, branch, base, ticket_key, ticket_url, provider, cost_budget_usd, speed, created_at, updated_at) VALUES (?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(input.id, input.sessionId, input.repoPath, input.label, input.worktreePath ?? null, input.branch ?? null, input.base ?? null, input.ticketKey ?? null, input.ticketUrl ?? null, input.provider ?? "claude", input.costBudgetUsd ?? null, ts, ts);
+      .run(input.id, input.sessionId, input.repoPath, input.label, input.worktreePath ?? null, input.branch ?? null, input.base ?? null, input.ticketKey ?? null, input.ticketUrl ?? null, input.provider ?? "claude", input.costBudgetUsd ?? null, input.speed ?? null, ts, ts);
     return this.getWorker(input.id)!;
   }
 
@@ -914,7 +945,7 @@ export class Repositories {
 
   private rowToAutomation(row: {
     id: string; name: string; enabled: number; trigger_type: string; trigger_config_json: string;
-    action_type: string; action_config_json: string; model: string | null; effort: string | null;
+    action_type: string; action_config_json: string; speed?: SpeedPreference | null; model: string | null; effort: string | null;
     permission_mode: string | null; max_turns: number | null; cost_budget_usd: number | null;
     next_run_at: string | null; last_run_at: string | null; last_status: string | null; last_error: string | null; created_at: string;
     provider: string;
@@ -924,7 +955,7 @@ export class Repositories {
         id: row.id, name: row.name, enabled: row.enabled === 1,
         trigger: { kind: row.trigger_type, ...JSON.parse(row.trigger_config_json) } as AutomationTrigger,
         action: { kind: row.action_type, ...JSON.parse(row.action_config_json) } as AutomationAction,
-        model: row.model, effort: row.effort,
+        model: row.model, effort: row.effort, speed: row.speed ?? null,
         permissionMode: row.permission_mode, maxTurns: row.max_turns, costBudgetUsd: row.cost_budget_usd,
         nextRunAt: row.next_run_at,
         lastRunAt: row.last_run_at, lastStatus: (row.last_status as Automation["lastStatus"]) ?? null,
@@ -940,7 +971,7 @@ export class Repositories {
         id: row.id, name: row.name, enabled: false, corrupt: true,
         trigger: { kind: row.trigger_type } as AutomationTrigger,
         action: { kind: row.action_type } as AutomationAction,
-        model: row.model, effort: row.effort,
+        model: row.model, effort: row.effort, speed: row.speed ?? null,
         permissionMode: row.permission_mode, maxTurns: row.max_turns, costBudgetUsd: row.cost_budget_usd,
         nextRunAt: null,
         lastRunAt: row.last_run_at, lastStatus: (row.last_status as Automation["lastStatus"]) ?? null,
@@ -953,9 +984,9 @@ export class Repositories {
   createAutomation(id: string, input: AutomationInput): Automation {
     const { kind: tk, ...tc } = input.trigger; const { kind: ak, ...ac } = input.action;
     this.db.prepare(
-      `INSERT INTO automations (id,name,enabled,trigger_type,trigger_config_json,action_type,action_config_json,model,effort,permission_mode,max_turns,cost_budget_usd,provider,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(id, input.name, input.enabled ? 1 : 0, tk, JSON.stringify(tc), ak, JSON.stringify(ac), input.model ?? null, input.effort ?? null, input.permissionMode ?? null, input.maxTurns ?? null, input.costBudgetUsd ?? null, input.provider ?? "claude", this.now());
+      `INSERT INTO automations (id,name,enabled,trigger_type,trigger_config_json,action_type,action_config_json,model,effort,permission_mode,max_turns,cost_budget_usd,provider,speed,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(id, input.name, input.enabled ? 1 : 0, tk, JSON.stringify(tc), ak, JSON.stringify(ac), input.model ?? null, input.effort ?? null, input.permissionMode ?? null, input.maxTurns ?? null, input.costBudgetUsd ?? null, input.provider ?? "claude", input.speed ?? null, this.now());
     return this.getAutomation(id)!;
   }
 
@@ -972,7 +1003,7 @@ export class Repositories {
     const trigger = patch.trigger ?? cur.trigger; const action = patch.action ?? cur.action;
     const { kind: tk, ...tc } = trigger; const { kind: ak, ...ac } = action;
     this.db.prepare(
-      `UPDATE automations SET name=?, enabled=?, trigger_type=?, trigger_config_json=?, action_type=?, action_config_json=?, model=?, effort=?, permission_mode=?, max_turns=?, cost_budget_usd=?, provider=? WHERE id=?`,
+      `UPDATE automations SET name=?, enabled=?, trigger_type=?, trigger_config_json=?, action_type=?, action_config_json=?, model=?, effort=?, permission_mode=?, max_turns=?, cost_budget_usd=?, provider=?, speed=? WHERE id=?`,
     ).run(
       patch.name ?? cur.name,
       (patch.enabled === undefined ? cur.enabled : patch.enabled) ? 1 : 0,
@@ -983,6 +1014,7 @@ export class Repositories {
       patch.maxTurns === undefined ? cur.maxTurns : patch.maxTurns,
       patch.costBudgetUsd === undefined ? cur.costBudgetUsd : patch.costBudgetUsd,
       patch.provider === undefined ? cur.provider : patch.provider,
+      patch.speed === undefined ? cur.speed ?? null : patch.speed,
       id,
     );
     return this.getAutomation(id);

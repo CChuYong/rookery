@@ -17,7 +17,9 @@ export function workerEventToCoreEvent(data: WorkerEventData, sessionId: string)
     case "result":
       return {
         type: "master.result", sessionId,
-        subtype: data.subtype, costUsd: data.costUsd, numTurns: data.numTurns,
+        subtype: data.subtype, costUsd: data.costUsd,
+        ...(data.costAccuracy ? { costAccuracy: data.costAccuracy } : {}),
+        ...(data.requestedSpeed ? { requestedSpeed: data.requestedSpeed } : {}), numTurns: data.numTurns,
         durationMs: data.durationMs ?? 0, contextTokens: data.contextTokens ?? 0, contextWindow: data.contextWindow ?? 0,
       };
     case "error":

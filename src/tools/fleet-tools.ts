@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "../core/speed.js";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -52,7 +53,7 @@ export async function spawnWorkerImpl(
   fleet: FleetOrchestrator,
   repos: Repositories,
   homeSessionId: string,
-  args: { repo: string; task: string; base?: string; model?: string; effort?: string; provider?: "claude" | "codex"; notify?: boolean; costBudgetUsd?: number },
+  args: { repo: string; task: string; base?: string; model?: string; speed?: SpeedPreference; effort?: string; provider?: "claude" | "codex"; notify?: boolean; costBudgetUsd?: number },
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   const repo = repos.getRepoByName(args.repo);
   if (!repo) return errorText(`unknown repo '${args.repo}'. Register it first or call list_repos.`);
@@ -62,7 +63,7 @@ export async function spawnWorkerImpl(
   }
   try {
     // model/effort are only set when explicitly requested — otherwise undefined → fleet.spawn launches with the global defaults.
-    const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, effort: args.effort, provider: args.provider, notify: args.notify, costBudgetUsd: args.costBudgetUsd });
+    const { id } = await fleet.spawn({ homeSessionId, repoPath: repo.path, label: repo.name, task: args.task, base, model: args.model, speed: args.speed, effort: args.effort, provider: args.provider, notify: args.notify, costBudgetUsd: args.costBudgetUsd });
     return text(`Spawned ${id} in '${repo.name}' (worktree branch rookery/${id}).${args.notify ? " You'll be notified when it finishes." : ""}`);
   } catch (err) {
     return errorText(`spawn failed: ${String(err)}`);
@@ -87,6 +88,7 @@ export function fleetToolDefs(
       task: z.string(),
       base: z.string().optional(),
       model: z.string().optional().describe("Override the worker model ONLY when the user explicitly requested a specific model; otherwise omit to use the default."),
+      speed: z.enum(["standard", "fast"]).optional().describe("Speed preference for the next turn; omit to use configured defaults."),
       effort: z.string().optional().describe("Override reasoning effort (low|medium|high|xhigh|max; codex workers also accept ultra) ONLY when the user explicitly requested it; otherwise omit to use the default."),
       provider: z.enum(["claude", "codex"]).optional().describe("Agent backend for this worker (default claude). codex = OpenAI Codex via app-server."),
       notify: z.boolean().optional().describe("When true, you are notified once this worker finishes this dispatch (goes idle) or fails — your turn can end and you'll be woken with the result. One-shot: re-arm with send_worker notify:true."),
@@ -99,10 +101,10 @@ export function fleetToolDefs(
     "send_worker",
     "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved). Use this to steer, correct, ask it to commit/push and open its own PR, or to continue after it has gone idle. " +
       "Does NOT interrupt: if the worker is mid-turn, the instruction is queued and runs at the next turn boundary (it does not abort the work in progress). To make it drop what it is doing and act on your new instruction immediately, call interrupt_worker first, then send_worker.",
-    { id: z.string(), text: z.string().describe("The instruction to send."), notify: z.boolean().optional().describe("When true, you are notified once the worker finishes this instruction (idle) or fails. One-shot.") },
+    { speed: z.enum(["standard", "fast"]).optional(), id: z.string(), text: z.string().describe("The instruction to send."), notify: z.boolean().optional().describe("When true, you are notified once the worker finishes this instruction (idle) or fails. One-shot.") },
     async (args) => {
       try {
-        fleet.send(args.id, args.text);
+        fleet.send(args.id, args.text, undefined, args.speed);
         if (args.notify) fleet.armNotify(args.id);
         return text(`Sent to ${args.id}.${args.notify ? " You'll be notified when it finishes." : ""}`);
       } catch (err) {

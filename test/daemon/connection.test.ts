@@ -421,9 +421,13 @@ describe("Connection", () => {
     const order: string[] = [];
     const socket: ClientSocket = { send: (data) => order.push(`reply:${(JSON.parse(data) as { type: string }).type}`) };
     let n = 0;
+    const send = vi.fn((id: string, text: string) => { order.push(`send:${id}:${text}`); });
     const sides = {
-      create: vi.fn(async () => ({ id: `side-${++n}` })),
-      send: vi.fn((id: string, text: string) => { order.push(`send:${id}:${text}`); }),
+      prepareStart: vi.fn(async (input: { text: string }) => {
+        const id = `side-${++n}`;
+        return { id, start: () => send(id, input.text) };
+      }),
+      send,
       stop: vi.fn(async () => {}),
       close: vi.fn(async () => {}),
     };
@@ -431,7 +435,7 @@ describe("Connection", () => {
       undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, sides);
 
     await conn.handleRaw(JSON.stringify({ type: "side.start", sourceKind: "worker", sourceId: "w1", text: "why", model: "m2", effort: "high", reqId: "q1" }));
-    expect(sides.create).toHaveBeenCalledWith({ sourceKind: "worker", sourceId: "w1", model: "m2", effort: "high" });
+    expect(sides.prepareStart).toHaveBeenCalledWith({ sourceKind: "worker", sourceId: "w1", model: "m2", effort: "high", text: "why", images: [] });
     expect(order.slice(0, 2)).toEqual(["reply:side.started", "send:side-1:why"]);
 
     await conn.handleRaw(JSON.stringify({ type: "side.send", sideId: "side-1", text: "more", reqId: "q2" }));
@@ -500,6 +504,7 @@ describe("Connection", () => {
     await conn.handleRaw(JSON.stringify({ type: "session.create", cwd: "/work" }));
     sent.length = 0;
     await conn.handleRaw(JSON.stringify({ type: "session.send", sessionId: "s0", text: "hello" }));
+    await vi.waitFor(() => expect(parsed(sent).some(m => m.type === "event" && (m.event as {type:string}).type === "master.result")).toBe(true));
     const types = parsed(sent)
       .filter((m) => m.type === "event")
       .map((m) => (m.event as { type: string }).type);
@@ -1555,5 +1560,45 @@ describe("Connection automation.resolveSlackRefs", () => {
     await conn.handleRaw(JSON.stringify({ type: "automation.resolveSlackRefs", reqId: "q4" }));
     expect(calls).toEqual([{ channels: [], users: [] }]);
     expect(sent.at(-1)).toMatchObject({ type: "automation.resolveSlackRefs.result", reqId: "q4" });
+  });
+});
+
+it("persists wire speed intent and replays observations with accounting quality", async () => {
+  const h = setup();
+  await h.conn.handleRaw(JSON.stringify({type: "session.create", cwd: "/x", speed: "fast"}));
+  const created = parsed(h.sent).find(m => m.type === "session.created")!;
+  const sessionId = created.sessionId as string;
+  expect(h.repos.getSession(sessionId)?.speed).toBe("fast");
+  await h.conn.handleRaw(JSON.stringify({type: "session.send", sessionId, text: "go", speed: "standard", reqId: "send"}));
+  expect(h.repos.getSession(sessionId)?.speed).toBe("standard");
+  await vi.waitFor(() => expect(h.repos.listSessionEvents(sessionId).some(e=>e.type === "master.result")).toBe(true));
+  expect(h.repos.listSessionEvents(sessionId).map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({type: "master.speed", observation: {requested: "standard", state: "unknown"}}));
+  expect(h.repos.listSessionEvents(sessionId).map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({type: "master.result", requestedSpeed: "standard", costAccuracy: "reported"}));
+  h.repos.createWorker({id: "w-speed", sessionId, repoPath: "/x", label: "w"});
+  await h.conn.handleRaw(JSON.stringify({type: "worker.setSpeed", id: "w-speed", speed: "fast", reqId: "speed"}));
+  expect(h.repos.getWorker("w-speed")?.speed).toBe("fast");
+  expect(parsed(h.sent)).toContainEqual({type: "fleet.ack", action: "setSpeed", id: "w-speed", reqId: "speed"});
+  await h.conn.handleRaw(JSON.stringify({type: "session.list", reqId: "list"}));
+  expect(parsed(h.sent).find(m => m.type === "session.list.result")).toMatchObject({sessions: [expect.objectContaining({id: sessionId, speed: "standard"})]});
+});
+
+describe("session.setSpeed", () => {
+  it("persists intent and acknowledges without executing an empty turn", async () => {
+    const { conn, sent, repos, sm } = setup();
+    const session = sm.create("/tmp");
+    const run = vi.spyOn(session.master, "runTurn");
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: session.id, speed: "fast", reqId: "speed-1" }));
+    expect(repos.getSession(session.id)?.speed).toBe("fast");
+    expect(run).not.toHaveBeenCalled();
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual({ type: "fleet.ack", action: "setSpeed", id: session.id, reqId: "speed-1" });
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: session.id, speed: null, reqId: "speed-2" }));
+    expect(repos.getSession(session.id)?.speed).toBeNull();
+  });
+  it("rejects unknown sessions and invalid preferences", async () => {
+    const { conn, sent } = setup();
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: "missing", speed: "fast", reqId: "speed-3" }));
+    expect(sent.map((s) => JSON.parse(s))).toContainEqual(expect.objectContaining({ type: "error", reqId: "speed-3" }));
+    await conn.handleRaw(JSON.stringify({ type: "session.setSpeed", sessionId: "missing", speed: "turbo", reqId: "speed-4" }));
+    expect(sent.map((s) => JSON.parse(s))).not.toContainEqual(expect.objectContaining({ type: "fleet.ack", reqId: "speed-4" }));
   });
 });

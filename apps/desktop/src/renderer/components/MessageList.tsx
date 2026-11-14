@@ -1,3 +1,5 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
+import { MessageImages } from "./MessageImages.js";
 import { memo, useEffect, useRef, useState, cloneElement, type ReactElement } from "react";
 import { MessageSquareDashed, ArrowDown } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
@@ -21,6 +23,9 @@ function MessageListImpl({
   loaded,
   loadFailed,
   onRetryHistory,
+  onRetryInput,
+  onRestoreInput,
+  onRecoverInput,
   onOpenFile,
   onSelectWorker,
   onRespond,
@@ -30,6 +35,9 @@ function MessageListImpl({
   loaded?: boolean; // the session.history/worker.history fetch for this id has succeeded at least once (default true — keeps direct/test callers on the old immediate-empty behavior)
   loadFailed?: boolean; // that fetch was rejected and hasn't succeeded since → error+retry instead of a permanently blank pane
   onRetryHistory?: () => void; // re-fires the history fetch that failed
+  onRestoreInput?: (text:string,images?:ImageRef[]) => void;
+  onRecoverInput?: () => void;
+  onRetryInput?: (text: string, images?: ImageRef[]) => void | Promise<void>;
   onOpenFile?: (path: string) => void;
   onSelectWorker?: (id: string) => void;
   onRespond?: (requestId: string, res: InteractionAnswer) => void;
@@ -107,13 +115,16 @@ function MessageListImpl({
             className="max-w-[80%] self-end [overflow-wrap:anywhere] rounded-md bg-raised px-3 py-2 text-prose leading-[1.6] text-fg"
           >
             {/* markdown on the bubble (remarkBreaks keeps casual newlines; rehypeMentions keeps @file chips) */}
-            <UserMarkdown content={it.content} />
+            <MessageImages images={it.images} />
+            {it.content && <UserMarkdown content={it.content} />}
           </div>,
         );
       } else {
         // agent message: full width without a bubble (flowing like a document). copy button below on hover.
         rows.push(<AssistantMessage key={i} content={it.content} streaming={it.streaming} ts={it.ts} />);
       }
+    } else if (it.kind === "failedInput") {
+      rows.push(<FailedInput key={i} item={it} onRetry={onRetryInput} onRestore={onRestoreInput} onRecover={onRecoverInput} />);
     } else if (it.kind === "thinking") {
       rows.push(<ThinkingBlock key={i} text={it.text} streaming={it.streaming} />);
     } else if (it.kind === "notice") {
@@ -214,3 +225,63 @@ function MessageListImpl({
 
 export const MessageList = memo(MessageListImpl);
 MessageList.displayName = "MessageList";
+
+function FailedInput({
+  item,
+  onRetry,
+  onRestore,
+  onRecover,
+}: {
+  onRestore?: (text: string, images?: ImageRef[]) => void;
+  onRecover?: () => void;
+  item: Extract<LogItem, { kind: "failedInput" }>;
+  onRetry?: (text: string, images?: ImageRef[]) => void | Promise<void>;
+}): JSX.Element {
+  const t = useT();
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  return (
+    <div className="max-w-[80%] self-end rounded-md border border-line bg-raised px-3 py-2 text-ui">
+      <MessageImages images={item.images} />
+      {item.text && <UserMarkdown content={item.text} />}
+      <div className="text-meta text-fail">{t("images.sendFailed")}</div>
+      {onRestore && (
+        <div className="flex gap-3">
+          <button
+            type="button"
+            className="text-meta text-fg-dim hover:underline"
+            onClick={() => onRestore(item.text, item.images)}
+          >
+            {t("images.restoreDraft")}
+          </button>
+          {onRecover && (
+            <button
+              type="button"
+              className="text-meta text-fg-dim hover:underline"
+              onClick={onRecover}
+            >
+              {t("images.recoverWorker")}
+            </button>
+          )}
+        </div>
+      )}
+      {onRetry && (
+        <button
+          type="button"
+          className="mt-1 text-meta text-fg-dim hover:underline disabled:text-faint"
+          disabled={sending || sent}
+          onClick={() => {
+            setSending(true);
+            Promise.resolve()
+              .then(() => onRetry(item.text, item.images))
+              .then(() => setSent(true))
+              .catch(() => {})
+              .finally(() => setSending(false));
+          }}
+        >
+          {t(sent ? "images.retried" : "images.retrySend")}
+        </button>
+      )}
+    </div>
+  );
+}

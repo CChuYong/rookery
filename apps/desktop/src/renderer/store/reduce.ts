@@ -1,17 +1,22 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
+import type { SpeedObservation, SpeedPreference, CostAccuracy } from "@daemon/core/speed.js";
 import type { CoreEvent, WorkerEventData, InteractionQuestion } from "@daemon/core/events.js";
 import type { WorkerRow } from "@daemon/protocol/messages.js";
 import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot, WorkflowRunSummary } from "@daemon/core/workflow-activity.js";
 import { contextPct } from "../format.js";
 
 export type LogItem =
-  | { kind: "message"; role: string; content: string; streaming?: boolean; ts?: number } // ts: arrival epoch ms (for hover relative time)
+  | {kind: "failedInput"; text:string; images?:ImageRef[]; clientMsgId?:string; error:string}
+  | { kind: "speedReset" }
+  | { kind: "speed"; observation: SpeedObservation; historical?: boolean }
+  | { kind: "message"; role: string; content: string; images?: ImageRef[]; clientMsgId?: string; streaming?: boolean; ts?: number } // ts: arrival epoch ms (for hover relative time)
   | { kind: "thinking"; text: string; streaming?: boolean } // thinking summary (collapsible, display:summarized)
   | { kind: "tool"; toolId: string; name: string; status: "in_progress" | "background" | "complete"; ok?: boolean; input?: string; result?: string; elapsedSec?: number; workflow?: WorkflowRunSummary }
   | { kind: "worker"; workerId: string; status: string }
   | { kind: "notice"; text: string; code?: string; params?: Record<string, string | number> } // informational system push (compaction/retry/fallback)
   // Master canUseTool (approve/AskUserQuestion) inline card. When resolved, shows a one-line summary instead of buttons.
   | { kind: "interaction"; requestId: string; mode: "approve" | "ask"; toolName?: string; inputText?: string; questions?: InteractionQuestion[]; resolved?: boolean; summary?: string; expired?: boolean }
-  | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; terminalReason?: string };
+  | { kind: "metrics"; contextPct: number; tokens: number; turns: number; durationMs: number; cost: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; terminalReason?: string };
 
 // The worker row's single source of truth is the protocol WorkerRow. archived always arrives on fleet.list but is omitted when building worker.* events, so it's optional.
 // permissionMode is required here (the worker composer's selector reads it) — defaulted to "bypassPermissions" wherever the source (event/list) doesn't carry it.
@@ -31,9 +36,9 @@ export interface AppState {
   sideConversations: Record<string, { sourceKind: "master" | "worker"; sourceId: string; status: "opening" | "running" | "idle" | "closed"; items: LogItem[] }>;
   // User messages not yet acknowledged (echoed) by the daemon — removed when reconciled via master.message by clientMsgId.
   // Always empty (dormant) until the App send path in Task 2 calls pushPending.
-  pendingBySession: Record<string, { clientMsgId: string; text: string; epoch?: number }[]>;
+  pendingBySession: Record<string, { clientMsgId: string; text: string; images?: ImageRef[]; epoch?: number }[]>;
   // "Pending" messages sent while the worker is busy (not yet committed at the boundary) — keyed by workerId. Reconciled via the clientMsgId of the worker.event echo.
-  pendingByWorker: Record<string, { clientMsgId: string; text: string }[]>;
+  pendingByWorker: Record<string, { clientMsgId: string; text: string; images?: ImageRef[] }[]>;
   workflows: Record<string, Record<string, WorkflowRunSnapshot>>;
   workflowAgentLogs: Record<string, LogItem[]>;
   workflowAgentHistoryLoading: Record<string, boolean>;
@@ -62,8 +67,8 @@ function appendLog(state: AppState, sid: string, item: LogItem): LogItem[] {
 }
 
 // If the daemon re-echoes a user message we already added optimistically, it would duplicate, so we skip the echo of the same user message.
-function isEchoUser(log: LogItem[] | undefined, role: string, content: string): boolean {
-  if (role !== "user" || !log || log.length === 0) return false;
+function isEchoUser(log: LogItem[] | undefined, role: string, content: string, images?: ImageRef[]): boolean {
+  if (images?.length || role !== "user" || !log || log.length === 0) return false;
   const last = log[log.length - 1];
   return last.kind === "message" && last.role === "user" && last.content === content;
 }
@@ -100,7 +105,7 @@ function seedCore(prev: LogItem[] | undefined, sid: string, events: Array<{ payl
   // Force each event's sessionId to sid: a forked session's copied events carry the ORIGINAL session's id, which would
   // otherwise route them (via reduceEvent) into the wrong session's log → the fork would render empty. No-op for normal sessions.
   for (const ev of events) st = reduceEvent(st, { ...(ev.payload as CoreEvent), sessionId: sid } as CoreEvent, ev.createdAt ? Date.parse(ev.createdAt) : undefined);
-  const committed = st.logsBySession[sid] ?? [];
+  const committed = (st.logsBySession[sid] ?? []).map((item) => item.kind === "speed" ? { ...item, historical: true } : item);
   if (!prev || prev.length === 0) return committed; // restart, etc. → the replay is everything
   if (events.length === 0) return prev; // nothing persisted → keep local (uncommitted)
   // Anchor by committed's message count → preserve the tail (uncommitted) after that many committed messages in prev.
@@ -167,7 +172,8 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
         return base.slice(0, -1).concat({ kind: "message", role: "assistant", content: d.content, ts: now });
       }
       // Empty messages (old data / empty SDK turns) are not turned into bubbles.
-      return d.content.trim() ? [...base, { kind: "message", role: d.role, content: d.content, ts: now }] : base;
+      if (d.clientMsgId && base.some(item => item.kind === "message" && item.clientMsgId === d.clientMsgId)) return base;
+      return d.content.trim() || d.images?.length ? [...base, { kind: "message", role: d.role, content: d.content, ...(d.images?.length ? {images:d.images} : {}), ...(d.clientMsgId ? {clientMsgId:d.clientMsgId} : {}), ts: now }] : base;
     }
     case "tool_use":
       return [...log, { kind: "tool", toolId: d.id, name: d.name, status: "in_progress", input: d.input }];
@@ -176,10 +182,12 @@ export function applySubEvent(log: LogItem[], d: WorkerEventData, now?: number):
     case "tool_progress":
       // Update only the elapsed seconds on the in-progress tool card (don't touch completed ones).
       return log.map((i) => (i.kind === "tool" && i.toolId === d.id && i.status === "in_progress" ? { ...i, elapsedSec: d.elapsedSec } : i));
+    case "speed":
+      return [...log, { kind: "speed", observation: d.observation }];
     case "result":
-      return [...log, { kind: "metrics", contextPct: contextPct(d.contextTokens ?? 0, d.contextWindow ?? 0), tokens: d.contextTokens ?? 0, turns: d.numTurns ?? 0, durationMs: d.durationMs ?? 0, cost: d.costUsd ?? 0, ...(d.terminalReason ? { terminalReason: d.terminalReason } : {}) }];
+      return [...log, { kind: "metrics", contextPct: contextPct(d.contextTokens ?? 0, d.contextWindow ?? 0), tokens: d.contextTokens ?? 0, turns: d.numTurns ?? 0, durationMs: d.durationMs ?? 0, cost: d.costUsd ?? 0, costAccuracy: d.costAccuracy, requestedSpeed: d.requestedSpeed, ...(d.terminalReason ? { terminalReason: d.terminalReason } : {}) }];
     case "error":
-      return [...log, { kind: "message", role: "assistant", content: `⚠ ${d.message}` }];
+      return [...log, d.retryInput ? {kind:"failedInput",text:d.retryInput.text,images:d.retryInput.images,clientMsgId:d.clientMsgId,error:d.message} : { kind: "message", role: "assistant", content: `⚠ ${d.message}` }];
     case "notice":
       return [...finalizeStreamingMsg(log), { kind: "notice", text: d.text }];
     default:
@@ -293,15 +301,16 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
         : state.pendingBySession;
       // If clientMsgId is present, it is the authoritative dedup (pending filter). Content matching (isEchoUser) is a fallback only for echoes without a clientMsgId
       // — so we don't swallow a legitimate message that sent the same content twice (A3).
-      if (!e.clientMsgId && isEchoUser(state.logsBySession[e.sessionId], e.role, e.content)) return { ...state, pendingBySession };
+      if (e.clientMsgId && (state.logsBySession[e.sessionId] ?? []).some(item => item.kind === "message" && item.clientMsgId === e.clientMsgId)) return { ...state, pendingBySession };
+      if (!e.clientMsgId && isEchoUser(state.logsBySession[e.sessionId], e.role, e.content, e.images)) return { ...state, pendingBySession };
       const log = finalizeThinking(state.logsBySession[e.sessionId] ?? []);
       const last = log[log.length - 1];
       // If there's a streaming assistant bubble, finalize it (replace) with the final content; otherwise a new bubble.
       if (e.role === "assistant" && last && last.kind === "message" && last.role === "assistant" && last.streaming) {
-        const next = log.slice(0, -1).concat({ kind: "message", role: "assistant", content: e.content, ts: now });
+        const next = log.slice(0, -1).concat({ kind: "message", role: "assistant", content: e.content, ...(e.images?.length ? { images: e.images } : {}), ...(e.clientMsgId ? {clientMsgId:e.clientMsgId} : {}), ts: now });
         return { ...state, pendingBySession, logsBySession: { ...state.logsBySession, [e.sessionId]: next } };
       }
-      return { ...state, pendingBySession, logsBySession: { ...state.logsBySession, [e.sessionId]: [...log, { kind: "message", role: e.role, content: e.content, ts: now }] } };
+      return { ...state, pendingBySession, logsBySession: { ...state.logsBySession, [e.sessionId]: [...log, { kind: "message", role: e.role, content: e.content, ...(e.images?.length ? { images: e.images } : {}), ...(e.clientMsgId ? {clientMsgId:e.clientMsgId} : {}), ts: now }] } };
     }
     case "master.tool": {
       const log = state.logsBySession[e.sessionId] ?? [];
@@ -316,9 +325,11 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       const next = log.map((i) => (i.kind === "tool" && i.toolId === e.toolId ? { ...i, status: "complete" as const, ok: e.ok, result: e.result } : i));
       return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: next } };
     }
+    case "master.speed":
+      return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "speed", observation: e.observation }) } };
     case "master.result": {
       const log = (state.logsBySession[e.sessionId] ?? []).map((i) => (i.kind === "tool" && i.status === "in_progress" ? { ...i, status: "complete" as const } : i));
-      const metrics: LogItem = { kind: "metrics", contextPct: contextPct(e.contextTokens, e.contextWindow), tokens: e.contextTokens, turns: e.numTurns, durationMs: e.durationMs, cost: e.costUsd };
+      const metrics: LogItem = { kind: "metrics", contextPct: contextPct(e.contextTokens, e.contextWindow), tokens: e.contextTokens, turns: e.numTurns, durationMs: e.durationMs, cost: e.costUsd, costAccuracy: e.costAccuracy, requestedSpeed: e.requestedSpeed };
       return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: [...log, metrics] } };
     }
     case "master.notice": {
@@ -349,7 +360,7 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       const status = e.status ?? "running";
       // the worker.spawned event doesn't carry permissionMode → default it; a later fleet.list (setFleet) reconciles the real value.
       // provider carried on the event so a codex worker shows its badge live; a later fleet.list (setFleet) reconciles the authoritative value.
-      const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, provider: e.provider, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
+      const row: FleetRow = { id: e.workerId, label: e.label, repoPath: e.repoPath, status, branch: e.branch ?? null, model: null, provider: e.provider, speed: e.speed, permissionMode: "bypassPermissions", ticketKey: e.ticketKey ?? null, ticketUrl: e.ticketUrl ?? null };
       return { ...state, fleet: { ...state.fleet, [e.workerId]: row }, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "worker", workerId: e.workerId, status }) } };
     }
     case "worker.deletion": {
@@ -402,13 +413,13 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
       return { ...state, fleet: { ...state.fleet, [e.workerId]: { ...prev, label: e.label } } };
     }
     case "worker.event": {
-      const d = e.data;
+      const d = e.data.kind === "message" && e.clientMsgId ? {...e.data, clientMsgId:e.clientMsgId} : e.data;
       // When a user echo arrives with a clientMsgId (= turn-boundary flush), remove the matching pending bubble (transition to committed).
-      const pendingByWorker = d.kind === "message" && d.role === "user" && e.clientMsgId
-        ? { ...state.pendingByWorker, [e.workerId]: (state.pendingByWorker[e.workerId] ?? []).filter((p) => p.clientMsgId !== e.clientMsgId) }
+      const pendingByWorker = ((d.kind === "message" && d.role === "user") || d.kind === "error") && d.clientMsgId
+        ? { ...state.pendingByWorker, [e.workerId]: (state.pendingByWorker[e.workerId] ?? []).filter((p) => p.clientMsgId !== d.clientMsgId) }
         : state.pendingByWorker;
       // Same as master.message: clientMsgId is the authoritative dedup. Content matching is a fallback only for echoes without a clientMsgId (A3).
-      if (d.kind === "message" && !e.clientMsgId && isEchoUser(state.workerLogs[e.workerId], d.role, d.content)) return { ...state, pendingByWorker };
+      if (d.kind === "message" && !d.clientMsgId && isEchoUser(state.workerLogs[e.workerId], d.role, d.content, d.images)) return { ...state, pendingByWorker };
       const log = applySubEvent(state.workerLogs[e.workerId] ?? [], d, now);
       return { ...state, pendingByWorker, workerLogs: { ...state.workerLogs, [e.workerId]: syncWorkflowTools(log, state.workflows[e.workerId]) } };
     }
@@ -440,7 +451,9 @@ export function reduceEvent(state: AppState, e: CoreEvent, now?: number): AppSta
     }
     case "error":
       // Surface the session error in the conversation (previously not shown) + clear the typing indicator.
-      return { ...state, logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, { kind: "message", role: "assistant", content: `⚠ ${e.message}` }) } };
+      return { ...state,
+        pendingBySession: e.clientMsgId ? {...state.pendingBySession,[e.sessionId]:(state.pendingBySession[e.sessionId] ?? []).filter(p=>p.clientMsgId!==e.clientMsgId)} : state.pendingBySession,
+        logsBySession: { ...state.logsBySession, [e.sessionId]: appendLog(state, e.sessionId, e.retryInput ? {kind:"failedInput",text:e.retryInput.text,images:e.retryInput.images,clientMsgId:e.clientMsgId,error:e.message} : { kind: "message", role: "assistant", content: `⚠ ${e.message}` }) } };
     default:
       return state;
   }

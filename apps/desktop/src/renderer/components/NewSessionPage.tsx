@@ -1,3 +1,7 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
+import type { SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
+import { defaultSpeed } from "../lib/speed.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder, X, AlertTriangle, FolderGit2 } from "lucide-react";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
@@ -7,7 +11,7 @@ import type { BrowseResult } from "../types/rookery.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
-import { useDraftStore } from "../store/drafts.js";
+import { useDraftStore, EMPTY_DRAFT } from "../store/drafts.js";
 import { useStore } from "../store/store.js";
 import { Select, Input } from "../ui/input.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
@@ -28,7 +32,7 @@ export function NewSessionPage(p: {
   defaultModel: string;
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, settings.codexMasterModel)
-  onStart: (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string }) => void;
+  onStart: (opts: { cwd?: string; prompt?: string; images?: ImageRef[]; model?: string; effort: string; provider?: string; speed?: SpeedPreference | null }) => void | Promise<void>;
   onClose?: () => void; // if absent, hide the close button (when shown as the default screen with no session)
   browseDir?: (dir: string, cwd?: string) => Promise<BrowseResult>; // @ file autocomplete (relative to the selected cwd)
   loadCommands?: (cwd?: string) => Promise<SlashCommand[]>; // / skill candidates (relative to the selected cwd)
@@ -40,6 +44,8 @@ export function NewSessionPage(p: {
   onRegisterRepo?: () => void; // opens RepoModal (audit #58) — shown in the empty-repo state in place of the (hidden) repo picker
 }): JSX.Element {
   const t = useT();
+  const [speed, setSpeed] = useState<SpeedPreference | null>(null);
+  const settings = useStore((s) => s.settings);
   const [cwd, setCwd] = useState("");
   const [model, setModel] = useState(p.defaultModel);
   const [effort, setEffort] = useState(p.defaultEffort);
@@ -55,8 +61,8 @@ export function NewSessionPage(p: {
 
   // Preserve the typed prompt across page close/reopen and session-create failures — same draft-store wiring as ConversationPane,
   // but with a fixed key since this page isn't per-session. Read non-reactively (only at mount); this page remounts (key={pageId}) on reopen.
-  const initialText = useMemo(() => useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY] ?? "", []);
-  const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, text), []);
+  const initialDraft = useMemo(() => useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY] ?? EMPTY_DRAFT, []);
+  const onDraftChange = useCallback((text: string, images?: ImageRef[]) => useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, text, images), []);
 
   // When the selected repo/folder (cwd) changes, reload that cwd's skills (live). If none selected, the daemon's default cwd.
   // Codex has no slash-command catalog, so skip the probe entirely for a codex new session (finding [6]) — otherwise the
@@ -68,11 +74,13 @@ export function NewSessionPage(p: {
     return () => { live = false; };
   }, [cwd, isCodex]);
 
-  const start = (prompt: string): void =>
+  const start = (prompt: string, images?: ImageRef[]): void | Promise<void> =>
     p.onStart({
       cwd: cwd.trim() || undefined,
       prompt: prompt.trim() || undefined,
+      ...(images?.length ? {images} : {}),
       model: isCodex ? codexModel.trim() || undefined : model,
+      ...(speed === null ? {} : { speed }),
       effort: currentEffort,
       provider: isCodex ? "codex" : undefined, // wire-minimal: absent means claude
     });
@@ -192,15 +200,18 @@ export function NewSessionPage(p: {
             allowEmpty // start with it empty for an empty session
             sendLabel={t("newSessionPage.sendLabel")}
             placeholder={t("newSessionPage.placeholder")}
-            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort }}
+            // Speed sits after model/effort on every surface (same order as the conversation composer): for Claude the
+            // composer renders it from controls; Codex brings its own model/effort selects in leftSlot, so it follows them.
+            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort, speed, defaultSpeed: defaultSpeed(settings, provider, "master"), provider, onSpeed: setSpeed }}
             commands={commands}
             browseDir={browseDir}
             onAttachFile={p.onAttachFile}
             onDropFiles={p.onDropFiles}
             onEscape={p.onClose}
-            leftSlot={<>{folderPicker}{providerSelector}{codexControls}</>}
+            leftSlot={<>{folderPicker}{providerSelector}{codexControls}{isCodex && <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "master")} provider={provider} model={effortModel} onChange={setSpeed} />}</>}
             className="px-3 py-3"
-            initialText={initialText}
+            initialText={initialDraft.text}
+            initialImages={initialDraft.images}
             onDraftChange={onDraftChange}
           />
 

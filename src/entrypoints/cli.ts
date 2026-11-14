@@ -13,6 +13,12 @@ export interface WebSocketLike {
   close(): void;
 }
 
+function costText(cost: unknown, accuracy: unknown): string {
+  if (accuracy === "unavailable") return t(cliLocale, "cli.costUnavailable");
+  const value = `$${String(cost)}`;
+  return accuracy === "estimated" ? t(cliLocale, "cli.costEstimated", { cost: value }) : value;
+}
+
 export function renderServerMessage(raw: string): string | null {
   let msg: Record<string, unknown>;
   try {
@@ -40,7 +46,7 @@ export function renderServerMessage(raw: string): string | null {
         case "master.message":
           return `\n${String(event.content)}`;
         case "master.result":
-          return `[turn done] $${String(event.costUsd)} · ${String(event.numTurns)} turns`;
+          return `[turn done] ${costText(event.costUsd, event.costAccuracy)} · ${String(event.numTurns)} turns`;
         case "master.system":
           return null;
         case "worker.spawned":
@@ -58,7 +64,7 @@ export function renderServerMessage(raw: string): string | null {
               body = data.content;
               break;
             case "result":
-              body = `${data.subtype} $${data.costUsd} · ${data.numTurns} turns`;
+              body = `${data.subtype} ${costText(data.costUsd, data.costAccuracy)} · ${data.numTurns} turns`;
               break;
             case "error":
               body = `error: ${data.message}`;

@@ -28,18 +28,19 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 
 | `type` | Key fields | Emitted when | Persisted | Notes |
 |---|---|---|---|---|
-| `master.message` | `role`, `content`, `clientMsgId?` | user echo at turn start; each assistant text block | yes (`session_events`); assistant text also `addMessage`→`messages` | `clientMsgId` is live-only correlation for the desktop pending bubble; absent from persisted payload |
+| `master.message` | `role`, `content`, `images?`, `clientMsgId?` | user echo at turn start; each assistant text block | yes (`session_events`); assistant text also `addMessage`→`messages` | `clientMsgId` is persisted correlation for desktop pending/history reconciliation |
+| `master.speed` | `observation: {requested,state,reason?}` | provider speed observation | yes | `state` is `unknown\|standard\|fast\|cooldown`; selected preference never substitutes for a report |
 | `master.message.delta` | `delta` | each `text_delta` partial message chunk | no (live streaming) | token-level stream; coalesced into `master.message` on completion |
 | `master.thinking.delta` | `delta` | each `thinking_delta` chunk | no (live) | thinking-summary stream (`display:summarized`) |
 | `master.thinking` | `text` | flushed at message/tool/turn boundary (`flushThinking`) | yes | coalesced single entry for restore (deltas are live-only) |
 | `master.system` | `text` | uncategorized SDK `system` message | no (live emit only) | from top-level `text`/`subtype` |
 | `master.notice` | `text`, `code?`, `params?` | compaction/retry/fallback push; turn-cap; interrupt | yes | `code`+`params` let clients re-localize (desktop i18n); `text` is the `DEFAULT_LOCALE` pre-render |
 | `commands.changed` | `scopeId`, `commands` | SDK `commands_changed` push | no | refresh `/` candidates; `scopeId` = sessionId (master) or worker id (worker) |
-| `master.result` | `subtype`, `costUsd`, `numTurns`, `durationMs`, `contextTokens`, `contextWindow`, `providerCostTotalUsd?` | each SDK `result` message | yes | cost/turns cumulative per session (summed per-turn deltas — the adapter differences the SDK's running `total_cost_usd`); context values are the current turn's; `providerCostTotalUsd` = Claude's raw running-total watermark, restored on rebuild and passed back as the resume baseline (absent on Codex) |
+| `master.result` | `subtype`, `costUsd`, `costAccuracy?`, `requestedSpeed?`, `numTurns`, `durationMs`, `contextTokens`, `contextWindow`, `providerCostTotalUsd?` | each SDK `result` message | yes | cost/turns cumulative per session (summed per-turn deltas — the adapter differences the SDK's running `total_cost_usd`); context values are the current turn's; `providerCostTotalUsd` = Claude's raw running-total watermark, restored on rebuild and passed back as the resume baseline (absent on Codex) |
 | `master.status` | `status: running\|idle` | turn start (`running`) / turn end (`idle`) | no (live pulse) | UI session-list activity indicator |
 | `session.label` | `label` | auto-label generation fills the session label | no | live refresh of UI session list (the label itself is persisted separately) |
 | `worker.spawned` | `workerId`, `repoPath`, `label`, `branch?`, `status?`, `ticketKey?`, `ticketUrl?` | `fleet.spawn` up front (worktree still provisioning) | (row in `workers`) | `status:"provisioning"` so the row shows immediately; omitted ⇒ treated as `running` |
-| `worker.event` | `workerId`, `seq`, `data: WorkerEventData`, `clientMsgId?` | every recorded/live worker activity | depends on `data.kind` (see below) | wraps a `WorkerEventData`; `clientMsgId` is live-only echo correlation |
+| `worker.event` | `workerId`, `seq`, `data: WorkerEventData`, `clientMsgId?` | every recorded/live worker activity | depends on `data.kind` (see below) | wraps a `WorkerEventData`; outer `clientMsgId` mirrors the optional persisted `data.clientMsgId` on user message/retry errors |
 | `worker.nested` | `workerId`, `parentToolUseId`, `data: WorkerEventData` | native nested subagent (SDK Task) activity | no (live only) | grouped by `parentToolUseId` in the desktop `NestedAgents` panel |
 | `worker.workflow.run` | `workerId`, `run: WorkflowRunSummary` | workflow launch/task/live-phase/journal/run-snapshot summary changes | no (daemon-live registry) | path-free run status/counts plus sanitized ordered phase definitions; no full agent array |
 | `worker.workflow.agent` | `workerId`, `taskId`, `agent: WorkflowAgentSummary` | a workflow agent's latest summary changes | no (daemon-live registry) | may include sanitized `label`, `phaseIndex`, `phaseTitle`, `model`; no prompts, transcript text, tool input/result, or filesystem path |
@@ -53,7 +54,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `capabilities.changed` | (`sessionId: @all`), `generation`, `affected[]` (`scopeKind,scopeRef`) | a pack, trust decision, secret, binding, manual refresh, repo-shared watcher reconciliation, or repo removal changes desired capability state | no | invalidation signal only; contains no pack body, public config, filesystem body, or secret value |
 | `capabilities.runtime` | `targetKind: master\|worker`, `targetId`, `desiredRevision`, `appliedRevision`, `state` | a Claude target's desired/applied lifecycle changes | no | `state` is `current\|pending-next-turn\|pending-reload\|blocked\|error`; revisions and ids only, no bodies/config/secrets |
 | `automation.changed` | (`sessionId: @all`) | automation create/update/set_enabled/delete/run; dispatcher run | no | UI `AutomationPage` refetches |
-| `error` | `message` | master turn failure (`recordEvent`); core error paths | yes (when via `recordEvent`) | |
+| `error` | `message`, `clientMsgId?`, `retryInput?` | master turn failure (`recordEvent`); core error paths | yes (when via `recordEvent`) | |
 
 ## WorkerEventData kinds (`data` of `worker.event` / `worker.nested`)
 
@@ -62,21 +63,28 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `kind` | Fields | Path / live vs persisted | Notes |
 |---|---|---|---|
 | `system` | `text` | `record` (persisted + live) | uncategorized SDK system message (top-level `text`/`subtype`) |
-| `message` | `role`, `content` | `record` (persisted + live) | assistant text; user echo of a deferred `send` recorded at the turn boundary with `clientMsgId` |
+| `speed` | `observation: {requested,state,reason?}` | `record` (persisted + live) | selected/requested speed and provider report remain separate |
+| `message` | `role`, `content`, `images?`, `clientMsgId?` | `record` (persisted + live) | assistant text; user echo of a deferred `send` recorded at the turn boundary with `clientMsgId` |
 | `message_delta` | `text` | `emit` (live only) | token-level text stream |
 | `thinking_delta` | `text` | `emit` (live only) | thinking-summary stream (`display:summarized`) |
 | `thinking` | `text` | `persistOnly` (persist only) | coalesced summary for restore; live is shown via `thinking_delta` |
 | `tool_use` | `id`, `name`, `input` | `record` (persisted + live) | `input` truncated to 4000 |
 | `tool_result` | `id`, `isError`, `content` | `record` (persisted + live) | `content` truncated to 4000 |
 | `tool_progress` | `id`, `elapsedSec` | `emit` (live only) | elapsed seconds of an in-progress tool |
-| `result` | `subtype`, `costUsd`, `numTurns`, `durationMs?`, `contextTokens?`, `contextWindow?`, `terminalReason?`, `providerCostTotalUsd?` | `record` (persisted + live) | cost/turns cumulative (summed per-turn deltas; `providerCostTotalUsd` = Claude running-total watermark, absent on Codex); drives maxTurns cap + idle/deferred transition; `terminalReason` is the provider's `terminal_reason` (worker only) |
+| `result` | `subtype`, `costUsd`, `costAccuracy?`, `requestedSpeed?`, `numTurns`, `durationMs?`, `contextTokens?`, `contextWindow?`, `terminalReason?`, `providerCostTotalUsd?` | `record` (persisted + live) | cost/turns cumulative (summed per-turn deltas; `providerCostTotalUsd` = Claude running-total watermark, absent on Codex); drives maxTurns cap + idle/deferred transition; `terminalReason` is the provider's `terminal_reason` (worker only) |
 | `notice` | `text` | `record` (persisted + live) | compaction/retry/fallback push, or turn-cap message |
-| `error` | `message` | `record` (persisted + live) | not recorded if the abort came from stop/discard |
+| `error` | `message`, `clientMsgId?`, `retryInput?` | `record` (persisted + live) | not recorded if the abort came from stop/discard |
 
 For `worker.nested` (native subagent via SDK Task), only `message`/`tool_use`/`tool_result` kinds flow, always live-only (never persisted), grouped by `parentToolUseId`.
 
 ## Persistence / restore summary
 
-- **Master:** `recordEvent`→`persistEvent` writes to `session_events` (`master.message`, `master.thinking`, `master.notice`, `master.result`, `master.tool` start/end, `error`). On reconnect/restart `session.history` replays them (tool/thinking/metrics/notice all restored). Live-only (never persisted): `master.message.delta`, `master.thinking.delta`, `master.system`, `master.status`, `master.tool` `progress`, `session.label`, `commands.changed`, `capabilities.runtime`.
+- **Master:** `recordEvent`→`persistEvent` writes to `session_events` (`master.message`, `master.speed`, `master.thinking`, `master.notice`, `master.result`, `master.tool` start/end, `error`). On reconnect/restart `session.history` replays them (tool/thinking/metrics/notice all restored). Live-only (never persisted): `master.message.delta`, `master.thinking.delta`, `master.system`, `master.status`, `master.tool` `progress`, `session.label`, `commands.changed`, `capabilities.runtime`.
 - **Worker:** `record`/`persistOnly` write to `worker_events`; `worker.history` replays them. Live-only: `message_delta`, `thinking_delta`, `tool_progress`, all `worker.nested`, and workflow activity. `worker.workflow.*` is retained only by the daemon-owned live registry: Claude's sanitized `task_progress.workflow_progress` feeds phase grouping during execution, `workflow.list` restores those summaries across desktop reconnect, and `workflow.agent.history` reads one validated/bounded transcript on demand. Daemon restart intentionally clears it.
 - See `src/persistence/repositories.ts` (`addSessionEvent`/`listSessionEvents`, `addWorkerEvent`/`transcript`).
+
+## Speed quality and image replay
+
+`costAccuracy` is `reported|estimated|unavailable`; `requestedSpeed` is the captured turn intent. Claude uses reported SDK cost deltas; Codex totals are estimates. With unavailable quality the compatibility number contains only known spend, so it must not be rendered as a complete total. See [speed.md](speed.md) for the budget and cold-resume caveats.
+
+Image fields contain immutable refs, never bytes or paths. Deferred errors may carry `retryInput {text, images?}` and `clientMsgId` before any user echo exists; reducers reconcile that one pending input and can restore it from history without local pending state. Consecutive image-only messages remain distinct even when they reuse identical refs. Side uses live-only `side.status` and `side.event` (the same `WorkerEventData` shape); its runtime history is not made persistent by this feature. See [images.md](images.md).

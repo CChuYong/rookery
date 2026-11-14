@@ -1,3 +1,5 @@
+import { acceptImages, type ImageResolver, type ImageRef } from "./image-input.js";
+import type { SpeedPreference, CostAccuracy } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,11 +15,12 @@ const DIFF_MAX_BYTES = 512 * 1024; // byte cap before sending a diff directly as
 export interface WorkerLike {
   start(task?: string): void;
   resume(): void;
-  send(text: string, clientMsgId?: string): void;
+  send(text: string, clientMsgId?: string, speed?: SpeedPreference | null, images?: ImageRef[]): void;
   stop(): Promise<void>;
   status(): string;
   waitUntilSettled(): Promise<void>;
   listCommands?(): Promise<SlashCommandInfo[]>; // slash commands/skills of a live session (absent = unsupported)
+  setSpeed?(speed: SpeedPreference | null): Promise<void>;
   setModel?(model: string): Promise<void>; // hot-swap the model while running (query.setModel)
   setPermissionMode?(mode: string): Promise<void>; // hot-swap the permission mode while running (query.setPermissionMode)
   interruptTurn?(): Promise<InterruptReceipt | undefined>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
@@ -38,6 +41,7 @@ export type WorkerFactory = (opts: {
   label: string;
   sdkSessionId?: string | null;
   model?: string; // model override at spawn time (falls back to global default). Fixed once running.
+  speed?: SpeedPreference | null;
   effort?: string;
   permissionMode?: string; // SDK permission mode at spawn time (falls back to the Worker default "bypassPermissions"). Changeable live.
   onTurnStart?: () => void; // called right before each turn starts — for checkpointing
@@ -49,6 +53,7 @@ export type WorkerFactory = (opts: {
 }) => WorkerLike;
 
 export interface FleetDeps {
+  images?: ImageResolver;
   repos: Repositories;
   bus: EventBus;
   git: GitOps;
@@ -85,6 +90,7 @@ interface Entry {
   permissionMode?: string; // persisted current permission mode → on resume, materialize with the same mode (restart consistency)
   maxTurns?: number; // persisted per-result turn cap → materialize restores it (the unattended runaway guard)
   costBudgetUsd?: number; // persisted lifetime cost ceiling → materialize restores it (the unattended runaway guard)
+  speed?: SpeedPreference | null;
   effort?: string; // persisted spawn-time effort override → materialize restores it
   provider?: string; // which AgentBackend runs this worker ('claude' | 'codex') → materialize/fork restore it
   resumeSessionId?: string; // if present, "resumable but not yet started (lazy)" state — materialize on first send/await
@@ -156,7 +162,7 @@ export class FleetOrchestrator {
     const handoffSeed = e.handoffFromProvider
       ? buildHandoffSeed(this.deps.repos.listWorkerEvents(id).map((r) => { try { return { type: r.type, payload: JSON.parse(r.payload_json) as unknown }; } catch { return { type: r.type, payload: {} }; } }), e.handoffFromProvider)
       : undefined;
-    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, effort: e.effort, maxTurns: e.maxTurns, costBudgetUsd: e.costBudgetUsd, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, handoffSeed, handoffFromProvider: e.handoffFromProvider, onTurnStart: () => this.checkpoint(id) });
+    const agent = this.deps.factory({ id, sessionId: e.homeSessionId, repoPath: e.worktreePath, label: e.label ?? "", sdkSessionId: e.resumeSessionId ?? null, model: e.model, speed: e.speed, effort: e.effort, maxTurns: e.maxTurns, costBudgetUsd: e.costBudgetUsd, permissionMode: e.permissionMode ?? this.deps.repos.getWorker(id)?.permission_mode, provider: e.provider, handoffSeed, handoffFromProvider: e.handoffFromProvider, onTurnStart: () => this.checkpoint(id) });
     agent.resume();
     e.agent = agent;
     e.resumeSessionId = undefined;
@@ -209,6 +215,7 @@ export class FleetOrchestrator {
         permissionMode: row.permission_mode ?? undefined,
         maxTurns: row.max_turns ?? undefined,
         costBudgetUsd: row.cost_budget_usd ?? undefined,
+        speed: row.speed,
         effort: row.effort ?? undefined,
         provider: row.provider ?? undefined,
         resumeSessionId,
@@ -220,7 +227,7 @@ export class FleetOrchestrator {
   // the returned Promise resolves after worktree provisioning finishes (agent boot = SDK session start continues asynchronously).
   // → at return time the worktree exists on disk, so the renderer's root resolution (explorer/diff) points at the worktree on the first try.
   // there is no concurrent-worker cap (removed) — spawn is never rejected.
-  async spawn(input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; costBudgetUsd?: number; provider?: string }): Promise<{ id: string }> {
+  async spawn(input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; speed?: SpeedPreference | null; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; costBudgetUsd?: number; provider?: string }): Promise<{ id: string }> {
     const id = this.idgen();
     // if there is a ticket, name the branch from its key (rookery/<slug>), with a short suffix only on collision. Otherwise rookery/<id>.
     const slug = input.ticketKey ? branchSlug(input.ticketKey) : "";
@@ -239,7 +246,7 @@ export class FleetOrchestrator {
   // Fork a worker: copy its SDK conversation into a new branch + duplicate its full worktree state (committed history via a
   // branch off the source's HEAD, plus uncommitted/untracked via checkpoint→restore) + copy its transcript. The fork is
   // registered as a lazy-resumable entry (resumes the forked SDK session in its own worktree on first send). Source untouched.
-  async fork(id: string, target?: { provider?: string; model?: string; effort?: string }): Promise<{ id: string }> {
+  async fork(id: string, target?: { provider?: string; model?: string; speed?: SpeedPreference | null; effort?: string }): Promise<{ id: string }> {
     const src = this.deps.repos.getWorker(id);
     if (!src) throw new Error(`Unknown worker: ${id}`);
     // A restore in flight is mid-checkout on the source worktree — checkpointing it now would snapshot a half-rewritten
@@ -283,6 +290,7 @@ export class FleetOrchestrator {
       // inherits the source's.
       const model = target?.model ?? (handoff ? undefined : src.model ?? undefined);
       const effort = target?.effort ?? (handoff ? undefined : src.effort ?? undefined);
+      this.deps.repos.setWorkerSpeed(newId, target?.speed === undefined ? src.speed ?? null : target.speed);
       if (model) this.deps.repos.setWorkerModel(newId, model);
       if (src.permission_mode) this.deps.repos.setWorkerPermissionMode(newId, src.permission_mode);
       if (src.max_turns != null) this.deps.repos.setWorkerMaxTurns(newId, src.max_turns);
@@ -295,10 +303,10 @@ export class FleetOrchestrator {
       this.entries.set(newId, {
         homeSessionId: src.session_id, repoPath: src.repo_path, worktreePath, branch, base: src.base ?? "",
         status: "idle", label, model, permissionMode: src.permission_mode ?? undefined,
-        maxTurns: src.max_turns ?? undefined, costBudgetUsd: src.cost_budget_usd ?? undefined, effort, provider,
+        speed: target?.speed === undefined ? src.speed : target.speed, maxTurns: src.max_turns ?? undefined, costBudgetUsd: src.cost_budget_usd ?? undefined, effort, provider,
         resumeSessionId: forkedUuid ?? undefined, handoffFromProvider: handoff ? srcProvider : undefined,
       });
-      this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", provider, ticketKey: null, ticketUrl: null });
+      this.deps.bus.emit({ type: "worker.spawned", sessionId: src.session_id, workerId: newId, repoPath: src.repo_path, label, branch, status: "idle", provider, speed: target?.speed === undefined ? src.speed : target.speed, ticketKey: null, ticketUrl: null });
       return { id: newId };
     } catch (err) {
       // The fork's snapshot-ref (and possibly its worktree/branch) were already created — reclaim them, or they
@@ -315,7 +323,7 @@ export class FleetOrchestrator {
 
   private async run(
     id: string,
-    input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; costBudgetUsd?: number; provider?: string },
+    input: { homeSessionId: string; repoPath: string; label: string; task?: string; base?: string; model?: string; speed?: SpeedPreference | null; effort?: string; permissionMode?: string; ticketKey?: string; ticketUrl?: string; notify?: boolean; maxTurns?: number; costBudgetUsd?: number; provider?: string },
     branch: string,
     worktreePath: string,
     signalReady: () => void,
@@ -339,6 +347,7 @@ export class FleetOrchestrator {
         ticketKey: input.ticketKey,
         ticketUrl: input.ticketUrl,
         provider: input.provider,
+        speed: input.speed,
       });
       if (input.notify) this.deps.repos.setWorkerNotifyArmed(id, true);
       if (input.maxTurns != null) repos.setWorkerMaxTurns(id, input.maxTurns);
@@ -347,7 +356,7 @@ export class FleetOrchestrator {
       // Surface the worker to clients IMMEDIATELY as "provisioning" — before base-resolve / `git worktree add`, which for a large
       // repo takes seconds. Without this the row (and all feedback) only appears once the worktree finishes, so spawn looks hung.
       // The agent's boot below reconciles it to running/idle; a failed worktree-create flips it to failed via the catch.
-      bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", provider: input.provider, ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
+      bus.emit({ type: "worker.spawned", sessionId: input.homeSessionId, workerId: id, repoPath: input.repoPath, label: input.label, task: input.task, branch, status: "provisioning", provider: input.provider, speed: input.speed, ticketKey: input.ticketKey ?? null, ticketUrl: input.ticketUrl ?? null });
       // launch: resolve base → addWorktree → factory(cwd=worktree) → start → reconcile status.
       // base resolution: explicit choice > remote default branch (refreshed via best-effort fetch) > current HEAD (fallback).
       let baseStale = false; // a best-effort fetch failed → branched from a possibly-stale ref (surfaced as a worker notice after boot)
@@ -375,7 +384,7 @@ export class FleetOrchestrator {
         return;
       }
       signalReady(); // worktree provisioned → spawn() can return (the rest of boot continues)
-      const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns, costBudgetUsd: input.costBudgetUsd, provider: input.provider });
+      const agent = factory({ id, sessionId: input.homeSessionId, repoPath: worktreePath, label: input.label, sdkSessionId: null, model: input.model, speed: input.speed, effort: input.effort, permissionMode: input.permissionMode, onTurnStart: () => this.checkpoint(id), maxTurns: input.maxTurns, costBudgetUsd: input.costBudgetUsd, provider: input.provider });
       const entry: Entry = {
         agent,
         homeSessionId: input.homeSessionId,
@@ -387,6 +396,7 @@ export class FleetOrchestrator {
         permissionMode: input.permissionMode, // remember so a later resume (materialize) restores the same mode
         maxTurns: input.maxTurns, // remember so a later resume (materialize) restores the runaway guard
         costBudgetUsd: input.costBudgetUsd, // remember so a later resume (materialize) restores the cost-budget runaway guard
+        speed: input.speed,
         effort: input.effort, // remember so a later resume (materialize) restores the effort override
         provider: input.provider, // remember so a later resume (materialize) restores the same backend
         pendingLabel: !input.task, // task-less spawn: relabel from the first send() message instead
@@ -509,7 +519,8 @@ export class FleetOrchestrator {
     return e as Entry & { agent: WorkerLike };
   }
 
-  send(id: string, message: string, clientMsgId?: string): void {
+  send(id: string, message: string, clientMsgId?: string, speed?: SpeedPreference | null, imageRefs?: ImageRef[]): void {
+    const images = acceptImages(this.deps.images, imageRefs);
     if (this.capabilityReloads.get(id)?.phase === "reloading") {
       throw new Error(`worker ${id} capability reload in progress; retry when it finishes`);
     }
@@ -521,7 +532,12 @@ export class FleetOrchestrator {
       entry.pendingLabel = false;
       void this.relabel(id, entry.homeSessionId, message); // task-less worker: relabel from the first message (best-effort, never throws)
     }
-    entry.agent.send(message, clientMsgId);
+    if (images.length) entry.agent.send(message, clientMsgId, speed, images);
+    else if (speed === undefined) entry.agent.send(message, clientMsgId);
+    else entry.agent.send(message, clientMsgId, speed);
+    // Persist the speed intent only once the send was accepted: agent.send throws for a stopped worker
+    // (or a failed reload), and a rejected send must not silently change the worker's stored speed.
+    if (speed !== undefined) { this.deps.repos.setWorkerSpeed(id, speed); entry.speed = speed; }
   }
 
   async reloadCapabilities(
@@ -637,6 +653,14 @@ export class FleetOrchestrator {
   }
 
   // change a running worker's model live. If alive, query.setModel; otherwise just persist the model (applied on next resume).
+  async setSpeed(id: string, speed: SpeedPreference | null): Promise<void> {
+    const e = this.entries.get(id);
+    if (!this.deps.repos.getWorker(id)) throw new Error(`Unknown worker: ${id}`);
+    if (e?.agent?.setSpeed) await e.agent.setSpeed(speed);
+    this.deps.repos.setWorkerSpeed(id, speed);
+    if (e) e.speed = speed;
+  }
+
   async setModel(id: string, model: string): Promise<void> {
     const e = this.entries.get(id);
     if (e?.agent?.setModel) {
@@ -820,7 +844,7 @@ export class FleetOrchestrator {
     if (timer) clearTimeout(timer);
   }
 
-  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number; maxTurns?: number | null; costBudgetUsd?: number | null }> {
+  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number; speed?: SpeedPreference | null; costAccuracy?: CostAccuracy; maxTurns?: number | null; costBudgetUsd?: number | null }> {
     const metrics = this.deps.repos.workerActivityAndCost(); // one indexed batched query for the whole fleet
     return this.deps.repos
       .listAllWorkers()
@@ -832,6 +856,7 @@ export class FleetOrchestrator {
         status: r.status,
         branch: r.branch,
         model: r.model,
+        speed: r.speed,
         permissionMode: r.permission_mode, // SDK permission mode (bypassPermissions | plan) — the worker composer's live selector reads this
         provider: r.provider, // which AgentBackend runs this worker ('claude' | 'codex')
         archived: !!r.archived_at, // archived or not — the UI splits into tree/archive

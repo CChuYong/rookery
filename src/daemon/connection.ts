@@ -1,3 +1,5 @@
+import type { ImageStore } from "./image-store.js";
+import { acceptImages, type ImageRef } from "../core/image-input.js";
 import { randomUUID } from "node:crypto";
 import type { SessionManager } from "../core/session-manager.js";
 import { UI_FLEET_SESSION_KEY } from "../core/session-manager.js";
@@ -27,7 +29,7 @@ import { STATIC_MODELS } from "../core/models-provider.js";
 import type { ActionVars } from "../core/automation-action.js";
 import type { CodexModelInfo, CodexAuthStatus } from "../protocol/messages.js";
 import type { WorkflowActivityProvider } from "../core/workflow-activity.js";
-import type { SideSourceKind } from "../core/side-conversation.js";
+import type { SideStartInput, PreparedSideStart } from "../core/side-conversation.js";
 import type {
   CapabilityBinding,
   CapabilityBindingInput,
@@ -129,8 +131,8 @@ export interface ClientSocket {
 }
 
 export interface SideConversationController {
-  create(input: { sourceKind: SideSourceKind; sourceId: string; model?: string; effort?: string | null }): Promise<{ id: string }>;
-  send(id: string, text: string): void;
+  prepareStart(input: SideStartInput): Promise<PreparedSideStart>;
+  send(id: string, text: string, images?: ImageRef[]): void;
   stop(id: string): Promise<void>;
   close(id: string): Promise<void>;
 }
@@ -145,6 +147,7 @@ function redactWriteOnlyValues(error: unknown, values: Record<string, string> | 
 export class Connection {
   private readonly unsubs = new Map<string, () => void>();
   private readonly ownedSideIds = new Set<string>();
+  private disposed = false;
 
   constructor(
     private readonly socket: ClientSocket,
@@ -167,6 +170,7 @@ export class Connection {
     private readonly sides?: SideConversationController,
     private readonly capabilities?: CapabilityProvider,
     private readonly workflows?: WorkflowActivityProvider,
+    private readonly images?: ImageStore,
   ) {}
 
   private reply(msg: ServerMessage): void {
@@ -208,9 +212,19 @@ export class Connection {
     // Otherwise the void-ed handleRaw rejects and the client's request() hangs forever.
     try {
     switch (msg.type) {
+      case "image.upload": {
+        if (!this.images) throw new Error("Image input unavailable");
+        this.reply({ type: "image.upload.result", image: this.images.upload(msg), reqId: msg.reqId });
+        return;
+      }
+      case "image.get": {
+        if (!this.images) throw new Error("Image input unavailable");
+        this.reply({ type: "image.get.result", ...this.images.get(msg.id), reqId: msg.reqId });
+        return;
+      }
       case "session.create": {
         // No explicit cwd (desktop "New Session" with no folder picked) → the configured default folder, else process.cwd().
-        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()), { provider: msg.provider });
+        const session = this.sessions.create(msg.cwd ?? (this.settings?.all().defaultSessionCwd?.trim() || process.cwd()), { provider: msg.provider, speed: msg.speed });
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
@@ -219,7 +233,7 @@ export class Connection {
         // find-or-create by external key (e.g. Slack thread_ts). Same key → always the same session.
         // provider is honored only on FIRST creation of the key (fixed for the session's lifetime),
         // mirroring session.create — otherwise a keyed session opened over the wire is permanently claude (finding [24]).
-        const session = this.sessions.getOrCreateByKey(msg.key, msg.cwd ?? process.cwd(), msg.provider);
+        const session = this.sessions.getOrCreateByKey(msg.key, msg.cwd ?? process.cwd(), msg.provider, msg.speed);
         this.subscribe(session.id);
         this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         return;
@@ -227,7 +241,7 @@ export class Connection {
       case "session.fork": {
         // Fork a master session → a new session with the original's SDK context + copied transcript. Replies like session.create so the client navigates to it.
         try {
-          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider });
+          const session = await this.sessions.fork(msg.sessionId, { provider: msg.provider, speed: msg.speed });
           this.subscribe(session.id);
           this.reply({ type: "session.created", sessionId: session.id, cwd: session.cwd, ...(msg.reqId ? { reqId: msg.reqId } : {}) });
         } catch (err) {
@@ -245,6 +259,12 @@ export class Connection {
         for (const event of this.interactions?.pendingEvents(session.id) ?? []) this.reply({ type: "event", event }); // rehydrate any open card for this session
         return;
       }
+      case "session.setSpeed": {
+        if (!this.repos.getSession(msg.sessionId)) throw new Error(`unknown session: ${msg.sessionId}`);
+        this.repos.setSessionSpeed(msg.sessionId, msg.speed);
+        if (msg.reqId) this.reply({ type: "fleet.ack", action: "setSpeed", id: msg.sessionId, reqId: msg.reqId });
+        return;
+      }
       case "session.send": {
         const session = this.sessions.get(msg.sessionId);
         if (!session) {
@@ -254,9 +274,11 @@ export class Connection {
         }
         this.subscribe(session.id);
         // Per-UI-session model/effort/permissionMode overrides (if present). Otherwise the global defaults (Slack also uses this path).
-        // A runTurn throw is caught by the outer try/catch and replied as error+reqId.
-        await session.master.runTurn(msg.text, { model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
-        // Ack when a reqId is present so request()-style clients get a settled promise; fire-and-forget (no reqId) stays unchanged for old clients.
+        // Validation/enqueue throws are caught by the outer try/catch and replied as error+reqId.
+        const accepted = session.master.enqueueTurn(msg.text, { images: msg.images, speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
+        // The turn is validated and queued. Later execution failures are persisted/emitted by MasterAgent.
+        void accepted.completion.catch(() => {}); // consume rejection without blocking subsequent UI drafts
+        // Acknowledge acceptance, not model completion.
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sessionId });
         return;
       }
@@ -268,16 +290,31 @@ export class Connection {
       }
       case "side.start": {
         if (!this.sides) return this.reply({ type: "error", message: "Side conversations unavailable", reqId: msg.reqId });
-        const { id } = await this.sides.create({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort });
-        this.ownedSideIds.add(id);
-        // Ordering is load-bearing: tell the client the id before send() can emit the first side.event.
-        this.reply({ type: "side.started", sideId: id, reqId: msg.reqId });
-        this.sides.send(id, msg.text);
+        const images = acceptImages(this.images, msg.images);
+        const prepared = await this.sides.prepareStart({ sourceKind: msg.sourceKind, sourceId: msg.sourceId, model: msg.model, effort: msg.effort, text: msg.text, images });
+        // A Side belongs to this connection, unlike independent Master/Worker execution.
+        // Its asynchronous fork may finish after dispose() has drained the owned ids.
+        if (this.disposed) {
+          await this.sides.close(prepared.id);
+          return;
+        }
+        this.ownedSideIds.add(prepared.id);
+        // Preparation has resolved every image after the async fork; it can reject only before this ack.
+        // Execution performs no further input I/O and emits its first event after the client knows the id.
+        try {
+          this.reply({ type: "side.started", sideId: prepared.id, reqId: msg.reqId });
+        } catch {
+          this.ownedSideIds.delete(prepared.id);
+          await this.sides.close(prepared.id);
+          return; // The sender failed; a second error reply would fail on the same socket.
+        }
+        if (!this.disposed) prepared.start();
         return;
       }
       case "side.send": {
         if (!this.sides || !this.ownedSideIds.has(msg.sideId)) throw new Error(`unknown Side conversation: ${msg.sideId}`);
-        this.sides.send(msg.sideId, msg.text);
+        if (msg.images?.length) this.sides.send(msg.sideId, msg.text, msg.images);
+        else this.sides.send(msg.sideId, msg.text);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sideId });
         return;
       }
@@ -495,7 +532,7 @@ export class Connection {
       case "worker.fork": {
         // Fork a worker → a new worker carrying the source's SDK context + full worktree state + transcript. Replies like fleet.spawn so the client navigates to it.
         try {
-          const { id } = await this.fleet.fork(msg.id, { provider: msg.provider, model: msg.model, effort: msg.effort });
+          const { id } = await this.fleet.fork(msg.id, { speed: msg.speed, provider: msg.provider, model: msg.model, effort: msg.effort });
           this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
         } catch (err) {
           this.reply({ type: "error", message: err instanceof Error ? err.message : String(err), reqId: msg.reqId });
@@ -506,8 +543,13 @@ export class Connection {
         // Deliver a follow-up message to a running worker (streaming input). Throws if the agent is terminated/unknown
         // or mid-restore, and the outer try/catch responds with error+reqId. On success, ack when a reqId is present so
         // request()-style clients (desktop) get a settled promise instead of a silently-dropped frame.
-        this.fleet.send(msg.id, msg.text, msg.clientMsgId);
+        this.fleet.send(msg.id, msg.text, msg.clientMsgId, msg.speed, msg.images);
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.id });
+        return;
+      }
+      case "worker.setSpeed": {
+        await this.fleet.setSpeed(msg.id, msg.speed);
+        if (msg.reqId) this.reply({ type: "fleet.ack", action: "setSpeed", id: msg.id, reqId: msg.reqId });
         return;
       }
       case "worker.setModel": {
@@ -762,7 +804,7 @@ export class Connection {
         const home = this.sessions.getOrCreateByKey(UI_FLEET_SESSION_KEY, repo.path);
         const label = msg.label?.trim() || msg.task?.trim().slice(0, 40) || "worker";
         try {
-          const { id } = await this.fleet.spawn({ homeSessionId: home.id, repoPath: repo.path, label, task: msg.task, base: spawnBase, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, ticketKey: msg.ticketKey, ticketUrl: msg.ticketUrl, provider: msg.provider, costBudgetUsd: msg.costBudgetUsd ?? undefined });
+          const { id } = await this.fleet.spawn({ homeSessionId: home.id, repoPath: repo.path, label, task: msg.task, base: spawnBase, speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, ticketKey: msg.ticketKey, ticketUrl: msg.ticketUrl, provider: msg.provider, costBudgetUsd: msg.costBudgetUsd ?? undefined });
           this.reply({ type: "fleet.spawn.result", reqId: msg.reqId, id });
         } catch (err) {
           this.reply({ type: "error", message: `fleet.spawn: ${String(err)}`, reqId: msg.reqId });
@@ -834,6 +876,8 @@ export class Connection {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const off of this.unsubs.values()) off();
     this.unsubs.clear();
     for (const id of this.ownedSideIds) void this.sides?.close(id);

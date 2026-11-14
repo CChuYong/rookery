@@ -1,3 +1,4 @@
+import type { SpeedPreference } from "./speed.js";
 import type { Config } from "../config.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { resolveLocale } from "./i18n.js";
@@ -28,6 +29,10 @@ export const DEFAULT_CODEX_HANDSHAKE_TIMEOUT_MS = 30000;
 // Settings that can be changed at runtime. Use the value stored in the DB (settings table) if present, otherwise the config/hardcoded default.
 // All kept as strings (parsing happens on the consumer side) → keeps SettingsPatch/the protocol simple. Slack tokens are secret, so they're not here (separate setter).
 export interface SettingsValues {
+  masterSpeed?: SpeedPreference;
+  workerSpeed?: SpeedPreference;
+  codexMasterSpeed?: SpeedPreference;
+  codexWorkerSpeed?: SpeedPreference;
   masterName: string;
   masterModel: string;
   workerModel: string;
@@ -71,6 +76,11 @@ export class Settings {
   masterName(): string {
     const raw = (this.repos.getSetting("masterName") ?? "").trim();
     return raw ? raw.slice(0, 64) : DEFAULT_MASTER_NAME;
+  }
+
+  speed(provider: string, role: "master" | "worker"): SpeedPreference {
+    const key = provider === "codex" ? (role === "master" ? "codexMasterSpeed" : "codexWorkerSpeed") : (role === "master" ? "masterSpeed" : "workerSpeed");
+    return this.repos.getSetting(key) === "fast" ? "fast" : "standard";
   }
 
   masterModel(): string {
@@ -259,6 +269,10 @@ export class Settings {
   all(): SettingsValues {
     const wcb = this.workerCostBudgetUsd(); // hoisted: avoid calling the getter twice for the same field below
     return {
+      masterSpeed: this.speed("claude", "master"),
+      workerSpeed: this.speed("claude", "worker"),
+      codexMasterSpeed: this.speed("codex", "master"),
+      codexWorkerSpeed: this.speed("codex", "worker"),
       masterName: this.masterName(),
       masterModel: this.masterModel(),
       workerModel: this.workerModel(),

@@ -14,9 +14,11 @@ Read the root [AGENTS.md](../AGENTS.md) **first**. It is the always-loaded map: 
 |---|---|
 | [glossary.md](glossary.md) | You hit a term (master/worker/fleet/session/worktree/nested subagent/capability overlay) and want its precise meaning + source file. |
 | [architecture/overview.md](architecture/overview.md) | You need the system shape and the end-to-end request/event flow before changing anything. |
-| [architecture/master-worker-turn.md](architecture/master-worker-turn.md) | You are touching how a master turn (string prompt + resume) or a worker turn (streaming `MessageQueue`) runs. |
+| [architecture/master-worker-turn.md](architecture/master-worker-turn.md) | You are touching how a master turn (finite input + resume) or a worker turn (streaming `MessageQueue`) runs. |
 | [architecture/fleet-lifecycle.md](architecture/fleet-lifecycle.md) | You are working on spawn/stop/discard, worktree isolation, terminal-state writes, or restart rehydration. |
 | [architecture/automation.md](architecture/automation.md) | You are working on cron/Slack triggers, the dispatcher, or automation actions (master/worker). |
+| [reference/speed.md](reference/speed.md) | You need requested vs reported speed, CLI floor, pricing quality or budget limitations. |
+| [reference/images.md](reference/images.md) | You are changing native image input, asset limits, storage, retention, provider mapping or reference-only history. |
 | [reference/events.md](reference/events.md) | You need the `CoreEvent` catalog and which `EventBus` channel each event flows on. |
 | [reference/protocol.md](reference/protocol.md) | You need the WS wire schema (client→daemon / daemon→client messages, `reqId` correlation). |
 | [reference/data-model.md](reference/data-model.md) | You need the SQLite tables/columns and the migration rules. |

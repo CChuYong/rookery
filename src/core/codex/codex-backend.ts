@@ -1,10 +1,12 @@
+import type { AgentInput } from "../image-input.js";
+import { resolveSpeed, type SpeedPreference } from "../speed.js";
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream, InterruptReceipt, MasterTurnOptions, ProviderToolDef, SlashCommandInfo } from "../agent-backend.js";
 import { t, DEFAULT_LOCALE } from "../i18n.js";
 import { CodexClient } from "./codex-client.js";
 import { codexManagedSecretSafetyArgs, type CodexSpawn } from "./codex-transport.js";
-import type { CodexTextInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
+import type { CodexInput, CodexThreadStartParams, CodexThreadStartResponse, CodexThreadTokenUsage, CodexTokenUsageBreakdown, CodexTurn } from "./codex-protocol.js";
 import { mapPermissionMode, sandboxPolicyFor, mapEffort } from "./codex-vocab.js";
-import { turnCostUsd, isRatedModel } from "./codex-pricing.js";
+import { estimateTurnCost } from "./codex-pricing.js";
 import { initializeCodex, requestExcludingTurns } from "./codex-version.js";
 import type { ResolvedAgentCapabilities } from "../capabilities/types.js";
 
@@ -36,6 +38,7 @@ export interface CodexBackendDeps {
   // Sync lookup of a model's supported reasoning efforts from the CACHED model/list catalog; undefined when
   // the catalog (or the model) is unknown. Lets sendTurn drop an effort the model lacks (e.g. a global
   // `max` default applied to a model that tops out at xhigh) instead of failing the turn.
+  modelServiceTiers?: (model: string) => string[] | undefined;
   modelEfforts?: (model: string) => string[] | undefined;
   env?: () => NodeJS.ProcessEnv | undefined; // extra env for the spawned child (Settings resolver, e.g. CODEX_HOME redirection)
   // Daemon MCP bridge (P2 master turns; P2.5 Track A hardening — docs/2026-07-06-p25-codex-hardening.md):
@@ -229,7 +232,7 @@ abstract class CodexSessionBase implements AgentStream {
   // accepted — same as the pre-fix behavior, now scoped to "once per daemon lifetime" instead of
   // "every single turn").
   protected prevTotal: CodexTokenUsageBreakdown | null;
-  protected turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  protected turnAccum = { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0 };
   // Per-turn inactivity watchdog state (P2.5 Track B). `idleTimer` is the "no notification of any
   // kind for N ms" timer, armed at turn/start and reset on every inbound notification. `graceTimer`
   // is the short second-chance window after the watchdog's OWN turn/interrupt, before it escalates
@@ -532,9 +535,37 @@ abstract class CodexSessionBase implements AgentStream {
   // master: always undefined — a master turn is single-shot, see CodexBackend.startTurn). The caller
   // is responsible for snapshotting `billedModel` BEFORE calling this, so pricing bills the model the
   // thread actually ran this turn under.
-  protected async sendTurn(client: CodexClient, threadId: string, text: string, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
-    const input: CodexTextInput[] = [{ type: "text", text, text_elements: [] as never[] }];
+  private billedSpeed: SpeedPreference = "standard";
+  // What the caller asked for this turn; differs from billedSpeed only on a catalog Fast fallback.
+  private requestedSpeed: SpeedPreference = "standard";
+  private speedOverride?: SpeedPreference;
+  private longContextSeen = false;
+  private turnUsageObserved = false;
+  private accountingIncomplete = false;
+
+  protected async sendTurn(client: CodexClient, threadId: string, text: AgentInput, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
+    const input: CodexInput[] = typeof text === "string"
+      ? [{ type: "text", text, text_elements: [] }]
+      : [...(text.text ? [{ type: "text" as const, text: text.text, text_elements: [] as never[] }] : []),
+        ...text.images.map(image => ({ type: "image" as const, url: `data:${image.mediaType};base64,${image.data}` }))];
+    this.requestedSpeed = this.speedOverride ?? resolveSpeed(this.opts.speed);
+    this.billedSpeed = this.requestedSpeed;
+    // Per-turn accounting state: a previous turn's long-context/incomplete flags never leak forward.
+    this.longContextSeen = false;
+    this.turnUsageObserved = false;
+    this.accountingIncomplete = false;
     const turnModel = modelOverride || this.opts.model || this.deps.defaultModel();
+    const tiers = this.deps.modelServiceTiers?.(turnModel);
+    // The live catalog calls Fast "priority"; serviceTierForTurn still accepts the "fast" request alias.
+    // Fast on a model the catalog authoritatively excludes falls back to the Standard tier for THIS turn
+    // (a global setting, a master/external spawn, or a setModel can all reach this) and reports it the
+    // way Claude reports fast mode off — never a throw that would kill the worker into terminal error.
+    if (this.requestedSpeed === "fast" && tiers && !tiers.includes("priority") && !tiers.includes("fast")) {
+      this.billedSpeed = "standard";
+      this.channel.push({ kind: "speed", observation: { requested: "fast", state: "standard", reason: `Fast is not supported for model ${turnModel}; using Standard for this turn` } });
+    } else {
+      this.channel.push({ kind: "speed", observation: { requested: this.billedSpeed, state: "unknown" } });
+    }
     const supported = effort ? this.deps.modelEfforts?.(turnModel) : undefined;
     if (effort && supported && supported.length > 0 && !supported.includes(effort)) {
       const key = `${turnModel}:${effort}`;
@@ -561,6 +592,7 @@ abstract class CodexSessionBase implements AgentStream {
       const turnRes = (await client.request("turn/start", {
         threadId,
         input,
+        serviceTierForTurn: this.billedSpeed === "fast" ? "fast" : "default",
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(effort ? { effort } : {}),
         approvalPolicy: mode.approvalPolicy,
@@ -645,16 +677,34 @@ abstract class CodexSessionBase implements AgentStream {
     }
     if (method === "thread/tokenUsage/updated") {
       const last = p?.tokenUsage?.last;
+      if (last && (last.inputTokens ?? 0) > 272_000) this.longContextSeen = true;
       if (last) this.lastContextTokens = (last.inputTokens ?? 0) + (last.cachedInputTokens ?? 0);
       const win = p?.tokenUsage?.modelContextWindow;
       if (typeof win === "number") this.contextWindow = win;
       const total = p?.tokenUsage?.total;
       if (total) {
+        this.turnUsageObserved = true;
+        if (!last) this.accountingIncomplete = true;
         if (this.prevTotal === null) {
-          this.prevTotal = total; // resumed stream: baseline only
+          // Cold resume/fork: no known baseline for the thread-cumulative total. The per-call `last`
+          // breakdown is exactly this first call's usage, so bill it directly and adopt `total` as the
+          // baseline for subsequent deltas — nothing is lost and nothing is double counted. Only when
+          // `last` is absent (already flagged incomplete above) does this call go unpriced.
+          if (last) {
+            this.turnAccum.inputTokens += Math.max(0, last.inputTokens ?? 0);
+            this.turnAccum.cachedInputTokens += Math.max(0, last.cachedInputTokens ?? 0);
+            this.turnAccum.cacheWriteInputTokens += Math.max(0, last.cacheWriteInputTokens ?? 0);
+            this.turnAccum.outputTokens += Math.max(0, last.outputTokens ?? 0);
+          }
+          this.prevTotal = total;
         } else {
+          // Compaction/reset or incomplete telemetry can move cumulative counters backwards.
+          // Clamping preserves nonnegative compatibility numbers but cannot certify a price.
+          const billedFields = ["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens"] as const;
+          if (billedFields.some(field => (total[field] ?? 0) < (this.prevTotal![field] ?? 0))) this.accountingIncomplete = true;
           this.turnAccum.inputTokens += Math.max(0, (total.inputTokens ?? 0) - (this.prevTotal.inputTokens ?? 0));
           this.turnAccum.cachedInputTokens += Math.max(0, (total.cachedInputTokens ?? 0) - (this.prevTotal.cachedInputTokens ?? 0));
+          this.turnAccum.cacheWriteInputTokens += Math.max(0, (total.cacheWriteInputTokens ?? 0) - (this.prevTotal.cacheWriteInputTokens ?? 0));
           this.turnAccum.outputTokens += Math.max(0, (total.outputTokens ?? 0) - (this.prevTotal.outputTokens ?? 0));
           this.prevTotal = total;
         }
@@ -677,19 +727,20 @@ abstract class CodexSessionBase implements AgentStream {
       if (turn?.status === "failed" && turn.error?.message) {
         this.channel.push({ kind: "push", push: { kind: "notice", code: "notice.codexError", params: { message: turn.error.message }, text: t(DEFAULT_LOCALE, "notice.codexError", { message: turn.error.message }) } });
       }
-      // Surface the $0/inert-budget blind spot once per model (finding [18]): a model the picker offered
-      // from the live catalog but that has no RATES entry bills as $0, so cumCostUsd never grows and the
-      // costBudgetUsd guard — the sole codex runaway guard, since the per-send maxTurns cap is inert on
-      // codex — can never trip. A daemon-log line makes that visible instead of silent.
-      if (!isRatedModel(this.billedModel) && !warnedUnratedModels.has(this.billedModel)) {
+      // Missing tier prices, long-context mixtures, or incomplete telemetry are explicitly unknown.
+      // Consumers retain the compatibility number while surfacing quality and enforcing budgets.
+      const estimate = estimateTurnCost(this.billedModel, this.turnUsageObserved && !this.accountingIncomplete ? this.turnAccum : undefined, this.billedSpeed, this.longContextSeen);
+      if (estimate.accuracy === "unavailable" && !warnedUnratedModels.has(this.billedModel)) {
         warnedUnratedModels.add(this.billedModel);
-        console.warn(`[codex] no pricing entry for model "${this.billedModel}" — turn cost recorded as $0; the costBudgetUsd guard is inert for it`);
+        console.warn(`[codex] cost estimate unavailable for model "${this.billedModel}" at ${this.billedSpeed} speed`);
       }
       const subtype = turn?.status === "failed" ? "error" : turn?.status === "interrupted" ? "interrupted" : "success";
       this.channel.push({
         kind: "turn_end",
         subtype,
-        costUsd: turnCostUsd(this.billedModel, this.turnAccum),
+        costUsd: estimate.costUsd,
+        costAccuracy: estimate.accuracy,
+        requestedSpeed: this.requestedSpeed,
         // PER-SEND per the port contract (agent-backend.ts): one turn/completed = one send. Codex
         // exposes no finer sub-turn agentic-loop count, so this is always 1 (consumers accumulate
         // their own lifetime total — worker.ts/master-agent.ts). Emitting a session-cumulative value
@@ -704,7 +755,7 @@ abstract class CodexSessionBase implements AgentStream {
       // instead of null. Applies to both fresh and resumed sessions alike: prevTotal is only ever null
       // when this thread has never completed a turn under this daemon process.
       if (this.threadId && this.prevTotal) this.totalsByThread.set(this.threadId, this.prevTotal);
-      this.turnAccum = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }; // reset per turn, including failed/interrupted
+      this.turnAccum = { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0 }; // reset per turn, including failed/interrupted
       if (this.turnDone) { const d = this.turnDone; this.turnDone = null; d(); }
       return;
     }
@@ -764,6 +815,8 @@ abstract class CodexSessionBase implements AgentStream {
     return undefined; // codex has no receipt concept
   }
 
+  async setSpeed(speed: SpeedPreference): Promise<void> { this.speedOverride = speed; }
+
   async setModel(model: string): Promise<void> {
     this.overrideModel = model; // applied on the next turn/start (per-turn override); a no-op on a
     // single-shot master turn (CodexTurnStream never reads it back — the next call is a NEW startTurn).
@@ -783,7 +836,7 @@ abstract class CodexSessionBase implements AgentStream {
 class CodexWorkerStream extends CodexSessionBase {
   constructor(
     deps: CodexBackendDeps,
-    private readonly input: AsyncIterable<string>,
+    private readonly input: AsyncIterable<AgentInput>,
     opts: AgentSessionOptions,
     private readonly envOverride: NodeJS.ProcessEnv | undefined,
     totalsByThread: Map<string, CodexTokenUsageBreakdown>,
@@ -825,7 +878,7 @@ class CodexWorkerStream extends CodexSessionBase {
 class CodexTurnStream extends CodexSessionBase {
   constructor(
     deps: CodexBackendDeps,
-    private readonly prompt: string,
+    private readonly prompt: AgentInput,
     opts: MasterTurnOptions,
     private readonly envOverride: NodeJS.ProcessEnv | undefined,
     totalsByThread: Map<string, CodexTokenUsageBreakdown>,
@@ -861,7 +914,7 @@ export class CodexBackend implements AgentBackend {
 
   constructor(private readonly deps: CodexBackendDeps) {}
 
-  openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
+  openSession(input: AsyncIterable<AgentInput>, opts: AgentSessionOptions): AgentStream {
     let streamOpts = opts;
     let envOverride: NodeJS.ProcessEnv | undefined;
     if (opts.capabilities) {
@@ -880,7 +933,7 @@ export class CodexBackend implements AgentBackend {
   // Per-turn ephemeral child (P2 — docs/2026-07-06-p2-codex-master.md). Rejects SYNCHRONOUSLY for
   // restricted sandboxes: they silently block the turn-scoped MCP bridge call rather than erroring
   // (spike finding #2), so this is the only place that footgun can be caught cleanly.
-  startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {
+  startTurn(prompt: AgentInput, opts: MasterTurnOptions): AgentStream {
     const mode = mapPermissionMode(opts.permissionMode);
     if (mode.sandbox !== "danger-full-access" && !opts.readOnly) {
       throw new Error("codex master sessions require bypassPermissions (restricted sandboxes silently block the MCP bridge — see docs/2026-07-06-p2-codex-master.md)");

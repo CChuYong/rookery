@@ -102,6 +102,18 @@ describe("SideConversationManager", () => {
     await expect(manager.create({ sourceKind: "worker", sourceId: "w1" })).rejects.toThrow(/no provider context/);
   });
 
+  it("closes a prepared Side once when cleanup calls overlap and never starts it afterward", async () => {
+    const h = harness();
+    const prepared = await h.manager.prepareStart({ sourceKind: "worker", sourceId: "w1", text: "why?" });
+    await Promise.all([h.manager.close(prepared.id), h.manager.close(prepared.id), h.manager.closeAll()]);
+    prepared.start();
+    await h.manager.close(prepared.id);
+    expect(h.turns).toEqual([]);
+    expect(h.cleanup).toHaveBeenCalledTimes(1);
+    expect(h.emitted).toEqual([expect.objectContaining({ type: "side.status", status: "closed" })]);
+    await expect(h.manager.idle(prepared.id)).rejects.toThrow("unknown Side conversation");
+  });
+
   it("rejects overlapping follow-ups and cleans up only the Side conversation", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -128,4 +140,18 @@ describe("SideConversationManager", () => {
     expect(cleanup).toHaveBeenCalledWith(id, expect.objectContaining({ sourceId: "s1" }));
     expect(() => manager.send(id, "after close")).toThrow(/unknown Side conversation/);
   });
+});
+
+it("inherits source speed at each Side turn and retains observation/accounting fields", async () => {
+  const h = harness([{kind: "speed", observation: {requested: "fast", state: "unknown"}}, {kind: "turn_end", subtype: "success", costUsd: .01, costAccuracy: "estimated", requestedSpeed: "fast", numTurns: 1, durationMs: 1, contextTokens: 0, contextWindow: 0}]);
+  let speed: "standard" | "fast" = "fast";
+  h.source.speed = () => speed;
+  const {id} = await h.manager.create({sourceKind: "worker", sourceId: "w1"});
+  h.manager.send(id, "q1"); await h.manager.idle(id);
+  expect((h.turns[0]!.opts.speed as () => string)()).toBe("fast");
+  speed = "standard";
+  h.manager.send(id, "q2"); await h.manager.idle(id);
+  expect((h.turns[1]!.opts.speed as () => string)()).toBe("standard");
+  expect(h.emitted).toContainEqual(expect.objectContaining({type: "side.event", data: {kind: "speed", observation: {requested: "fast", state: "unknown"}}}));
+  expect(h.emitted).toContainEqual(expect.objectContaining({type: "side.event", data: expect.objectContaining({kind: "result", costAccuracy: "estimated", requestedSpeed: "fast"})}));
 });

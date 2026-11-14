@@ -1,9 +1,12 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import type { ImageRef } from "@daemon/core/image-input.js";
+import { MessageImages } from "./MessageImages.js";
+import { latestSpeedObservation, lastReportedSpeed, speedPendingNextTurn } from "../lib/speed.js";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { useStore } from "../store/store.js";
 import type { LogItem } from "../store/reduce.js";
-import { useDraftStore } from "../store/drafts.js";
+import { useDraftStore, EMPTY_DRAFT, clearAcceptedDraft } from "../store/drafts.js";
 import { Conversation } from "../views/Conversation.js";
 import type { ConversationProps } from "../views/Conversation.js";
 import { useT } from "../i18n/provider.js";
@@ -32,8 +35,8 @@ export function ConversationPane({
   kind: "master" | "worker";
   id: string;
   onRetryHistory?: (kind: "master" | "worker", id: string) => void;
-  onSideStart?: (text: string) => Promise<string>;
-  onSideSend?: (sideId: string, text: string) => void;
+  onSideStart?: (text: string, images?: ImageRef[]) => Promise<string>;
+  onSideSend?: (sideId: string, text: string, images?: ImageRef[]) => Promise<void>;
   onSideStop?: (sideId: string) => void;
   onSideClose?: (sideId: string) => void;
 } & Omit<ConversationProps, "items" | "busy" | "kind" | "loaded" | "loadFailed" | "onRetryHistory" | "onSideSend">): JSX.Element {
@@ -50,44 +53,55 @@ export function ConversationPane({
   const retryHistory = useCallback(() => onRetryHistory?.(kind, id), [onRetryHistory, kind, id]);
 
   // draft is read non-reactively, only when id changes (we write to the store on every keystroke but don't subscribe). App uses key={id}, so it remounts on switch.
-  const initialText = useMemo(() => useDraftStore.getState().byPage[id] ?? "", [id]);
-  const onDraftChange = useCallback((text: string) => useDraftStore.getState().setDraft_(id, text), [id]);
-  const [side, setSide] = useState<{ id: string | null; question: string } | null>(null);
+  const [draftGeneration,setDraftGeneration] = useState(0);
+  const restoreInput = useCallback((text:string,images?:ImageRef[]) => {useDraftStore.getState().setDraft_(id,text,images);setDraftGeneration(n=>n+1);},[id]);
+  const initialDraft = useMemo(() => useDraftStore.getState().byPage[id] ?? EMPTY_DRAFT, [id,draftGeneration]);
+  const onDraftChange = useCallback((text: string, images?: ImageRef[]) => useDraftStore.getState().setDraft_(id, text, images), [id]);
+  const [side, setSide] = useState<{ id: string | null; question: string; images?: ImageRef[] } | null>(null);
   const sideGeneration = useRef(0);
-  const askSide = useCallback((text: string) => {
+  const sideRef = useRef(side); sideRef.current = side;
+  useEffect(() => () => {
+    sideGeneration.current++;
+    if (sideRef.current?.id) onSideClose?.(sideRef.current.id);
+  }, [onSideClose]);
+  const askSide = useCallback(async (text: string, images?: ImageRef[]) => {
     if (!onSideStart) return;
     // One Side thread per visible target. A question submitted while it is open becomes a follow-up.
-    if (side?.id) { onSideSend?.(side.id, text); return; }
+    if (side?.id) { await onSideSend?.(side.id, text, images); return; }
+    const acceptedDraft = useDraftStore.getState().byPage[id];
     const generation = ++sideGeneration.current;
-    setSide({ id: null, question: text });
-    void onSideStart(text).then((sideId) => {
-      if (sideGeneration.current === generation) setSide({ id: sideId, question: text });
-      else onSideClose?.(sideId); // closed while the provider fork was opening
-    }).catch(() => { if (sideGeneration.current === generation) setSide(null); });
-  }, [onSideStart, onSideSend, onSideClose, side]);
+    setSide({ id: null, question: text, images });
+    await (images?.length ? onSideStart(text, images) : onSideStart(text)).then((sideId) => {
+      if (sideGeneration.current === generation) setSide({ id: sideId, question: text, images });
+      else { onSideClose?.(sideId); throw new Error("Side opening cancelled"); } // preserve source input when closed while opening
+    }).catch((error) => { if (sideGeneration.current === generation) setSide(null); throw error; });
+    clearAcceptedDraft(id, text, images, acceptedDraft);
+  }, [onSideStart, onSideSend, onSideClose, side, id]);
   const composerCommands = useMemo(() => commands.filter((command) =>
     command.action.type !== "open-panel" || Boolean(onSideStart && !side)), [commands, onSideStart, side]);
   const handleCommandAction = useCallback((action: CommandAction, argument?: string) => {
     if (action.type === "open-panel") {
-      if (argument) askSide(argument);
+      if (argument) void askSide(argument).catch(() => {});
       return;
     }
     onCommandAction?.(action, argument);
   }, [askSide, onCommandAction]);
   const closeSide = useCallback(() => {
     sideGeneration.current++;
+    sideRef.current = null;
     if (side?.id) onSideClose?.(side.id);
     setSide(null);
   }, [side, onSideClose]);
   return (
     <div className="relative flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <Conversation items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} commands={composerCommands} busy={busy} initialText={initialText} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
+        <Conversation key={draftGeneration} onRestoreInput={kind === "worker" && rest.disabled ? restoreInput : undefined} onRecoverInput={kind === "worker" && rest.disabled ? rest.onRecover : undefined} items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} controls={rest.controls ? { ...rest.controls, speedPending: speedPendingNextTurn(items), speedObservation: latestSpeedObservation(items), speedLastObservation: lastReportedSpeed(items) } : undefined} commands={composerCommands} busy={busy} initialText={initialDraft.text} initialImages={initialDraft.images} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
         {pending.length > 0 && (
           <div className="mx-auto flex w-full max-w-[720px] flex-col gap-1 px-6 pb-2">
             {pending.map((p) => (
               <div key={p.clientMsgId} className="ml-auto max-w-[80%] rounded-md border border-dashed border-line bg-ink/30 px-3 py-2 text-ui text-fg-dim opacity-70">
                 <span className="mr-2 inline-flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-meta text-muted"><Clock size={12} /> {t("conversation.pendingBadge")}</span>
+                <MessageImages images={p.images} />
                 {p.text}
               </div>
             ))}
@@ -97,9 +111,15 @@ export function ConversationPane({
       {side && (
         <SideConversationDrawer
           sourceKind={kind}
+          sourceId={id}
+          speed={rest.controls?.speed ?? rest.controls?.defaultSpeed}
+          defaultSpeed={rest.controls?.defaultSpeed}
+          provider={rest.controls?.provider}
+          model={rest.controls?.model}
           sideId={side.id}
           openingQuestion={side.question}
-          onSend={(sideId, text) => onSideSend?.(sideId, text)}
+          openingImages={side.images}
+          onSend={async (sideId, text, images) => { await (images?.length ? onSideSend?.(sideId, text, images) : onSideSend?.(sideId, text)); }}
           onStop={(sideId) => onSideStop?.(sideId)}
           onClose={closeSide}
         />

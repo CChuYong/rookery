@@ -1,3 +1,4 @@
+import { readSelectedAttachment } from "./selected-attachment.js";
 import { app, BrowserWindow, ipcMain, dialog, Notification, screen, shell, session } from "electron";
 import { buildCsp, isAllowedNavigation, decideWindowOpen } from "./csp.js";
 import { loadWindowState, serializeWindowState } from "./window-state.js";
@@ -237,6 +238,13 @@ ipcMain.handle("dialog:pickFile", async () => {
     ? await dialog.showOpenDialog(win, { properties: ["openFile"] })
     : await dialog.showOpenDialog({ properties: ["openFile"] });
   return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0];
+});
+
+ipcMain.handle("dialog:pickAttachment", async () => {
+  const win = BrowserWindow.getFocusedWindow();
+  const result = win ? await dialog.showOpenDialog(win, {properties:["openFile"]}) : await dialog.showOpenDialog({properties:["openFile"]});
+  const selected = result.filePaths[0];
+  return result.canceled || !selected ? null : readSelectedAttachment(selected);
 });
 
 // OS notification for worker state transitions. Suppressed when a window is focused (i.e. already being watched) — this is for walk-away use.

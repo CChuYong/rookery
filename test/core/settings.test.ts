@@ -10,6 +10,7 @@ describe("Settings", () => {
   it("returns config defaults when DB is empty (incl. effort)", () => {
     const s = new Settings(new Repositories(openDb(":memory:")), config);
     expect(s.all()).toEqual({
+      masterSpeed: "standard", workerSpeed: "standard", codexMasterSpeed: "standard", codexWorkerSpeed: "standard",
       masterName: "rookery", // settings-only default (no config fallback)
       masterModel: config.masterModel,
       workerModel: config.workerModel,

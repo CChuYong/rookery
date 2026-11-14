@@ -121,7 +121,7 @@ export function fakeQuery(
 // and the generator stays alive until the input is closed (= the worker's stop). It exposes verbatim the "stay idle after a turn"
 // lifecycle that the finite fakeQuery hides (for worker tests; for the master's string prompt it terminates empty immediately).
 export function fakeStreamingQuery(
-  responder: (userText: string, turn: number) => FakeStep[],
+  responder: (userText: string, turn: number, content?: unknown) => FakeStep[],
   opts?: { stillQueued?: string[] }, // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
 ): QueryFn {
   const fn = ((input: { prompt?: unknown; options?: { abortController?: AbortController } }) => {
@@ -134,8 +134,8 @@ export function fakeStreamingQuery(
       for await (const userMsg of prompt as AsyncIterable<{ message?: { content?: unknown } }>) {
         if (signal?.aborted) return;
         const c = userMsg?.message?.content;
-        const text = typeof c === "string" ? c : "";
-        for (const step of responder(text, turn)) yield stepToMessage(step);
+        const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((block) => block?.type === "text").map((block) => block.text ?? "").join("\n") : "";
+        for (const step of responder(text, turn, c)) yield stepToMessage(step);
         turn++;
       }
     }
@@ -154,6 +154,6 @@ export function fakeStreamingQuery(
 export function fakeBackend(script: FakeStep[], opts?: Parameters<typeof fakeQuery>[1]): AgentBackend {
   return new ClaudeBackend(fakeQuery(script, opts));
 }
-export function fakeStreamingBackend(responder: (userText: string, turn: number) => FakeStep[], opts?: { stillQueued?: string[] }): AgentBackend {
+export function fakeStreamingBackend(responder: (userText: string, turn: number, content?: unknown) => FakeStep[], opts?: { stillQueued?: string[] }): AgentBackend {
   return new ClaudeBackend(fakeStreamingQuery(responder, opts));
 }

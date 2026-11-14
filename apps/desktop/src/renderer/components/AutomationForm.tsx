@@ -1,3 +1,6 @@
+import type { SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
+import { defaultSpeed } from "../lib/speed.js";
 import { useState } from "react";
 import { X } from "lucide-react";
 import type { Automation, AutomationInput, AutomationTrigger, AutomationAction } from "@daemon/persistence/repositories.js";
@@ -91,6 +94,8 @@ export function AutomationForm(p: {
   const [codexModel, setCodexModel] = useState(initProvider === "codex" ? (init?.model ?? "") : "");
   const effectiveModel = provider === "codex" ? codexModel : model;
   const [effort, setEffort] = useState(init?.effort ?? "high");
+  const [speed, setSpeed] = useState<SpeedPreference | null>(init?.speed ?? null);
+  const settings = useStore((s) => s.settings);
   // Defaults to bypassPermissions (common to all triggers; existing items fall back to the saved value or bypassPermissions)
   const [permissionMode, setPermissionMode] = useState(init?.permissionMode ?? "bypassPermissions");
   // maxTurns is managed as a string (empty = unset)
@@ -161,6 +166,7 @@ export function AutomationForm(p: {
         action,
         enabled,
         provider,
+        speed,
         model: resolvedModel,
         effort: resolvedEffort,
         permissionMode: resolvedPermissionMode,
@@ -487,6 +493,8 @@ export function AutomationForm(p: {
               </div>
             )}
 
+            <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, actionKind)} provider={provider} model={effectiveModel || (provider === "codex" ? (actionKind === "master" ? settings?.codexMasterModel : settings?.codexWorkerModel) : (actionKind === "master" ? settings?.masterModel : settings?.workerModel)) || ""} onChange={setSpeed} />
+            {provider === "codex" && <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>}
             {/* costBudgetUsd — shown for BOTH action kinds (KEY DIVERGENCE from maxTurns, which is worker-only):
                 the daemon checks this at runTurn (master, WARN-only) and at fleet.spawn (worker, STOP). */}
             <div className="flex flex-col gap-1">

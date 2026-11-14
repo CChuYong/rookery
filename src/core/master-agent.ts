@@ -1,3 +1,5 @@
+import { acceptImages, resolveInput, type ImageResolver, type ImageRef } from "./image-input.js";
+import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccuracy } from "./speed.js";
 import { randomUUID } from "node:crypto";
 import type { AgentBackend, InterruptReceipt, ProviderMcpServer, ProviderPermissionCallback, ProviderToolDef } from "./agent-backend.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
@@ -28,9 +30,11 @@ type RealCanUseToolSig = (
 ) => Promise<AskChannelResult>;
 
 export interface MasterAgentDeps {
+  images?: ImageResolver;
   repos: Repositories;
   bus: EventBus;
   backend: AgentBackend;
+  speed?: () => SpeedPreference;
   model: () => string; // Resolved per turn → a Settings model change is reflected even in a live (cached) session.
   effort: () => string; // Global default effort. Used when there is no per-turn override.
   name: () => string; // The value the master uses as its own name in the system prompt. Resolved per turn (Settings changes apply immediately).
@@ -60,6 +64,8 @@ export interface TurnCapabilities {
 
 // Per-UI-session override (unspecified → global default). Slack always uses the defaults.
 export interface TurnOverride {
+  images?: ImageRef[];
+  speed?: SpeedPreference | null;
   model?: string;
   effort?: string;
   permissionMode?: string; // Unspecified → bypassPermissions (current). Selected per UI session.
@@ -152,6 +158,7 @@ export class MasterAgent {
   private pendingNotifications: WorkerNotification[] = [];
   private notifyFlushScheduled = false;
   // Session cumulative cost/turns (in-memory). Each turn's result gives only that turn's values, so accumulate for the UI session total.
+  private costAccuracy?: CostAccuracy;
   private cumCostUsd = 0;
   private cumTurns = 0;
   // Provider-reported running cost total last observed (see Worker.providerCostTotalUsd). Persisted in
@@ -180,7 +187,8 @@ export class MasterAgent {
     try {
       const last = opts.deps.repos.lastSessionEventPayload(opts.sessionId, "master.result");
       if (last) {
-        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number };
+        const p = JSON.parse(last) as { costUsd?: number; numTurns?: number; costAccuracy?: CostAccuracy };
+        this.costAccuracy = p.costAccuracy;
         this.cumCostUsd = p.costUsd ?? 0;
         this.cumTurns = p.numTurns ?? 0;
         this.providerCostTotalUsd = providerCostTotalOf(last);
@@ -272,6 +280,17 @@ export class MasterAgent {
   // Even if two runTurn calls happen concurrently they run one at a time, and a failed turn
   // does not contaminate the chain, but its error is propagated to that caller.
   async runTurn(userText: string, override?: TurnOverride): Promise<void> {
+    return this.enqueueTurn(userText, override).completion;
+  }
+
+  // Validation and queue insertion are synchronous. UI transports acknowledge this boundary,
+  // while internal callers retain runTurn's execution-completion semantics.
+  enqueueTurn(userText: string, override?: TurnOverride): { completion: Promise<void> } {
+    if (this.closing) throw new Error("session closed");
+    const images = acceptImages(this.opts.deps.images, override?.images);
+    if (override) override = { ...override, images };
+    if (override?.speed !== undefined) this.opts.deps.repos.setSessionSpeed(this.opts.sessionId, override.speed);
+    const notifications = this.drainPersistedNotifications();
     const gen = this.stopGeneration;
     this.queuedByGen.set(gen, (this.queuedByGen.get(gen) ?? 0) + 1);
     const result = this.turnChain.then(() => {
@@ -282,8 +301,8 @@ export class MasterAgent {
     this.turnChain = result.catch(() => {});
     // User activity is a natural retry point for stranded notification rows: re-inject them through
     // notifyWorker so they flush as one coalesced notice turn AFTER this user turn.
-    for (const n of this.drainPersistedNotifications()) this.notifyWorker(n);
-    return result;
+    for (const n of notifications) this.notifyWorker(n);
+    return { completion: result };
   }
 
   // Drain stranded retry rows (a failed notification flush persisted its lines). build() drains them only once
@@ -320,32 +339,27 @@ export class MasterAgent {
   }
 
   private async doTurn(userText: string, override?: TurnOverride, opts?: { notices?: DisplayNotice[] }): Promise<void> {
-    if (this.closing) throw new Error("session closed"); // teardown started: reject before any DB write / SDK call (avoids racing the row cascade)
+    if (this.closing) throw new Error("session closed");
     const { repos, bus, fleet } = this.opts.deps;
-    // Per-turn override (UI) takes precedence; otherwise the global default (Slack/default entry point).
-    // Treat empty/whitespace strings as "unspecified" — with only `??`, model:'' would be passed to query() as an empty model and the SDK would fail.
-    const model = override?.model?.trim() || this.opts.deps.model();
-    const effort = override?.effort?.trim() || this.opts.deps.effort();
-    // Per-session permission mode (re-evaluated each turn). Unspecified → current bypassPermissions. The protocol enum guarantees value validity.
-    const permissionMode = override?.permissionMode?.trim() || "bypassPermissions";
-    const clientMsgId = override?.clientMsgId;
     const sessionId = this.opts.sessionId;
+    const clientMsgId = override?.clientMsgId;
     const runtimeTarget: CapabilityRuntimeTarget = { targetKind: "master", targetId: sessionId, sessionId };
     let managed: ResolvedAgentCapabilities | undefined;
     let managedApplied = false;
-    // Per-source dynamic capability (resolved per turn). If not injected, an empty object → base unchanged (current).
-    const caps = this.opts.deps.capabilities?.() ?? {};
-    const deny = new Set(caps.denyTools ?? []);
-    const baseAllowed = [...MEMORY_TOOL_NAMES, ...REPO_TOOL_NAMES, ...FLEET_TOOL_NAMES, ...(this.opts.deps.canUseTool ? ["AskUserQuestion"] : []), ...(caps.allowedTools ?? [])];
-
-    // Keep addMessage/maybeLabel inside try — so a pre-loop error (DB, etc.) also surfaces as a bus 'error' in catch
-    // and is then rethrown (MS-2). That way callers can depend on the single EventBus without duplicate posting.
+    let userEchoed = false;
     let labelDone: Promise<void> = Promise.resolve();
     const abort = new AbortController();
-    this.currentAbort = abort; // Register so stop() can abort this turn
-    bus.emit({ type: "master.status", sessionId, status: "running" }); // Turn start — live pulse for the UI session list
-    repos.setSessionStatus(sessionId, "running"); // Persist — seeds the running indicator via session.list on reconnect
     try {
+      const speed = override?.speed === null ? resolveSpeed(this.opts.deps.speed) : override?.speed ?? this.opts.deps.repos.getSession(this.opts.sessionId)?.speed ?? resolveSpeed(this.opts.deps.speed);
+      const model = override?.model?.trim() || this.opts.deps.model();
+      const effort = override?.effort?.trim() || this.opts.deps.effort();
+      const permissionMode = override?.permissionMode?.trim() || "bypassPermissions";
+      const caps = this.opts.deps.capabilities?.() ?? {};
+      const deny = new Set(caps.denyTools ?? []);
+      const baseAllowed = [...MEMORY_TOOL_NAMES, ...REPO_TOOL_NAMES, ...FLEET_TOOL_NAMES, ...(this.opts.deps.canUseTool ? ["AskUserQuestion"] : []), ...(caps.allowedTools ?? [])];
+      this.currentAbort = abort;
+      bus.emit({ type: "master.status", sessionId, status: "running" });
+      repos.setSessionStatus(sessionId, "running");
       this.thinking.reset(); // Turn start — clear leftover thinking buffer from the previous turn
       // Cross-provider handoff (T4): on the FIRST turn of a handed-off session, prepend the source transcript
       // to the PROVIDER prompt (not the UI echo below) so it bakes into turn-1's conversation — durable across
@@ -358,14 +372,17 @@ export class MasterAgent {
         const seed = buildHandoffSeed(events, handoffFrom);
         if (seed) promptText = `${seed}\n\n${userText}`;
       }
+      const images = override?.images ?? [];
+      const input = resolveInput(promptText, images, this.opts.deps.images);
       if (opts?.notices) {
         // System-injected worker-completion turn: record clean per-worker notices (code+params, re-localized by clients);
         // the model still receives `userText` (the tagged prompt) below. Not a user message, and don't relabel the session.
         for (const dn of opts.notices) this.recordEvent({ type: "master.notice", sessionId, text: dn.text, code: dn.code, params: dn.params });
       } else {
         repos.addMessage({ sessionId, role: "user", content: userText }); // messages table (last_activity)
-        this.persistEvent({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId }); // Persist transcript (restore)
-        bus.emit({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId }); // Live echo — accurate timeline position after passing through the turn queue
+        this.persistEvent({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId, ...(images.length ? { images } : {}) }); // Persist transcript (restore)
+        bus.emit({ type: "master.message", sessionId, role: "user", content: userText, clientMsgId, ...(images.length ? { images } : {}) }); // Live echo — accurate timeline position after passing through the turn queue
+        userEchoed = true;
         // Auto-generate a label from the first message (run concurrently so it doesn't block the response, finalized with await at the end of the turn).
         labelDone = this.maybeLabel(userText);
       }
@@ -378,9 +395,10 @@ export class MasterAgent {
       }
       // A fresh session (incl. a cross-provider fork target) has no provider cost history: drop any inherited watermark.
       if (!this.sdkSessionId) this.providerCostTotalUsd = 0;
-      const stream = this.opts.deps.backend.startTurn(promptText, {
+      const stream = this.opts.deps.backend.startTurn(input, {
         cwd: this.opts.cwd,
         model,
+        speed,
         abortController: abort, // Abort signal — abort() from stop()
         effort,
         // A headless daemon has no TTY to approve permission prompts, so the master also auto-approves.
@@ -484,12 +502,15 @@ export class MasterAgent {
           bus.emit({ type: "master.system", sessionId, text: ev.text });
         } else if (ev.kind === "tool_progress") {
           bus.emit({ type: "master.tool", sessionId, toolId: ev.toolUseId, name: "", phase: "progress", elapsedSec: ev.elapsedSec });
+        } else if (ev.kind === "speed") {
+          this.recordEvent({ type: "master.speed", sessionId, observation: ev.observation });
         } else if (ev.kind === "turn_end") {
           // Carry cumulative cost/turns for the session (context tokens/window are the current turn's values).
           // ev.costUsd is THIS turn's incremental cost (the Claude SDK reports a running total per result —
           // probed on 0.3.303: resumed turns $0.03168 → $0.03421 → $0.03619 — which the adapter differences
           // against costBaselineUsd). The raw total is kept as the next baseline and persisted with the result.
           this.cumCostUsd += ev.costUsd;
+          this.costAccuracy = mergeCostAccuracy(this.costAccuracy, ev.costAccuracy);
           if (ev.costTotalUsd !== undefined) this.providerCostTotalUsd = ev.costTotalUsd;
           this.cumTurns += ev.numTurns;
           this.recordEvent({
@@ -497,6 +518,8 @@ export class MasterAgent {
             sessionId,
             subtype: ev.subtype,
             costUsd: this.cumCostUsd,
+            costAccuracy: this.costAccuracy,
+            requestedSpeed: ev.requestedSpeed,
             numTurns: this.cumTurns,
             // Only persisted for turns that reported a provider total (Claude): a Codex turn must not re-persist an inherited value.
             ...(ev.costTotalUsd !== undefined && this.providerCostTotalUsd !== undefined ? { providerCostTotalUsd: this.providerCostTotalUsd } : {}),
@@ -513,9 +536,13 @@ export class MasterAgent {
             this.recordEvent({ type: "master.notice", sessionId, code: "notice.turnCap", params, text: t(DEFAULT_LOCALE, "notice.turnCap", params) });
           }
           // costBudgetUsd: warning-only for master (no abort) — mirror maxTurns above, but on the LIFETIME cost total.
+          // The unavailable notice keys off THIS turn's accuracy; the cumulative one is sticky (display only) and
+          // would otherwise re-record the notice on every later turn.
+          if (ev.costAccuracy === "unavailable") this.recordEvent({ type: "master.notice", sessionId, code: "notice.costUnavailable", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
           if (override?.costBudgetUsd != null && this.cumCostUsd >= override.costBudgetUsd) {
             const params = { spent: this.cumCostUsd.toFixed(2), budget: override.costBudgetUsd.toFixed(2) };
-            this.recordEvent({ type: "master.notice", sessionId, code: "notice.costBudget", params, text: t(DEFAULT_LOCALE, "notice.costBudget", params) });
+            const budgetCode = this.costAccuracy === "estimated" || this.costAccuracy === "unavailable" ? "notice.costBudgetEstimated" : "notice.costBudget";
+            this.recordEvent({ type: "master.notice", sessionId, code: budgetCode, params, text: t(DEFAULT_LOCALE, budgetCode, params) });
           }
         }
       }
@@ -544,8 +571,8 @@ export class MasterAgent {
         this.recordEvent({ type: "master.notice", sessionId, code: "notice.interrupted", params: undefined, text: t(DEFAULT_LOCALE, "notice.interrupted") });
         return;
       }
-      this.recordEvent({ type: "error", sessionId, message: String(err) });
-      throw err; // Let runTurn reject → the catch in connection.ts/handle-incoming surfaces the turn failure (MS-2). turnChain is protected by runTurn's .catch.
+      this.recordEvent({ type: "error", sessionId, message: String(err), ...(clientMsgId ? {clientMsgId} : {}), ...(!userEchoed && !opts?.notices ? {retryInput:{text:userText,...(override?.images?.length ? {images:override.images}:{})}}:{}) });
+      throw err; // Internal runTurn callers still receive execution failure; enqueue clients already received the persisted error event.
     } finally {
       this.flushThinking(); // Persist the trailing thinking summary too (a step that ended without an answer)
       // Codex parity (finding [10]): retire any interaction armed on this turn's signal. A codex turn can

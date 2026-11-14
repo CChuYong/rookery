@@ -7,7 +7,7 @@
 - **Engine:** `better-sqlite3` (synchronous, no async/await).
 - **Pragmas** (set in `openDb`): `journal_mode = WAL`, `foreign_keys = ON`, `busy_timeout = 5000`.
 - **STRICT tables:** every table is declared `STRICT` — column types are enforced, no silent affinity coercion.
-- **Single squashed baseline migration.** `MIGRATIONS` is an **append-only array**; the index is the version number. The entire pre-release history was squashed into one CREATE-only baseline (`MIGRATIONS[0]`) — no `ALTER`/backfill cruft, and there are no in-the-wild DBs to migrate. **Never modify an existing entry; only append a new one.** `db.test.ts` asserts `currentVersion === MIGRATIONS.length`.
+- **Squashed baseline plus append-only migrations.** `MIGRATIONS` is an **append-only array**; the index is the version number. The entire pre-release history was squashed into one CREATE-only baseline (`MIGRATIONS[0]`) — no `ALTER`/backfill cruft, and later feature changes append their migrations. **Never modify an existing entry; only append a new one.** `db.test.ts` asserts `currentVersion === MIGRATIONS.length`.
 - **Versioning / downgrade guard:** `schema_version` holds a single integer row. `openDb` runs every migration from the stored version up to `MIGRATIONS.length` in one transaction, then rewrites `schema_version`. If the stored version is **newer** than the build (`from > MIGRATIONS.length`) it throws (refuses to open a DB written by a newer daemon).
 - The DB lives at `~/.rookery/rookery.db` (`Config.dbPath`); tests use `openDb(":memory:")`.
 
@@ -31,6 +31,8 @@ One row per master conversation.
 | `origin_ref` | TEXT | nullable | Identifier within the source (slack thread key / automation id) |
 | `pinned_at` | TEXT | nullable | Pin timestamp for the sidebar 'pinned' section |
 | `provider` | TEXT | NOT NULL, default `'claude'` | Which `AgentBackend` runs this session: `claude`\|`codex` (P2) |
+
+`speed` is nullable TEXT with `CHECK (speed IN ('standard', 'fast'))` on `sessions`, `workers` and `automations`. NULL inherits the provider/role setting; it is preserved through target restart/fork. This is requested intent, not an effective provider-state column.
 
 ### `messages`
 Text-only transcript (used for text + `last_activity`). Tool/thinking/metrics events live in `session_events`.
@@ -100,6 +102,23 @@ Worker transcript events (worker counterpart of `session_events`).
 | `created_at` | TEXT | NOT NULL | ISO timestamp |
 
 Index: `idx_worker_events (worker_id, seq)`.
+
+Speed observations and result accounting quality live in `session_events.payload_json` / `worker_events.payload_json`, not new metrics columns. Unavailable cumulative quality survives replay/restart/fork. Image user messages contain `images: ImageRef[]` and optional `clientMsgId`; errors may contain correlated, reference-only `retryInput`. No image base64 belongs in these tables. `messages.content` remains the textual index even for image-only input.
+
+### `images`
+
+Immutable metadata, added by a separate append-only migration. Bytes live under `<ROOKERY_HOME>/images/<id>`; metadata has no session/worker foreign key and target deletion does not collect it.
+
+| Column | Type | Constraint / meaning |
+|---|---|---|
+| `id` | TEXT | PK, opaque UUID supplied by ImageStore |
+| `name` | TEXT | NOT NULL, sanitized original name |
+| `media_type` | TEXT | NOT NULL, PNG/JPEG/WebP/GIF MIME allowlist |
+| `byte_length` | INTEGER | NOT NULL, 1–3,145,728 bytes |
+| `width`, `height` | INTEGER | NOT NULL, 1–8000 each; product ≤20,000,000 pixels |
+| `created_at` | TEXT | NOT NULL, ISO timestamp |
+
+Quota is 1 GiB including conservative crash-leftover accounting. Retention is indefinite, with no implicit GC or deletion API; forks and persisted drafts can retain refs. See [images.md](images.md) for validation and filesystem ownership.
 
 ### `worker_checkpoints`
 Per-turn worktree git snapshot — maps a transcript position (`seq`) to a commit sha for "revert to this turn".

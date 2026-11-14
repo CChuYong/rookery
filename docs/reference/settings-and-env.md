@@ -18,6 +18,10 @@
 | `workerModel` | `config.workerModel` (`ROOKERY_WORKER_MODEL`, `claude-opus-4-8`) | yes | Default worker model. |
 | `masterEffort` | `config.masterEffort` (`ROOKERY_MASTER_EFFORT`, `high`) | yes | Master effort. |
 | `workerEffort` | `config.workerEffort` (`ROOKERY_WORKER_EFFORT`, `high`) | yes | Default worker effort. |
+| `masterSpeed` | `"standard"` | yes | Claude Master inherited speed; settings-only. |
+| `workerSpeed` | `"standard"` | yes | Claude Worker inherited speed; settings-only. |
+| `codexMasterSpeed` | `"standard"` | yes | Codex Master inherited speed; settings-only. |
+| `codexWorkerSpeed` | `"standard"` | yes | Codex Worker inherited speed; settings-only. |
 | `slackCwd` | `process.cwd()` | yes | cwd for Slack-originated sessions. Settings-only. |
 | `slackAllowedUsers` | `""` | yes | Comma-separated user ids allowed to get responses. Settings-only. |
 | `slackAllowAll` | `"0"` | yes | `"1"` allows everyone. Fail-closed default. Settings-only. |
@@ -26,6 +30,10 @@
 | `slackLocale` | `"ko"` (via `resolveLocale`) | yes | Slack output language (`ko`/`en`). |
 | `usageRefreshMs` | `120000` (`DEFAULT_USAGE_REFRESH_MS`) | yes | Usage refresh interval (ms). Applied at boot. |
 | `hasAcceptedDataNotice` | `"0"` | yes | First-run data-transmission consent flag (`"1"` accepted). Not secret. |
+
+A target's nullable `speed` override takes precedence over its provider/role default. `null` inherits the live default; clearing a default restores Standard. Selection changes apply at the next user-turn boundary and never interrupt an active turn. Explicit queued inputs capture their own preference. Side inherits its source preference. Restart, controlled reload and native forks retain intent; cross-provider forks recompute provider capability and observation.
+
+The selected preference is distinct from the latest provider report. Fast availability is model/account dependent: authoritative catalog exclusion disables Fast, missing metadata allows a request with unknown availability. Claude may report Standard/cooldown and a reason even after Fast was requested; Codex request acceptance leaves effective state unknown. No real provider configuration file is modified. See [speed and accounting](speed.md).
 
 **Write-only secrets** — outside `SettingsValues`, separate getters/setters, **never echoed** via `settings.get`. Each prefers DB, falls back to env/config:
 

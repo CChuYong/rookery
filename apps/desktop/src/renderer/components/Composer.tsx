@@ -1,3 +1,7 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
+import { checkImageBatch, importImage, isImageFile, ImageImportError } from "../lib/image-import.js";
+import { getImageClient } from "../lib/image-client.js";
+import { ImageAttachments } from "./ImageAttachments.js";
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
@@ -10,6 +14,8 @@ import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSup
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
+import type { SpeedObservation, SpeedPreference } from "@daemon/core/speed.js";
+import { SpeedControl } from "./SpeedControl.js";
 import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
 
@@ -24,6 +30,12 @@ const CHIP_SELECT = "[field-sizing:content] h-6 min-w-0 cursor-pointer appearanc
 // Model/effort controls at the bottom of the input box. editable=true means selectable (master session, before spawn),
 // false means a read-only badge (running worker — model is fixed at spawn time).
 export interface ComposerControls {
+  speed?: SpeedPreference | null;
+  defaultSpeed?: SpeedPreference;
+  speedPending?: boolean;
+  speedObservation?: SpeedObservation;
+  speedLastObservation?: SpeedObservation;
+  onSpeed?: (speed: SpeedPreference | null) => void;
   provider?: string; // "codex" → the model dropdown is sourced from the codex model/list catalog + per-model efforts (like the spawn surfaces); absent/"claude" → the Claude models list. Codex falls back to the Claude list only if the catalog couldn't be fetched.
   model: string;
   effort?: string; // if absent, hide the effort select/badge (a running worker can't change effort live)
@@ -66,8 +78,8 @@ export function matchCommandAction(text: string, commands: SlashCommand[]): { ca
 // file attachment / drag-drop, and model/effort controls into one box. The outer chrome (bottom bar vs card) is
 // wrapped by the caller — this only renders the inner input box.
 export interface ComposerProps {
-  onSend: (text: string) => void;
-  onSideSend?: (text: string) => void; // redirect the current draft into an independent read-only Side conversation
+  onSend: (text: string, images?: ImageRef[]) => void | Promise<void>;
+  onSideSend?: (text: string, images?: ImageRef[]) => void | Promise<void>; // redirect the current draft into an independent read-only Side conversation
   disabled?: boolean;
   placeholder?: string;
   controls?: ComposerControls;
@@ -85,8 +97,9 @@ export interface ComposerProps {
   autoFocus?: boolean;
   sendLabel?: string; // send button aria-label (default "Send"; "Start" for a new session)
   className?: string; // override outer box styling (card look, etc.)
+  initialImages?: ImageRef[];
   initialText?: string; // seed the editor with this draft on mount (restore after tab/session switch). Changes flow through onDraftChange.
-  onDraftChange?: (text: string) => void; // called whenever the serialized input changes — the caller persists the draft
+  onDraftChange?: (text: string, images?: ImageRef[]) => void; // called whenever the serialized input changes — the caller persists the draft
 }
 
 export function Composer({
@@ -109,6 +122,7 @@ export function Composer({
   autoFocus = false,
   sendLabel,
   className,
+  initialImages = [],
   initialText,
   onDraftChange,
 }: ComposerProps): JSX.Element {
@@ -116,6 +130,33 @@ export function Composer({
   const placeholderText = placeholder ?? t("composer.placeholder");
   const sendLabelText = sendLabel ?? t("composer.sendLabel");
   const [text, setText] = useState(initialText ?? ""); // current message serialized from the editor (derived, for popup/empty-state/send decisions)
+  const [images, setImages] = useState<ImageRef[]>(initialImages);
+  const imagesRef = useRef(images); imagesRef.current = images;
+  const [importing, setImporting] = useState(false);
+  const importLock = useRef(false);
+  const [picking, setPicking] = useState(false);
+  const pickerLock = useRef(false);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const disabledRef = useRef(disabled); disabledRef.current = disabled;
+  const draftGeneration = useRef(0);
+  const [error, setError] = useState<string>();
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const importFiles = async (files: Parameters<typeof importImage>[0][]) => {
+    if (!files.length || disabledRef.current || importLock.current || sendingRef.current) return;
+    importLock.current = true; setImporting(true); setError(undefined);
+    try {
+      checkImageBatch(imagesRef.current, files.map(file => 'size' in file ? file.size : file.byteLength));
+      for (const file of files) {
+        const image = await importImage(file, getImageClient());
+        if (!alive.current) return;
+        setImages(current => [...current, image]);
+      }
+    } catch (err) {
+      if (alive.current) setError(t(err instanceof ImageImportError ? `images.${err.reason}` : "images.failed"));
+    } finally { importLock.current = false; if (alive.current) setImporting(false); }
+  };
   const models = useStore((s) => s.models); // live Claude model list (static fallback if absent)
   const codexModels = useStore((s) => s.codexModels); // codex model/list catalog (null when unfetched)
   // When the conversation runs on codex AND the catalog is available, source the model dropdown + per-model
@@ -155,31 +196,36 @@ export function Composer({
   const draftMounted = useRef(false);
   useEffect(() => {
     if (!draftMounted.current) { draftMounted.current = true; return; }
-    onDraftChange?.(text);
-  }, [text, onDraftChange]);
+    if (images.length) onDraftChange?.(text, images); else onDraftChange?.(text);
+  }, [text, images, onDraftChange]);
 
-  const submit = () => {
-    if (disabled) return;
+  const submitTo = async (side = false) => {
+    if (disabledRef.current || importing || importLock.current || sendingRef.current) return;
     const msg = (promptRef.current?.getText() ?? "").trim();
-    if (!msg && !allowEmpty) return;
-    const command = onCommandAction ? matchCommandAction(msg, commands) : null;
+    if (!msg && !images.length && (!allowEmpty || side)) return;
+    const command = !side && onCommandAction ? matchCommandAction(msg, commands) : null;
     if (command && command.candidate.action.type !== "insert-prompt") {
+      if (images.length) { setError(t("images.command")); return; }
       if (command.candidate.action.type === "open-panel" && !command.argument) return;
+      draftGeneration.current++;
       onCommandAction?.(command.candidate.action, command.argument);
-      promptRef.current?.clear();
-      return;
+      promptRef.current?.clear(); return;
     }
-    onSend(msg);
-    promptRef.current?.clear();
+    const send = side ? onSideSend : onSend;
+    if (!send) return;
+    draftGeneration.current++;
+    sendingRef.current = true;
+    setSending(true); setError(undefined);
+    try {
+      const result = images.length ? send(msg, images) : send(msg);
+      if (result) await result;
+      // Acceptance may navigate/unmount. The owning draft is cleared by the send path in that case.
+      if (alive.current) { promptRef.current?.clear(); setImages([]); }
+    } catch { if (alive.current) setError(t("images.sendFailed")); }
+    finally { sendingRef.current = false; if (alive.current) setSending(false); }
   };
-
-  const submitSide = () => {
-    if (disabled || !onSideSend) return;
-    const msg = (promptRef.current?.getText() ?? "").trim();
-    if (!msg) return;
-    onSideSend(msg);
-    promptRef.current?.clear();
-  };
+  const submit = () => { void submitTo(); };
+  const submitSide = () => { void submitTo(true); };
 
   // Insert paths as Lexical-owned inline chips (show only the filename, serialize as @path).
   const addAttachments = (paths: string[]) => {
@@ -190,18 +236,35 @@ export function Composer({
 
   // File selection → attach.
   const attach = async () => {
-    if (!onAttachFile) return;
-    const p = await onAttachFile();
-    if (p) addAttachments([p]);
+    if (disabledRef.current || sendingRef.current || importLock.current || pickerLock.current) return;
+    pickerLock.current = true; setPicking(true);
+    const generation = draftGeneration.current;
+    const canApply = () => alive.current && !disabledRef.current && !sendingRef.current && generation === draftGeneration.current;
+    try {
+      // The native bridge reads only its dialog selection. Old selections cannot mutate a submitted draft.
+      const selected = window.rookery?.pickAttachment
+        ? await window.rookery.pickAttachment()
+        : onAttachFile ? await onAttachFile().then(path => path ? {path} : null) : null;
+      if (!canApply() || !selected) return;
+      if ('path' in selected) addAttachments([selected.path]);
+      else await importFiles([selected]);
+    } catch (error) {
+      if (canApply()) {
+        const message = error instanceof Error ? error.message : "";
+        setError(t(/unsupported/i.test(message) ? "images.type" : /size limit/i.test(message) ? "images.size" : "images.failed"));
+      }
+    } finally {
+      pickerLock.current = false;
+      if (alive.current) setPicking(false);
+    }
   };
-
-  // Drag-drop → convert Files to absolute paths and insert chips at the editor's latest selection.
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    if (disabled || !onDropFiles) return;
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length) addAttachments(onDropFiles(files));
+  const onDrop = (event: DragEvent) => {
+    event.preventDefault(); setDragOver(false);
+    if (disabled || sending || importing) return;
+    const files = Array.from(event.dataTransfer.files);
+    void importFiles(files.filter(isImageFile));
+    const paths = files.filter(file => !isImageFile(file));
+    if (paths.length && onDropFiles) addAttachments(onDropFiles(paths));
   };
 
   return (
@@ -212,7 +275,7 @@ export function Composer({
         dragOver ? "border-accent/70 bg-accent/5" : "border-line",
         className,
       )}
-      onDragOver={(e) => { if (onDropFiles && !disabled) { e.preventDefault(); setDragOver(true); } }}
+      onDragOver={(e) => { if (!disabled && !sending) { e.preventDefault(); setDragOver(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }}
       onDrop={onDrop}
     >
@@ -221,18 +284,22 @@ export function Composer({
           {t("composer.dropToAttach")}
         </div>
       )}
+      <ImageAttachments images={images} onRemove={(index) => { if (!sending) setImages(current => current.filter((_,i) => i !== index)); }} />
+      {importing && <div role="status" className="text-meta text-muted">{t("images.importing")}</div>}
+      {error && <div role="alert" className="text-meta text-fail">{error}</div>}
       <PromptEditor
         ref={promptRef}
         initialText={initialText}
         onChange={setText}
-        commands={commands}
+        commands={images.length ? commands.filter(command => command.action.type === "insert-prompt") : commands}
         browseDir={browseDir}
         placeholder={placeholderText}
-        disabled={disabled}
+        disabled={disabled || sending}
+        onPasteImages={(files) => void importFiles(files)}
         autoFocus={autoFocus}
         onSubmit={submit}
         onEscape={onEscape}
-        onCommandAction={(action) => onCommandAction?.(action)}
+        onCommandAction={(action) => { if (images.length) setError(t("images.command")); else onCommandAction?.(action); }}
       />
       {/* flex-wrap so the controls reflow onto a second line in a very narrow pane instead of overflowing (the outer <main>
           now clips, so without wrap the send button could be cut off). */}
@@ -307,14 +374,15 @@ export function Composer({
               )}
             </span>
           ))}
+        {controls?.speed !== undefined && <SpeedControl speed={controls.speed} defaultSpeed={controls.defaultSpeed} provider={controls.provider} model={controls.model} pendingNextTurn={controls.speedPending} observation={controls.speedObservation} lastObservation={controls.speedLastObservation} onChange={controls.onSpeed} disabled={disabled || !controls.editable} />}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {onSideSend && !disabled && (
-            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.sideQuestion")} disabled={!text.trim()} onClick={submitSide}>
+            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.sideQuestion")} disabled={sending || importing || (!text.trim() && !images.length)} onClick={submitSide}>
               <MessageCircleQuestion size={14} />
             </Button>
           )}
-          {onAttachFile && (
-            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled} onClick={() => void attach()}>
+          {(onAttachFile || window.rookery?.pickAttachment) && (
+            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled || sending || importing || picking} onClick={() => void attach()}>
               <Paperclip size={14} />
             </Button>
           )}
@@ -334,14 +402,14 @@ export function Composer({
               </Button>
             )
           )}
-          {!(busy && onStop && !disabled && !text.trim()) && (
+          {!(busy && onStop && !disabled && !text.trim() && !images.length) && (
             // White-on-black send, like T3 — the accent stays off the send action entirely.
             <Button
               variant="primary"
               size="icon"
               className="h-[26px] w-[26px] rounded-full bg-fg text-ink hover:bg-fg/90 disabled:bg-raised disabled:text-faint"
               aria-label={sendLabelText}
-              disabled={disabled || (!text.trim() && !allowEmpty)}
+              disabled={disabled || sending || importing || (!text.trim() && !images.length && !allowEmpty)}
               onClick={submit}
             >
               <Send size={14} />

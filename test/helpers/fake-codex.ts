@@ -29,7 +29,7 @@ export interface FakeCodexServerOpts {
   deadInterrupt?: boolean; // turn/interrupt gets NO response at all (not even an ack) — the child is wedged
   // AND unresponsive to requests, so interrupt()'s `await client.request("turn/interrupt")` would hang
   // forever. Exercises onIdleTimeout's ack-timeout race that must still arm the grace→kill escalation.
-  userAgent?: string; // `initialize` result userAgent (default "rookery/0.163.0 (fake)"; pass e.g. "fake" for an unparseable one)
+  userAgent?: string; // `initialize` result userAgent (default "rookery/0.169.0 (fake)"; pass e.g. "fake" for an unparseable one)
   rejectExcludeTurns?: boolean; // thread/resume|fork carrying excludeTurns → -32600 "requires experimentalApi capability" (old/pre-release CLI)
   silentInitialize?: boolean; // the `initialize` request never gets a response — stalls openClient() (P3-remaining Track A handshake-timeout test)
   silentThreadStart?: boolean; // `thread/start`/`thread/resume` never get a response — stalls startOrResumeThread() (same test)
@@ -99,7 +99,7 @@ export function fakeCodexSpawn(
         requests.push({ method: msg.method, params: msg.params ?? {} });
         if (msg.method === "initialize") {
           if (opts.silentInitialize) return;
-          const respond = () => send({ id: msg.id, result: { userAgent: opts.userAgent ?? "rookery/0.163.0 (fake)" } });
+          const respond = () => send({ id: msg.id, result: { userAgent: opts.userAgent ?? "rookery/0.169.0 (fake)" } });
           if (opts.initializeDelayMs) setTimeout(respond, opts.initializeDelayMs); else respond();
           return;
         }
