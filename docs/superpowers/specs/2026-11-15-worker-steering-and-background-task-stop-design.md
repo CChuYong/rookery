@@ -193,6 +193,40 @@ rookery/abc  ● Running   2 bg ▾
 - Ship the current task list to a reconnecting desktop (today `fleet.list` doesn't carry `bg`), and avoid writing a
   session log row for a `worker.status` that repeats the same status only to update `bg`.
 
+### Live findings (2026-11-15)
+
+Isolated daemon (port 8899, temp `ROOKERY_HOME`), Claude SDK CLI 2.1.325, Codex CLI 0.169.0.
+
+- **Claude priority: `"next"` kept.** A send during a running `Bash` (`sleep 10`) was absorbed into the same
+  turn (SDK queue op `absorbed_mid_turn`, rendered as a `<system-reminder>` "The user sent a new message while you
+  were working" next to the following tool result). The running tool was not aborted, there was one `result`, one
+  user echo, and the worker settled `idle`. `"now"` was not needed and not tested. The model's compliance depends on
+  wording: imperative "Additional instruction (do it within this same task) … Then continue with the remaining
+  steps." was rejected as a suspected prompt injection by both Haiku 5.5 and Sonnet 5.5; a conversational "Oh, one
+  more thing: please also create …" was followed (Haiku 5.5). Master `send_worker` text is at risk of the first
+  style.
+- **Claude end of turn: a separate turn, with a transient `idle`.** A send that arrives after the model's last tool
+  step (here: right after the final assistant text, before `result`) is not folded. `steer()` accepts it anyway
+  (`turnActive` stays true until `result`), so it is echoed once, then the SDK emits `result` for the old turn and
+  answers the message as a new turn with its own `result`. Observed `worker.status`: `running → idle → running →
+  idle`, with about 1.4 s (Haiku) or 3.0 s (Sonnet) of `idle` between. Nothing is lost or stuck, but the transient
+  `idle` would wake a master armed with `notify:true` and could fire an `idle` worker-settled trigger. Reported as a
+  bug for routing; not fixed here.
+- **Codex.** `turn/steer` mid-turn was accepted and delivered as a real user message in the same turn (rollout:
+  user message right after the original task, one `task_complete`). gpt-6.1-terra acted on it; gpt-6-luna (low)
+  received it but ignored it. At the end of a turn (11 probes with a 0–150 ms delay after the final assistant text)
+  a steer that arrives before `turn/completed` (0–10 ms) is folded into the same turn with one result and no
+  transient `idle`; later sends found the worker already `idle` and started a normal turn. No send was lost or
+  echoed twice, and none left the worker `running`. The "accepted at `turn/completed`" race and the
+  rejected-steer fallback were not hit live.
+- **Background stop (Claude).** Raw `task_type` was `local_bash` for both `run_in_background` shells (no Monitor was
+  started, so no monitor type was observed). `worker.task.stop` removed the stopped task from `worker.tasks` at
+  once and killed only its process; the other shell kept running. The worker did **not** wake: it stayed
+  `background` for 22 s and the SDK only queued a `<task-notification>` with status `killed`, which rides the next
+  turn. An unknown task id returns `Unknown background task <id>`. Stopping the worker killed the remaining shell.
+  The terminal `stopped` status still carried `bg: {count: 1}` and `worker.tasks: []` followed it, as designed
+  (`worker.ts` keeps the legacy `bg` payload on the status event and clears the listed view after it).
+
 ## Calls made while writing (not discussed with the owner)
 
 - Steering waits behind an already-deferred message (never overtakes it); per-message `speed` applies next turn.
