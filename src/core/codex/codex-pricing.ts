@@ -6,15 +6,16 @@ import type { CodexTokenUsageBreakdown } from "./codex-protocol.js";
 // total_tokens === input_tokens + output_tokens with cached_input_tokens <= input_tokens, and
 // reasoning_output_tokens is a subset of output_tokens.
 // Rates: developers.openai.com/api/docs/pricing, standard tier, USD per 1M tokens (gpt-5.x rows
-// verified 2026-07-06; gpt-6*/gpt-5.6* rows fetched 2026-10-19). Reasoning tokens bill as output
+// verified 2026-07-06; gpt-6*/gpt-5.6* rows fetched 2026-10-19, re-checked and gpt-6.1-terra added 2026-11-14). Reasoning tokens bill as output
 // tokens (Responses API). The long-context surcharge (>272K input: 2x input/cached, 1.5x output) is
 // NOT modeled — bills at the short-context rate, so very long single turns under-report. Likewise
 // `cacheWriteInputTokens` (new in 0.163.0) is NOT billed: no cache-write price is published (it is
-// currently always 0 in live rollouts). gpt-5.6-sol is promotional pricing "at least through
-// 2026-11-21" — re-check after that date. Pro tiers have no cached-input discount → cachedInput =
+// currently always 0 in live rollouts). gpt-5.6-sol is promotional pricing "until
+// 2026-11-30" — re-check after that date. Pro tiers have no cached-input discount → cachedInput =
 // input rate. Unknown model → 0 (see isRatedModel).
 const RATES: Record<string, { input: number; cachedInput: number; output: number }> = {
   "gpt-6.1-sol": { input: 2.0, cachedInput: 0.1, output: 10.0 },
+  "gpt-6.1-terra": { input: 1.0, cachedInput: 0.05, output: 5.0 },
   "gpt-6-astra": { input: 10.0, cachedInput: 1.0, output: 50.0 },
   "gpt-6-sol": { input: 2.0, cachedInput: 0.2, output: 10.0 },
   "gpt-6-luna": { input: 0.1, cachedInput: 0.01, output: 0.5 },
