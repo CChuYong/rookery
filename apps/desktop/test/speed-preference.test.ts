@@ -58,3 +58,49 @@ it("two rejected rapid changes restore the original persisted intent", async () 
   ]);
   expect(useStore.getState().sessions[0].speed).toBe("standard");
 });
+
+it.each(["master", "worker"] as const)("%s refresh preserves another target's pending intent and the next send's speed", async (kind) => {
+  const { WsClient } = await import("../src/renderer/ws/client.js");
+  const sessionRow = (id: string) => ({ ...session, id });
+  const workerRow = (id: string) => ({ id, label: id, status: "idle", repoPath: "/", branch: id, model: "gpt-5.5", speed: "standard" as const });
+  if (kind === "master") useStore.getState().setSessions([sessionRow("a"), sessionRow("b")]);
+  else useStore.getState().setFleet([workerRow("a"), workerRow("b")]);
+  const requests: Array<import("@daemon/protocol/messages.js").ClientMessage> = [];
+  const socket: import("../src/renderer/ws/client.js").SocketLike = {
+    send: (data) => { requests.push(JSON.parse(data)); }, close: vi.fn(), readyState: 1,
+    onopen: null, onclose: null, onmessage: null,
+  };
+  const onEvent = vi.fn((event: import("@daemon/core/events.js").CoreEvent) => useStore.getState().applyEvent(event));
+  const client = new WsClient(() => socket, onEvent);
+  client.start();
+  const reply = (index: number, message: Record<string, unknown>) => {
+    const request = requests[index] as { reqId?: string };
+    socket.onmessage!(JSON.stringify({ ...message, reqId: request.reqId }));
+  };
+  const writes = new Map<string, SpeedWriteState>();
+  const a = persistSpeedPreference(client, kind, "a", "fast", writes);
+  reply(0, { type: "fleet.ack" });
+  await Promise.resolve(); // A's authoritative list response is now in flight.
+  const b = persistSpeedPreference(client, kind, "b", "fast", writes);
+  reply(1, kind === "master"
+    ? { type: "session.list.result", sessions: [{ ...sessionRow("a"), speed: "fast" }, sessionRow("b")] }
+    : { type: "fleet.list.result", fleet: [{ ...workerRow("a"), speed: "fast" }, workerRow("b")] });
+  await a;
+  // Capture speed exactly as App's send paths do, before B's own acknowledgement/refresh.
+  const current = useStore.getState();
+  const speed = kind === "master" ? current.sessions.find((row) => row.id === "b")?.speed : current.fleet.b.speed;
+  if (kind === "master") client.send({ type: "session.send", sessionId: "b", text: "next", speed });
+  else client.send({ type: "worker.send", id: "b", text: "next", speed });
+  const sentSpeed = (requests[3] as { speed?: string }).speed;
+  reply(2, { type: "fleet.ack" });
+  await Promise.resolve();
+  reply(4, kind === "master"
+    ? { type: "session.list.result", sessions: ["a", "b"].map((id) => ({ ...sessionRow(id), speed: "fast" })) }
+    : { type: "fleet.list.result", fleet: ["a", "b"].map((id) => ({ ...workerRow(id), speed: "fast" })) });
+  await b;
+  expect(speed).toBe("fast");
+  expect(sentSpeed).toBe("fast");
+  // Correlated list responses resolve only their caller; WsClient never treats them as global events.
+  expect(onEvent).not.toHaveBeenCalled();
+  client.stop();
+});

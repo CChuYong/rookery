@@ -32,10 +32,23 @@ export async function persistSpeedPreference(
     if (version > write.confirmedVersion) { write.confirmed = speed; write.confirmedVersion = version; }
     if (kind === "master") {
       const result = await client.request({ type: "session.list" });
-      if (write.version === version) useStore.getState().setSessions(result.sessions);
+      const target = result.sessions.find((row) => row.id === id);
+      if (write.version === version && target) {
+        const confirmed = target.speed ?? null;
+        write.confirmed = confirmed;
+        // The list snapshot may predate another target's optimistic mutation. Reconcile this preference only.
+        useStore.setState((current) => ({ sessions: current.sessions.map((row) => row.id === id ? { ...row, speed: confirmed } : row) }));
+      }
     } else {
       const result = await client.request({ type: "fleet.list" });
-      if (write.version === version) useStore.getState().setFleet(result.fleet);
+      const target = result.fleet.find((row) => row.id === id);
+      if (write.version === version && target) {
+        const confirmed = target.speed ?? null;
+        write.confirmed = confirmed;
+        useStore.setState((current) => current.fleet[id]
+          ? { fleet: { ...current.fleet, [id]: { ...current.fleet[id], speed: confirmed } } }
+          : {});
+      }
     }
   } finally {
     if (--write.pending === 0) {
