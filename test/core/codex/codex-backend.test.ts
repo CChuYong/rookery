@@ -616,7 +616,7 @@ describe("CodexBackend — pricing aggregation", () => {
     expect(end.costUsd).toBeCloseTo(0.01345, 10);
   });
 
-  it("resume: first tokenUsage update only sets the baseline (thread history not billed)", async () => {
+  it("cold resume: bills the first call from `last`, adopts `total` as the baseline (history not billed)", async () => {
     const { backend: b } = backend(() => [
       { kind: "tokenUsage", last: { inputTokens: 100 }, total: { inputTokens: 50_000, cachedInputTokens: 10_000, outputTokens: 9_000 } }, // history-inclusive
       { kind: "tokenUsage", last: { inputTokens: 100 }, total: { inputTokens: 51_000, cachedInputTokens: 10_500, outputTokens: 9_100 } },
@@ -625,8 +625,18 @@ describe("CodexBackend — pricing aggregation", () => {
     const q = new MessageQueue(); q.push("x"); q.close();
     const events = await collect(b.openSession(q, baseOpts({ model: "gpt-5.5", resume: "th-1" })));
     const end = events.find((e) => e.kind === "turn_end") as { costUsd: number };
-    // Cold resume cannot separate the first request from history; incomplete totals are unavailable.
-    expect(end).toMatchObject({ costUsd: 0, costAccuracy: "unavailable" });
+    // first call from `last`: 100*5/1M; second from the total delta: (1000-500)*5/1M + 500*0.5/1M + 100*30/1M
+    expect(end).toMatchObject({ costAccuracy: "estimated" });
+    expect(end.costUsd).toBeCloseTo(100 * 5 / 1e6 + 500 * 5 / 1e6 + 500 * 0.5 / 1e6 + 100 * 30 / 1e6, 10);
+  });
+
+  it("cold resume: a first update with no per-call `last` cannot be priced (unavailable)", async () => {
+    const { backend: b } = backend(() => [
+      { kind: "raw", method: "thread/tokenUsage/updated", params: { tokenUsage: { total: { inputTokens: 50_000, outputTokens: 9_000 } } } },
+      { kind: "turnEnd" },
+    ]);
+    const events = await collect(b.startTurn("continue", baseOpts({ model: "gpt-5.5", resume: "th-y" }) as never));
+    expect(events.find((e) => e.kind === "turn_end")).toMatchObject({ costUsd: 0, costAccuracy: "unavailable" });
   });
 
   it("accumulator resets per turn and clamps negative deltas to 0", async () => {
@@ -691,17 +701,29 @@ describe("CodexBackend — pricing aggregation", () => {
     expect(end2.costUsd).toBeCloseTo(0.008, 10);
   });
 
-  it("cold map: a fresh backend's first-ever resume of a thread still consumes the baseline (costUsd 0, existing behavior made explicit)", async () => {
+  it("cold map: a fresh backend's first-ever resume bills the first call from `last` (estimated, not unavailable)", async () => {
     const fake = fakeCodexSpawn(() => [
       { kind: "tokenUsage", last: { inputTokens: 100 }, total: { inputTokens: 50_000, cachedInputTokens: 10_000, outputTokens: 9_000 } },
       { kind: "turnEnd" },
     ]);
     const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-5.5" });
-    // No prior turn has ever run under this backend for "th-x" — totalsByThread is cold, so this
-    // falls back to prevTotal=null and the single update is consumed as the baseline, same as before T3b.
+    // No prior turn has ever run under this backend for "th-x" — totalsByThread is cold, so prevTotal
+    // starts null; the per-call `last` prices this call while `total` (history-inclusive) becomes the baseline.
     const events = await collect(b.startTurn("continue", baseOpts({ model: "gpt-5.5", resume: "th-x" }) as never));
     const end = events.find((e) => e.kind === "turn_end") as { costUsd: number };
-    expect(end.costUsd).toBe(0);
+    expect(end).toMatchObject({ costAccuracy: "estimated" });
+    expect(end.costUsd).toBeCloseTo(100 * 5 / 1e6, 10);
+  });
+
+  it("long-context unavailability is per turn: a >272K request does not taint the next turn", async () => {
+    const { backend: b } = backend((_t, turn) => turn === 0
+      ? [{ kind: "tokenUsage", last: { inputTokens: 272_001 }, total: { inputTokens: 272_001 } }, { kind: "turnEnd" }]
+      : [{ kind: "tokenUsage", last: { inputTokens: 1000 }, total: { inputTokens: 273_001 } }, { kind: "turnEnd" }]);
+    const q = new MessageQueue(); q.push("a"); q.push("b"); q.close();
+    const ends = (await collect(b.openSession(q, baseOpts({ model: "gpt-5.5" })))).filter((e) => e.kind === "turn_end") as Array<{ costUsd: number }>;
+    expect(ends[0]).toMatchObject({ costUsd: 0, costAccuracy: "unavailable" });
+    expect(ends[1]).toMatchObject({ costAccuracy: "estimated" });
+    expect(ends[1]!.costUsd).toBeCloseTo(1000 * 5 / 1e6, 10);
   });
 });
 
@@ -1397,11 +1419,14 @@ it("sends a non-sticky explicit tier on every Codex turn", async () => {
  expect(events).toContainEqual({ kind: "speed", observation: { requested: "fast", state: "unknown" } });
 });
 
-it("rejects authoritative catalog exclusion before executing Fast, and permits unknown capability", async () => {
-  const fake = fakeCodexSpawn(() => [{kind: "turnEnd"}]);
+it("falls back to Standard (no throw) when the catalog excludes Fast for the model, and permits unknown capability", async () => {
+  const fake = fakeCodexSpawn(() => [{kind: "tokenUsage", last: {inputTokens: 1000}}, {kind: "turnEnd"}]);
   const b = new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5", modelServiceTiers: () => ["default"]});
-  await expect(collect(b.startTurn("go", baseOpts({speed: "fast"})))).rejects.toThrow("Fast speed is unavailable");
-  expect(fake.requests.some(r => r.method === "turn/start")).toBe(false);
+  const events = await collect(b.startTurn("go", baseOpts({speed: "fast"})));
+  expect(fake.requests.find(r => r.method === "turn/start")?.params).toMatchObject({serviceTierForTurn: "default"});
+  expect(events).toContainEqual({kind: "speed", observation: {requested: "fast", state: "standard", reason: expect.stringContaining("not supported for model gpt-5.5")}});
+  // billed at the Standard tier (1000 * $5/1M) while still reporting what the caller asked for
+  expect(events.at(-1)).toMatchObject({kind: "turn_end", requestedSpeed: "fast", costUsd: .005, costAccuracy: "estimated"});
   const unknown = backend(() => [{kind: "turnEnd"}]);
   await expect(collect(unknown.backend.startTurn("go", baseOpts({speed: "fast"})))).resolves.toContainEqual({kind: "speed", observation: {requested: "fast", state: "unknown"}});
 });

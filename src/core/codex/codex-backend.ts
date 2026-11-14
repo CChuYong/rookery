@@ -536,6 +536,8 @@ abstract class CodexSessionBase implements AgentStream {
   // is responsible for snapshotting `billedModel` BEFORE calling this, so pricing bills the model the
   // thread actually ran this turn under.
   private billedSpeed: SpeedPreference = "standard";
+  // What the caller asked for this turn; differs from billedSpeed only on a catalog Fast fallback.
+  private requestedSpeed: SpeedPreference = "standard";
   private speedOverride?: SpeedPreference;
   private longContextSeen = false;
   private turnUsageObserved = false;
@@ -546,15 +548,24 @@ abstract class CodexSessionBase implements AgentStream {
       ? [{ type: "text", text, text_elements: [] }]
       : [...(text.text ? [{ type: "text" as const, text: text.text, text_elements: [] as never[] }] : []),
         ...text.images.map(image => ({ type: "image" as const, url: `data:${image.mediaType};base64,${image.data}` }))];
-    this.billedSpeed = this.speedOverride ?? resolveSpeed(this.opts.speed);
+    this.requestedSpeed = this.speedOverride ?? resolveSpeed(this.opts.speed);
+    this.billedSpeed = this.requestedSpeed;
+    // Per-turn accounting state: a previous turn's long-context/incomplete flags never leak forward.
     this.longContextSeen = false;
     this.turnUsageObserved = false;
     this.accountingIncomplete = false;
     const turnModel = modelOverride || this.opts.model || this.deps.defaultModel();
     const tiers = this.deps.modelServiceTiers?.(turnModel);
     // The live catalog calls Fast "priority"; serviceTierForTurn still accepts the "fast" request alias.
-    if (this.billedSpeed === "fast" && tiers && !tiers.includes("priority") && !tiers.includes("fast")) throw new Error(`Fast speed is unavailable for model ${turnModel} according to the provider catalog`);
-    this.channel.push({ kind: "speed", observation: { requested: this.billedSpeed, state: "unknown" } });
+    // Fast on a model the catalog authoritatively excludes falls back to the Standard tier for THIS turn
+    // (a global setting, a master/external spawn, or a setModel can all reach this) and reports it the
+    // way Claude reports fast mode off — never a throw that would kill the worker into terminal error.
+    if (this.requestedSpeed === "fast" && tiers && !tiers.includes("priority") && !tiers.includes("fast")) {
+      this.billedSpeed = "standard";
+      this.channel.push({ kind: "speed", observation: { requested: "fast", state: "standard", reason: `Fast is not supported for model ${turnModel}; using Standard for this turn` } });
+    } else {
+      this.channel.push({ kind: "speed", observation: { requested: this.billedSpeed, state: "unknown" } });
+    }
     const supported = effort ? this.deps.modelEfforts?.(turnModel) : undefined;
     if (effort && supported && supported.length > 0 && !supported.includes(effort)) {
       const key = `${turnModel}:${effort}`;
@@ -675,8 +686,17 @@ abstract class CodexSessionBase implements AgentStream {
         this.turnUsageObserved = true;
         if (!last) this.accountingIncomplete = true;
         if (this.prevTotal === null) {
-          this.accountingIncomplete = true;
-          this.prevTotal = total; // resumed stream: baseline only
+          // Cold resume/fork: no known baseline for the thread-cumulative total. The per-call `last`
+          // breakdown is exactly this first call's usage, so bill it directly and adopt `total` as the
+          // baseline for subsequent deltas — nothing is lost and nothing is double counted. Only when
+          // `last` is absent (already flagged incomplete above) does this call go unpriced.
+          if (last) {
+            this.turnAccum.inputTokens += Math.max(0, last.inputTokens ?? 0);
+            this.turnAccum.cachedInputTokens += Math.max(0, last.cachedInputTokens ?? 0);
+            this.turnAccum.cacheWriteInputTokens += Math.max(0, last.cacheWriteInputTokens ?? 0);
+            this.turnAccum.outputTokens += Math.max(0, last.outputTokens ?? 0);
+          }
+          this.prevTotal = total;
         } else {
           // Compaction/reset or incomplete telemetry can move cumulative counters backwards.
           // Clamping preserves nonnegative compatibility numbers but cannot certify a price.
@@ -720,7 +740,7 @@ abstract class CodexSessionBase implements AgentStream {
         subtype,
         costUsd: estimate.costUsd,
         costAccuracy: estimate.accuracy,
-        requestedSpeed: this.billedSpeed,
+        requestedSpeed: this.requestedSpeed,
         // PER-SEND per the port contract (agent-backend.ts): one turn/completed = one send. Codex
         // exposes no finer sub-turn agentic-loop count, so this is always 1 (consumers accumulate
         // their own lifetime total — worker.ts/master-agent.ts). Emitting a session-cumulative value

@@ -274,14 +274,8 @@ export class Worker {
         this.providerCostTotalUsd = providerCostTotalOf(last);
       }
     } catch { /* corrupt row — start from 0 */ }
-    if (this.costAccuracy === "unavailable" && this.opts.deps.costBudgetUsd != null) {
-      this.record({ kind: "notice", text: t(DEFAULT_LOCALE, "notice.costUnavailableStopped") });
-      this.transition("stopped");
-      this.queue.close();
-      this.abort.abort();
-      this.loop = Promise.resolve();
-      return;
-    }
+    // A persisted "unavailable" cumulative accuracy is display-only here: resuming is allowed, and the
+    // budget guard re-evaluates per turn (the next unmeasurable turn stops the worker again).
     this.opts.deps.repos.setWorkerModel(this.opts.id, this.currentModel);
     this.opts.deps.repos.setWorkerPermissionMode(this.opts.id, this.currentPermissionMode);
     // Background tasks died with the previous process (children of the SDK subprocess) — resume always
@@ -785,10 +779,13 @@ export class Worker {
           }
           // cost-budget guard: LIFETIME total (this.cumCostUsd, just incremented above), unlike maxTurns which is per-send.
           // null/undefined → unlimited. Mutually exclusive with the maxTurns cap above (both terminal; whichever crosses first stops).
+          // The unavailable notice and stop key off THIS turn's accuracy (ev.costAccuracy): the cumulative value is
+          // sticky for display, and keying off it would re-record the notice (and stop again) on every later turn.
           const budget = this.opts.deps.costBudgetUsd;
-          if (this.costAccuracy === "unavailable") this.record({ kind: "notice", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
-          if (budget != null && (this.costAccuracy === "unavailable" || this.cumCostUsd >= budget)) {
-            this.record({ kind: "notice", text: this.costAccuracy === "unavailable" ? t(DEFAULT_LOCALE, "notice.costUnavailableStopped") : this.costAccuracy === "estimated" ? t(DEFAULT_LOCALE, "notice.costBudgetEstimatedWorker", { spent: this.cumCostUsd.toFixed(2), budget: budget.toFixed(2) }) : `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
+          const turnUnavailable = ev.costAccuracy === "unavailable";
+          if (turnUnavailable) this.record({ kind: "notice", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
+          if (budget != null && (turnUnavailable || this.cumCostUsd >= budget)) {
+            this.record({ kind: "notice", text: turnUnavailable ? t(DEFAULT_LOCALE, "notice.costUnavailableStopped") : this.costAccuracy === "estimated" || this.costAccuracy === "unavailable" ? t(DEFAULT_LOCALE, "notice.costBudgetEstimatedWorker", { spent: this.cumCostUsd.toFixed(2), budget: budget.toFixed(2) }) : `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
             void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop
             queue.close();
             abort.abort();

@@ -536,10 +536,13 @@ export class MasterAgent {
             this.recordEvent({ type: "master.notice", sessionId, code: "notice.turnCap", params, text: t(DEFAULT_LOCALE, "notice.turnCap", params) });
           }
           // costBudgetUsd: warning-only for master (no abort) — mirror maxTurns above, but on the LIFETIME cost total.
-          if (this.costAccuracy === "unavailable") this.recordEvent({ type: "master.notice", sessionId, code: "notice.costUnavailable", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
+          // The unavailable notice keys off THIS turn's accuracy; the cumulative one is sticky (display only) and
+          // would otherwise re-record the notice on every later turn.
+          if (ev.costAccuracy === "unavailable") this.recordEvent({ type: "master.notice", sessionId, code: "notice.costUnavailable", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
           if (override?.costBudgetUsd != null && this.cumCostUsd >= override.costBudgetUsd) {
             const params = { spent: this.cumCostUsd.toFixed(2), budget: override.costBudgetUsd.toFixed(2) };
-            this.recordEvent({ type: "master.notice", sessionId, code: this.costAccuracy === "estimated" ? "notice.costBudgetEstimated" : "notice.costBudget", params, text: t(DEFAULT_LOCALE, this.costAccuracy === "estimated" ? "notice.costBudgetEstimated" : "notice.costBudget", params) });
+            const budgetCode = this.costAccuracy === "estimated" || this.costAccuracy === "unavailable" ? "notice.costBudgetEstimated" : "notice.costBudget";
+            this.recordEvent({ type: "master.notice", sessionId, code: budgetCode, params, text: t(DEFAULT_LOCALE, budgetCode, params) });
           }
         }
       }

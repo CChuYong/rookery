@@ -12,6 +12,7 @@ import { CodexBackend } from "../../src/core/codex/codex-backend.js";
 import { ClaudeBackend, type QueryFn } from "../../src/core/claude-backend.js";
 import { fakeQuery } from "../helpers/fake-query.js";
 import { fakeCodexSpawn } from "../helpers/fake-codex.js";
+import { t, DEFAULT_LOCALE } from "../../src/core/i18n.js";
 
 async function until(test: () => boolean) {
   for (let n = 0; n < 1000; n++) { if (test()) return; await new Promise(r => setTimeout(r, 1)); }
@@ -122,17 +123,41 @@ describe("speed lifecycle", () => {
   });
 });
 
-it("does not resume another budgeted turn after previously unavailable accounting", async () => {
+it("resumes a budgeted Worker with persisted unavailable accuracy; a measurable turn neither stops nor re-notices", async () => {
   const d = base();
   d.repos.createSession({id: "s", cwd: "/x"});
-  d.repos.createWorker({id: "w", sessionId: "s", repoPath: "/x", label: "w"});
+  d.repos.createWorker({id: "w", sessionId: "s", repoPath: "/x", label: "w", provider: "codex"});
   d.repos.addWorkerEvent({workerId: "w", seq: 0, type: "result", payloadJson: JSON.stringify({kind: "result", costUsd: 0, numTurns: 1, costAccuracy: "unavailable"})});
-  const fake = fakeCodexSpawn(() => [{kind: "turnEnd"}]);
+  // Cold resume: the first update carries a history-inclusive total plus this call's `last`.
+  const fake = fakeCodexSpawn(() => [{kind: "tokenUsage", last: {inputTokens: 1000}, total: {inputTokens: 90_000}}, {kind: "turnEnd"}]);
   const worker = new Worker({id: "w", sessionId: "s", repoPath: "/x", label: "w", sdkSessionId: "old-thread", deps: {...d, backend: new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5"}), model: "gpt-5.5", costBudgetUsd: 10}});
-  worker.resume();
-  expect(worker.status()).toBe("stopped");
-  expect(() => worker.send("again")).toThrow(/not running/);
-  expect(fake.requests.some(r => r.method === "turn/start")).toBe(false);
+  try {
+    worker.resume();
+    expect(worker.status()).toBe("idle");
+    worker.send("again");
+    await until(() => fake.requests.some(r => r.method === "turn/start") && worker.status() === "idle");
+    const events = d.repos.listWorkerEvents("w").map(e => JSON.parse(e.payload_json));
+    const result = events.filter(e => e.kind === "result").at(-1);
+    expect(result).toMatchObject({costAccuracy: "unavailable", numTurns: 2}); // cumulative stays unavailable for display
+    expect(result.costUsd).toBeCloseTo(.005, 10); // first call billed from `last`
+    expect(events.some(e => e.kind === "notice" && (e.text === t(DEFAULT_LOCALE, "notice.costUnavailable") || e.text === t(DEFAULT_LOCALE, "notice.costUnavailableStopped")))).toBe(false);
+  } finally { await worker.stop(); d.db.close(); }
+});
+
+it("records the Master cost-unavailable notice only for the unmeasurable turn", async () => {
+  const d = base();
+  d.repos.createSession({id: "s", cwd: "/x", provider: "codex"});
+  const fake = fakeCodexSpawn((text) => text === "blind" ? [{kind: "turnEnd"}] : [{kind: "tokenUsage", last: {inputTokens: 1000}}, {kind: "turnEnd"}]);
+  const sm = new SessionManager({...d, backends: {codex: new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5"})}, masterModel: "gpt-5.5"});
+  const master = sm.get("s")!.master;
+  await master.runTurn("blind");
+  await master.runTurn("measured");
+  await master.runTurn("measured again");
+  const notices = d.repos.listSessionEvents("s").filter(r => r.type === "master.notice" && JSON.parse(r.payload_json).code === "notice.costUnavailable");
+  expect(notices).toHaveLength(1);
+  const results = d.repos.listSessionEvents("s").filter(r => r.type === "master.result").map(r => JSON.parse(r.payload_json));
+  expect(results.map(r => r.costAccuracy)).toEqual(["unavailable", "unavailable", "unavailable"]);
+  d.db.close();
 });
 
 it.each([1, 2])("settles Worker terminally on real SDK initial/follow-up flag rejection (call %s)", async (rejectFlagAt) => {
@@ -211,5 +236,22 @@ it("stops a budgeted Worker before releasing deferred input after backwards usag
     await worker.waitUntilSettled();
     expect(fake.requests.filter(r => r.method === "turn/start")).toHaveLength(2);
     expect(JSON.parse(d.repos.lastWorkerEventPayload("w", "result")!)).toMatchObject({costUsd: .008, costAccuracy: "unavailable"});
+  } finally { await worker.stop(); d.db.close(); }
+});
+
+it("keeps a Codex Worker alive when Fast is requested on a model without a priority tier", async () => {
+  const d = base();
+  d.repos.createSession({id: "s", cwd: "/x"});
+  d.repos.createWorker({id: "w", sessionId: "s", repoPath: "/x", label: "w", provider: "codex"});
+  const fake = fakeCodexSpawn(() => [{kind: "tokenUsage", last: {inputTokens: 1000}}, {kind: "turnEnd"}]);
+  const backend = new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5", modelServiceTiers: () => ["default"]});
+  const worker = new Worker({id: "w", sessionId: "s", repoPath: "/x", label: "w", deps: {...d, backend, model: "gpt-5.5", speed: () => "fast"}});
+  try {
+    worker.start("go"); await until(() => worker.status() === "idle");
+    worker.send("again", undefined, "fast"); await until(() => fake.requests.filter(r => r.method === "turn/start").length === 2 && worker.status() === "idle");
+    expect(fake.requests.filter(r => r.method === "turn/start").map(r => r.params.serviceTierForTurn)).toEqual(["default", "default"]);
+    const events = d.repos.listWorkerEvents("w").map(e => JSON.parse(e.payload_json));
+    expect(events.filter(e => e.kind === "speed").map(e => e.observation)).toEqual([0, 1].map(() => ({requested: "fast", state: "standard", reason: expect.stringContaining("not supported")})));
+    expect(events.some(e => e.kind === "error")).toBe(false);
   } finally { await worker.stop(); d.db.close(); }
 });
