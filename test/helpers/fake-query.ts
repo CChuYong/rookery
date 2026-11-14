@@ -99,6 +99,7 @@ export function fakeQuery(
     onSetModel?: (model: string) => void;
     onSetPermissionMode?: (mode: string) => void;
     stillQueued?: string[]; // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
+    onStopTask?: (taskId: string) => void; // when set, the query exposes stopTask (SDK Query.stopTask)
   },
 ): QueryFn {
   const fn = ((_input: unknown) => {
@@ -112,6 +113,7 @@ export function fakeQuery(
       supportedCommands: async () => opts?.commands ?? [],
       setModel: async (model: string) => opts?.onSetModel?.(model),
       setPermissionMode: async (mode: string) => opts?.onSetPermissionMode?.(mode),
+      ...(opts?.onStopTask ? { stopTask: async (taskId: string) => opts.onStopTask!(taskId) } : {}),
     });
   }) as unknown as QueryFn;
   return fn;
@@ -122,7 +124,9 @@ export function fakeQuery(
 // lifecycle that the finite fakeQuery hides (for worker tests; for the master's string prompt it terminates empty immediately).
 export function fakeStreamingQuery(
   responder: (userText: string, turn: number, content?: unknown) => FakeStep[],
-  opts?: { stillQueued?: string[] }, // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
+  // stillQueued: when set, interrupt() resolves the SDK's typed receipt shape { still_queued }.
+  // onStopTask: when set, the query exposes stopTask (SDK Query.stopTask).
+  opts?: { stillQueued?: string[]; onStopTask?: (taskId: string) => void },
 ): QueryFn {
   const fn = ((input: { prompt?: unknown; options?: { abortController?: AbortController } }) => {
     const prompt = input?.prompt as AsyncIterable<{ message?: { content?: unknown } }> | undefined;
@@ -144,6 +148,7 @@ export function fakeStreamingQuery(
       interrupt: async () => (opts?.stillQueued ? { still_queued: opts.stillQueued } : undefined),
       close: () => {},
       supportedCommands: async () => [],
+      ...(opts?.onStopTask ? { stopTask: async (taskId: string) => opts.onStopTask!(taskId) } : {}),
     });
   }) as unknown as QueryFn;
   return fn;
@@ -154,24 +159,32 @@ export function fakeStreamingQuery(
 export function fakeBackend(script: FakeStep[], opts?: Parameters<typeof fakeQuery>[1]): AgentBackend {
   return new ClaudeBackend(fakeQuery(script, opts));
 }
-export function fakeStreamingBackend(responder: (userText: string, turn: number, content?: unknown) => FakeStep[], opts?: { stillQueued?: string[] }): AgentBackend {
+export function fakeStreamingBackend(responder: (userText: string, turn: number, content?: unknown) => FakeStep[], opts?: Parameters<typeof fakeStreamingQuery>[1]): AgentBackend {
   return new ClaudeBackend(fakeStreamingQuery(responder, opts));
 }
 
 // The deferred-FIFO fallback path: hide the stream's steer() (as on a provider that can't steer) so a mid-turn
 // send is held for the next turn boundary. Tests of that fallback wrap their backend with this.
 export function withoutSteer(backend: AgentBackend): AgentBackend {
+  return withoutStreamMethods(backend, "steer");
+}
+
+// Pass-through wrapper whose session streams hide only the named optional methods (as on a provider that
+// lacks them, e.g. Codex has no stopTask). Everything else — including optional controls — still reaches
+// the real stream, with `this` bound to it.
+export function withoutStreamMethods(backend: AgentBackend, ...hidden: Array<"steer" | "stopTask">): AgentBackend {
+  const hide = new Set<PropertyKey>(hidden);
   return {
     openSession: (input, opts) => {
       const s = backend.openSession(input, opts);
-      const plain: AgentStream = {
-        [Symbol.asyncIterator]: () => s[Symbol.asyncIterator](),
-        interrupt: () => s.interrupt(),
-        setModel: (m) => s.setModel(m),
-        setPermissionMode: (m) => s.setPermissionMode(m),
-        supportedCommands: () => s.supportedCommands(),
-      };
-      return plain;
+      return new Proxy(s, {
+        get: (target, key) => {
+          if (hide.has(key)) return undefined;
+          const v = Reflect.get(target, key, target);
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+        has: (target, key) => !hide.has(key) && Reflect.has(target, key),
+      }) as AgentStream;
     },
     startTurn: (prompt, opts) => backend.startTurn(prompt, opts),
   };

@@ -25,6 +25,7 @@ export interface WorkerLike {
   setPermissionMode?(mode: string): Promise<void>; // hot-swap the permission mode while running (query.setPermissionMode)
   interruptTurn?(): Promise<InterruptReceipt | undefined>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
   abandon?(): Promise<void>; // hard-kill the subprocess WITHOUT going terminal (recover tears it down, then re-arms a lazy resume) — unlike stop, no "stopped" transition
+  stopTask?(taskId: string): Promise<void>; // stop ONE listed background task (absent = provider has none)
   backgroundTasks?(): BackgroundTaskView[]; // listed (user-visible) background tasks of a live worker (absent = provider has none)
   notice?(text: string): void; // surface an out-of-band informational notice in the worker transcript (degraded condition the orchestrator caught)
   requestCapabilityReload?(input: {
@@ -594,6 +595,13 @@ export class FleetOrchestrator {
   // abort only the current turn (keep the session) — parity with master turn-abort. Requires a live agent.
   async interrupt(id: string): Promise<InterruptReceipt | undefined> {
     return await this.requireLive(id).agent.interruptTurn?.();
+  }
+
+  // stop one listed background task of a live worker. Requires a live agent; the agent validates the task id.
+  async stopTask(id: string, taskId: string): Promise<void> {
+    const { agent } = this.requireLive(id);
+    if (!agent.stopTask) throw new Error("Stopping background tasks is not supported for this worker");
+    await agent.stopTask(taskId);
   }
 
   // called right before a turn starts (onTurnStart) — snapshot the whole worktree to a hidden ref and persist by seq. best-effort,

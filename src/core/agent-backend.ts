@@ -90,6 +90,10 @@ export interface AgentStream extends AsyncIterable<AgentEvent> {
   // (no active turn, stream closed, or the provider refused it) tells the caller to fall back to queuing.
   // Never throws. `clientMsgId` is the caller's echo-correlation id, forwarded where the provider has one.
   steer?(input: AgentInput, clientMsgId?: string): Promise<boolean>;
+  // Optional: stop ONE provider-tracked background task by id. Resolving means the provider accepted the
+  // request; the task leaves the running set only through the provider's own settle frames. Absent on
+  // providers with no background-task concept (Codex).
+  stopTask?(taskId: string): Promise<void>;
   // Optional: suspend/resume a provider's per-turn inactivity watchdog while a blocking interaction
   // (AskUserQuestion / approval) awaits a human — the master brackets its ask closure with these so a
   // long human think-time isn't mistaken for a wedged turn. Only the Codex adapter has such a watchdog;

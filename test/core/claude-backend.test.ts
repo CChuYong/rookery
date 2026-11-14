@@ -430,6 +430,25 @@ describe("ClaudeStream controls", () => {
     await expect(stream.interrupt()).resolves.toBeUndefined();
     await collect(stream);
   });
+
+  it("stopTask calls query.stopTask", async () => {
+    const stopped: string[] = [];
+    const backend = new ClaudeBackend(fakeStreamingQuery(() => [], { onStopTask: (id) => stopped.push(id) }));
+    const queue = new MessageQueue();
+    const stream = backend.openSession(queue, baseOpts());
+    const done = collect(stream);
+    await stream.stopTask!("b1");
+    expect(stopped).toEqual(["b1"]);
+    queue.close();
+    await done;
+  });
+
+  it("stopTask rejects when the underlying query lacks stopTask", async () => {
+    const backend = new ClaudeBackend(rawQuery([]));
+    const stream = backend.startTurn("hi", baseOpts());
+    await expect(stream.stopTask!("b1")).rejects.toThrow();
+    await collect(stream);
+  });
 });
 
 // ── Background-task lifecycle frames + terminal_reason (2026-07-11 state-graph redesign) ──

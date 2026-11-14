@@ -562,6 +562,17 @@ export class Worker {
     return steer ? [steer] : [];
   }
 
+  // Stop ONE listed background task (not ambient, not a backgrounded subagent/workflow). State is untouched:
+  // the provider's settle frames remove the task and the normal derivation runs (which may auto-wake the
+  // model like any settled task).
+  async stopTask(taskId: string): Promise<void> {
+    if (this.isTerminalState()) throw new Error(`Worker ${this.opts.id} is not running`);
+    if (!this.listedTasks.some((t) => t.id === taskId)) throw new Error(`Unknown background task ${taskId}`);
+    const stream = this.stream;
+    if (!stream?.stopTask) throw new Error("Stopping background tasks is not supported for this worker");
+    await stream.stopTask(taskId);
+  }
+
   // interrupt only the current turn (keep the session) — parity with the master stop()'s turn-abort. Does not close the queue, so additional instructions are possible.
   async interruptTurn(): Promise<InterruptReceipt | undefined> {
     // ORDER IS LOAD-BEARING: splice MUST run synchronously BEFORE the await — else the SDK could emit `result`

@@ -6,7 +6,7 @@ import type { CoreEvent } from "../../src/core/events.js";
 import { Worker } from "../../src/core/worker.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
-import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, withoutSteer, type FakeStep } from "../helpers/fake-query.js";
+import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, withoutSteer, withoutStreamMethods, type FakeStep } from "../helpers/fake-query.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
 import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream } from "../../src/core/agent-backend.js";
 import type { AgentInput, ImageRef, ImageResolver } from "../../src/core/image-input.js";
@@ -1508,15 +1508,17 @@ describe("extractToolUses / extractToolResults", () => {
 // ── Background-aware state machine (2026-07-11 redesign): running / background / idle derived from
 //    turnActive + running bg-task set. Design: docs/superpowers/specs/2026-07-11-worker-state-graph-design.md ──
 describe("Worker background state machine", () => {
-  function mk(responder: Parameters<typeof fakeStreamingBackend>[0], opts?: { settleGraceMs?: number }) {
+  function mk(responder: Parameters<typeof fakeStreamingBackend>[0], opts?: { settleGraceMs?: number; onStopTask?: (taskId: string) => void; hideStopTask?: boolean }) {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
     const bus = new EventBus();
     const statusEvents: Array<{ status: string; bg?: { count: number; types: string[] } }> = [];
     bus.subscribe("s1", (e) => { if (e.type === "worker.status") statusEvents.push({ status: e.status, ...(e.bg ? { bg: e.bg } : {}) }); });
+    const base = fakeStreamingBackend(responder, opts?.onStopTask ? { onStopTask: opts.onStopTask } : undefined);
+    const backend = opts?.hideStopTask ? withoutStreamMethods(base, "stopTask") : base;
     // settleGraceMs: short by default so no-wake tests resolve fast; wake tests arrive synchronously anyway.
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: fakeStreamingBackend(responder), settleGraceMs: opts?.settleGraceMs ?? 15 } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend, settleGraceMs: opts?.settleGraceMs ?? 15 } });
     return { repos, bus, statusEvents, agent };
   }
 
@@ -1798,6 +1800,76 @@ describe("Worker background state machine", () => {
     await x.agent.stop();
     expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
     expect(x.agent.listedBackgroundTasks()).toEqual([]);
+  });
+
+  // ── Stop one background task (Task 6) ──
+  it("stopTask delegates for a listed task and leaves state alone", async () => {
+    const stopped: string[] = [];
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], { onStopTask: (id) => stopped.push(id) });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stopTask("b1");
+    expect(stopped).toEqual(["b1"]);
+    expect(x.agent.status()).toBe("background"); // the SDK settle frames (not the call) remove the task
+    expect(x.agent.listedBackgroundTasks()).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]);
+    await x.agent.stop();
+  });
+
+  it("stopTask rejects unknown, excluded (local_agent) and already-settled task ids", async () => {
+    const stopped: string[] = [];
+    const x = mk(() => [
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "b2", taskType: "local_bash", description: "npm test" },
+          { id: "g1", taskType: "local_agent", description: "research" },
+        ],
+      },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "g1", taskType: "local_agent", description: "research" },
+        ],
+      },
+    ], { onStopTask: (id) => stopped.push(id) });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background" && x.agent.listedBackgroundTasks().length === 1);
+    await expect(x.agent.stopTask("nope")).rejects.toThrow("Unknown background task nope");
+    await expect(x.agent.stopTask("g1")).rejects.toThrow("Unknown background task g1");
+    await expect(x.agent.stopTask("b2")).rejects.toThrow("Unknown background task b2"); // already settled
+    expect(stopped).toEqual([]);
+    await x.agent.stop();
+  });
+
+  it("stopTask rejects on a terminal worker", async () => {
+    const stopped: string[] = [];
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], { onStopTask: (id) => stopped.push(id) });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stop();
+    await expect(x.agent.stopTask("b1")).rejects.toThrow("Worker a1 is not running");
+    expect(stopped).toEqual([]);
+  });
+
+  it("stopTask rejects when the stream has no stopTask (codex)", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], { hideStopTask: true });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await expect(x.agent.stopTask("b1")).rejects.toThrow("Stopping background tasks is not supported for this worker");
+    await x.agent.stop();
   });
 });
 

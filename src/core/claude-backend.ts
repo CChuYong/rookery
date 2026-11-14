@@ -406,6 +406,15 @@ class ClaudeStream implements AgentStream {
     await (this.q as { setPermissionMode?: (m: string) => Promise<void> }).setPermissionMode?.(mode);
   }
 
+  // SDK Query.stopTask: the CLI then emits a task_notification (status "stopped") that settles the task
+  // through the normal background-task frames. Unlike the best-effort controls above, a missing control
+  // throws — the caller asked for a specific effect and must not see a silent success.
+  async stopTask(taskId: string): Promise<void> {
+    const stop = (this.q as { stopTask?: (id: string) => Promise<void> }).stopTask;
+    if (!stop) throw new Error("Stopping background tasks is not supported for this worker");
+    await stop.call(this.q, taskId);
+  }
+
   async supportedCommands(): Promise<SlashCommandInfo[]> {
     const cmds = (await (this.q as { supportedCommands?: () => Promise<SlashCommandInfo[]> }).supportedCommands?.()) ?? [];
     return cmds.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint, aliases: c.aliases }));

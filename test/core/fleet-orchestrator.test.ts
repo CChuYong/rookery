@@ -891,6 +891,25 @@ describe("FleetOrchestrator", () => {
     await s.fleet.stop(id); // cleanup
   });
 
+  it("stopTask() delegates to the live agent's stopTask", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const calls: string[] = [];
+    let resolveSettled: () => void = () => {};
+    const settled = new Promise<void>((r) => { resolveSettled = r; });
+    const factory = (): WorkerLike => ({
+      start: () => {}, resume: () => {}, send: () => {}, status: () => "background", waitUntilSettled: () => settled,
+      stop: async () => { resolveSettled(); },
+      stopTask: async (taskId: string) => { calls.push(taskId); },
+    });
+    const fleet = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps({ headValue: "base0" }), factory, worktreesDir: "/wt", idgen: () => "w0" });
+    const { id } = await fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "r", task: "t" });
+    await until(() => calls.length === 0 && fleet.status(id) === "background");
+    await fleet.stopTask(id, "b1");
+    expect(calls).toEqual(["b1"]);
+    await fleet.stop(id);
+  });
+
   // A3: discard used to race trackFlow settle and emit the terminal worker.status twice → write-once means just once.
   it("emits a terminal worker.status only once when discard races trackFlow settle (write-once)", async () => {
     const s = liveSetup();
@@ -1346,6 +1365,13 @@ describe("FleetOrchestrator rehydrate (restart recovery)", () => {
     expect(s.agents.has("old1")).toBe(false);
     expect(s.fleet.status("old1")).toBe("orphaned");
     expect(() => s.fleet.spawn({ homeSessionId: "sA", repoPath: "/r", label: "r", task: "t" })).not.toThrow();
+  });
+
+  it("stopTask on an unknown/detached worker throws", async () => {
+    const s = resumable({ exists: false });
+    s.fleet.rehydrate(); // old1 → orphaned, no live agent
+    await expect(s.fleet.stopTask("nope", "b1")).rejects.toThrow("Unknown worker: nope");
+    await expect(s.fleet.stopTask("old1", "b1")).rejects.toThrow("Worker old1 is not running (its session ended, likely a daemon restart).");
   });
 
   it("stopping a pending-resumable agent does not resume it (just marks stopped)", async () => {
