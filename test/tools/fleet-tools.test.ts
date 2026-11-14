@@ -30,6 +30,13 @@ describe("fleet tools", () => {
     expect(FLEET_TOOL_NAMES).toContain("mcp__fleet__interrupt_worker");
   });
 
+  it("send_worker describes running-turn delivery", () => {
+    const { repos, fo } = fleet();
+    const send = fleetToolDefs(fo, repos, "s1").find((d) => d.name === "send_worker")!;
+    expect(send.description).toContain("delivered into the running turn");
+    expect(send.description).not.toContain("queued and runs at the next turn boundary");
+  });
+
   it("spawn_worker's provider param reaches fleet.spawn and persists on the worker row", async () => {
     const { repos, fo } = fleet();
     repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });

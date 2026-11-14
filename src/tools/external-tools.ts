@@ -150,7 +150,7 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
   const send = tool(
     "send_worker",
     "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved) — steer it, correct it, or ask it to commit/push and open its own PR. " +
-      "Does NOT interrupt a mid-turn worker: the instruction is queued for the next turn boundary. To make it drop what it is doing, call interrupt_worker first.",
+      "If the worker is mid-turn, the instruction is delivered into the running turn (the worker folds it into its current work); if that isn't possible it runs at the next turn boundary. To make it abandon its current work first, call interrupt_worker, then send_worker.",
     { speed: z.enum(["standard", "fast"]).optional(), id: z.string(), text: z.string().describe("The instruction to send.") },
     async (args) => {
       audit("send_worker");
