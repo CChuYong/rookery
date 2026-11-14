@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import appSource from "../src/renderer/App.tsx?raw";
 import { NewSessionPage } from "../src/renderer/components/NewSessionPage.js";
 import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
@@ -73,7 +73,7 @@ it.each(["master", "worker"] as const)("%s composer restores intent; Side reads 
   const { setPromptEditorText } = await import("./prompt-editor-helpers.js");
   setPromptEditorText(editor, "explain");
   fireEvent.click(screen.getByRole("button", { name: "Ask separately" }));
-  expect(await screen.findByText("Inherited: Fast")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText("Inherited: Fast")).toBeInTheDocument());
   expect(screen.getAllByLabelText("Speed")).toHaveLength(1);
 });
 it("both App workspace branches use the same speed-aware controls", () => {

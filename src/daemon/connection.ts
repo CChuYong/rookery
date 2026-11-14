@@ -273,9 +273,11 @@ export class Connection {
         }
         this.subscribe(session.id);
         // Per-UI-session model/effort/permissionMode overrides (if present). Otherwise the global defaults (Slack also uses this path).
-        // A runTurn throw is caught by the outer try/catch and replied as error+reqId.
-        await session.master.runTurn(msg.text, { images: msg.images, speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
-        // Ack when a reqId is present so request()-style clients get a settled promise; fire-and-forget (no reqId) stays unchanged for old clients.
+        // Validation/enqueue throws are caught by the outer try/catch and replied as error+reqId.
+        const accepted = session.master.enqueueTurn(msg.text, { images: msg.images, speed: msg.speed, model: msg.model, effort: msg.effort, permissionMode: msg.permissionMode, clientMsgId: msg.clientMsgId });
+        // The turn is validated and queued. Later execution failures are persisted/emitted by MasterAgent.
+        void accepted.completion.catch(() => {}); // consume rejection without blocking subsequent UI drafts
+        // Acknowledge acceptance, not model completion.
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "send", id: msg.sessionId });
         return;
       }

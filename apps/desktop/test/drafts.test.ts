@@ -10,14 +10,14 @@ describe("drafts reducer", () => {
   it("setDraft stores text per page key", () => {
     let s = emptyDraftState();
     s = setDraft(s, "session-1", "hello world");
-    expect(s.byPage["session-1"]).toBe("hello world");
+    expect(s.byPage["session-1"]).toEqual({text:"hello world",images:[]});
   });
 
   it("setDraft keeps drafts isolated per page key", () => {
     let s = emptyDraftState();
     s = setDraft(s, "a", "draft A");
     s = setDraft(s, "b", "draft B");
-    expect(s.byPage).toEqual({ a: "draft A", b: "draft B" });
+    expect(s.byPage).toEqual({ a: {text:"draft A",images:[]}, b: {text:"draft B",images:[]} });
   });
 
   it("setDraft with empty text removes the draft (no empty entries persisted)", () => {
@@ -40,7 +40,7 @@ describe("drafts reducer", () => {
     s = setDraft(s, "alive", "keep me");
     s = setDraft(s, "dead", "drop me");
     const pruned = pruneDrafts(s, new Set(["alive"]));
-    expect(pruned.byPage).toEqual({ alive: "keep me" });
+    expect(pruned.byPage).toEqual({ alive: {text:"keep me",images:[]} });
   });
 
   // Audit #5 review: NEW_SESSION_DRAFT_KEY is a fixed page key, not a session/worker id, so a "known" set built only
@@ -53,6 +53,23 @@ describe("drafts reducer", () => {
     // Simulates App.tsx's known set on a fresh boot with zero sessions/workers, but with the fixed key added in.
     const known = new Set<string>([NEW_SESSION_DRAFT_KEY]);
     const pruned = pruneDrafts(s, known);
-    expect(pruned.byPage).toEqual({ [NEW_SESSION_DRAFT_KEY]: "unsent new-session prompt" });
+    expect(pruned.byPage).toEqual({ [NEW_SESSION_DRAFT_KEY]: {text:"unsent new-session prompt",images:[]} });
   });
+});
+
+it("migrates legacy drafts and persists only image references", async () => {
+  const { migrateDrafts, setDraft } = await import("../src/renderer/store/drafts.js");
+  const s = migrateDrafts({ byPage: { old: "hello" } });
+  expect(s.byPage.old).toEqual({ text: "hello", images: [] });
+  const image = { id: "550e8400-e29b-41d4-a716-446655440000", name: "a.png", mediaType: "image/png" as const, byteLength: 1, width: 1, height: 1, base64: "never-store-me" };
+  const next = setDraft(s, "image", "", [image]);
+  expect(next.byPage.image.images).toHaveLength(1);
+  expect(JSON.stringify(next)).not.toContain("never-store-me");
+});
+it('does not clear a newer identical draft after an old acceptance finishes across navigation',async()=>{
+ const {useDraftStore,clearAcceptedDraft}=await import('../src/renderer/store/drafts.js');
+ useDraftStore.getState().setDraft_('s','repeat');const accepted=useDraftStore.getState().byPage.s;
+ useDraftStore.getState().setDraft_('s','repeat');
+ clearAcceptedDraft('s','repeat',[],accepted);
+ expect(useDraftStore.getState().byPage.s.text).toBe('repeat');
 });

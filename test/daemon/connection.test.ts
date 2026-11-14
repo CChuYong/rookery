@@ -504,6 +504,7 @@ describe("Connection", () => {
     await conn.handleRaw(JSON.stringify({ type: "session.create", cwd: "/work" }));
     sent.length = 0;
     await conn.handleRaw(JSON.stringify({ type: "session.send", sessionId: "s0", text: "hello" }));
+    await vi.waitFor(() => expect(parsed(sent).some(m => m.type === "event" && (m.event as {type:string}).type === "master.result")).toBe(true));
     const types = parsed(sent)
       .filter((m) => m.type === "event")
       .map((m) => (m.event as { type: string }).type);
@@ -1570,6 +1571,7 @@ it("persists wire speed intent and replays observations with accounting quality"
   expect(h.repos.getSession(sessionId)?.speed).toBe("fast");
   await h.conn.handleRaw(JSON.stringify({type: "session.send", sessionId, text: "go", speed: "standard", reqId: "send"}));
   expect(h.repos.getSession(sessionId)?.speed).toBe("standard");
+  await vi.waitFor(() => expect(h.repos.listSessionEvents(sessionId).some(e=>e.type === "master.result")).toBe(true));
   expect(h.repos.listSessionEvents(sessionId).map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({type: "master.speed", observation: {requested: "standard", state: "unknown"}}));
   expect(h.repos.listSessionEvents(sessionId).map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({type: "master.result", requestedSpeed: "standard", costAccuracy: "reported"}));
   h.repos.createWorker({id: "w-speed", sessionId, repoPath: "/x", label: "w"});

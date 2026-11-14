@@ -23,6 +23,6 @@ describe("NewSessionPage draft persistence (audit #5)", () => {
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={() => {}} />);
     const ed = screen.getByRole("textbox");
     setPromptEditorText(ed, "typing a prompt");
-    expect(useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY]).toBe("typing a prompt");
+    expect(useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY]).toEqual({text:"typing a prompt",images:[]});
   });
 });

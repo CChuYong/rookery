@@ -1,3 +1,4 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
 import type { SpeedPreference } from "@daemon/core/speed.js";
 import { create } from "zustand";
 import type { CoreEvent, WorkerEventData, SlackStatus } from "@daemon/core/events.js";
@@ -136,11 +137,11 @@ interface Store extends AppState {
   setHistoryLoaded: (id: string, v: boolean) => void;
   setHistoryLoadFailed: (id: string, v: boolean) => void;
   // Optimistic "pending" bubble for a message sent while a worker is busy. Reconciled to committed when the worker.event user echo (clientMsgId) arrives.
-  pushWorkerPending: (id: string, item: { clientMsgId: string; text: string }) => void;
+  pushWorkerPending: (id: string, item: { clientMsgId: string; text: string; images?: ImageRef[] }) => void;
   // Roll back an optimistic worker bubble whose send was rejected (mid-restore, terminated worker, disconnected).
   dropWorkerPending: (id: string, clientMsgId: string) => void;
   // Add an optimistic pending bubble on the App send path. Transitioned to committed via isEchoUser dedup when the daemon user echo (master.message role=user) arrives.
-  pushPending: (sid: string, item: { clientMsgId: string; text: string }) => void;
+  pushPending: (sid: string, item: { clientMsgId: string; text: string; images?: ImageRef[] }) => void;
   // Roll back an optimistic master bubble whose session.send was rejected (unknown session, runTurn throw, disconnected).
   dropPending: (sid: string, clientMsgId: string) => void;
 }
@@ -366,6 +367,7 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => {
       const replayed = events.reduce<LogItem[]>((log, ev) => applySubEvent(log, ev.payload as WorkerEventData, ev.createdAt ? Date.parse(ev.createdAt) : undefined), []);
       return {
+        pendingByWorker: { ...s.pendingByWorker, [id]: (s.pendingByWorker[id] ?? []).filter(p => !replayed.some(item => (item.kind === "message" || item.kind === "failedInput") && item.clientMsgId === p.clientMsgId)) },
         workerLogs: { ...s.workerLogs, [id]: syncWorkflowTools(replayed.map((item) => item.kind === "speed" ? { ...item, historical: true } : item), s.workflows[id]) },
         historyLoaded: { ...s.historyLoaded, [id]: true },
         historyLoadFailed: { ...s.historyLoadFailed, [id]: false },

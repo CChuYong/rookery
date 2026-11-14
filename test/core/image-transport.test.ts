@@ -370,6 +370,7 @@ it("Worker cancellation drops deferred image refs; unreadable queued images fail
       await worker.waitUntilSettled();
       expect(worker.status()).toBe("error");
       expect(resolve).toHaveBeenCalledTimes(1);
+      expect(() => worker.send("retry", "retry-id", undefined, [ref])).toThrow("not running");
     }
     expect(seen).toEqual(["start"]);
     const history = repos
@@ -378,6 +379,7 @@ it("Worker cancellation drops deferred image refs; unreadable queued images fail
     expect(
       history.filter((e) => e.kind === "message" && e.role === "user"),
     ).toHaveLength(1);
+    if (!cancel) expect(history).toContainEqual(expect.objectContaining({kind:"error",clientMsgId:"queued-image",retryInput:{text:"",images:[ref]}}));
     expect(JSON.stringify(history)).toContain(
       cancel ? "Dropped deferred instruction" : "unreadable",
     );

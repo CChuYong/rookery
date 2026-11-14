@@ -109,6 +109,7 @@ export interface PromptEditorProps {
   minHeight?: number;
   className?: string;
   ariaLabel?: string;
+  onPasteImages?: (files: File[]) => void;
   onSubmit?: () => void;
   onEscape?: () => void;
   onCommandAction?: (action: CommandAction) => void;
@@ -413,7 +414,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
       <HistoryBaselinePlugin historyState={historyState} />
       <ListPlugin />
       <MarkdownShortcutPlugin transformers={PROMPT_TRANSFORMERS} />
-      <PlainTextPastePlugin />
+      <PlainTextPastePlugin onImages={props.onPasteImages} />
       <EditablePlugin editable={!disabled} />
       <FocusPlugin autoFocus={autoFocus} />
       <OnChangePlugin

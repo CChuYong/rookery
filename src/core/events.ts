@@ -5,7 +5,7 @@ import type { WorkflowAgentSummary, WorkflowRunSummary } from "./workflow-activi
 export type WorkerEventData =
   | { kind: "speed"; observation: SpeedObservation }
   | { kind: "system"; text: string }
-  | { kind: "message"; role: "assistant" | "user"; content: string; images?: ImageRef[] }
+  | { kind: "message"; role: "assistant" | "user"; content: string; images?: ImageRef[]; clientMsgId?: string }
   | { kind: "message_delta"; text: string } // token-level delta (not persisted, for live streaming)
   | { kind: "thinking_delta"; text: string } // thinking-summary delta (not persisted, live — display:summarized)
   | { kind: "thinking"; text: string } // coalesced thinking summary (persisted, persist-only — live is shown via deltas). Worker counterpart of master master.thinking
@@ -14,7 +14,7 @@ export type WorkerEventData =
   | { kind: "tool_progress"; id: string; elapsedSec: number } // elapsed seconds of an in-progress tool (live only)
   | { kind: "result"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs?: number; contextTokens?: number; contextWindow?: number; terminalReason?: string; providerCostTotalUsd?: number }
   | { kind: "notice"; text: string } // informational system push (compaction/retry/fallback) — shown as a single-line chip in the conversation
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; clientMsgId?: string; retryInput?: {text:string;images?:ImageRef[]} };
 
 export type SlackStatus = "unconfigured" | "off" | "connecting" | "up" | "error";
 
@@ -52,7 +52,7 @@ export type CoreEvent =
   // provider: the AgentBackend the worker runs on ('claude' | 'codex'). Carried on the live spawn event so the desktop shows the
   // Codex badge for the worker's whole run — without it the badge only appeared once fleet.list reconciled (reconnect/terminal). Omitted ⇒ claude.
   | { type: "worker.spawned"; sessionId: string; workerId: string; repoPath: string; label: string; task?: string; branch?: string; status?: string; provider?: string; speed?: SpeedPreference | null; ticketKey?: string | null; ticketUrl?: string | null }
-  // clientMsgId: a live-only correlation key carried only on the user echo — used to reconcile the desktop pending bubble (absent from the persisted payload).
+  // clientMsgId mirrors the persisted user-message data correlation key for pending/history reconciliation.
   | { type: "worker.event"; sessionId: string; workerId: string; seq: number; data: WorkerEventData; clientMsgId?: string }
   // Native nested subagent (SDK subagent spawned by a worker via Task) activity — live only (not persisted), grouped by parentToolUseId.
   | { type: "worker.nested"; sessionId: string; workerId: string; parentToolUseId: string; data: WorkerEventData }
@@ -75,7 +75,7 @@ export type CoreEvent =
   | { type: "capabilities.changed"; sessionId: string; generation: number; affected: import("./capabilities/types.js").CapabilityScopeRef[] }
   | { type: "capabilities.runtime"; sessionId: string; targetKind: "master" | "worker"; targetId: string; desiredRevision: string; appliedRevision: string | null; state: import("./capabilities/runtime-state.js").CapabilityRuntimeStatus }
   | { type: "automation.changed"; sessionId: string }
-  | { type: "error"; sessionId: string; message: string };
+  | { type: "error"; sessionId: string; message: string; clientMsgId?: string; retryInput?: { text: string; images?: ImageRef[] } };
 
 type Listener = (event: CoreEvent) => void;
 

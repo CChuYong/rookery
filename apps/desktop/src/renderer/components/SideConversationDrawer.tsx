@@ -1,3 +1,5 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
+import { useDraftStore, EMPTY_DRAFT, clearAcceptedDraft } from "../store/drafts.js";
 import type { SpeedPreference } from "@daemon/core/speed.js";
 import { SpeedControl } from "./SpeedControl.js";
 import { latestSpeedObservation } from "../lib/speed.js";
@@ -19,16 +21,19 @@ export interface SideConversationDrawerProps {
   sourceKind: "master" | "worker";
   sideId: string | null;
   openingQuestion: string;
-  onSend: (sideId: string, text: string) => void;
+  openingImages?: ImageRef[];
+  onSend: (sideId: string, text: string, images?: ImageRef[]) => Promise<void>;
   onStop: (sideId: string) => void;
   onClose: () => void;
 }
 
-export function SideConversationDrawer({ speed, defaultSpeed, provider, model, sourceKind, sideId, openingQuestion, onSend, onStop, onClose }: SideConversationDrawerProps): JSX.Element {
+export function SideConversationDrawer({ speed, defaultSpeed, provider, model, sourceKind, sideId, openingQuestion, openingImages, onSend, onStop, onClose }: SideConversationDrawerProps): JSX.Element {
   const t = useT();
   const side = useStore((s) => sideId ? s.sideConversations[sideId] : undefined);
   const status = side?.status ?? "opening";
-  const items = side?.items ?? (openingQuestion ? [{ kind: "message", role: "user", content: openingQuestion } as LogItem] : EMPTY);
+  const items = side?.items ?? (openingQuestion || openingImages?.length ? [{ images:openingImages, kind: "message", role: "user", content: openingQuestion } as LogItem] : EMPTY);
+  const draftKey = `side:${sideId ?? "opening"}`;
+  const initialDraft = useDraftStore.getState().byPage[draftKey] ?? EMPTY_DRAFT;
   const running = status === "opening" || status === "running";
 
   return (
@@ -54,7 +59,12 @@ export function SideConversationDrawer({ speed, defaultSpeed, provider, model, s
       <div className="border-t border-line bg-surface p-2.5">
         <Composer
           leftSlot={speed !== undefined ? <SpeedControl speed={speed} defaultSpeed={defaultSpeed} provider={provider} model={model ?? ""} observation={latestSpeedObservation(items)} /> : undefined}
-          onSend={(text) => { if (sideId) onSend(sideId, text); }}
+          key={draftKey}
+          initialText={initialDraft.text}
+          initialImages={initialDraft.images}
+          onDraftChange={(text, images) => useDraftStore.getState().setDraft_(draftKey,text,images)}
+          onDropFiles={(files) => files.map(file=>window.rookery.getPathForFile(file)).filter(Boolean)}
+          onSend={async (text,images) => { if (sideId) { await (images?.length ? onSend(sideId, text, images) : onSend(sideId, text)); clearAcceptedDraft(draftKey,text,images); } }}
           busy={running}
           onStop={sideId ? () => onStop(sideId) : undefined}
           disabled={!sideId || status === "closed"}

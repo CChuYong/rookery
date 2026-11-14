@@ -523,6 +523,7 @@ export class Worker {
   }
 
   private record(data: WorkerEventData, clientMsgId?: string): void {
+    if (data.kind === "message" && data.role === "user" && clientMsgId) data = { ...data, clientMsgId };
     const seq = this.seq++;
     this.opts.deps.repos.addWorkerEvent({
       workerId: this.opts.id,
@@ -536,7 +537,7 @@ export class Worker {
       workerId: this.opts.id,
       seq,
       data,
-      ...(clientMsgId ? { clientMsgId } : {}), // user echo correlation key (live only)
+      ...(clientMsgId ? { clientMsgId } : {}), // user echo correlation key (also persisted in message data)
     });
   }
 
@@ -577,6 +578,7 @@ export class Worker {
     };
     let managed: ResolvedAgentCapabilities | undefined;
     let managedApplied = false;
+    let dispatching: {text:string;images:ImageRef[];clientMsgId?:string} | undefined;
     try {
       managed = this.opts.deps.managedCapabilities?.();
       if (managed) {
@@ -798,11 +800,13 @@ export class Worker {
           // the user echo settles right before the next turn without wedging in. That turn runs shortly, so we don't drop to idle.
           const next = this.deferred.shift();
           if (next) {
+            dispatching = next;
             const input = resolveInput(next.text, next.images, this.opts.deps.images);
             this.opts.deps.onTurnStart?.(); // the checkpoint must be taken right before the actual turn (= here) to stay aligned
             this.turnSpeed = this.resolveTurnSpeed(next.speed);
             queue.push(input); // release the held instruction NOW (at the boundary) → it runs as its own turn, never coalesced into the just-finished one
             this.record({ kind: "message", role: "user", content: next.text, ...(next.images.length ? { images: next.images } : {}) }, next.clientMsgId);
+            dispatching = undefined;
             // turnActive stays true — the flushed instruction's turn starts immediately.
           } else {
             // nothing deferred → derive: background while bg tasks still run, else idle (ALL work complete).
@@ -855,7 +859,8 @@ export class Worker {
         return;
       }
       this.flushThinking(); // also persist the thinking summary up to right before the error (so it shows on restore)
-      this.record({ kind: "error", message: String(err) });
+      this.record({ kind: "error", message: String(err), ...(dispatching ? {clientMsgId:dispatching.clientMsgId,retryInput:{text:dispatching.text,...(dispatching.images.length ? {images:dispatching.images}:{})}}:{}) });
+      for (const pending of this.deferred.splice(0)) this.record({kind:"error",message:String(err),clientMsgId:pending.clientMsgId,retryInput:{text:pending.text,...(pending.images.length ? {images:pending.images}:{})}});
       // A non-abort throw can arrive while the worker is running, background, OR idle (turn ended, stream then
       // dies). All must go terminal — otherwise a quiescent worker is left a zombie and a follow-up send wedges it.
       if (!this.isTerminalState()) this.transition("error");

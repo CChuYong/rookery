@@ -21,7 +21,7 @@ The daemon exposes HTTP `/health` + a WebSocket `/ws` (`noServer` mode). All cli
 | `session.create` | opt | `cwd?` | create a master session | `session.created` |
 | `session.open` | opt | `key`, `cwd?` | find-or-create by external key (e.g. Slack thread) | `session.created` |
 | `session.attach` | — | `sessionId` | subscribe to a session's events | (none) |
-| `session.send` | — | `sessionId`, `text`, `model?`, `effort?`, `permissionMode?`, `clientMsgId?` | run a master turn (per-session overrides) | (none; streams events) |
+| `session.send` | — | `sessionId`, `text`, `model?`, `effort?`, `permissionMode?`, `clientMsgId?` | validate/enqueue a master turn (per-session overrides); completion streams events | `fleet.ack` at acceptance when `reqId` is supplied |
 | `session.stop` | opt | `sessionId` | interrupt the in-progress master turn | `fleet.ack` (action `stop`) |
 | `interaction.respond` | opt | `requestId`, `decision?`, `answers?` | answer a master canUseTool card | (none; `interaction.resolved` event) |
 | `session.delete` | ✓ | `sessionId` | delete a session | `fleet.ack` (`delete`) |

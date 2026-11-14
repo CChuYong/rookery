@@ -28,7 +28,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 
 | `type` | Key fields | Emitted when | Persisted | Notes |
 |---|---|---|---|---|
-| `master.message` | `role`, `content`, `clientMsgId?` | user echo at turn start; each assistant text block | yes (`session_events`); assistant text also `addMessage`→`messages` | `clientMsgId` is live-only correlation for the desktop pending bubble; absent from persisted payload |
+| `master.message` | `role`, `content`, `clientMsgId?` | user echo at turn start; each assistant text block | yes (`session_events`); assistant text also `addMessage`→`messages` | `clientMsgId` is persisted correlation for desktop pending/history reconciliation |
 | `master.message.delta` | `delta` | each `text_delta` partial message chunk | no (live streaming) | token-level stream; coalesced into `master.message` on completion |
 | `master.thinking.delta` | `delta` | each `thinking_delta` chunk | no (live) | thinking-summary stream (`display:summarized`) |
 | `master.thinking` | `text` | flushed at message/tool/turn boundary (`flushThinking`) | yes | coalesced single entry for restore (deltas are live-only) |
@@ -39,7 +39,7 @@ Special `sessionId` values used as routing addresses (not real sessions): `conne
 | `master.status` | `status: running\|idle` | turn start (`running`) / turn end (`idle`) | no (live pulse) | UI session-list activity indicator |
 | `session.label` | `label` | auto-label generation fills the session label | no | live refresh of UI session list (the label itself is persisted separately) |
 | `worker.spawned` | `workerId`, `repoPath`, `label`, `branch?`, `status?`, `ticketKey?`, `ticketUrl?` | `fleet.spawn` up front (worktree still provisioning) | (row in `workers`) | `status:"provisioning"` so the row shows immediately; omitted ⇒ treated as `running` |
-| `worker.event` | `workerId`, `seq`, `data: WorkerEventData`, `clientMsgId?` | every recorded/live worker activity | depends on `data.kind` (see below) | wraps a `WorkerEventData`; `clientMsgId` is live-only echo correlation |
+| `worker.event` | `workerId`, `seq`, `data: WorkerEventData`, `clientMsgId?` | every recorded/live worker activity | depends on `data.kind` (see below) | wraps a `WorkerEventData`; outer `clientMsgId` mirrors the optional persisted `data.clientMsgId` on user message/retry errors |
 | `worker.nested` | `workerId`, `parentToolUseId`, `data: WorkerEventData` | native nested subagent (SDK Task) activity | no (live only) | grouped by `parentToolUseId` in the desktop `NestedAgents` panel |
 | `worker.workflow.run` | `workerId`, `run: WorkflowRunSummary` | workflow launch/task/live-phase/journal/run-snapshot summary changes | no (daemon-live registry) | path-free run status/counts plus sanitized ordered phase definitions; no full agent array |
 | `worker.workflow.agent` | `workerId`, `taskId`, `agent: WorkflowAgentSummary` | a workflow agent's latest summary changes | no (daemon-live registry) | may include sanitized `label`, `phaseIndex`, `phaseTitle`, `model`; no prompts, transcript text, tool input/result, or filesystem path |

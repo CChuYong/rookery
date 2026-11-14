@@ -120,3 +120,31 @@ describe("setFleet pending retention across the worker state graph", () => {
     }
   });
 });
+
+const imageRef={id:'550e8400-e29b-41d4-a716-446655440000',name:'repeat.png',mediaType:'image/png' as const,byteLength:20,width:1,height:1};
+it.each(['master','worker'] as const)('%s keeps consecutive same-ref image-only inputs distinct through live echoes and replay',kind=>{
+ useStore.setState({logsBySession:{},workerLogs:{},pendingBySession:{},pendingByWorker:{},connectionEpoch:0});
+ const state=useStore.getState();
+ const payloads=['one','two'].map(clientMsgId=>({kind:'message' as const,role:'user' as const,content:'',images:[imageRef],clientMsgId}));
+ for(const data of payloads) {
+  if(kind==='master') {state.pushPending('s',{clientMsgId:data.clientMsgId,text:'',images:[imageRef]});state.applyEvent({type:'master.message',sessionId:'s',role:'user',content:'',images:[imageRef],clientMsgId:data.clientMsgId});}
+  else {state.pushWorkerPending('w',{clientMsgId:data.clientMsgId,text:'',images:[imageRef]});state.applyEvent({type:'worker.event',sessionId:'s',workerId:'w',seq:1,data,clientMsgId:data.clientMsgId});}
+ }
+ const logs=()=>kind==='master'?useStore.getState().logsBySession.s:useStore.getState().workerLogs.w;
+ expect(logs()).toHaveLength(2);
+ if(kind==='master')state.seedHistory('s',payloads.map((data,seq)=>({seq,type:'master.message',payload:{type:'master.message',sessionId:'s',role:'user',content:'',images:data.images,clientMsgId:data.clientMsgId}})));
+ else state.seedWorkerHistory('w',payloads.map((data,seq)=>({seq,type:'message',payload:data})));
+ expect(logs()).toHaveLength(2);expect(logs().map(item=>item.kind==='message'?item.clientMsgId:undefined)).toEqual(['one','two']);
+ expect(kind==='master'?useStore.getState().pendingBySession.s:useStore.getState().pendingByWorker.w).toEqual([]);
+});
+it.each(['master','worker'] as const)('%s correlated pre-echo failure removes pending and replays retry refs without local pending',kind=>{
+ useStore.setState({logsBySession:{},workerLogs:{},pendingBySession:{},pendingByWorker:{},connectionEpoch:0});
+ const state=useStore.getState(),retryInput={text:'',images:[imageRef]};
+ if(kind==='master') {state.pushPending('s',{clientMsgId:'failed',text:'',images:[imageRef]});state.applyEvent({type:'error',sessionId:'s',message:'missing',clientMsgId:'failed',retryInput});expect(useStore.getState().pendingBySession.s).toEqual([]);}
+ else {state.pushWorkerPending('w',{clientMsgId:'failed',text:'',images:[imageRef]});state.applyEvent({type:'worker.event',sessionId:'s',workerId:'w',seq:1,data:{kind:'error',message:'missing',clientMsgId:'failed',retryInput}});expect(useStore.getState().pendingByWorker.w).toEqual([]);}
+ useStore.setState({logsBySession:{},workerLogs:{},pendingBySession:{},pendingByWorker:{}});
+ if(kind==='master')state.seedHistory('s',[{seq:0,type:'error',payload:{type:'error',sessionId:'s',message:'missing',clientMsgId:'failed',retryInput}}]);
+ else state.seedWorkerHistory('w',[{seq:1,type:'error',payload:{kind:'error',message:'missing',clientMsgId:'failed',retryInput}}]);
+ const log=kind==='master'?useStore.getState().logsBySession.s:useStore.getState().workerLogs.w;
+ expect(log).toEqual([expect.objectContaining({kind:'failedInput',text:'',images:[imageRef],clientMsgId:'failed'})]);
+});

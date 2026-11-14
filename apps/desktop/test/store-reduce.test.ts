@@ -90,7 +90,7 @@ describe("pendingBySession reconcile", () => {
     let s = emptyState();
     s = { ...s, pendingBySession: { s1: [{ clientMsgId: "c1", text: "q" }, { clientMsgId: "c2", text: "r" }] } };
     const next = reduceEvent(s, { type: "master.message", sessionId: "s1", role: "user", content: "q", clientMsgId: "c1" });
-    expect(next.logsBySession.s1).toEqual([{ kind: "message", role: "user", content: "q" }]);
+    expect(next.logsBySession.s1).toEqual([{ kind: "message", role: "user", content: "q", clientMsgId: "c1" }]);
     expect(next.pendingBySession.s1).toEqual([{ clientMsgId: "c2", text: "r" }]); // only c1 removed
   });
 
@@ -146,7 +146,7 @@ describe("worker pending reconcile (mid-turn message ordering)", () => {
     s = { ...s, pendingByWorker: { w1: [{ clientMsgId: "c1", text: "msg1" }, { clientMsgId: "c2", text: "msg2" }] } };
     const next = reduceEvent(s, { type: "worker.event", sessionId: "s1", workerId: "w1", seq: 5, data: { kind: "message", role: "user", content: "msg1" }, clientMsgId: "c1" });
     expect(next.pendingByWorker.w1).toEqual([{ clientMsgId: "c2", text: "msg2" }]); // only c1 removed
-    expect(next.workerLogs.w1).toEqual([{ kind: "message", role: "user", content: "msg1" }]); // committed at the boundary
+    expect(next.workerLogs.w1).toEqual([{ kind: "message", role: "user", content: "msg1", clientMsgId:"c1" }]); // committed at the boundary
   });
 
   it("leaves pending untouched for non-user worker events (no clientMsgId)", () => {

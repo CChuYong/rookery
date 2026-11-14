@@ -36,7 +36,7 @@ export function HistoryBaselinePlugin({ historyState }: { historyState: HistoryS
 }
 
 /** Plain text only, with a Lexical-owned history boundary around each paste. */
-export function PlainTextPastePlugin(): null {
+export function PlainTextPastePlugin({onImages}: {onImages?: (files: File[]) => void}): null {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => editor.registerCommand(
@@ -44,6 +44,8 @@ export function PlainTextPastePlugin(): null {
     (event) => {
       const clipboardData = "clipboardData" in event ? event.clipboardData : null;
       if (clipboardData == null) return false;
+      const files = Array.from(clipboardData.files ?? []);
+      if (files.length && onImages) onImages(files);
       event.preventDefault();
       editor.update(() => {
         const selection = $getSelection();
@@ -54,7 +56,7 @@ export function PlainTextPastePlugin(): null {
       return true;
     },
     COMMAND_PRIORITY_HIGH,
-  ), [editor]);
+  ), [editor, onImages]);
 
   return null;
 }

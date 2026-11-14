@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("rookery", {
   },
   wsUrl: () => ipcRenderer.invoke("daemon:wsUrl") as Promise<string>,
   pickDirectory: () => ipcRenderer.invoke("dialog:pickDirectory") as Promise<string | null>,
+  pickAttachment: () => ipcRenderer.invoke("dialog:pickAttachment"),
   pickFile: () => ipcRenderer.invoke("dialog:pickFile") as Promise<string | null>,
   // Open an external URL in the default browser (ticket shortcuts). main gates it with an http(s) whitelist.
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),

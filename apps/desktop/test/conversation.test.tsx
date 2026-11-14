@@ -164,12 +164,12 @@ describe("Conversation", () => {
     const ed = composer();
     fireEvent.drop(ed, {
       dataTransfer: {
-        files: [new File(["x"], "a.ts"), new File(["y"], "b.png")],
+        files: [new File(["x"], "a.ts"), new File(["y"], "b.txt")],
         types: ["Files"],
       },
     });
     expect(screen.getByText("a.ts")).toBeInTheDocument(); // chip = filename only
-    expect(screen.getByText("b.png")).toBeInTheDocument();
+    expect(screen.getByText("b.txt")).toBeInTheDocument();
     expect(screen.queryByText("/abs/a.ts")).toBeNull();
     // The editor selection remains after the inserted chips, so append ordinary text through Lexical state.
     const lexicalEditor = getEditorPropertyFromDOMNode(ed);
@@ -179,7 +179,7 @@ describe("Conversation", () => {
       if ($isRangeSelection(selection)) selection.insertText("이거 봐줘");
     }, { discrete: true }));
     fireEvent.click(screen.getByRole("button", { name: "보내기" }));
-    expect(onSend).toHaveBeenCalledWith("@/abs/a.ts @/abs/b.png 이거 봐줘");
+    expect(onSend).toHaveBeenCalledWith("@/abs/a.ts @/abs/b.txt 이거 봐줘");
   });
 
   it("busy → stop stays visible; typing shows send alongside stop (abort or queue a follow-up, audit #23)", () => {

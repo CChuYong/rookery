@@ -1,3 +1,6 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
+import type { SelectedAttachment } from "./lib/image-import.js";
+import { setImageClient } from "./lib/image-client.js";
 import type { ComposerControls } from "./components/Composer.js";
 import type { SpeedPreference } from "@daemon/core/speed.js";
 import { persistSpeedPreference, type SpeedWriteState } from "./lib/speed-preference.js";
@@ -65,7 +68,7 @@ import { useTermStore, pruneLayout } from "./store/terminals.js";
 import { RightSidebar } from "./components/RightSidebar.js";
 import { useWsStore, pruneWsPages } from "./store/workspace.js";
 import { useLayoutStore } from "./store/layout.js";
-import { useDraftStore, pruneDrafts } from "./store/drafts.js";
+import { useDraftStore, pruneDrafts, clearAcceptedDraft } from "./store/drafts.js";
 import { readViewState, writeViewState } from "./lib/view-state.js";
 import { WorkspaceTab } from "./components/WorkspaceTab.js";
 import { TabBar } from "./components/TabBar.js";
@@ -81,7 +84,7 @@ import { useWorkRoot } from "./lib/useWorkRoot.js";
 
 declare global {
   interface Window {
-    rookery: { daemon: { ensure(): Promise<string>; status(): Promise<string>; restart(): Promise<string> }; wsUrl(): Promise<string>; pickDirectory(): Promise<string | null>; pickFile(): Promise<string | null>; openExternal(url: string): Promise<void>; getPathForFile(file: File): string; system: { getLocale(): Promise<string>; setLocale(locale: string): void }; term: RookeryTerm; ws: RookeryWs; fs: RookeryFs; resources: RookeryResources; apps: RookeryApps; notify(p: { title: string; body: string; workerId?: string; sessionId?: string }): Promise<void>; onNotifyClick(cb: (target: { workerId?: string; sessionId?: string }) => void): () => void; platform: string; win: RookeryWin; getVersion(): Promise<string>; update: RookeryUpdate };
+    rookery: { daemon: { ensure(): Promise<string>; status(): Promise<string>; restart(): Promise<string> }; wsUrl(): Promise<string>; pickDirectory(): Promise<string | null>; pickFile(): Promise<string | null>; pickAttachment?(): Promise<SelectedAttachment | null>; openExternal(url: string): Promise<void>; getPathForFile(file: File): string; system: { getLocale(): Promise<string>; setLocale(locale: string): void }; term: RookeryTerm; ws: RookeryWs; fs: RookeryFs; resources: RookeryResources; apps: RookeryApps; notify(p: { title: string; body: string; workerId?: string; sessionId?: string }): Promise<void>; onNotifyClick(cb: (target: { workerId?: string; sessionId?: string }) => void): () => void; platform: string; win: RookeryWin; getVersion(): Promise<string>; update: RookeryUpdate };
   }
 }
 
@@ -584,6 +587,7 @@ export function App(): JSX.Element {
       },
     );
     client = c;
+    setImageClient(c);
     c.onOpen(() => {
       if (startTimer) { clearTimeout(startTimer); startTimer = null; } // connection succeeded → release the fallback timer (DSK-10)
       useStore.getState().resetLiveInteractions(); // must precede events.subscribe: the replay repopulates the set
@@ -637,6 +641,7 @@ export function App(): JSX.Element {
       if (startTimer) clearTimeout(startTimer); // BUG-5 (+DSK-10 fallback timer)
       client?.stop();
       client = null;
+      setImageClient(null);
     };
   }, [connect]);
 
@@ -721,57 +726,39 @@ export function App(): JSX.Element {
     });
   }, [refetchFleet]);
   // Start a new session: create a session at cwd → (save model/effort overrides) → select → send the first turn if there's a prompt.
-  const startSession = (opts: { cwd?: string; prompt?: string; model?: string; effort: string; provider?: string; speed?: SpeedPreference | null }) => {
-    navigate({ overlay: null });
+  const startSession = async (opts: { cwd?: string; prompt?: string; images?: ImageRef[]; model?: string; effort: string; provider?: string; speed?: SpeedPreference | null }): Promise<void> => {
     const c = client;
-    if (!c) return;
-    void c
-      .request({ type: "session.create", speed: opts.speed, ...(opts.cwd ? { cwd: opts.cwd } : {}), ...(opts.provider ? { provider: opts.provider as "claude" | "codex" } : {}) })
-      .then((r) =>
-        c.request({ type: "session.list" }).then((lr) => {
-          useStore.getState().setSessions(lr.sessions ?? []);
-          const sid = r.sessionId;
-          if (!sid) return;
-          useStore.getState().setOverride(sid, { model: opts.model, effort: opts.effort }); // subsequent turns use the same model/effort
-          // A freshly created session has zero prior turns by construction — mark it loaded immediately so the
-          // composer-only empty state shows right away instead of a skeleton flash while select()'s redundant
-          // history fetch round-trips (audit #43).
-          useStore.getState().setHistoryLoaded(sid, true);
-          select(sid);
-          const prompt = opts.prompt?.trim();
-          if (prompt) {
-            // select is async, so we can't rely on send()'s activeSessionId → send explicitly with the new sid. The pending bubble immediately shows "in progress".
-            const clientMsgId = crypto.randomUUID();
-            useStore.getState().pushPending(sid, { clientMsgId, text: prompt });
-            // request(): a rejected send rolls the pending bubble back and surfaces a toast instead of silently stranding it.
-            void c.request({ type: "session.send", sessionId: sid, text: prompt, model: opts.model, effort: opts.effort, speed: opts.speed, clientMsgId }).catch((e) => {
-              useStore.getState().dropPending(sid, clientMsgId);
-              toast.error(tRef.current("toast.sendFailed"), String(e));
-            });
-            // The session now exists (the send failure above already has its own rollback+toast), so the new-session draft has served
-            // its purpose — clear it only here, on confirmed create success (audit #5).
-            useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, "");
-          }
-        }),
-      )
-      .catch((e) => {
-        // session.create/list failed: the page already navigated away and the composer cleared on send (Composer.tsx's clear() fires
-        // unconditionally), so without this the typed prompt would be unrecoverably gone. Restore it into the draft so reopening
-        // New Session brings it back. Only restore when the draft is still empty — otherwise a slow failure here would clobber
-        // NEWER text the user already typed after reopening the page (audit #5 review).
-        if (opts.prompt && !useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY]) {
-          useDraftStore.getState().setDraft_(NEW_SESSION_DRAFT_KEY, opts.prompt);
-        }
-        toast.error(tRef.current("toast.actionFailed"), String(e));
-      });
+    if (!c) throw new Error("not connected");
+    const acceptedDraft = useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY];
+    try {
+      const result = await c.request({type:"session.create",speed: opts.speed,...(opts.cwd ? {cwd:opts.cwd}:{}),...(opts.provider ? {provider:opts.provider as "claude"|"codex"}:{})});
+      const list = await c.request({type:"session.list"});
+      useStore.getState().setSessions(list.sessions ?? []);
+      const sid = result.sessionId;
+      useStore.getState().setOverride(sid,{model:opts.model,effort:opts.effort});
+      useStore.getState().setHistoryLoaded(sid,true);
+      const prompt=opts.prompt?.trim() ?? "";
+      if(prompt || opts.images?.length) {
+        const clientMsgId=crypto.randomUUID();
+        useStore.getState().pushPending(sid,{clientMsgId,text:prompt,...(opts.images?.length ? {images:opts.images}:{})});
+        try { await c.request({type:"session.send",sessionId:sid,text:prompt,images:opts.images,model:opts.model,effort:opts.effort,speed: opts.speed,clientMsgId}); }
+        catch(error) { useStore.getState().dropPending(sid,clientMsgId); throw error; }
+      }
+      clearAcceptedDraft(NEW_SESSION_DRAFT_KEY,prompt,opts.images,acceptedDraft);
+      navigate({overlay:null}); select(sid);
+    } catch(error) {
+      toast.error(tRef.current("toast.sendFailed"),String(error));
+      throw error;
+    }
   };
-  const send = useCallback((text: string) => {
+  const send = useCallback(async (text: string, images?: ImageRef[]) => {
     const st = useStore.getState();
     const sid = st.activeSessionId;
     if (!sid) return;
     if (st.sessions.find((x) => x.id === sid)?.origin === "slack") return; // Slack sessions are read-only in the UI
+    const acceptedDraft = useDraftStore.getState().byPage[sid];
     const clientMsgId = crypto.randomUUID();
-    st.pushPending(sid, { clientMsgId, text }); // pending bubble: immediately "in progress" (stop button) → switches to committed when the daemon's user echo arrives
+    st.pushPending(sid, { clientMsgId, text, ...(images?.length ? {images} : {}) }); // pending bubble: immediately "in progress" (stop button) → switches to committed when the daemon's user echo arrives
     const ov = st.overrides[sid] ?? {}; // per-session override (backend uses defaults if absent)
     // Send the SAME effort the composer displays, re-derived fresh from the current settings + catalog so a
     // codex session never sends a level its model lacks. The daemon's per-model catalog guard only works once its
@@ -784,10 +771,13 @@ export function App(): JSX.Element {
       : ov.effort;
     // request(): a rejected send (unknown session, runTurn throw, disconnected) rolls the pending bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished while the composer stayed stuck busy.
-    void client?.request({ type: "session.send", sessionId: sid, text, speed: st.sessions.find((x) => x.id === sid)?.speed, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
+    if (!client) { st.dropPending(sid,clientMsgId); throw new Error("not connected"); }
+    await client.request({ type: "session.send", sessionId: sid, text, images, speed: st.sessions.find((x) => x.id === sid)?.speed, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
       useStore.getState().dropPending(sid, clientMsgId);
       toast.error(tRef.current("toast.sendFailed"), String(e));
+      throw e;
     });
+    clearAcceptedDraft(sid,text,images,acceptedDraft);
   }, []);
   // Stop the in-progress master turn. The backend aborts+interrupts and emits a "stopped" notice.
   // The stop button disappears when running clears via master.status:idle (server authority) — no optimistic immediate release needed.
@@ -814,16 +804,20 @@ export function App(): JSX.Element {
   const runForkSub = useCallback((id: string, target: { provider: string; model?: string; effort?: string }) => {
     void client?.request({ type: "worker.fork", id, provider: target.provider as "claude" | "codex", model: target.model, effort: target.effort }).then((r) => { refetchFleet(); selectSub(r.id); }).catch((e) => toast.error(tRef.current("toast.forkFailed"), String(e)));
   }, [refetchFleet, selectSub]);
-  const subSend = useCallback((id: string, text: string) => {
+  const subSend = useCallback(async (id: string, text: string, images?: ImageRef[]) => {
+    const acceptedDraft = useDraftStore.getState().byPage[id];
     const clientMsgId = crypto.randomUUID();
     // Show a queued bubble immediately → after the worker finishes its current turn (boundary echo) it switches to committed and settles into place.
-    useStore.getState().pushWorkerPending(id, { clientMsgId, text });
+    useStore.getState().pushWorkerPending(id, { clientMsgId, text, ...(images?.length ? {images} : {}) });
     // request(): a rejected send (mid-restore, terminated worker, disconnected) rolls the bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished.
-    void client?.request({ type: "worker.send", id, text, speed: useStore.getState().fleet[id]?.speed, clientMsgId }).catch((e) => {
+    if (!client) { useStore.getState().dropWorkerPending(id,clientMsgId); throw new Error("not connected"); }
+    await client.request({ type: "worker.send", id, text, images, speed: useStore.getState().fleet[id]?.speed, clientMsgId }).catch((e) => {
       useStore.getState().dropWorkerPending(id, clientMsgId);
       toast.error(tRef.current("toast.sendFailed"), String(e));
+      throw e;
     });
+    clearAcceptedDraft(id,text,images,acceptedDraft);
   }, []);
   const subSetModel = useCallback((id: string, model: string) => {
     const prev = useStore.getState().fleet[id]?.model;
@@ -851,19 +845,20 @@ export function App(): JSX.Element {
   // Recover a wedged worker whose soft interrupt won't land (stuck in a long tool call / Dynamic Workflow): hard-kill
   // and resume the session in place → idle, still usable. Surfaced by the composer's Stop escalation (onRecover).
   const subRecover = useCallback((id: string) => { void client?.request({ type: "worker.recover", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
-  const startSide = useCallback(async (sourceKind: "master" | "worker", sourceId: string, text: string, model?: string, effort?: string): Promise<string> => {
+  const startSide = useCallback(async (sourceKind: "master" | "worker", sourceId: string, text: string, model?: string, effort?: string, images?: ImageRef[]): Promise<string> => {
     const c = client;
     if (!c) throw new Error("not connected");
     try {
-      const result = await c.request({ type: "side.start", sourceKind, sourceId, text, model, effort });
+      const result = await c.request({ type: "side.start", sourceKind, sourceId, text, images, model, effort });
       return result.sideId;
     } catch (error) {
       toast.error(tRef.current("toast.sendFailed"), String(error));
       throw error;
     }
   }, []);
-  const sendSide = useCallback((sideId: string, text: string) => {
-    void client?.request({ type: "side.send", sideId, text }).catch((error) => toast.error(tRef.current("toast.sendFailed"), String(error)));
+  const sendSide = useCallback(async (sideId: string, text: string, images?: ImageRef[]) => {
+    if (!client) throw new Error("not connected");
+    await client.request({ type: "side.send", sideId, text, images }).catch((error) => {toast.error(tRef.current("toast.sendFailed"), String(error)); throw error;});
   }, []);
   const stopSide = useCallback((sideId: string) => {
     void client?.request({ type: "side.stop", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
@@ -1061,10 +1056,10 @@ export function App(): JSX.Element {
             kind="worker"
             id={activeSub.id}
             onRetryHistory={retryHistory}
-            onSend={(text) => subSend(activeSub.id, text)}
+            onSend={(text, images) => subSend(activeSub.id, text, images)}
             onStop={() => subInterrupt(activeSub.id)}
             onRecover={() => subRecover(activeSub.id)}
-            onSideStart={(text) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined)}
+            onSideStart={(text, images) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined, undefined, images)}
             onSideSend={sendSide}
             onSideStop={stopSide}
             onSideClose={closeSide}
@@ -1100,7 +1095,7 @@ export function App(): JSX.Element {
             onRespond={respondInteraction}
             disabled={sessionReadOnly}
             onStop={stopMaster}
-            onSideStart={(text) => startSide("master", s.activeSessionId!, text, masterControls?.model, masterControls?.effort)}
+            onSideStart={(text, images) => startSide("master", s.activeSessionId!, text, masterControls?.model, masterControls?.effort, images)}
             onSideSend={sendSide}
             onSideStop={stopSide}
             onSideClose={closeSide}
@@ -1450,10 +1445,10 @@ export function App(): JSX.Element {
                       kind="worker"
                       id={activeSub.id}
                       onRetryHistory={retryHistory}
-                      onSend={(t) => subSend(activeSub.id, t)}
+                      onSend={(text, images) => subSend(activeSub.id, text, images)}
                       onStop={() => subInterrupt(activeSub.id)}
                       onRecover={() => subRecover(activeSub.id)}
-                      onSideStart={(text) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined)}
+                      onSideStart={(text, images) => startSide("worker", activeSub.id, text, activeSub.model ?? undefined, undefined, images)}
                       onSideSend={sendSide}
                       onSideStop={stopSide}
                       onSideClose={closeSide}
@@ -1530,7 +1525,7 @@ export function App(): JSX.Element {
                 onRespond={respondInteraction}
                 disabled={sessionReadOnly}
                 onStop={stopMaster}
-                onSideStart={(text) => startSide("master", s.activeSessionId!, text, masterControls?.model, masterControls?.effort)}
+                onSideStart={(text, images) => startSide("master", s.activeSessionId!, text, masterControls?.model, masterControls?.effort, images)}
                 onSideSend={sendSide}
                 onSideStop={stopSide}
                 onSideClose={closeSide}

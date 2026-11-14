@@ -1,3 +1,4 @@
+import type { ImageRef } from "@daemon/core/image-input.js";
 import { memo } from "react";
 import type { LogItem } from "../store/reduce.js";
 import { MessageList } from "../components/MessageList.js";
@@ -15,16 +16,18 @@ export interface ConversationProps extends ComposerProps {
   loaded?: boolean; // history fetch for this conversation has succeeded at least once — passed through to MessageList
   loadFailed?: boolean; // history fetch was rejected and hasn't succeeded since — passed through to MessageList
   onRetryHistory?: () => void; // re-fires the failed history fetch
+  onRestoreInput?: (text:string,images?:ImageRef[]) => void;
+  onRecoverInput?: () => void;
   onOpenFile?: (path: string) => void; // click a tool-card filename chip → open the file tab
   onSelectWorker?: (id: string) => void; // click a spawned worker marker/card → navigate to that worker's view (repo tab) (master conversation only)
   onRespond?: (requestId: string, res: InteractionAnswer) => void; // respond to an approval/question card (master conversation only)
 }
 
 // Message list + input composer. The composer body (editor/popup/attachments/controls) is owned by Composer.
-function ConversationImpl({ items, kind, loaded, loadFailed, onRetryHistory, onOpenFile, onSelectWorker, onRespond, ...composer }: ConversationProps): JSX.Element {
+function ConversationImpl({ items, kind, loaded, loadFailed, onRetryHistory, onRestoreInput, onRecoverInput, onOpenFile, onSelectWorker, onRespond, ...composer }: ConversationProps): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MessageList items={items} kind={kind} loaded={loaded} loadFailed={loadFailed} onRetryHistory={onRetryHistory} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} onRespond={onRespond} />
+      <MessageList items={items} kind={kind} loaded={loaded} loadFailed={loadFailed} onRetryHistory={onRetryHistory} onRetryInput={composer.disabled ? undefined : composer.onSend} onRestoreInput={onRestoreInput} onRecoverInput={onRecoverInput} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} onRespond={onRespond} />
       {/* same centered column as the message list, so the composer lines up under the prose above it. */}
       <div className="bg-ink py-3">
         <div className="mx-auto w-full max-w-[720px] px-6">
