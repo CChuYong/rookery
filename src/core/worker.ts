@@ -4,7 +4,7 @@ import { resolveSpeed, mergeCostAccuracy, type SpeedPreference, type CostAccurac
 import type { AgentBackend, AgentStream, InterruptReceipt } from "./agent-backend.js";
 import { MessageQueue } from "./message-queue.js";
 import { ThinkingCoalescer } from "./thinking-coalescer.js";
-import type { EventBus, WorkerEventData } from "./events.js";
+import type { BackgroundTaskView, EventBus, WorkerEventData } from "./events.js";
 import type { Repositories } from "../persistence/repositories.js";
 import { truncateBytes } from "./truncate.js";
 import type { SlashCommandInfo } from "./agent-backend.js";
@@ -112,6 +112,25 @@ function truncate(s: string, n: number): string {
   return truncateBytes(s, n); // interpret n as a UTF-8 byte budget (surrogate-safe, G-UNICODE)
 }
 
+// One harness-tracked background task as the worker stores it. ambient = the SDK's "not activity" flag.
+interface BgTask {
+  type: string;
+  description: string;
+  ambient: boolean;
+}
+
+// Task types with their own Activity surfaces (backgrounded subagents → NestedAgents, workflows → workflow
+// registry): they still count toward the "background" state but are not listed as stoppable tasks.
+const UNLISTED_TASK_TYPES = new Set(["local_agent", "local_workflow"]);
+
+function isListedTask(t: BgTask): boolean {
+  return !t.ambient && !UNLISTED_TASK_TYPES.has(t.type);
+}
+
+function sameTaskViews(a: BackgroundTaskView[], b: BackgroundTaskView[]): boolean {
+  return a.length === b.length && a.every((t, i) => t.id === b[i]!.id && t.type === b[i]!.type && t.description === b[i]!.description);
+}
+
 export class Worker {
   // A worker lifetime can now span multiple provider stream cycles. Capability reload closes only
   // the current cycle and replaces these two objects; terminal stop still ends the whole lifetime.
@@ -131,7 +150,8 @@ export class Worker {
   // Derived-state inputs (2026-07-11 state-graph redesign): liveStatus = f(turnActive, bgTasks.size).
   private turnActive = true; // a task-spawned worker starts mid-turn; start()/resume() reconcile for the task-less paths
   private abortLoopStreak = 0; // consecutive non-success turn_ends (circuit breaker; reset on success or a human send)
-  private readonly bgTasks = new Map<string, string>(); // running background tasks: taskId → taskType (claude only; codex never emits them)
+  private readonly bgTasks = new Map<string, BgTask>(); // running background tasks by taskId (claude only; codex never emits them)
+  private listedTasks: BackgroundTaskView[] = []; // last published listed view (worker.tasks) — see publishTasks()
   private bgLevel = false; // latched on the first background_tasks level frame — edge frames are ignored from then on
   private idleGraceTimer?: ReturnType<typeof setTimeout>; // settle-grace hold (see WorkerDeps.settleGraceMs)
   private wakeWatchdog?: ReturnType<typeof setTimeout>; // armed only while the current "running" was entered by an auto-wake (see WAKE_WATCHDOG_MS)
@@ -185,6 +205,34 @@ export class Worker {
 
   status(): WorkerStatus {
     return this.state;
+  }
+
+  // The user-visible background tasks: not ambient, not a backgrounded subagent/workflow. Always equal to
+  // the last published worker.tasks payload ([] once terminal).
+  listedBackgroundTasks(): BackgroundTaskView[] {
+    return this.listedTasks.map((t) => ({ ...t }));
+  }
+
+  // WorkerLike port (FleetOrchestrator.list rows / control paths).
+  backgroundTasks(): BackgroundTaskView[] {
+    return this.listedBackgroundTasks();
+  }
+
+  // Recompute the listed view after a bgTasks membership change and emit worker.tasks only if it changed
+  // (ids/types/descriptions, in insertion order). A terminal worker lists nothing. Never re-emits
+  // worker.status — that event is a session-log row and a notifier/trigger/relay input.
+  private publishTasks(): void {
+    const next: BackgroundTaskView[] = this.isTerminalState()
+      ? []
+      : [...this.bgTasks].filter(([, t]) => isListedTask(t)).map(([id, t]) => ({ id, type: t.type, description: t.description }));
+    if (sameTaskViews(next, this.listedTasks)) return;
+    this.listedTasks = next;
+    this.opts.deps.bus.emit({
+      type: "worker.tasks",
+      sessionId: this.opts.sessionId,
+      workerId: this.opts.id,
+      tasks: next.map((t) => ({ ...t })),
+    });
   }
 
   private isTerminalState(): boolean {
@@ -591,6 +639,7 @@ export class Worker {
     this.stream = undefined;
     this.bgTasks.clear();
     this.bgLevel = false;
+    this.publishTasks(); // the replaced stream's tasks are gone → clear a non-empty listed view
     this.clearIdleGrace();
     this.turnActive = false;
 
@@ -639,8 +688,11 @@ export class Worker {
       workerId: this.opts.id,
       status,
       // Why the worker is still busy after its turn ended — clients label the "background" state with it.
-      ...(this.bgTasks.size > 0 ? { bg: { count: this.bgTasks.size, types: [...new Set(this.bgTasks.values())] } } : {}),
+      ...(this.bgTasks.size > 0 ? { bg: { count: this.bgTasks.size, types: [...new Set([...this.bgTasks.values()].map((t) => t.type))] } } : {}),
     });
+    // Terminal: the subprocess takes its tasks with it — clear a non-empty listed view (after the status
+    // event, whose bg payload stays as it always was).
+    if (status === "stopped" || status === "done" || status === "error") this.publishTasks();
   }
 
   private record(data: WorkerEventData, clientMsgId?: string): void {
@@ -816,10 +868,17 @@ export class Worker {
           // guidance: do not correlate the two streams — the level snapshot is authoritative from then on).
           if (!this.bgLevel) {
             if (ev.status === "started") {
-              this.bgTasks.set(ev.taskId, ev.taskType ?? "task");
+              const prev = this.bgTasks.get(ev.taskId);
+              this.bgTasks.set(ev.taskId, {
+                type: ev.taskType ?? prev?.type ?? "task",
+                description: ev.description ?? prev?.description ?? "",
+                ambient: ev.ambient ?? prev?.ambient ?? false,
+              });
+              this.publishTasks();
               this.reconcile();
             } else {
               this.bgTasks.delete(ev.taskId);
+              this.publishTasks();
               // Last task settled while quiescent → hold "background" for the settle-grace instead of blipping
               // idle (the auto-wake turn is imminent; see WorkerDeps.settleGraceMs). The double-fire re-arms
               // harmlessly. Settles DURING a turn (auto-promoted foreground tasks) take the plain reconcile.
@@ -833,7 +892,8 @@ export class Worker {
           this.bgLevel = true;
           const hadTasks = this.bgTasks.size > 0;
           this.bgTasks.clear();
-          for (const bt of ev.tasks) this.bgTasks.set(bt.taskId, bt.taskType);
+          for (const bt of ev.tasks) this.bgTasks.set(bt.taskId, { type: bt.taskType, description: bt.description ?? "", ambient: bt.ambient === true });
+          this.publishTasks();
           // Same settle-grace rule as the edge path: dropping to zero while quiescent must not blip idle.
           if (hadTasks && this.bgTasks.size === 0 && !this.turnActive) this.armIdleGrace();
           else {

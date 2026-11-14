@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Repositories } from "../persistence/repositories.js";
-import type { EventBus } from "./events.js";
+import type { BackgroundTaskView, EventBus } from "./events.js";
 import type { GitOps } from "./git-ops.js";
 import type { InterruptReceipt, SlashCommandInfo } from "./agent-backend.js";
 import { truncateBytes } from "./truncate.js";
@@ -25,6 +25,7 @@ export interface WorkerLike {
   setPermissionMode?(mode: string): Promise<void>; // hot-swap the permission mode while running (query.setPermissionMode)
   interruptTurn?(): Promise<InterruptReceipt | undefined>; // abort only the current turn (keep the session, query.interrupt) — unlike stop, does not close the queue
   abandon?(): Promise<void>; // hard-kill the subprocess WITHOUT going terminal (recover tears it down, then re-arms a lazy resume) — unlike stop, no "stopped" transition
+  backgroundTasks?(): BackgroundTaskView[]; // listed (user-visible) background tasks of a live worker (absent = provider has none)
   notice?(text: string): void; // surface an out-of-band informational notice in the worker transcript (degraded condition the orchestrator caught)
   requestCapabilityReload?(input: {
     whenIdle: boolean;
@@ -844,7 +845,7 @@ export class FleetOrchestrator {
     if (timer) clearTimeout(timer);
   }
 
-  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number; speed?: SpeedPreference | null; costAccuracy?: CostAccuracy; maxTurns?: number | null; costBudgetUsd?: number | null }> {
+  list(filter?: { status?: string; repoPath?: string }): Array<{ id: string; label: string; repoPath: string; status: string; branch: string | null; model: string | null; permissionMode: string; provider: string; archived: boolean; ticketKey: string | null; ticketUrl: string | null; lastActivityTs?: number; costUsd?: number; speed?: SpeedPreference | null; costAccuracy?: CostAccuracy; maxTurns?: number | null; costBudgetUsd?: number | null; tasks?: BackgroundTaskView[] }> {
     const metrics = this.deps.repos.workerActivityAndCost(); // one indexed batched query for the whole fleet
     return this.deps.repos
       .listAllWorkers()
@@ -865,10 +866,16 @@ export class FleetOrchestrator {
         maxTurns: r.max_turns, // per-result turn cap, the sibling runaway guard to costBudgetUsd (WorkerRow protocol field)
         costBudgetUsd: r.cost_budget_usd, // explicit per-worker $ ceiling override; null = none set (the workerCostBudgetUsd settings default may still apply — see server.ts subFactory)
         ...(metrics.get(r.id) ?? {}), // lastActivityTs / costUsd from worker_events (absent when the worker has neither)
+        ...this.listedTasksOf(r.id), // live workers with a non-empty listed background-task set only
       }))
       .filter((x) => !this.deleting.has(x.id))
       .filter((x) => (filter?.status ? x.status === filter.status : true))
       .filter((x) => (filter?.repoPath ? x.repoPath === filter.repoPath : true));
+  }
+
+  private listedTasksOf(id: string): { tasks?: BackgroundTaskView[] } {
+    const tasks = this.entries.get(id)?.agent?.backgroundTasks?.() ?? [];
+    return tasks.length > 0 ? { tasks } : {};
   }
 
   async waitAllSettled(): Promise<void> {

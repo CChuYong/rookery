@@ -49,11 +49,13 @@ export type AgentEvent =
   // this YET: unawaited collab child threads DO outlive the turn (live-verified 2026-07-11,
   // probe-collab-nowait.mjs) but are only surfaced as nested-panel traffic, not background_task
   // (scope-A decision, docs/superpowers/specs/2026-07-11-codex-nested-agents-design.md).
-  | { kind: "background_task"; taskId: string; taskType?: string; status: "started" | "settled" }
+  // description/ambient ride on "started" when the SDK carries them (ambient = the SDK's "not activity" flag —
+  // live-update watchers / skip_transcript tasks; hosts exclude them from activity indicators).
+  | { kind: "background_task"; taskId: string; taskType?: string; description?: string; ambient?: boolean; status: "started" | "settled" }
   // Level form of the same signal (SDK ≥0.3.203 background_tasks_changed): the FULL live-task set after a
   // membership change — REPLACE semantics. SDK guidance: do not correlate with the edge frames above; once
   // a consumer sees a level frame it should trust levels only (Worker latches edges out on first sight).
-  | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string }> }
+  | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string; description?: string; ambient?: boolean }> }
   | { kind: "workflow_launched"; launch: WorkflowLaunch }
   | { kind: "workflow_task"; update: WorkflowTaskUpdate }
   // End of one turn. costUsd/numTurns/durationMs are THIS turn's values (numTurns is the provider's

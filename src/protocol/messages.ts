@@ -1,6 +1,6 @@
 import { IMAGE_LIMITS, type ImageRef } from "../core/image-input.js";
 import { z } from "zod";
-import type { CoreEvent, SlackStatus } from "../core/events.js";
+import type { BackgroundTaskView, CoreEvent, SlackStatus } from "../core/events.js";
 import type { UsageSnapshot } from "../core/usage.js";
 import type { SettingsValues } from "../core/settings.js";
 import type { CommandCandidate } from "../core/capabilities/commands.js";
@@ -504,6 +504,7 @@ export interface WorkerRow {
   costUsd?: number;        // cumulative $ from the worker's last result event; absent if it never completed a turn
   maxTurns?: number | null; // per-result turn cap (runaway guard) persisted on the worker; null/absent = no cap
   costBudgetUsd?: number | null; // explicit per-worker lifetime USD ceiling override; null/absent = no per-worker override (the workerCostBudgetUsd settings default may still apply — see server.ts subFactory)
+  tasks?: BackgroundTaskView[]; // live worker's listed background tasks (fleet.list snapshot); absent when none — live updates ride the worker.tasks event
 }
 
 // Integration connection status (on-demand pull). github=gh auth, linear=key present + viewer verification.

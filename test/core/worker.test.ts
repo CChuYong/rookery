@@ -1651,6 +1651,124 @@ describe("Worker background state machine", () => {
     expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // no extra transitions from the edge frames
     await x.agent.stop();
   });
+
+  // ── Listed background tasks + worker.tasks (per-task background stop, Task 5) ──
+  function tasksEvents(bus: EventBus): Array<Array<{ id: string; type: string; description: string }>> {
+    const out: Array<Array<{ id: string; type: string; description: string }>> = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.tasks") out.push(e.tasks); });
+    return out;
+  }
+
+  it("listed tasks exclude ambient, subagents and workflows", async () => {
+    const x = mk(() => [
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "m1", taskType: "monitor", description: "watch", ambient: true },
+          { id: "g1", taskType: "local_agent", description: "research" },
+          { id: "w1", taskType: "local_workflow", description: "audit" },
+        ],
+      },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      // the listed shell finishes; the three excluded tasks keep running
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "m1", taskType: "monitor", description: "watch", ambient: true },
+          { id: "g1", taskType: "local_agent", description: "research" },
+          { id: "w1", taskType: "local_workflow", description: "audit" },
+        ],
+      },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => events.length >= 2);
+    expect(events[0]).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    expect(x.agent.listedBackgroundTasks()).toEqual([]);
+    // state model unchanged: excluded tasks still count toward "background"
+    await new Promise((r) => setTimeout(r, 40)); // past the settle-grace
+    expect(x.agent.status()).toBe("background");
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // listed-set change did NOT re-emit worker.status
+    await x.agent.stop();
+  });
+
+  it("listedBackgroundTasks() returns only the listed task while all four run", async () => {
+    const x = mk(() => [
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "m1", taskType: "monitor", description: "watch", ambient: true },
+          { id: "g1", taskType: "local_agent", description: "research" },
+          { id: "w1", taskType: "local_workflow", description: "audit" },
+        ],
+      },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    expect(x.agent.listedBackgroundTasks()).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    expect(x.agent.backgroundTasks()).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    await x.agent.stop();
+  });
+
+  it("emits worker.tasks only when the listed set changes", async () => {
+    const bash = { id: "b1", taskType: "local_bash", description: "npm run dev" };
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [bash, { id: "g1", taskType: "local_agent", description: "a" }] },
+      { type: "bg_tasks", ids: [bash, { id: "g1", taskType: "local_agent", description: "a" }] }, // same listed set → no event
+      { type: "bg_tasks", ids: [bash, { id: "g2", taskType: "local_agent", description: "b" }] }, // excluded-only change → no event
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "bg_tasks", ids: [{ id: "g2", taskType: "local_agent", description: "b" }] }, // listed set emptied → []
+      { type: "bg_tasks", ids: [] }, // excluded-only change → no event
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    await x.agent.stop();
+  });
+
+  it("edge frames feed the listed view (description from task_started; settle removes it)", async () => {
+    const x = mk(() => [
+      { type: "task_started", id: "b1", taskType: "local_bash", description: "npm run dev" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "b1", status: "completed" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    await x.agent.stop();
+  });
+
+  it("tasks are listed while running", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "assistant", text: "still working" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const seen: Array<{ status: string; tasks: unknown }> = [];
+    x.bus.subscribe("s1", (e) => { if (e.type === "worker.tasks") seen.push({ status: x.agent.status(), tasks: e.tasks }); });
+    x.agent.start("go");
+    await until(() => seen.length >= 1);
+    expect(seen[0]).toEqual({ status: "running", tasks: [{ id: "b1", type: "local_bash", description: "npm run dev" }] });
+    await x.agent.stop();
+  });
+
+  it("stop clears a non-empty listed view with worker.tasks []", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stop();
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    expect(x.agent.listedBackgroundTasks()).toEqual([]);
+  });
 });
 
 // ── Settle-grace (fix/worker-idle-grace): no transient idle between the last bg settle and the auto-wake ──

@@ -146,9 +146,26 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     ]));
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events.filter((e) => e.kind === "background_tasks")).toEqual([
-      { kind: "background_tasks", tasks: [{ taskId: "b1", taskType: "local_bash" }, { taskId: "b2", taskType: "agent" }] },
+      { kind: "background_tasks", tasks: [{ taskId: "b1", taskType: "local_bash", description: "x" }, { taskId: "b2", taskType: "agent", description: "y" }] },
       { kind: "background_tasks", tasks: [] },
     ]);
+  });
+
+  it("background_tasks_changed carries description and ambient", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "b1", task_type: "local_bash", description: "npm run dev" }, { task_id: "m1", task_type: "monitor", description: "watch", ambient: true }] },
+      { type: "system", subtype: "task_started", task_id: "b2", task_type: "local_bash", description: "npm test" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events.find((e) => e.kind === "background_tasks")).toEqual({
+      kind: "background_tasks",
+      tasks: [
+        { taskId: "b1", taskType: "local_bash", description: "npm run dev" },
+        { taskId: "m1", taskType: "monitor", description: "watch", ambient: true },
+      ],
+    });
+    expect(events.find((e) => e.kind === "background_task")).toEqual({ kind: "background_task", taskId: "b2", taskType: "local_bash", description: "npm test", status: "started" });
   });
 });
 

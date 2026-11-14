@@ -1073,6 +1073,28 @@ describe("FleetOrchestrator", () => {
     expect(typeof row.lastActivityTs).toBe("number");
   });
 
+  it("fleet.list rows carry tasks", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "sA", cwd: "/x" });
+    const bus = new EventBus();
+    const git = new FakeGitOps({ headValue: "base0" });
+    let n = 0;
+    const factory = (o: { id: string }): WorkerLike => ({
+      start: () => {}, send: () => {}, resume: () => {}, stop: async () => {},
+      status: () => "background", waitUntilSettled: () => new Promise(() => {}),
+      backgroundTasks: () => (o.id === "a0" ? [{ id: "b1", type: "local_bash", description: "npm run dev" }] : []),
+    });
+    const fleet = new FleetOrchestrator({ repos, bus, git, factory, worktreesDir: "/wt", idgen: () => `a${n++}` });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app", task: "t" });
+    await fleet.spawn({ homeSessionId: "sA", repoPath: "/code/app", label: "app2", task: "t" });
+    await vi.waitFor(() => expect(fleet.list().length).toBe(2));
+    repos.createWorker({ id: "wDet", sessionId: "sA", repoPath: "/r", label: "detached", worktreePath: "/wt/wDet", branch: "b" });
+    const rows = fleet.list();
+    await vi.waitFor(() => expect(fleet.list().find((w) => w.id === "a0")?.tasks).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]));
+    expect("tasks" in rows.find((w) => w.id === "a1")!).toBe(false); // live but nothing listed
+    expect("tasks" in rows.find((w) => w.id === "wDet")!).toBe(false); // no live agent
+  });
+
   it("list() carries costBudgetUsd + maxTurns (protocol WorkerRow siblings), null when unset", () => {
     const { repos, fleet } = setup();
     repos.createWorker({ id: "wBudget", sessionId: "sA", repoPath: "/r", label: "app", worktreePath: "/wt/wBudget", branch: "b", costBudgetUsd: 3.5 });

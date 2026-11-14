@@ -22,7 +22,7 @@ export type FakeStep =
   | { type: "task_notification"; id: string; status?: string; summary?: string; outputFile?: string; usage?: { total_tokens: number; tool_uses: number; duration_ms: number } }
   | { type: "task_progress"; id: string; description?: string; summary?: string; lastToolName?: string; workflowProgress?: unknown; usage?: { total_tokens: number; tool_uses: number; duration_ms: number } }
   // background_tasks_changed level frame (SDK ≥0.3.203): the full live set, REPLACE semantics.
-  | { type: "bg_tasks"; ids: Array<{ id: string; taskType?: string }> }
+  | { type: "bg_tasks"; ids: Array<{ id: string; taskType?: string; description?: string; ambient?: boolean }> }
   | {
       type: "result";
       subtype: string;
@@ -76,7 +76,7 @@ function stepToMessage(step: FakeStep): unknown {
   } else if (step.type === "task_progress") {
     return { type: "system", subtype: "task_progress", task_id: step.id, description: step.description ?? "", ...(step.summary ? { summary: step.summary } : {}), ...(step.lastToolName ? { last_tool_name: step.lastToolName } : {}), ...(step.workflowProgress !== undefined ? { workflow_progress: step.workflowProgress } : {}), usage: step.usage ?? { total_tokens: 0, tool_uses: 0, duration_ms: 0 } };
   } else if (step.type === "bg_tasks") {
-    return { type: "system", subtype: "background_tasks_changed", tasks: step.ids.map((t) => ({ task_id: t.id, task_type: t.taskType ?? "task", description: "" })) };
+    return { type: "system", subtype: "background_tasks_changed", tasks: step.ids.map((t) => ({ task_id: t.id, task_type: t.taskType ?? "task", description: t.description ?? "", ...(t.ambient !== undefined ? { ambient: t.ambient } : {}) })) };
   }
   return {
     type: "result",

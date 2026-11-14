@@ -135,8 +135,17 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
     const sub = (msg as { subtype?: string }).subtype;
     if (sub === "background_tasks_changed") {
       // NOTE: this frame may also carry a top-level `session_id` — already re-emitted above (harmless/idempotent).
-      const bt = msg as { tasks?: Array<{ task_id?: string; task_type?: string }> };
-      const tasks = (bt.tasks ?? []).flatMap((t) => (t.task_id ? [{ taskId: t.task_id, taskType: t.task_type ?? "task" }] : []));
+      const bt = msg as { tasks?: Array<{ task_id?: string; task_type?: string; description?: unknown; ambient?: unknown }> };
+      const tasks = (bt.tasks ?? []).flatMap((t) => {
+        if (!t.task_id) return [];
+        const description = workflowText(t.description, 4_000);
+        return [{
+          taskId: t.task_id,
+          taskType: t.task_type ?? "task",
+          ...(description ? { description } : {}),
+          ...(t.ambient === true ? { ambient: true } : {}),
+        }];
+      });
       yield { kind: "background_tasks", tasks };
       return;
     }
@@ -153,6 +162,7 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
         usage?: unknown;
         status?: string;
         patch?: { status?: string };
+        ambient?: unknown;
       };
       if (typeof tm.task_id !== "string" || !tm.task_id || tm.task_id.length > 512) return;
       const taskType = workflowText(tm.task_type, 256);
@@ -173,7 +183,14 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
             },
           };
         }
-        yield { kind: "background_task", taskId: tm.task_id, ...(taskType ? { taskType } : {}), status: "started" };
+        yield {
+          kind: "background_task",
+          taskId: tm.task_id,
+          ...(taskType ? { taskType } : {}),
+          ...(description ? { description } : {}),
+          ...(tm.ambient === true ? { ambient: true } : {}),
+          status: "started",
+        };
         return;
       }
       if (sub === "task_progress") {
