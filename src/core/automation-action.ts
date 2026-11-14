@@ -68,7 +68,10 @@ export async function runAutomationAction(a: Automation, vars: ActionVars, deps:
         ? deps.sessions.getOrCreateByKey("automation:" + a.id, c.cwd, a.provider) // prefix-derived → origin=automation, ref=id
         : deps.sessions.create(c.cwd, { origin: "automation", originRef: a.id, provider: a.provider }); // fresh: keyless but tagged as automation (per-run session, grouped by id)
     if (!session) return; // target session is gone (deleted, etc.) → silently skip
-    await session.master.runTurn(applyVars(c.prompt, vars), opts);
+    // A self-wakeup resumes an existing target as-is. Its absent/null automation
+    // speed is not an instruction to erase that session's explicit preference.
+    const turnOpts = c.targetSessionId && a.speed == null ? { ...opts, speed: undefined } : opts;
+    await session.master.runTurn(applyVars(c.prompt, vars), turnOpts);
   } else {
     const c = a.action;
     const repo = deps.repos.getRepoByName(c.repo);

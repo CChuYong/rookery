@@ -280,6 +280,53 @@ function* translate(msg: unknown, state: DecodeState): Generator<AgentEvent> {
   }
 }
 
+// SDK 0.3.325 owns an independent input pump and aborts its supplied controller on
+// input failure. Keep that controller separate from caller cancellation: Worker/Master
+// must never mistake a rejected provider control for their own stop/reload request.
+class ClaudeInputScope {
+  readonly controller = new AbortController();
+  private rejectFailure!: (error: unknown) => void;
+  readonly failure = new Promise<never>((_resolve, reject) => { this.rejectFailure = reject; });
+  private inputError: { error: unknown } | undefined;
+  private readonly forwardAbort = () => this.controller.abort(this.caller.signal.reason);
+
+  constructor(private readonly caller: AbortController) {
+    // A query may begin pumping before its consumer starts iterating. The same rejection
+    // is still raced below; observing it here only prevents an unhandled-rejection window.
+    void this.failure.catch(() => {});
+    if (caller.signal.aborted) this.forwardAbort();
+    else caller.signal.addEventListener("abort", this.forwardAbort, { once: true });
+  }
+
+  fail(error: unknown): void {
+    if (this.caller.signal.aborted || this.inputError) return;
+    this.inputError = { error };
+    this.rejectFailure(error);
+    this.controller.abort(error);
+  }
+
+  dispose(): void {
+    this.caller.signal.removeEventListener("abort", this.forwardAbort);
+  }
+
+  async *messages(q: ReturnType<QueryFn>): AsyncIterable<unknown> {
+    const iterator = q[Symbol.asyncIterator]();
+    try {
+      while (true) {
+        // A failed input pump need not reject/end the SDK's output iterator promptly.
+        const next = await Promise.race([iterator.next(), this.failure]);
+        if (next.done) return;
+        yield next.value;
+      }
+    } catch (error) {
+      throw this.inputError ? this.inputError.error : error;
+    } finally {
+      this.dispose();
+      q.close?.();
+    }
+  }
+}
+
 interface ClaudeSpeedState {
   current: SpeedPreference; // captured intent of the input currently executing
   override?: SpeedPreference; // live control queued for the next input
@@ -288,11 +335,11 @@ interface ClaudeSpeedState {
 
 class ClaudeStream implements AgentStream {
   // initialCostWatermark: 0 for a fresh session or a resume with no known baseline; else the caller's baseline.
-  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number, private readonly speed: ClaudeSpeedState) {}
+  constructor(private readonly q: ReturnType<QueryFn>, private readonly initialCostWatermark: number, private readonly speed: ClaudeSpeedState, private readonly inputScope?: ClaudeInputScope) {}
 
   async *[Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
     const state: DecodeState = { lastReqContextTokens: 0, workflowTaskIds: new Set(), costWatermark: this.initialCostWatermark, requestedSpeed: this.speed.current };
-    for await (const msg of this.q) {
+    for await (const msg of this.inputScope ? this.inputScope.messages(this.q) : this.q) {
       state.requestedSpeed = this.speed.current;
       if ((msg as { type?: string }).type === "result" && !(msg as { parent_tool_use_id?: string }).parent_tool_use_id) this.speed.turnActive = false;
       yield* translate(msg, state);
@@ -370,24 +417,37 @@ export class ClaudeBackend implements AgentBackend {
 
   openSession(input: AsyncIterable<string>, opts: AgentSessionOptions): AgentStream {
     const speed: ClaudeSpeedState = { current: resolveSpeed(opts.speed), turnActive: false };
+    const baseOptions = this.baseOptions(opts);
+    const scope = new ClaudeInputScope(opts.abortController);
     let q: ReturnType<QueryFn>;
     const messages = async function* () {
-      for await (const message of claudeUserMessages(input)) {
-        const next = speed.override ?? resolveSpeed(opts.speed);
-        await q.applyFlagSettings?.({ fastMode: next === "fast" });
-        speed.current = next;
-        speed.turnActive = true;
-        yield message;
+      try {
+        for await (const message of claudeUserMessages(input)) {
+          const next = speed.override ?? resolveSpeed(opts.speed);
+          await q.applyFlagSettings?.({ fastMode: next === "fast" });
+          speed.current = next;
+          speed.turnActive = true;
+          yield message;
+        }
+      } catch (error) {
+        scope.fail(error);
+        throw error;
       }
     };
-    q = this.queryFn({
-      prompt: messages(),
-      options: {
-        ...this.baseOptions(opts),
-        forwardSubagentText: true, // nested subagent text/tool activity → UI panels (streaming sessions only, as before)
-      },
-    });
-    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed);
+    try {
+      q = this.queryFn({
+        prompt: messages(),
+        options: {
+          ...baseOptions,
+          abortController: scope.controller,
+          forwardSubagentText: true, // native nested activity (streaming sessions only)
+        },
+      });
+    } catch (error) {
+      scope.dispose();
+      throw error;
+    }
+    return new ClaudeStream(q, opts.resume ? (opts.costBaselineUsd ?? 0) : 0, speed, scope);
   }
 
   startTurn(prompt: string, opts: MasterTurnOptions): AgentStream {

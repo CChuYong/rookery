@@ -637,7 +637,8 @@ describe("CodexBackend — pricing aggregation", () => {
     const events = await collect(b.openSession(q, baseOpts({ model: "gpt-5.5" })));
     const ends = events.filter((e) => e.kind === "turn_end") as Array<{ costUsd: number }>;
     expect(ends[0]!.costUsd).toBeCloseTo(1000 * 5 / 1e6 + 100 * 30 / 1e6, 10);
-    expect(ends[1]!.costUsd).toBe(0); // clamped, not negative
+    expect(ends[1]!.costUsd).toBe(0); // compatibility number stays nonnegative
+    expect(ends[1]).toMatchObject({costAccuracy: "unavailable"});
   });
 
   it("billedModel snapshots per thread: a mid-turn setModel prices the NEXT turn only, not the in-flight one", async () => {

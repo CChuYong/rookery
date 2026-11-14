@@ -689,3 +689,15 @@ it("defers a busy Claude stream speed control until the next input without chang
   expect(results).toMatchObject([{requestedSpeed: "standard"}, {requestedSpeed: "fast"}]);
   expect(flags).toEqual([false, true]);
 });
+
+it("separates real SDK input-pump failure from caller cancellation", async () => {
+  const { sdkQueryProcess } = await import("../helpers/sdk-query-process.js");
+  const sdk = sdkQueryProcess({rejectFlagAt: 1});
+  const abortController = new AbortController();
+  const stream = new ClaudeBackend(sdk.queryFn).openSession((async function* () { yield "rejected input"; })(), baseOpts({speed: "fast", abortController}));
+  try {
+    await expect(collect(stream)).rejects.toThrow("account rejected fast mode");
+    expect(abortController.signal.aborted).toBe(false);
+    expect(sdk.delivered).toEqual([]);
+  } finally { sdk.close(); }
+});

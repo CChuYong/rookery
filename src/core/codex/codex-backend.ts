@@ -673,6 +673,10 @@ abstract class CodexSessionBase implements AgentStream {
           this.accountingIncomplete = true;
           this.prevTotal = total; // resumed stream: baseline only
         } else {
+          // Compaction/reset or incomplete telemetry can move cumulative counters backwards.
+          // Clamping preserves nonnegative compatibility numbers but cannot certify a price.
+          const billedFields = ["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens"] as const;
+          if (billedFields.some(field => (total[field] ?? 0) < (this.prevTotal![field] ?? 0))) this.accountingIncomplete = true;
           this.turnAccum.inputTokens += Math.max(0, (total.inputTokens ?? 0) - (this.prevTotal.inputTokens ?? 0));
           this.turnAccum.cachedInputTokens += Math.max(0, (total.cachedInputTokens ?? 0) - (this.prevTotal.cachedInputTokens ?? 0));
           this.turnAccum.cacheWriteInputTokens += Math.max(0, (total.cacheWriteInputTokens ?? 0) - (this.prevTotal.cacheWriteInputTokens ?? 0));

@@ -134,3 +134,82 @@ it("does not resume another budgeted turn after previously unavailable accountin
   expect(() => worker.send("again")).toThrow(/not running/);
   expect(fake.requests.some(r => r.method === "turn/start")).toBe(false);
 });
+
+it.each([1, 2])("settles Worker terminally on real SDK initial/follow-up flag rejection (call %s)", async (rejectFlagAt) => {
+  const { sdkQueryProcess } = await import("../helpers/sdk-query-process.js");
+  const sdk = sdkQueryProcess({rejectFlagAt});
+  const d = base();
+  d.repos.createSession({id: "s", cwd: "/tmp"});
+  d.repos.createWorker({id: "w", sessionId: "s", repoPath: "/tmp", label: "w"});
+  const worker = new Worker({id: "w", sessionId: "s", repoPath: "/tmp", label: "w", deps: {...d, backend: new ClaudeBackend(sdk.queryFn), model: "m"}});
+  try {
+    worker.start("initial");
+    if (rejectFlagAt === 2) { await until(() => worker.status() === "idle"); worker.send("rejected follow-up", undefined, "fast"); }
+    await until(() => worker.status() === "error");
+    await worker.waitUntilSettled();
+    expect(sdk.delivered).toEqual(rejectFlagAt === 1 ? [] : ["initial"]);
+    expect(d.repos.listWorkerEvents("w").map(e => JSON.parse(e.payload_json))).toContainEqual({kind: "error", message: "Error: account rejected fast mode"});
+  } finally { sdk.close(); await worker.stop(); d.db.close(); }
+});
+
+it.each(["stop", "reload"])("preserves deliberate %s with the real SDK independent input pump", async (action) => {
+  const { sdkQueryProcess } = await import("../helpers/sdk-query-process.js");
+  const sdk = sdkQueryProcess({holdFlagAt: action === "stop" ? 1 : undefined});
+  const d = base();
+  d.repos.createSession({id: "s", cwd: "/tmp"});
+  d.repos.createWorker({id: "w", sessionId: "s", repoPath: "/tmp", label: "w"});
+  const worker = new Worker({id: "w", sessionId: "s", repoPath: "/tmp", label: "w", deps: {...d, backend: new ClaudeBackend(sdk.queryFn), model: "m"}});
+  try {
+    worker.start("pending");
+    if (action === "stop") {
+      await until(() => sdk.controls.includes("apply_flag_settings"));
+      await worker.stop(); expect(worker.status()).toBe("stopped");
+    }
+    else {
+      await until(() => worker.status() === "idle");
+      const reload = worker.requestCapabilityReload({whenIdle: false, onBegin() {}});
+      await reload.completion;
+      worker.send("after reload");
+      await until(() => worker.status() === "idle");
+      expect(sdk.delivered).toEqual(["pending", "after reload"]);
+    }
+    expect(d.repos.listWorkerEvents("w").some(e => e.type === "error")).toBe(false);
+  } finally { sdk.close(); await worker.stop(); d.db.close(); }
+});
+
+it.each(["fast", "standard"] as const)("preserves explicit %s across a scheduled self-wakeup with the opposite role default", async (speed) => {
+  const { runAutomationAction } = await import("../../src/core/automation-action.js");
+  const { wakeupImpl } = await import("../../src/tools/schedule-tools.js");
+  const d = base();
+  d.settings.apply({masterSpeed: speed === "fast" ? "standard" : "fast"});
+  const seen: unknown[] = [];
+  const query = ((input: Parameters<QueryFn>[0]) => { seen.push(input.options?.settings); return fakeQuery([{type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk"}])(input); }) as QueryFn;
+  const sessions = new SessionManager({...d, backends: {claude: new ClaudeBackend(query)}, masterModel: "m", masterSpeed: (provider) => d.settings.speed(provider, "master")});
+  const session = sessions.create("/tmp", {speed});
+  await session.master.runTurn("initial");
+  wakeupImpl({repos: d.repos, now: () => new Date(), reconcile() {}, idgen: () => "wake"}, session.id, {delaySeconds: 60, reason: "check", prompt: "wake"});
+  const wake = d.repos.getAutomation("wake")!;
+  expect(wake.speed).toBeNull();
+  await runAutomationAction(wake, {}, {...d, sessions});
+  expect(d.repos.getSession(session.id)?.speed).toBe(speed);
+  await session.master.runTurn("manual after wake");
+  expect(seen).toEqual(Array.from({length: 3}, () => ({fastMode: speed === "fast"})));
+  d.db.close();
+});
+
+it("stops a budgeted Worker before releasing deferred input after backwards usage counters", async () => {
+  const d = base();
+  d.repos.createSession({id: "s", cwd: "/tmp"});
+  d.repos.createWorker({id: "w", sessionId: "s", repoPath: "/tmp", label: "w"});
+  const fake = fakeCodexSpawn((text, turn) => [{kind: "agentMessage", text}, {kind: "tokenUsage", last: {inputTokens: 500}, total: {inputTokens: turn === 0 ? 1000 : 500, outputTokens: turn === 0 ? 100 : 50}}, {kind: "turnEnd"}]);
+  const worker = new Worker({id: "w", sessionId: "s", repoPath: "/tmp", label: "w", deps: {...d, backend: new CodexBackend({spawn: fake.spawn, defaultModel: () => "gpt-5.5"}), model: "gpt-5.5", costBudgetUsd: 10}});
+  d.bus.subscribe("s", e => { if (e.type === "worker.event" && e.data.kind === "message" && e.data.role === "assistant" && e.data.content === "rollback") worker.send("must not execute"); });
+  try {
+    worker.start("first"); await until(() => worker.status() === "idle");
+    worker.send("rollback");
+    await until(() => worker.status() === "stopped");
+    await worker.waitUntilSettled();
+    expect(fake.requests.filter(r => r.method === "turn/start")).toHaveLength(2);
+    expect(JSON.parse(d.repos.lastWorkerEventPayload("w", "result")!)).toMatchObject({costUsd: .008, costAccuracy: "unavailable"});
+  } finally { await worker.stop(); d.db.close(); }
+});
