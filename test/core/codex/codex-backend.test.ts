@@ -1427,3 +1427,11 @@ it.each([false, true])("marks missing usage or an observed long request unavaila
   const {backend: b} = backend(() => long ? [{kind: "tokenUsage", last: {inputTokens: 272_001}}, {kind: "turnEnd"}] : [{kind: "turnEnd"}]);
   expect((await collect(b.startTurn("go", baseOpts({speed: "fast"})))).at(-1)).toMatchObject({costUsd: 0, costAccuracy: "unavailable"});
 });
+
+it.each(["priority", "fast"])("accepts the catalog %s Fast capability while requesting the fast turn alias", async (tier) => {
+  const fake = fakeCodexSpawn(() => [{ kind: "turnEnd" }]);
+  const b = new CodexBackend({ spawn: fake.spawn, defaultModel: () => "gpt-6.1-sol", modelServiceTiers: () => [tier] });
+  const events = await collect(b.startTurn("go", baseOpts({ model: "gpt-6.1-sol", speed: "fast" })));
+  expect(fake.requests.find((request) => request.method === "turn/start")?.params).toMatchObject({ serviceTierForTurn: "fast" });
+  expect(events).toContainEqual({ kind: "speed", observation: { requested: "fast", state: "unknown" } });
+});

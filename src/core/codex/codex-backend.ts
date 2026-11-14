@@ -548,7 +548,8 @@ abstract class CodexSessionBase implements AgentStream {
     this.accountingIncomplete = false;
     const turnModel = modelOverride || this.opts.model || this.deps.defaultModel();
     const tiers = this.deps.modelServiceTiers?.(turnModel);
-    if (this.billedSpeed === "fast" && tiers && !tiers.includes("fast")) throw new Error(`Fast speed is unavailable for model ${turnModel} according to the provider catalog`);
+    // The live catalog calls Fast "priority"; serviceTierForTurn still accepts the "fast" request alias.
+    if (this.billedSpeed === "fast" && tiers && !tiers.includes("priority") && !tiers.includes("fast")) throw new Error(`Fast speed is unavailable for model ${turnModel} according to the provider catalog`);
     this.channel.push({ kind: "speed", observation: { requested: this.billedSpeed, state: "unknown" } });
     const supported = effort ? this.deps.modelEfforts?.(turnModel) : undefined;
     if (effort && supported && supported.length > 0 && !supported.includes(effort)) {

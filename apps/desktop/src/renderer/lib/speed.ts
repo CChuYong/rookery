@@ -8,11 +8,12 @@ export function defaultSpeed(settings: Partial<SettingsValues> | null, provider:
   return settings?.[key] === "fast" ? "fast" : "standard";
 }
 
+// CLI 0.169.0 calls the Fast catalog capability "priority"; turn/start uses "fast".
 // Missing metadata is unknown, never authoritative exclusion.
 export function fastAvailability(provider: string | undefined, model: string, catalog: CodexModelInfo[] | null): "supported" | "unsupported" | "unknown" {
   if (provider !== "codex") return "unknown";
   const tiers = catalog?.find((m) => m.id === model)?.serviceTiers;
-  return tiers == null ? "unknown" : tiers.some((tier) => tier.id === "fast") ? "supported" : "unsupported";
+  return tiers == null ? "unknown" : tiers.some((tier) => tier.id === "priority" || tier.id === "fast") ? "supported" : "unsupported";
 }
 
 export function latestSpeedObservation(items: LogItem[] | undefined): SpeedObservation | undefined {

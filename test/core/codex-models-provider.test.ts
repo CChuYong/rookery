@@ -133,3 +133,10 @@ it("preserves authoritative service tiers and distinguishes absent from excluded
   expect(rows?.[1]?.serviceTiers).toEqual([]);
   expect(rows?.[2]).not.toHaveProperty("serviceTiers");
 });
+
+it("preserves CLI 0.169.0 priority/Fast capability metadata without renaming its id", async () => {
+  const tier = { id: "priority", name: "Fast", description: "" };
+  const fake = fakeCodexSpawn(() => [], { modelList: [{ ...GPT_5_5, id: "gpt-6.1-sol", serviceTiers: [tier] }] });
+  const rows = await makeCodexModelsProvider({ spawn: fake.spawn }).list();
+  expect(rows?.[0]?.serviceTiers).toEqual([tier]);
+});

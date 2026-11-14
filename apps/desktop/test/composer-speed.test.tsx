@@ -45,3 +45,16 @@ it("configuration invalidation shows next-turn pending while retaining historica
   expect(screen.getByText("Applies next turn")).toHaveAttribute("title", expect.stringContaining("last turn only"));
   expect(screen.queryByText("Last reported: Fast")).toBeNull();
 });
+
+it.each([
+  { id: "priority", name: "Fast", description: "" },
+  { id: "priority", name: "빠르게", description: "" },
+  { id: "fast", name: "Fast", description: "" },
+])("recognizes catalog tier $id ($name) without relying on its localized label", (tier) => {
+  // CLI 0.169.0 reports the Fast capability with id=priority, name=Fast.
+  useStore.getState().setCodexModels([{ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", defaultEffort: "high", supportedEfforts: ["high"], isDefault: true, serviceTiers: [tier] }]);
+  show({ model: "gpt-6.1-sol", speedObservation: { requested: "fast", state: "unknown" } });
+  expect(screen.getByRole("option", { name: "Fast" })).not.toBeDisabled();
+  expect(screen.queryByText("Fast unavailable for this model; preference retained")).toBeNull();
+  expect(screen.getByText("Fast requested; effective speed unknown")).toBeInTheDocument();
+});
