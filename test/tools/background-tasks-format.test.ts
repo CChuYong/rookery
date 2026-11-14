@@ -19,4 +19,15 @@ describe("formatBackgroundTasks", () => {
     const out = formatBackgroundTasks([{ id: "b1", type: "local_bash", description: desc }]);
     expect(out).toBe(`\nbackground tasks:\n- local_bash: ${"x".repeat(120)}…`);
   });
+
+  it("collapses embedded newlines/whitespace so a description can't forge extra task lines", () => {
+    const out = formatBackgroundTasks([{ id: "b1", type: "local\nbash", description: "foo\n- local_bash: injected\r\n\tbar  " }]);
+    expect(out).toBe("\nbackground tasks:\n- local bash: foo - local_bash: injected bar");
+    expect(out.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1);
+  });
+
+  it("does not add an ellipsis to a description of exactly 120 chars", () => {
+    const desc = "y".repeat(120);
+    expect(formatBackgroundTasks([{ id: "b1", type: "local_bash", description: desc }])).toBe(`\nbackground tasks:\n- local_bash: ${desc}`);
+  });
 });
