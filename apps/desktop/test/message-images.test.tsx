@@ -78,3 +78,27 @@ it("bounds data cache and refetches an evicted oldest image", async () => {
   await loadImage(image);
   expect(request).toHaveBeenCalledTimes(calls + 1);
 });
+
+it("fetches history images one at a time so large replies never pile up in the daemon's send buffer", async () => {
+  const other = { ...image, id: "550e8400-e29b-41d4-a716-446655440001", name: "second.png" };
+  let release!: () => void;
+  request.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ image, base64: "eHl6" }); }));
+  request.mockImplementationOnce(() => Promise.resolve({ image: other, base64: "eHl6" }));
+  const first = loadImage(image);
+  const second = loadImage(other);
+  await Promise.resolve();
+  expect(request).toHaveBeenCalledTimes(1);
+  release();
+  await expect(first).resolves.toContain("data:image/png");
+  await expect(second).resolves.toContain("data:image/png");
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it("opens a sent image full size on click and closes on Escape", async () => {
+  render(<MessageImages images={[image]} eager />);
+  const open = await screen.findByRole("button", { name: /history\.png/ });
+  fireEvent.click(open);
+  expect(screen.getByRole("dialog", { name: "history.png" })).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});

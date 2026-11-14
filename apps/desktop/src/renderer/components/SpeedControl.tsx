@@ -31,6 +31,9 @@ export function SpeedControl({ speed, defaultSpeed = "standard", provider, model
     : reported?.state === "cooldown" ? t("speed.cooldown")
     : undefined;
   const explanation = [status, reported?.reason].filter(Boolean).join(". ") || undefined;
+  // Fast was asked for but the provider says it isn't running Fast (cooldown, or reported Standard). The inline status
+  // text was removed to keep the composer quiet, so without this the only trace was a native tooltip on "Fast".
+  const degraded = !pending && requested === "fast" && (reported?.state === "cooldown" || reported?.state === "standard");
   return (
     <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-meta text-muted">
       {onChange ? (
@@ -47,6 +50,9 @@ export function SpeedControl({ speed, defaultSpeed = "standard", provider, model
           <option value="fast" disabled={availability === "unsupported"}>{t("speed.fast")}</option>
         </select>
       ) : <span title={explanation}>{t("speed.inherited", { speed: requested === "fast" ? "Fast" : "Standard" })}</span>}
+      {degraded && (
+        <span role="img" aria-label={t("speed.mismatch")} title={explanation ?? t("speed.mismatch")} className="-ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+      )}
     </span>
   );
 }

@@ -200,13 +200,15 @@ export function NewSessionPage(p: {
             allowEmpty // start with it empty for an empty session
             sendLabel={t("newSessionPage.sendLabel")}
             placeholder={t("newSessionPage.placeholder")}
-            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort }}
+            // Speed sits after model/effort on every surface (same order as the conversation composer): for Claude the
+            // composer renders it from controls; Codex brings its own model/effort selects in leftSlot, so it follows them.
+            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort, speed, defaultSpeed: defaultSpeed(settings, provider, "master"), provider, onSpeed: setSpeed }}
             commands={commands}
             browseDir={browseDir}
             onAttachFile={p.onAttachFile}
             onDropFiles={p.onDropFiles}
             onEscape={p.onClose}
-            leftSlot={<>{folderPicker}{providerSelector}{codexControls}<SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "master")} provider={provider} model={isCodex ? effortModel : model} onChange={setSpeed} /></>}
+            leftSlot={<>{folderPicker}{providerSelector}{codexControls}{isCodex && <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "master")} provider={provider} model={effortModel} onChange={setSpeed} />}</>}
             className="px-3 py-3"
             initialText={initialDraft.text}
             initialImages={initialDraft.images}

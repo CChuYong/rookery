@@ -1,5 +1,5 @@
 import type { ImageRef } from "@daemon/core/image-input.js";
-import { validateImageRefs } from "@daemon/core/image-input.js";
+import { validateImageRefs } from "../lib/image-limits.js";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 

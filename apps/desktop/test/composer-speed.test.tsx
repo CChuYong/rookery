@@ -62,3 +62,17 @@ it.each([
   expect(screen.queryByText("Fast unavailable for this model; preference retained")).toBeNull();
   expect(screen.queryByText("Fast requested; effective speed unknown")).toBeNull();
 });
+
+it("marks a Fast request the provider did not honor with a quiet dot, not inline text", () => {
+  show({ speed: "fast", speedObservation: { requested: "fast", state: "cooldown", reason: "account cooling down" } });
+  expect(screen.getByRole("img", { name: /different speed/ })).toBeInTheDocument();
+  expect(screen.queryByText("Fast cooldown")).toBeNull();
+});
+
+it("shows no dot while Fast is honored or the outcome is unknown", () => {
+  const { unmount } = show({ speed: "fast", speedObservation: { requested: "fast", state: "fast" } });
+  expect(screen.queryByRole("img", { name: /different speed/ })).toBeNull();
+  unmount();
+  show({ speed: "fast", speedObservation: { requested: "fast", state: "unknown" } });
+  expect(screen.queryByRole("img", { name: /different speed/ })).toBeNull();
+});

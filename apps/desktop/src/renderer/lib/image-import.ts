@@ -1,4 +1,4 @@
-import { IMAGE_LIMITS, validateImageRefs } from "@daemon/core/image-input.js";
+import { IMAGE_LIMITS, validateImageRefs } from "./image-limits.js";
 import type { ImageRef, ImageMediaType } from "@daemon/core/image-input.js";
 import type { WsClient } from "../ws/client.js";
 export type SelectedAttachment =

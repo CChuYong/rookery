@@ -66,7 +66,7 @@ Event mapping (summary): `master.message.delta` → streaming bubble, `master.th
 - **The daemon does not die when the window closes** (detached+unref) — logs·diagnostics are in `~/.rookery/daemon.log`.
 - **The `nested` map is non-persistent** — reloading makes the nested panel disappear.
 - **Slack-originated sessions are read-only in the UI** (composer disabled, badge shown) — converse with those from Slack.
-- **Never runtime-import `better-sqlite3` or daemon code from main/renderer** (ABI conflict). `@daemon/*` is for **type-only** imports only.
+- **Never runtime-import `better-sqlite3` or daemon code from main/renderer** (ABI conflict). `@daemon/*` is for **type-only** imports only — values the renderer needs (e.g. image limits) are mirrored locally with a parity test (`lib/image-limits.ts` ↔ `test/image-limits-parity.test.ts`).
 
 ## i18n (localization — `src/renderer/i18n/`)
 

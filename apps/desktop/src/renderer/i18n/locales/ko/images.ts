@@ -6,6 +6,8 @@ export default {
   "images.recoverWorker": "워커 복구",
   "images.retrySend": "다시 보내기",
   "images.retried": "다시 보냈습니다",
+  "images.open": "이미지 {name} 크게 보기",
+  "images.closePreview": "Esc 또는 클릭으로 닫기",
   "images.remove": "{name} 이미지 제거",
   "images.retry": "이미지를 불러올 수 없습니다. 다시 시도",
   "images.load": "이미지 불러오기",

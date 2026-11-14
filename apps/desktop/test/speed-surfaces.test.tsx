@@ -18,9 +18,9 @@ it("new master inherits each provider default and sends an explicit selection", 
   const onStart = vi.fn();
   render(english(<NewSessionPage repos={[]} defaultModel={settings.masterModel} defaultEffort="high" onStart={onStart} />));
   expect(screen.getByLabelText("Speed")).toHaveValue("");
-  expect(screen.getByRole("option", { name: "Default (Fast)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
-  expect(screen.getByRole("option", { name: "Default (Standard)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Standard (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "fast" } });
   fireEvent.click(screen.getByLabelText("Start"));
   expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ speed: "fast", provider: "codex" }));
@@ -29,7 +29,7 @@ it("worker spawn carries its own selected preference and labels Codex budgets", 
   const onSpawn = vi.fn();
   render(english(<WorkerSpawnModal repo="app" defaultModel={settings.workerModel} defaultEffort="high" onSpawn={onSpawn} onClose={vi.fn()} />));
   fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
-  expect(screen.getByRole("option", { name: "Default (Fast)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "standard" } });
   fireEvent.click(screen.getByRole("button", { name: /Spawn|Start/ }));
   expect(onSpawn.mock.calls[0]?.[9]).toBe("standard");

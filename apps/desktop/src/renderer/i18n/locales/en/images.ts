@@ -6,6 +6,8 @@ export default {
   "images.recoverWorker": "Recover worker",
   "images.retrySend": "Retry send",
   "images.retried": "Sent again",
+  "images.open": "Open image {name}",
+  "images.closePreview": "Press Escape or click to close",
   "images.remove": "Remove image {name}",
   "images.retry": "Image unavailable. Retry",
   "images.load": "Load image",

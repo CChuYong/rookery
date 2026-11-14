@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useModalKeys } from "../lib/useModalKeys.js";
 import type { ImageRef } from "@daemon/core/image-input.js";
 import { getImageClient } from "../lib/image-client.js";
 import { useT } from "../i18n/provider.js";
@@ -11,6 +13,18 @@ export function clearImageCache(): void {
   cache.clear();
   cacheBytes = 0;
 }
+// One image.get on the wire at a time. Each reply can be ~4 MiB of base64, and the daemon cuts a socket whose send
+// buffer passes 8 MiB (server.ts backpressure guard) — requesting every visible image at once made a message with
+// 3–4 large images disconnect the desktop, and the reconnect re-requested them in a loop. Waiting for each reply
+// before asking for the next keeps the daemon's buffer near one image.
+type ImageReply = { image: ImageRef; base64: string };
+let wire: Promise<unknown> = Promise.resolve();
+function fetchSerially(id: string): Promise<ImageReply> {
+  const next = wire.then(() => getImageClient().request({ type: "image.get", id }) as Promise<ImageReply>);
+  wire = next.catch(() => undefined);
+  return next;
+}
+
 export async function loadImage(ref: ImageRef): Promise<string> {
   const hit = cache.get(ref.id);
   if (hit) {
@@ -20,8 +34,7 @@ export async function loadImage(ref: ImageRef): Promise<string> {
   }
   const pending = inFlight.get(ref.id);
   if (pending) return pending;
-  const task = getImageClient()
-    .request({ type: "image.get", id: ref.id })
+  const task = fetchSerially(ref.id)
     .then(({ image, base64 }) => {
       if (
         image.id !== ref.id ||
@@ -59,6 +72,7 @@ export function MessageImage({
   const [url, setUrl] = useState<string>();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
   useEffect(() => {
     if (eager || !element.current) return;
     if (typeof IntersectionObserver === "undefined") return; // explicit load remains available on older clients
@@ -96,6 +110,12 @@ export function MessageImage({
       title={`${image.name} · ${image.width} × ${image.height}`}
     >
       {url ? (
+        <button
+          type="button"
+          onClick={() => setZoomed(true)}
+          aria-label={t("images.open", { name: image.name })}
+          className="cursor-zoom-in rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi"
+        >
         <img
           src={url}
           alt={image.name}
@@ -110,6 +130,7 @@ export function MessageImage({
           }}
           className="h-20 max-w-[180px] rounded object-contain bg-ink"
         />
+        </button>
       ) : (
         <button
           type="button"
@@ -125,7 +146,29 @@ export function MessageImage({
       <span className="max-w-[180px] truncate text-meta text-muted">
         {image.name}
       </span>
+      {zoomed && url && <ImageLightbox url={url} name={image.name} onClose={() => setZoomed(false)} />}
     </div>
+  );
+}
+
+// Full-size view of an attached/sent image. Thumbnails are capped at 80px high, which is too small to read a
+// screenshot; click opens the image at its natural size (scaled down to fit), Escape or a click anywhere closes.
+function ImageLightbox({ url, name, onClose }: { url: string; name: string; onClose: () => void }): JSX.Element {
+  const t = useT();
+  useModalKeys({ escape: "close", onEscape: onClose });
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={name}
+      onClick={onClose}
+      className="fixed inset-0 z-[120] flex cursor-zoom-out flex-col items-center justify-center gap-2 bg-scrim p-8 motion-safe:animate-[overlay-in_140ms_ease-out]"
+    >
+      <img src={url} alt={name} className="min-h-0 max-w-full flex-1 rounded-md object-contain" />
+      <span className="max-w-full truncate text-meta text-fg-dim">{name}</span>
+      <span className="sr-only">{t("images.closePreview")}</span>
+    </div>,
+    document.body,
   );
 }
 export function MessageImages({
