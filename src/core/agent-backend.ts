@@ -83,6 +83,11 @@ export interface AgentStream extends AsyncIterable<AgentEvent> {
   setModel(model: string): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   supportedCommands(): Promise<SlashCommandInfo[]>;
+  // Optional (worker streams only): fold a follow-up into the RUNNING turn instead of queuing it for the
+  // next turn. Resolves `true` only when the provider accepted the input for the active turn; `false`
+  // (no active turn, stream closed, or the provider refused it) tells the caller to fall back to queuing.
+  // Never throws. `clientMsgId` is the caller's echo-correlation id, forwarded where the provider has one.
+  steer?(input: AgentInput, clientMsgId?: string): Promise<boolean>;
   // Optional: suspend/resume a provider's per-turn inactivity watchdog while a blocking interaction
   // (AskUserQuestion / approval) awaits a human — the master brackets its ask closure with these so a
   // long human think-time isn't mistaken for a wedged turn. Only the Codex adapter has such a watchdog;
