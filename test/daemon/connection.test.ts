@@ -47,6 +47,7 @@ type FleetOverride = {
   discard?: (id: string) => Promise<void>;
   delete?: (id: string) => Promise<void>;
   interrupt?: (id: string) => Promise<void>;
+  stopTask?: (id: string, taskId: string) => Promise<void>;
   setModel?: (id: string, model: string) => Promise<void>;
   setPermissionMode?: (id: string, mode: string) => Promise<void>;
   transcript?: (id: string, sinceSeq?: number) => Array<{ seq: number; type: string; payload: unknown }>;
@@ -732,6 +733,25 @@ describe("Connection v2 routes", () => {
     await conn.handleRaw(JSON.stringify({ type: "worker.interrupt", reqId: "r5", id: "a1" }));
     expect(calls).toEqual(["interrupt:a1"]);
     expect(sent.at(-1)).toMatchObject({ type: "fleet.ack", action: "interrupt", id: "a1", reqId: "r5" });
+  });
+
+  it("worker.task.stop replies fleet.ack", async () => {
+    const sent: any[] = [];
+    const calls: string[] = [];
+    const fleet: FleetOverride = { stopTask: async (id: string, taskId: string) => { calls.push(`${id}:${taskId}`); } };
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "worker.task.stop", reqId: "r6", id: "a1", taskId: "b1" }));
+    expect(calls).toEqual(["a1:b1"]);
+    expect(sent.at(-1)).toEqual({ type: "fleet.ack", reqId: "r6", action: "task.stop", id: "a1" });
+  });
+
+  it("worker.task.stop error replies error with reqId", async () => {
+    const sent: any[] = [];
+    const fleet: FleetOverride = { stopTask: async () => { throw new Error("Unknown background task b9"); } };
+    const conn = makeConn(sent, { fleet });
+    await conn.handleRaw(JSON.stringify({ type: "worker.task.stop", reqId: "r7", id: "a1", taskId: "b9" }));
+    expect(sent.at(-1)).toMatchObject({ type: "error", reqId: "r7", message: expect.stringContaining("Unknown background task b9") });
+    expect(sent.some((m) => m.type === "fleet.ack")).toBe(false);
   });
 
   it("worker.setPermissionMode routes to fleet.setPermissionMode (fire-and-forget)", async () => {

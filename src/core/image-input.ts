@@ -25,7 +25,10 @@ export interface ResolvedImage {
   mediaType: ImageMediaType;
   data: string;
 }
-export type AgentInput = string | { text: string; images: ResolvedImage[] };
+// `priority` is a delivery hint for a streaming session (only Claude reads it): a steered follow-up
+// rides with it so it joins the running turn instead of starting the next one. `uuid` is the provider
+// correlation id the Claude adapter stamps on a steered follow-up, so it can see whether a turn consumed it.
+export type AgentInput = string | { text: string; images: ResolvedImage[]; priority?: "now" | "next" | "later"; uuid?: `${string}-${string}-${string}-${string}-${string}` };
 // Validation returns fresh authoritative refs, never caller-owned metadata. Resolution occurs only at dispatch.
 export interface ImageResolver {
   validate(refs: readonly ImageRef[]): ImageRef[];

@@ -3,12 +3,14 @@ import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
 import type { CoreEvent } from "../../src/core/events.js";
-import { Worker } from "../../src/core/worker.js";
+import { Worker, WORKER_FENCE_INSTRUCTION, WORKER_STEER_INSTRUCTION } from "../../src/core/worker.js";
+import { WorkerNotifier } from "../../src/core/worker-notifier.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
-import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, type FakeStep } from "../helpers/fake-query.js";
+import { fakeQuery, fakeStreamingQuery, fakeBackend, fakeStreamingBackend, withoutSteer, withoutStreamMethods, type FakeStep } from "../helpers/fake-query.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
-import type { AgentBackend, AgentSessionOptions } from "../../src/core/agent-backend.js";
+import type { AgentBackend, AgentEvent, AgentSessionOptions, AgentStream } from "../../src/core/agent-backend.js";
+import type { AgentInput, ImageRef, ImageResolver } from "../../src/core/image-input.js";
 import type { ResolvedAgentCapabilities } from "../../src/core/capabilities/types.js";
 
 // Poll until the condition becomes true (throw on timeout) — for reproducing mid-turn timing.
@@ -758,7 +760,7 @@ describe("Worker", () => {
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: withoutSteer(new ClaudeBackend(gated)) } });
     agent.start("task");
     // Wait until turn0's assistant is recorded (= just before the gate).
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
@@ -796,7 +798,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: withoutSteer(new ClaudeBackend(gated)) } });
     agent.start("task");
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
     agent.send("m1");
@@ -1229,7 +1231,7 @@ describe("Worker", () => {
       });
     }) as QueryFn;
 
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gatedQuery) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: withoutSteer(new ClaudeBackend(gatedQuery)) } });
     agent.start("task");
 
     // Wait until the assistant message is recorded (= turn0 is mid-flight at the gate)
@@ -1447,7 +1449,7 @@ describe("Worker", () => {
       }
       return Object.assign(gen(), { interrupt: async () => { releaseGate(); }, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
     }) as QueryFn;
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gatedQuery) } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: withoutSteer(new ClaudeBackend(gatedQuery)) } });
     agent.start("task");
     await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && (JSON.parse(e.payload_json) as { content?: string }).content === "reply:task"));
     // mid-turn send → echo deferred + message buffered in the MessageQueue (the gen is parked at the gate, not pulling input)
@@ -1507,15 +1509,17 @@ describe("extractToolUses / extractToolResults", () => {
 // ── Background-aware state machine (2026-07-11 redesign): running / background / idle derived from
 //    turnActive + running bg-task set. Design: docs/superpowers/specs/2026-07-11-worker-state-graph-design.md ──
 describe("Worker background state machine", () => {
-  function mk(responder: Parameters<typeof fakeStreamingBackend>[0], opts?: { settleGraceMs?: number }) {
+  function mk(responder: Parameters<typeof fakeStreamingBackend>[0], opts?: { settleGraceMs?: number; onStopTask?: (taskId: string) => void; hideStopTask?: boolean }) {
     const repos = new Repositories(openDb(":memory:"));
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
     const bus = new EventBus();
     const statusEvents: Array<{ status: string; bg?: { count: number; types: string[] } }> = [];
     bus.subscribe("s1", (e) => { if (e.type === "worker.status") statusEvents.push({ status: e.status, ...(e.bg ? { bg: e.bg } : {}) }); });
+    const base = fakeStreamingBackend(responder, opts?.onStopTask ? { onStopTask: opts.onStopTask } : undefined);
+    const backend = opts?.hideStopTask ? withoutStreamMethods(base, "stopTask") : base;
     // settleGraceMs: short by default so no-wake tests resolve fast; wake tests arrive synchronously anyway.
-    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: fakeStreamingBackend(responder), settleGraceMs: opts?.settleGraceMs ?? 15 } });
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend, settleGraceMs: opts?.settleGraceMs ?? 15 } });
     return { repos, bus, statusEvents, agent };
   }
 
@@ -1648,6 +1652,224 @@ describe("Worker background state machine", () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(x.agent.status()).toBe("background"); // still background — bg1 was never removed by the ignored edge settle
     expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // no extra transitions from the edge frames
+    await x.agent.stop();
+  });
+
+  // ── Listed background tasks + worker.tasks (per-task background stop, Task 5) ──
+  function tasksEvents(bus: EventBus): Array<Array<{ id: string; type: string; description: string }>> {
+    const out: Array<Array<{ id: string; type: string; description: string }>> = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.tasks") out.push(e.tasks); });
+    return out;
+  }
+
+  it("listed tasks exclude ambient, subagents and workflows", async () => {
+    const x = mk(() => [
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "m1", taskType: "monitor", description: "watch", ambient: true },
+          { id: "g1", taskType: "local_agent", description: "research" },
+          { id: "w1", taskType: "local_workflow", description: "audit" },
+        ],
+      },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      // the listed shell finishes; the three excluded tasks keep running
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "m1", taskType: "monitor", description: "watch", ambient: true },
+          { id: "g1", taskType: "local_agent", description: "research" },
+          { id: "w1", taskType: "local_workflow", description: "audit" },
+        ],
+      },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => events.length >= 2);
+    expect(events[0]).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    expect(x.agent.listedBackgroundTasks()).toEqual([]);
+    // state model unchanged: excluded tasks still count toward "background"
+    await new Promise((r) => setTimeout(r, 40)); // past the settle-grace
+    expect(x.agent.status()).toBe("background");
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // listed-set change did NOT re-emit worker.status
+    await x.agent.stop();
+  });
+
+  it("listedBackgroundTasks() returns only the listed task while all four run", async () => {
+    const x = mk(() => [
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "m1", taskType: "monitor", description: "watch", ambient: true },
+          { id: "g1", taskType: "local_agent", description: "research" },
+          { id: "w1", taskType: "local_workflow", description: "audit" },
+        ],
+      },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    expect(x.agent.listedBackgroundTasks()).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    expect(x.agent.backgroundTasks()).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    await x.agent.stop();
+  });
+
+  it("emits worker.tasks only when the listed set changes", async () => {
+    const bash = { id: "b1", taskType: "local_bash", description: "npm run dev" };
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [bash, { id: "g1", taskType: "local_agent", description: "a" }] },
+      { type: "bg_tasks", ids: [bash, { id: "g1", taskType: "local_agent", description: "a" }] }, // same listed set → no event
+      { type: "bg_tasks", ids: [bash, { id: "g2", taskType: "local_agent", description: "b" }] }, // excluded-only change → no event
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "bg_tasks", ids: [{ id: "g2", taskType: "local_agent", description: "b" }] }, // listed set emptied → []
+      { type: "bg_tasks", ids: [] }, // excluded-only change → no event
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    await x.agent.stop();
+  });
+
+  it("edge frames feed the listed view (description from task_started; settle removes it)", async () => {
+    const x = mk(() => [
+      { type: "task_started", id: "b1", taskType: "local_bash", description: "npm run dev" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      { type: "task_notification", id: "b1", status: "completed" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "idle");
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    await x.agent.stop();
+  });
+
+  it("tasks are listed while running", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "assistant", text: "still working" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const seen: Array<{ status: string; tasks: unknown }> = [];
+    x.bus.subscribe("s1", (e) => { if (e.type === "worker.tasks") seen.push({ status: x.agent.status(), tasks: e.tasks }); });
+    x.agent.start("go");
+    await until(() => seen.length >= 1);
+    expect(seen[0]).toEqual({ status: "running", tasks: [{ id: "b1", type: "local_bash", description: "npm run dev" }] });
+    await x.agent.stop();
+  });
+
+  it("a description-only change of a listed task emits worker.tasks", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev -- --port 3001" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    expect(events).toEqual([
+      [{ id: "b1", type: "local_bash", description: "npm run dev" }],
+      [{ id: "b1", type: "local_bash", description: "npm run dev -- --port 3001" }],
+    ]);
+    await x.agent.stop();
+  });
+
+  it("abandon publishes an empty task list", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.abandon();
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    expect(x.agent.listedBackgroundTasks()).toEqual([]);
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]); // abandon never goes terminal
+  });
+
+  it("stop clears a non-empty listed view with worker.tasks []", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ]);
+    const events = tasksEvents(x.bus);
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stop();
+    expect(events).toEqual([[{ id: "b1", type: "local_bash", description: "npm run dev" }], []]);
+    expect(x.agent.listedBackgroundTasks()).toEqual([]);
+  });
+
+  // ── Stop one background task (Task 6) ──
+  it("stopTask delegates for a listed task and leaves state alone", async () => {
+    const stopped: string[] = [];
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], { onStopTask: (id) => stopped.push(id) });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stopTask("b1");
+    expect(stopped).toEqual(["b1"]);
+    expect(x.agent.status()).toBe("background"); // the SDK settle frames (not the call) remove the task
+    expect(x.agent.listedBackgroundTasks()).toEqual([{ id: "b1", type: "local_bash", description: "npm run dev" }]);
+    expect(x.statusEvents.map((s) => s.status)).toEqual(["background"]);
+    await x.agent.stop();
+  });
+
+  it("stopTask rejects unknown, excluded (local_agent) and already-settled task ids", async () => {
+    const stopped: string[] = [];
+    const x = mk(() => [
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "b2", taskType: "local_bash", description: "npm test" },
+          { id: "g1", taskType: "local_agent", description: "research" },
+        ],
+      },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+      {
+        type: "bg_tasks",
+        ids: [
+          { id: "b1", taskType: "local_bash", description: "npm run dev" },
+          { id: "g1", taskType: "local_agent", description: "research" },
+        ],
+      },
+    ], { onStopTask: (id) => stopped.push(id) });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background" && x.agent.listedBackgroundTasks().length === 1);
+    await expect(x.agent.stopTask("nope")).rejects.toThrow("Unknown background task nope");
+    await expect(x.agent.stopTask("g1")).rejects.toThrow("Unknown background task g1");
+    await expect(x.agent.stopTask("b2")).rejects.toThrow("Unknown background task b2"); // already settled
+    expect(stopped).toEqual([]);
+    await x.agent.stop();
+  });
+
+  it("stopTask rejects on a terminal worker", async () => {
+    const stopped: string[] = [];
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], { onStopTask: (id) => stopped.push(id) });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await x.agent.stop();
+    await expect(x.agent.stopTask("b1")).rejects.toThrow("Worker a1 is not running");
+    expect(stopped).toEqual([]);
+  });
+
+  it("stopTask rejects when the stream has no stopTask (codex)", async () => {
+    const x = mk(() => [
+      { type: "bg_tasks", ids: [{ id: "b1", taskType: "local_bash", description: "npm run dev" }] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1" },
+    ], { hideStopTask: true });
+    x.agent.start("go");
+    await until(() => x.agent.status() === "background");
+    await expect(x.agent.stopTask("b1")).rejects.toThrow("Stopping background tasks is not supported for this worker");
     await x.agent.stop();
   });
 });
@@ -1821,5 +2043,792 @@ describe("Worker managed capability runtime", () => {
     expect(reporter.setApplied).toHaveBeenCalledTimes(1);
     expect(reporter.setApplied).toHaveBeenCalledWith(target, "worker-revision");
     expect(reporter.setError).not.toHaveBeenCalled();
+  });
+});
+
+describe("Worker steering (mid-turn send folded into the running turn)", () => {
+  type Steer = (input: AgentInput, clientMsgId?: string) => Promise<boolean>;
+  const turnEnd = (subtype = "success"): AgentEvent => ({ kind: "turn_end", subtype, costUsd: 0, numTurns: 1, durationMs: 0, contextTokens: 0, contextWindow: 0 });
+  const said = (text: string): AgentEvent => ({ kind: "message", role: "assistant", text, parentToolUseId: null });
+  const imgRef: ImageRef = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "a.png", mediaType: "image/png", byteLength: 3, width: 1, height: 1 };
+  const images: ImageResolver = {
+    validate: (refs) => refs.map(() => ({ ...imgRef })),
+    resolve: (refs) => refs.map(() => ({ mediaType: "image/png" as const, data: "eHl6" })),
+  };
+  // A hand-driven stream: the test pushes provider events; every input the worker enqueues is captured in `pulled`.
+  function mk(steer?: Steer, rig: { steerTimeoutMs?: number; settleGraceMs?: number; pendingSteers?: () => AgentInput[] } = {}) {
+    const { pendingSteers, ...extra } = rig;
+    let failure: Error | undefined;
+    let lastOpts: AgentSessionOptions | undefined;
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    const pulled: AgentInput[] = [];
+    const pending: AgentEvent[] = [];
+    let wake: (() => void) | undefined;
+    let closed = false;
+    const backend: AgentBackend = {
+      openSession(input, o) {
+        lastOpts = o;
+        void (async () => { for await (const m of input) pulled.push(m); })();
+        o.abortController.signal.addEventListener("abort", () => { closed = true; wake?.(); });
+        const stream: AgentStream = {
+          async *[Symbol.asyncIterator]() {
+            while (true) {
+              while (pending.length) yield pending.shift()!;
+              if (failure) throw failure;
+              if (closed) return;
+              await new Promise<void>((r) => { wake = r; });
+              wake = undefined;
+            }
+          },
+          interrupt: async () => undefined,
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          supportedCommands: async () => [],
+          ...(steer ? { steer } : {}),
+          ...(pendingSteers ? { pendingSteers } : {}),
+        };
+        return stream;
+      },
+      startTurn: () => { throw new Error("not used"); },
+    };
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend, images, wakeWatchdogMs: 40, ...extra } });
+    const emit = (ev: AgentEvent) => { pending.push(ev); wake?.(); };
+    const flush = () => new Promise((r) => setTimeout(r, 5));
+    const users = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; role?: string; content?: string; clientMsgId?: string; text?: string; images?: unknown[] }).filter((p) => p.kind === "message" && p.role === "user");
+    const notices = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; text?: string }).filter((p) => p.kind === "notice").map((p) => p.text ?? "");
+    const pulledText = () => pulled.map((p) => (typeof p === "string" ? p : p.text));
+    const fail = (err: Error) => { failure = err; wake?.(); };
+    type Ev = { kind?: string; text?: string; message?: string; clientMsgId?: string; retryInput?: { text: string; images?: unknown[] } };
+    const errors = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as Ev).filter((p) => p.kind === "error");
+    return { repos, bus, agent, emit, flush, users, notices, pulled, pulledText, statuses, fail, errors, opts: () => lastOpts };
+  }
+  function held() {
+    let resolve!: (v: boolean) => void;
+    const promise = new Promise<boolean>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it("mid-turn send steers and echoes once", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-1");
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(steer).toHaveBeenCalledWith("redirect", "c-1");
+    const echoes = x.users().filter((u) => u.content === "redirect");
+    expect(echoes).toHaveLength(1);
+    expect(echoes[0]!.clientMsgId).toBe("c-1");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle"); // nothing deferred → no extra turn
+    expect(x.pulledText()).toEqual(["task"]); // the steered text never went through the queue as its own turn
+    await x.agent.stop();
+  });
+
+  it("steer rejected falls back to the deferred path", async () => {
+    const steer = vi.fn<Steer>(async () => false);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("later", "c-2");
+    await x.flush();
+    expect(x.users().some((u) => u.content === "later")).toBe(false); // no immediate echo
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "later"]);
+    expect(x.users().filter((u) => u.content === "later").map((u) => u.clientMsgId)).toEqual(["c-2"]);
+    expect(x.agent.status()).toBe("running"); // the deferred instruction's turn is starting
+    await x.agent.stop();
+  });
+
+  it("no steer when something is already deferred", async () => {
+    const steer = vi.fn<Steer>(async () => false);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first");
+    await x.flush();
+    x.agent.send("second");
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1); // "second" never overtakes the deferred "first"
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first", "second"]);
+    await x.agent.stop();
+  });
+
+  it("sends during an in-flight steer keep order", async () => {
+    const h = held();
+    const steer = vi.fn<Steer>(() => h.promise);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first");
+    x.agent.send("second"); // the first steer is still in flight → deferred, no second steer
+    expect(steer).toHaveBeenCalledTimes(1);
+    h.resolve(false);
+    await x.flush();
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first", "second"]);
+    expect(x.users().map((u) => u.content)).toEqual(["task", "first", "second"]);
+    await x.agent.stop();
+  });
+
+  for (const accepted of [true, false]) {
+    it(`stop during in-flight steer (steer later resolves ${accepted})`, async () => {
+      const h = held();
+      const x = mk(vi.fn<Steer>(() => h.promise));
+      x.agent.start("task");
+      await x.flush();
+      x.agent.send("redirect", "c-3");
+      await x.agent.stop();
+      h.resolve(accepted);
+      await x.flush();
+      expect(x.agent.status()).toBe("stopped");
+      expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (stopped): redirect"))).toHaveLength(1);
+      expect(x.users().some((u) => u.content === "redirect")).toBe(false);
+    });
+  }
+
+  it("steer accepted at the boundary still settles", async () => {
+    const x = mk(vi.fn<Steer>(async () => true));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(turnEnd());
+    await x.flush();
+    // The SDK answered the steered message as a new turn: a spontaneous model frame, then its own result.
+    x.emit(said("on it"));
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses.slice(-2)).toEqual(["running", "idle"]);
+    await x.agent.stop();
+  });
+
+  it("steered images are resolved up front", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("look", "c-4", undefined, [imgRef]);
+    await x.flush();
+    expect(steer).toHaveBeenCalledWith({ text: "look", images: [{ mediaType: "image/png", data: "eHl6" }] }, "c-4");
+    const echo = x.users().find((u) => u.content === "look");
+    expect(echo?.images).toHaveLength(1);
+    expect(JSON.stringify(x.repos.listWorkerEvents("a1"))).not.toContain("eHl6"); // refs only in the transcript
+    await x.agent.stop();
+  });
+
+  it("an unreadable image on a steered send throws before any steer, echo, or queueing (retryable, like an idle send)", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    const broken = vi.spyOn(images, "resolve").mockImplementationOnce(() => { throw new Error("Image unreadable; retry"); });
+    expect(() => x.agent.send("look", "c-10", undefined, [imgRef])).toThrow("unreadable");
+    broken.mockRestore();
+    await x.flush();
+    expect(steer).not.toHaveBeenCalled();
+    expect(x.users().some((u) => u.content === "look")).toBe(false);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task"]); // nothing was deferred either
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("a steer resets the abort-loop streak", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer);
+    x.agent.start("task");
+    await x.flush();
+    x.emit(turnEnd("error_during_execution"));
+    x.emit(said("auto-restarted")); // SDK restarts on its own → running again
+    x.emit(turnEnd("error_during_execution")); // streak 2
+    x.emit(said("auto-restarted again"));
+    await x.flush();
+    x.agent.send("redirect"); // a human steering mid-turn breaks the streak
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1);
+    x.emit(turnEnd("error_during_execution")); // would be streak 3 without the reset
+    await x.flush();
+    expect(x.agent.status()).not.toBe("stopped");
+    expect(x.notices().some((n) => /without completing/i.test(n))).toBe(false);
+    await x.agent.stop();
+  });
+
+  it("streams without steer keep today's behavior", async () => {
+    const x = mk(undefined);
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("later", "c-5");
+    await x.flush();
+    expect(x.users().some((u) => u.content === "later")).toBe(false);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "later"]);
+    expect(x.users().find((u) => u.content === "later")?.clientMsgId).toBe("c-5");
+    await x.agent.stop();
+  });
+
+  it("a steer that never settles falls back after the timeout", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise), { steerTimeoutMs: 20 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("slow", "c-6");
+    await new Promise((r) => setTimeout(r, 40)); // past the steer timeout
+    expect(x.users().some((u) => u.content === "slow")).toBe(false);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "slow"]); // delivered through the deferred fallback
+    h.resolve(true); // a late acceptance is ignored — no second echo
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "slow")).toHaveLength(1);
+    await x.agent.stop();
+  });
+
+  it("a turn that ends while the steer is in flight holds the boundary, then dispatches the rejected message first", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first");
+    x.agent.send("second"); // deferred behind the in-flight steer
+    x.emit(turnEnd()); // the turn ends before the provider answered the steer
+    await x.flush();
+    expect(x.agent.status()).toBe("running"); // boundary held: no transient idle, "second" not dispatched ahead
+    expect(x.pulledText()).toEqual(["task"]);
+    h.resolve(false);
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.pulledText()).toEqual(["task", "first", "second"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses.filter((s) => s === "idle")).toHaveLength(1);
+    await x.agent.stop();
+  });
+
+  it("a held boundary whose steer is accepted waits for the new turn, and settles if none comes", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    x.emit(turnEnd());
+    await x.flush();
+    h.resolve(true);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1);
+    expect(x.agent.status()).toBe("running"); // the provider will answer it as a new turn
+    await new Promise((r) => setTimeout(r, 80)); // past wakeWatchdogMs with no frames → it fizzled
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("interrupt during in-flight steer: a rejection is dropped with the interrupted notice, never deferred", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-7");
+    await x.agent.interruptTurn();
+    h.resolve(false);
+    await x.flush();
+    x.emit(turnEnd("error_during_execution"));
+    await x.flush();
+    expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (interrupted): redirect"))).toHaveLength(1);
+    expect(x.pulledText()).toEqual(["task"]); // no ghost turn
+    expect(x.users().some((u) => u.content === "redirect")).toBe(false);
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("interrupt during in-flight steer: an acceptance is recorded once as delivered", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-8");
+    await x.agent.interruptTurn();
+    h.resolve(true);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1);
+    expect(x.notices().some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+    await x.agent.stop();
+  });
+
+  it("through the Claude adapter: a mid-turn send is pushed with priority, echoed at once, and the worker still settles idle", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const pulled: Array<{ text: string; priority?: string }> = [];
+    const gated = ((input: { prompt?: AsyncIterable<{ priority?: string; message?: { content?: unknown } }> }) => {
+      async function* gen(): AsyncGenerator<unknown> {
+        let turn = 0;
+        for await (const um of input.prompt!) {
+          const c = um?.message?.content;
+          const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("") : "";
+          pulled.push({ text, ...(um.priority ? { priority: um.priority } : {}) });
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${text}` }] } };
+          if (turn === 0) await gate;
+          // This fake answers the steered message as its own turn (the boundary case); the worker must still settle.
+          yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+          turn++;
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as unknown as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus: new EventBus(), model: "m", backend: new ClaudeBackend(gated), wakeWatchdogMs: 200 } });
+    agent.start("task");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.type === "message" && e.payload_json.includes("reply:task")));
+    agent.send("redirect", "c-9");
+    await until(() => repos.listWorkerEvents("a1").some((e) => e.payload_json.includes('"content":"redirect"'))); // echoed before the turn ends
+    release();
+    await until(() => pulled.length === 2 && agent.status() === "idle");
+    expect(pulled[1]).toEqual({ text: "redirect", priority: "next" });
+    const echoes = repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { role?: string; content?: string; clientMsgId?: string }).filter((p) => p.role === "user");
+    expect(echoes.map((e) => [e.content, e.clientMsgId])).toEqual([["task", undefined], ["redirect", "c-9"]]);
+    await agent.stop();
+  });
+
+  // The real Claude adapter decides steerPending from result.user_message_uuids (live-verified on SDK 0.3.325: an
+  // absorbed steer's uuid is listed on that turn's result; an end-of-turn steer's uuid only on its follow-up turn's).
+  function adapterRig(absorb: boolean) {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    type In = { uuid?: string; priority?: string; message?: { content?: unknown } };
+    const textOf = (um: In) => { const c = um?.message?.content; return typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("") : ""; };
+    const result = (uuids?: string[]) => ({ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null, ...(uuids ? { user_message_uuid: uuids.at(-1), user_message_uuids: uuids } : {}) });
+    const gated = ((input: { prompt?: AsyncIterable<In> }) => {
+      async function* gen(): AsyncGenerator<unknown> {
+        const it = input.prompt![Symbol.asyncIterator]();
+        for (let turn = 0; ; turn++) {
+          const next = await it.next();
+          if (next.done) return;
+          yield { type: "system", subtype: "init", session_id: "sdk-1" };
+          yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${textOf(next.value)}` }] } };
+          if (turn === 0) {
+            await gate;
+            if (absorb) {
+              // fold the steered message into this turn (the SDK does this at a tool boundary) → one combined result
+              const steered = await it.next();
+              yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `folded:${textOf(steered.value!)}` }] } };
+              yield result([steered.value!.uuid!]);
+              continue;
+            }
+            yield result(); // a uuid-less opener: the live result carries no list
+            continue;
+          }
+          yield result(next.value.uuid ? [next.value.uuid] : undefined);
+        }
+      }
+      return Object.assign(gen(), { interrupt: async () => {}, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as unknown as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gated), wakeWatchdogMs: 200, settleGraceMs: 10_000 } });
+    return { repos, agent, statuses, release };
+  }
+
+  it("through the Claude adapter: an end-of-turn steer answered as its own turn emits no transient idle", async () => {
+    const x = adapterRig(false);
+    x.agent.start("task");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("reply:task")));
+    x.agent.send("redirect", "c-9");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes('"content":"redirect"')));
+    x.release();
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("reply:redirect")) && x.agent.status() === "idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  it("through the Claude adapter: an absorbed steer settles at that turn's end without the hold", async () => {
+    const x = adapterRig(true);
+    x.agent.start("task");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("reply:task")));
+    x.agent.send("redirect", "c-9");
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes('"content":"redirect"')));
+    x.release();
+    // settleGraceMs is 10 s: reaching idle within until()'s budget proves no hold was taken
+    await until(() => x.repos.listWorkerEvents("a1").some((e) => e.payload_json.includes("folded:redirect")) && x.agent.status() === "idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  it("recover (abandon) during in-flight steer drops it with a notice and nothing else", async () => {
+    const h = held();
+    const x = mk(vi.fn<Steer>(() => h.promise));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.agent.abandon();
+    h.resolve(false);
+    await x.flush();
+    expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (recovered): redirect"))).toHaveLength(1);
+    expect(x.users().some((u) => u.content === "redirect")).toBe(false);
+  });
+
+  // Final review #1: a Claude steer is accepted (and echoed) the moment it is pushed, but it sits in the SDK's in-memory
+  // queue until a tool boundary or the next turn. A teardown that kills the subprocess loses it; the user must be
+  // able to resend it, the same way deferred instructions get a retryable error on a stream error.
+  function pendingRig() {
+    const pend: AgentInput[] = [];
+    const steer = vi.fn<Steer>(async (input) => { pend.push(input); return true; });
+    return { pend, steer, pendingSteers: () => [...pend] };
+  }
+
+  it("recover after an accepted steer the provider has not consumed records a retryable error for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r", undefined, [imgRef]);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1); // echoed at acceptance
+    await x.agent.abandon();
+    const errs = x.errors();
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.clientMsgId).toBe("c-r");
+    expect(errs[0]!.retryInput).toEqual({ text: "redirect", images: [imgRef] });
+    expect(errs[0]!.message).toMatch(/recover/i);
+    expect(x.notices().some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+  });
+
+  it("recover after the steer was consumed by a turn records nothing for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r");
+    await x.flush();
+    r.pend.length = 0; // the turn's result listed the steer as consumed
+    x.emit(turnEnd());
+    await x.flush();
+    await x.agent.abandon();
+    expect(x.errors()).toEqual([]);
+  });
+
+  it("a steer still pending after its turn_end (left for its own turn) is reported if recover kills it first", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers, settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r");
+    await x.flush();
+    x.emit(steerPendingEnd()); // not consumed by this turn; its own turn has not started
+    await x.flush();
+    await x.agent.abandon();
+    expect(x.errors().map((e) => e.clientMsgId)).toEqual(["c-r"]);
+  });
+
+  it("a stream error after an accepted unconsumed steer records a retryable error for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-e");
+    await x.flush();
+    x.fail(new Error("boom"));
+    await x.flush();
+    expect(x.agent.status()).toBe("error");
+    const steerErr = x.errors().filter((e) => e.clientMsgId === "c-e");
+    expect(steerErr).toHaveLength(1);
+    expect(steerErr[0]!.retryInput).toEqual({ text: "redirect" });
+    expect(steerErr[0]!.message).toContain("boom");
+  });
+
+  it("streams without pendingSteers keep today's recover behavior (nothing recorded for an accepted steer)", async () => {
+    const x = mk(vi.fn<Steer>(async () => true));
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-r");
+    await x.flush();
+    await x.agent.abandon();
+    expect(x.errors()).toEqual([]);
+  });
+
+  // Live (isolated daemon, Haiku 5.5, SDK 0.3.325): interrupting a turn while a steer waits behind a long Bash call does
+  // NOT drop the steer — the interrupt receipt lists it in still_queued, the interrupted result omits its uuid, and the
+  // SDK answers it as its own follow-up turn ~150 ms later. The worker holds "running" across the gap.
+  it("through the Claude adapter: interrupt with a pending steer — the steer survives and runs as its own turn, no transient idle", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t" });
+    const bus = new EventBus();
+    const statuses: string[] = [];
+    bus.subscribe("s1", (e) => { if (e.type === "worker.status") statuses.push(e.status); });
+    type In = { uuid?: string; message?: { content?: unknown } };
+    const textOf = (um: In) => { const c = um?.message?.content; return typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("") : ""; };
+    let interrupted!: () => void;
+    const interruptP = new Promise<void>((r) => { interrupted = r; });
+    let it!: AsyncIterator<In>;
+    let steerMsg: In | undefined;
+    const gated = ((input: { prompt?: AsyncIterable<In> }) => {
+      it = input.prompt![Symbol.asyncIterator]();
+      async function* gen(): AsyncGenerator<unknown> {
+        const first = await it.next();
+        yield { type: "system", subtype: "init", session_id: "sdk-1" };
+        yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${textOf(first.value!)}` }] } };
+        await interruptP; // a long tool call, cut short by the interrupt
+        yield { type: "result", subtype: "error_during_execution", terminal_reason: "aborted_tools", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null };
+        // the queued steer runs as its own turn
+        yield { type: "system", subtype: "init", session_id: "sdk-1" };
+        yield { type: "assistant", parent_tool_use_id: null, message: { role: "assistant", content: [{ type: "text", text: `reply:${textOf(steerMsg!)}` }] } };
+        yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "sdk-1", parent_tool_use_id: null, user_message_uuid: steerMsg!.uuid, user_message_uuids: [steerMsg!.uuid] };
+        for (let n = await it.next(); !n.done; n = await it.next()) { /* no further turns */ }
+      }
+      const interrupt = async () => {
+        steerMsg = (await it.next()).value; // still in the SDK queue when the interrupt lands
+        interrupted();
+        return { still_queued: [steerMsg!.uuid] };
+      };
+      return Object.assign(gen(), { interrupt, close: () => {}, supportedCommands: async () => [], setModel: async () => {} });
+    }) as unknown as QueryFn;
+    const agent = new Worker({ id: "a1", sessionId: "s1", repoPath: "/r", label: "t", deps: { repos, bus, model: "m", backend: new ClaudeBackend(gated), wakeWatchdogMs: 500, settleGraceMs: 10_000 } });
+    const payloads = () => repos.listWorkerEvents("a1").map((e) => JSON.parse(e.payload_json) as { kind?: string; role?: string; content?: string; text?: string });
+    agent.start("task");
+    await until(() => payloads().some((p) => p.content === "reply:task"));
+    agent.send("redirect", "c-i");
+    await until(() => payloads().some((p) => p.role === "user" && p.content === "redirect"));
+    await agent.interruptTurn();
+    await until(() => payloads().some((p) => p.content === "reply:redirect") && agent.status() === "idle");
+    expect(statuses).toEqual(["idle"]); // running throughout, then the final idle — no idle between the two turns
+    expect(payloads().filter((p) => p.role === "user" && p.content === "redirect")).toHaveLength(1);
+    const notes = payloads().filter((p) => p.kind === "notice").map((p) => p.text ?? "");
+    expect(notes).toContain("Interrupt receipt: 1 queued message(s) may still run.");
+    expect(notes.some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+    await agent.abandon(); // the follow-up turn consumed it → nothing left to report
+    expect(payloads().filter((p) => p.kind === "error")).toEqual([]);
+  });
+
+  // Final review #3: recover() discards this Worker object; its timers must not fire into the shared DB/bus afterwards.
+  it("abandon clears an armed settle-grace hold (no late idle from the discarded object)", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 20 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd()); // arms the hold
+    await x.flush();
+    await x.agent.abandon();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(x.statuses).not.toContain("idle");
+    expect(x.repos.getWorker("a1")?.status).not.toBe("idle");
+  });
+
+  it("abandon clears an armed wake watchdog (no late idle from the discarded object)", async () => {
+    const x = mk(); // wakeWatchdogMs: 40
+    x.agent.start("task");
+    await x.flush();
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    x.emit(said("spontaneous")); // auto-wake → running + watchdog armed
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    const before = x.statuses.length;
+    await x.agent.abandon();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(x.statuses.slice(before)).not.toContain("idle");
+  });
+
+  it("the worker system prompt carries the steering rule after the untrusted-fence rule", async () => {
+    const x = mk();
+    x.agent.start("task");
+    await x.flush();
+    const append = x.opts()!.systemPromptAppend!;
+    expect(append.startsWith(WORKER_FENCE_INSTRUCTION)).toBe(true);
+    expect(append).toContain(WORKER_STEER_INSTRUCTION);
+    expect(WORKER_STEER_INSTRUCTION).toContain("The user sent a new message while you were working");
+    expect(WORKER_STEER_INSTRUCTION).toContain("<untrusted-...>");
+    await x.agent.stop();
+  });
+
+  it("a throw while settling a steer is logged to stderr, not swallowed", async () => {
+    const x = mk(vi.fn<Steer>(async () => true));
+    x.agent.start("task");
+    await x.flush();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const add = vi.spyOn(x.repos, "addWorkerEvent").mockImplementationOnce(() => { throw new Error("db gone"); });
+    try {
+      x.agent.send("redirect");
+      await x.flush();
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.calls.flat().map(String).join(" ")).toContain("db gone");
+    } finally {
+      add.mockRestore();
+      spy.mockRestore();
+    }
+    await x.agent.stop();
+  });
+
+  // Task 10 (live-found on Claude): a steer accepted after the model's last tool step is not folded into the running
+  // turn — the SDK answers it as its own follow-up turn. The adapter flags that turn_end (steerPending); the worker
+  // must hold "running" instead of emitting a transient idle that wakes a notify:true master early.
+  const steerPendingEnd = (): AgentEvent => ({ ...turnEnd(), steerPending: true });
+  const init: AgentEvent = { kind: "system_text", text: "init" };
+
+  it("an accepted steer answered as a separate turn emits no transient idle", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd()); // the old turn's own result: the steered message was not consumed by it
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(init); // the SDK starts the follow-up turn for the steered message
+    x.emit(said("BRAVO"));
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle"]); // started running; the only status change is the final idle
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1);
+    await x.agent.stop();
+  });
+
+  it("the hold expires to a truthful idle when no follow-up turn comes", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 30 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    await new Promise((r) => setTimeout(r, 60)); // past the hold with no frames
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  it("an absorbed steer settles at the turn end without delay", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(turnEnd()); // one combined result: the adapter saw the steered message consumed (no steerPending)
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    await x.agent.stop();
+  });
+
+  it("a notify:true arm is not fired between the turn and the steer's follow-up turn", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    const deliver = vi.fn();
+    new WorkerNotifier({ bus: x.bus, repos: x.repos, deliver }).start();
+    x.agent.start("task");
+    await x.flush();
+    x.repos.setWorkerNotifyArmed("a1", true);
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    expect(deliver).not.toHaveBeenCalled();
+    x.emit(init);
+    x.emit(said("BRAVO"));
+    x.emit(turnEnd());
+    await x.flush();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]![1].status).toBe("idle");
+    await x.agent.stop();
+  });
+
+  // What this proves: a send during the hold takes the immediate path (no turn is tracked, so it is not steered),
+  // goes straight to the input, and cancels the hold. It does NOT prove both pending messages are answered before
+  // idle: with one turn_end for two messages, the worker settles at the first turn_end (see the next test).
+  it("a send during the hold is enqueued at once (not steered) and cancels the hold", async () => {
+    const steer = vi.fn<Steer>(async () => true);
+    const x = mk(steer, { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    x.agent.send("more");
+    await x.flush();
+    expect(steer).toHaveBeenCalledTimes(1); // only "redirect" was steered
+    expect(x.pulledText()).toEqual(["task", "more"]);
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle"); // the hold was cancelled: the first turn_end settles at once
+    expect(x.statuses).toEqual(["idle"]);
+    await x.agent.stop();
+  });
+
+  // Known edge (documented, not fixed): if the SDK answers the steered message and the held-period send as two
+  // separate turns, the worker settles idle at the first turn_end and the second turn auto-wakes it — one transient
+  // idle between them. Nothing is lost and the worker ends idle.
+  it("a send during the hold answered as two separate turns shows one transient idle between them, and ends idle", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 10_000 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    x.agent.send("more");
+    await x.flush();
+    x.emit(init); // the steered message's own turn
+    x.emit(said("BRAVO"));
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    x.emit(init); // then "more" as another turn (auto-wake on its first model frame)
+    x.emit(said("MORE"));
+    await x.flush();
+    expect(x.agent.status()).toBe("running");
+    x.emit(turnEnd());
+    await x.flush();
+    expect(x.agent.status()).toBe("idle");
+    expect(x.statuses).toEqual(["idle", "running", "idle"]);
+    expect(x.users().map((u) => u.content)).toEqual(["task", "redirect", "more"]); // each echoed once
+    await x.agent.stop();
+  });
+
+  it("stop during the hold lands stopped and the expired hold never resurrects it", async () => {
+    const x = mk(vi.fn<Steer>(async () => true), { settleGraceMs: 20 });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect");
+    await x.flush();
+    x.emit(steerPendingEnd());
+    await x.flush();
+    await x.agent.stop();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(x.agent.status()).toBe("stopped");
+    expect(x.statuses).toEqual(["stopped"]);
   });
 });

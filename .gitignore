@@ -35,3 +35,6 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# oh-my-claudecode local session state
+.omc/

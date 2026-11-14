@@ -13,4 +13,6 @@ export default {
   "workspaceHeaders.sessionEyebrow": "Session",
   "workspaceHeaders.workflowTasks": "Workflow · {count}",
   "workspaceHeaders.backgroundTasks": "Background · {count}",
+  "workspaceHeaders.stopTask": "Stop: {description}",
+  "workspaceHeaders.tasksMenu": "Background tasks",
 } satisfies Catalog;

@@ -148,6 +148,16 @@ function spawnCardsOf(item: CodexItemShape, parent: string | null): AgentEvent[]
   ];
 }
 
+// AgentInput → the UserInput[] that turn/start and turn/steer both take. Images ride as data URLs;
+// an image-only input omits the text item rather than sending an empty one.
+function toCodexInput(input: AgentInput): CodexInput[] {
+  if (typeof input === "string") return [{ type: "text", text: input, text_elements: [] }];
+  return [
+    ...(input.text ? [{ type: "text" as const, text: input.text, text_elements: [] as never[] }] : []),
+    ...input.images.map(image => ({ type: "image" as const, url: `data:${image.mediaType};base64,${image.data}` })),
+  ];
+}
+
 const CLIENT_INFO = { name: "rookery", title: "rookery", version: "0.1.0" };
 
 type PermissionPair = ReturnType<typeof mapPermissionMode>;
@@ -408,7 +418,8 @@ abstract class CodexSessionBase implements AgentStream {
   // this before it does anything else, unconditionally). A no-op when no watchdog is currently armed
   // (disabled turn, or already fired/disarmed) — an event arriving outside an armed turn must not
   // spuriously start one. Also a no-op while paused (a blocking interaction owns the silence).
-  private resetIdleWatchdog(): void {
+  // An accepted worker steer counts as progress too (CodexWorkerStream.steer).
+  protected resetIdleWatchdog(): void {
     if (this.watchdogPaused) return;
     if (this.idleTimer === null) return;
     clearTimeout(this.idleTimer);
@@ -544,10 +555,7 @@ abstract class CodexSessionBase implements AgentStream {
   private accountingIncomplete = false;
 
   protected async sendTurn(client: CodexClient, threadId: string, text: AgentInput, mode: PermissionPair, effort: string | undefined, modelOverride: string | undefined): Promise<void> {
-    const input: CodexInput[] = typeof text === "string"
-      ? [{ type: "text", text, text_elements: [] }]
-      : [...(text.text ? [{ type: "text" as const, text: text.text, text_elements: [] as never[] }] : []),
-        ...text.images.map(image => ({ type: "image" as const, url: `data:${image.mediaType};base64,${image.data}` }))];
+    const input = toCodexInput(text);
     this.requestedSpeed = this.speedOverride ?? resolveSpeed(this.opts.speed);
     this.billedSpeed = this.requestedSpeed;
     // Per-turn accounting state: a previous turn's long-context/incomplete flags never leak forward.
@@ -600,7 +608,9 @@ abstract class CodexSessionBase implements AgentStream {
       })) as { turn?: { id?: string } };
       // Track the active turn id from the RESPONSE too — the turn/started notification's ordering
       // relative to this response is undocumented (0.142.5), and interrupt() needs the id either way.
-      if (turnRes.turn?.id) this.activeTurnId = turnRes.turn.id;
+      // A fast turn's turn/completed can be handled before this continuation resumes (turnDone is then
+      // already null) — re-setting the id then would leave a finished turn looking active to steer().
+      if (turnRes.turn?.id && this.turnDone !== null) this.activeTurnId = turnRes.turn.id;
       await turnEnded; // resolves on turn/completed (any status), a watchdog-triggered kill, or an external client close
     } finally {
       this.disarmIdleWatchdog(); // covers every resolution path (redundant with turn/completed's own disarm, but never dangling)
@@ -868,6 +878,30 @@ class CodexWorkerStream extends CodexSessionBase {
     } finally {
       this.teardownClient();
     }
+  }
+
+  // Folds a follow-up into the running turn via app-server turn/steer. `expectedTurnId` pins it to the
+  // turn we believe is active: the server refuses a stale id (the turn just ended) and non-steerable
+  // turns (review/compact), and any refusal or transport failure resolves false so the caller queues the
+  // input for the next turn instead. Same dead window as interrupt(): before turn/start's response or
+  // turn/started lands, activeTurnId is still null and steer declines.
+  async steer(input: AgentInput, clientMsgId?: string): Promise<boolean> {
+    const client = this.client;
+    const threadId = this.threadId;
+    const expectedTurnId = this.activeTurnId;
+    if (!client || !threadId || !expectedTurnId || this.clientClosed) return false;
+    try {
+      await client.request("turn/steer", {
+        threadId,
+        expectedTurnId,
+        input: toCodexInput(input),
+        ...(clientMsgId ? { clientUserMessageId: clientMsgId } : {}),
+      });
+    } catch {
+      return false;
+    }
+    this.resetIdleWatchdog(); // the turn has new input to work on — fresh idle window
+    return true;
   }
 }
 

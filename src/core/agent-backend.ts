@@ -49,11 +49,13 @@ export type AgentEvent =
   // this YET: unawaited collab child threads DO outlive the turn (live-verified 2026-07-11,
   // probe-collab-nowait.mjs) but are only surfaced as nested-panel traffic, not background_task
   // (scope-A decision, docs/superpowers/specs/2026-07-11-codex-nested-agents-design.md).
-  | { kind: "background_task"; taskId: string; taskType?: string; status: "started" | "settled" }
+  // description/ambient ride on "started" when the SDK carries them (ambient = the SDK's "not activity" flag —
+  // live-update watchers / skip_transcript tasks; hosts exclude them from activity indicators).
+  | { kind: "background_task"; taskId: string; taskType?: string; description?: string; ambient?: boolean; status: "started" | "settled" }
   // Level form of the same signal (SDK ≥0.3.203 background_tasks_changed): the FULL live-task set after a
   // membership change — REPLACE semantics. SDK guidance: do not correlate with the edge frames above; once
   // a consumer sees a level frame it should trust levels only (Worker latches edges out on first sight).
-  | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string }> }
+  | { kind: "background_tasks"; tasks: Array<{ taskId: string; taskType: string; description?: string; ambient?: boolean }> }
   | { kind: "workflow_launched"; launch: WorkflowLaunch }
   | { kind: "workflow_task"; update: WorkflowTaskUpdate }
   // End of one turn. costUsd/numTurns/durationMs are THIS turn's values (numTurns is the provider's
@@ -64,7 +66,10 @@ export type AgentEvent =
   // when they resume/fork the session. Absent on Codex (it emits per-turn deltas) and on zeroed results.
   // terminalReason: opaque provider diagnostic (Claude result.terminal_reason; absent on codex) — carried
   // for observability only, never branched on (live-verified 2026-07-11: bg detection rests on task frames).
-  | { kind: "turn_end"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number };
+  | { kind: "turn_end"; subtype: string; costUsd: number; costAccuracy?: CostAccuracy; requestedSpeed?: SpeedPreference; numTurns: number; durationMs: number; contextTokens: number; contextWindow: number; terminalReason?: string; costTotalUsd?: number;
+    // true: an input steered into this turn was NOT consumed by it — the provider will answer it as its own
+    // follow-up turn (Claude, after the model's last tool step). Consumers must not treat this boundary as settled.
+    steerPending?: true };
 
 // The SDK's typed interrupt receipt (0.3.205+ Query.interrupt() resolution), neutralized.
 // still_queued: uuids of async user messages that survive the interrupt. [] does NOT mean
@@ -83,6 +88,20 @@ export interface AgentStream extends AsyncIterable<AgentEvent> {
   setModel(model: string): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   supportedCommands(): Promise<SlashCommandInfo[]>;
+  // Optional (worker streams only): fold a follow-up into the RUNNING turn instead of queuing it for the
+  // next turn. Resolves `true` only when the provider accepted the input for the active turn; `false`
+  // (no active turn, stream closed, or the provider refused it) tells the caller to fall back to queuing.
+  // Never throws. `clientMsgId` is the caller's echo-correlation id, forwarded where the provider has one.
+  steer?(input: AgentInput, clientMsgId?: string): Promise<boolean>;
+  // Optional, alongside steer: the accepted steer inputs (the very values passed to steer(), so callers can match
+  // their own records by identity) that no turn is known to have consumed yet. A teardown that kills the provider
+  // process loses these. Absent on Codex, whose turn/steer acceptance puts the message in the thread at once
+  // (live-observed in the rollout), so there is nothing provider-side to lose.
+  pendingSteers?(): AgentInput[];
+  // Optional: stop ONE provider-tracked background task by id. Resolving means the provider accepted the
+  // request; the task leaves the running set only through the provider's own settle frames. Absent on
+  // providers with no background-task concept (Codex).
+  stopTask?(taskId: string): Promise<void>;
   // Optional: suspend/resume a provider's per-turn inactivity watchdog while a blocking interaction
   // (AskUserQuestion / approval) awaits a human — the master brackets its ask closure with these so a
   // long human think-time isn't mistaken for a wedged turn. Only the Codex adapter has such a watchdog;

@@ -7,6 +7,7 @@ import type { Repositories } from "../persistence/repositories.js";
 import type { SessionManager } from "../core/session-manager.js";
 import { EXTERNAL_FLEET_SESSION_KEY } from "../core/session-manager.js";
 import { isSafeGitRef } from "../core/git-ref.js";
+import { formatBackgroundTasks } from "./background-tasks-format.js";
 import { spawnWorkerImpl, formatTranscript } from "./fleet-tools.js";
 
 // Byte cap on transcript output returned to an external client (mirrors fleet-tools' own cap).
@@ -65,7 +66,7 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
     async (args) => {
       audit("get_worker_status");
       try {
-        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})`);
+        return text(`${args.id}: ${fleet.status(args.id)} (${repos.getWorker(args.id)?.provider ?? "claude"})${formatBackgroundTasks(fleet.backgroundTasks(args.id))}`);
       } catch (err) {
         return errorText(String(err));
       }
@@ -150,7 +151,7 @@ export function externalToolDefs(deps: ExternalToolsDeps, scope: "readonly" | "f
   const send = tool(
     "send_worker",
     "Send a follow-up instruction to a running or idle worker. It continues the same session in its worktree (full context preserved) — steer it, correct it, or ask it to commit/push and open its own PR. " +
-      "Does NOT interrupt a mid-turn worker: the instruction is queued for the next turn boundary. To make it drop what it is doing, call interrupt_worker first.",
+      "If the worker is mid-turn, the instruction is delivered into the running turn (the worker folds it into its current work); if that isn't possible it runs at the next turn boundary. To make it abandon its current work first, call interrupt_worker, then send_worker.",
     { speed: z.enum(["standard", "fast"]).optional(), id: z.string(), text: z.string().describe("The instruction to send.") },
     async (args) => {
       audit("send_worker");

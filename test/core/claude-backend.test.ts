@@ -146,9 +146,46 @@ describe("ClaudeBackend.startTurn — event translation", () => {
     ]));
     const events = await collect(backend.startTurn("hi", baseOpts()));
     expect(events.filter((e) => e.kind === "background_tasks")).toEqual([
-      { kind: "background_tasks", tasks: [{ taskId: "b1", taskType: "local_bash" }, { taskId: "b2", taskType: "agent" }] },
+      { kind: "background_tasks", tasks: [{ taskId: "b1", taskType: "local_bash", description: "x" }, { taskId: "b2", taskType: "agent", description: "y" }] },
       { kind: "background_tasks", tasks: [] },
     ]);
+  });
+
+  it("background_tasks_changed drops invalid or oversized task ids and caps task_type like the edge path", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "background_tasks_changed", tasks: [
+        { task_id: "b1", task_type: "t".repeat(400), description: "ok" },
+        { task_id: "x".repeat(513), task_type: "local_bash" },
+        { task_id: 42, task_type: "local_bash" },
+        { task_id: "", task_type: "local_bash" },
+        { task_id: "b2", task_type: 7 },
+        { task_id: "b3", task_type: "" },
+      ] },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    const level = events.find((e): e is Extract<AgentEvent, { kind: "background_tasks" }> => e.kind === "background_tasks")!;
+    expect(level.tasks.map((t) => t.taskId)).toEqual(["b1", "b2", "b3"]);
+    expect(Buffer.byteLength(level.tasks[0]!.taskType)).toBeLessThanOrEqual(256);
+    expect(level.tasks[1]!.taskType).toBe("task"); // non-string type → the edge path's default
+    expect(level.tasks[2]!.taskType).toBe("task");
+  });
+
+  it("background_tasks_changed carries description and ambient", async () => {
+    const backend = new ClaudeBackend(rawQuery([
+      { type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "b1", task_type: "local_bash", description: "npm run dev" }, { task_id: "m1", task_type: "monitor", description: "watch", ambient: true }] },
+      { type: "system", subtype: "task_started", task_id: "b2", task_type: "local_bash", description: "npm test" },
+      { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" },
+    ]));
+    const events = await collect(backend.startTurn("hi", baseOpts()));
+    expect(events.find((e) => e.kind === "background_tasks")).toEqual({
+      kind: "background_tasks",
+      tasks: [
+        { taskId: "b1", taskType: "local_bash", description: "npm run dev" },
+        { taskId: "m1", taskType: "monitor", description: "watch", ambient: true },
+      ],
+    });
+    expect(events.find((e) => e.kind === "background_task")).toEqual({ kind: "background_task", taskId: "b2", taskType: "local_bash", description: "npm test", status: "started" });
   });
 });
 
@@ -411,6 +448,25 @@ describe("ClaudeStream controls", () => {
     const backend = new ClaudeBackend(rawQuery([]));
     const stream = backend.startTurn("hi", baseOpts());
     await expect(stream.interrupt()).resolves.toBeUndefined();
+    await collect(stream);
+  });
+
+  it("stopTask calls query.stopTask", async () => {
+    const stopped: string[] = [];
+    const backend = new ClaudeBackend(fakeStreamingQuery(() => [], { onStopTask: (id) => stopped.push(id) }));
+    const queue = new MessageQueue();
+    const stream = backend.openSession(queue, baseOpts());
+    const done = collect(stream);
+    await stream.stopTask!("b1");
+    expect(stopped).toEqual(["b1"]);
+    queue.close();
+    await done;
+  });
+
+  it("stopTask rejects when the underlying query lacks stopTask", async () => {
+    const backend = new ClaudeBackend(rawQuery([]));
+    const stream = backend.startTurn("hi", baseOpts());
+    await expect(stream.stopTask!("b1")).rejects.toThrow();
     await collect(stream);
   });
 });
@@ -700,4 +756,252 @@ it("separates real SDK input-pump failure from caller cancellation", async () =>
     expect(abortController.signal.aborted).toBe(false);
     expect(sdk.delivered).toEqual([]);
   } finally { sdk.close(); }
+});
+
+// ── Worker steering (2026-11-15): a follow-up joins the running turn through the streaming input ──
+describe("claudeUserMessages — priority", () => {
+  it("claudeUserMessages copies priority onto the SDK message", async () => {
+    async function* inputs() {
+      yield { text: "hi", images: [], priority: "next" as const };
+      yield { text: "plain", images: [] };
+    }
+    const out: Record<string, unknown>[] = [];
+    for await (const m of claudeUserMessages(inputs())) out.push(m as unknown as Record<string, unknown>);
+    expect(out[0]).toEqual({ type: "user", priority: "next", message: { role: "user", content: [{ type: "text", text: "hi" }] }, parent_tool_use_id: null });
+    expect(out[1]).not.toHaveProperty("priority");
+  });
+});
+
+describe("ClaudeStream.steer", () => {
+  // A query that records every prompt message it pulls and never emits a result, so the
+  // first input's turn stays active until the test closes the queue.
+  function promptCapture() {
+    const seen: unknown[] = [];
+    const flags: boolean[] = [];
+    const queryFn = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+      for await (const m of input.prompt as AsyncIterable<unknown>) seen.push(m);
+    })(), { interrupt: async () => {}, applyFlagSettings: async ({ fastMode }: { fastMode: boolean }) => { flags.push(fastMode); } })) as unknown as QueryFn;
+    const until = async (n: number) => { while (seen.length < n) await new Promise((r) => setTimeout(r, 1)); };
+    return { seen, flags, queryFn, until };
+  }
+
+  it("steer pushes a priority-tagged message while a turn is active", async () => {
+    const cap = promptCapture();
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(cap.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("first task");
+    await cap.until(1);
+    await expect(stream.steer!("also check bar", "c-2")).resolves.toBe(true);
+    await cap.until(2);
+    expect(cap.seen[1]).toMatchObject({ type: "user", priority: "next", message: { role: "user", content: [{ type: "text", text: "also check bar" }] } });
+    queue.close();
+    await done;
+  });
+
+  it("steer does not re-apply speed flags", async () => {
+    const cap = promptCapture();
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(cap.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("first task");
+    await cap.until(1);
+    expect(cap.flags).toEqual([false]);
+    await stream.steer!({ text: "steered", images: [] });
+    await cap.until(2);
+    expect(cap.flags).toEqual([false]);
+    queue.close();
+    await done;
+  });
+
+  it("steer returns false when no turn is active or the input is closed", async () => {
+    const cap = promptCapture();
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(cap.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    await expect(stream.steer!("too early")).resolves.toBe(false);
+    queue.push("first task");
+    await cap.until(1);
+    queue.close();
+    await expect(stream.steer!("too late")).resolves.toBe(false);
+    await done;
+    expect(cap.seen).toHaveLength(1);
+  });
+
+  it("steer returns false when the session input has no push target", async () => {
+    const cap = promptCapture();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const stream = new ClaudeBackend(cap.queryFn).openSession((async function* () { yield "only"; await gate; })(), baseOpts());
+    const done = collect(stream);
+    await cap.until(1);
+    await expect(stream.steer!("nowhere")).resolves.toBe(false);
+    release();
+    await done;
+  });
+});
+
+// Task 10: result.user_message_uuids tells whether a steered message was consumed by the turn (live-verified on
+// SDK 0.3.325). An unconsumed one is answered as its own follow-up turn → that turn_end carries steerPending.
+describe("ClaudeSessionStream steer absorption (turn_end.steerPending)", () => {
+  type In = { uuid?: string; priority?: string };
+  // Pulls the opener, waits for the test to steer, then (optionally) pulls the steered message into the same turn
+  // and ends the turn with the given consumed-uuid list; then answers any further input as its own turn.
+  function rig(mode: "absorb" | "leave" | "no-steer") {
+    let steered!: () => void;
+    const steeredP = new Promise<void>((r) => { steered = r; });
+    const seen: In[] = [];
+    const result = (uuids?: string[]) => ({ type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s", ...(uuids ? { user_message_uuid: uuids.at(-1), user_message_uuids: uuids } : {}) });
+    const queryFn = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+      const it = (input.prompt as AsyncIterable<In>)[Symbol.asyncIterator]();
+      const first = await it.next();
+      seen.push(first.value!);
+      if (mode !== "no-steer") await steeredP;
+      if (mode === "absorb") {
+        const s2 = await it.next();
+        seen.push(s2.value!);
+        yield result([s2.value!.uuid!]);
+      } else {
+        yield result();
+      }
+      for (let n = await it.next(); !n.done; n = await it.next()) {
+        seen.push(n.value);
+        yield result(n.value.uuid ? [n.value.uuid] : undefined);
+      }
+    })(), { interrupt: async () => {}, close: () => {} })) as unknown as QueryFn;
+    return { queryFn, seen, steered };
+  }
+  const turnEnds = (evs: AgentEvent[]) => evs.filter((e): e is Extract<AgentEvent, { kind: "turn_end" }> => e.kind === "turn_end");
+
+  it("steer stamps a fresh uuid on the pushed message", async () => {
+    const r = rig("absorb");
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(r.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("task");
+    while (r.seen.length < 1) await new Promise((x) => setTimeout(x, 1));
+    await expect(stream.steer!("redirect")).resolves.toBe(true);
+    r.steered();
+    while (r.seen.length < 2) await new Promise((x) => setTimeout(x, 1));
+    expect(r.seen[0]!.uuid).toBeUndefined(); // ordinary turns stay unstamped
+    expect(r.seen[1]!.uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    queue.close();
+    await done;
+  });
+
+  it("an absorbed steer: the turn_end carries no steerPending", async () => {
+    const r = rig("absorb");
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(r.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("task");
+    while (r.seen.length < 1) await new Promise((x) => setTimeout(x, 1));
+    await stream.steer!("redirect");
+    r.steered();
+    while (r.seen.length < 2) await new Promise((x) => setTimeout(x, 1));
+    queue.close();
+    const ends = turnEnds(await done);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).not.toHaveProperty("steerPending");
+  });
+
+  it("a steer left for its own turn: that turn_end carries steerPending, the follow-up's does not", async () => {
+    const r = rig("leave");
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(r.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("task");
+    while (r.seen.length < 1) await new Promise((x) => setTimeout(x, 1));
+    await stream.steer!("redirect");
+    r.steered();
+    while (r.seen.length < 2) await new Promise((x) => setTimeout(x, 1));
+    await new Promise((x) => setTimeout(x, 5));
+    queue.close();
+    const ends = turnEnds(await done);
+    expect(ends).toHaveLength(2);
+    expect(ends[0]!.steerPending).toBe(true);
+    expect(ends[1]).not.toHaveProperty("steerPending");
+  });
+
+  it("pendingSteers lists an accepted steer until a result reports it consumed", async () => {
+    const r = rig("absorb");
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(r.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("task");
+    while (r.seen.length < 1) await new Promise((x) => setTimeout(x, 1));
+    expect(stream.pendingSteers!()).toEqual([]);
+    const input = { text: "redirect", images: [] };
+    await stream.steer!(input);
+    expect(stream.pendingSteers!()).toEqual([input]);
+    expect(stream.pendingSteers!()[0]).toBe(input); // identity: the caller matches its own records by reference
+    r.steered();
+    while (r.seen.length < 2) await new Promise((x) => setTimeout(x, 1));
+    await new Promise((x) => setTimeout(x, 5));
+    expect(stream.pendingSteers!()).toEqual([]); // the turn's result listed its uuid
+    queue.close();
+    await done;
+  });
+
+  it("pendingSteers keeps a steer left for the next turn until that turn's result lists it", async () => {
+    const r = rig("leave");
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(r.queryFn).openSession(queue, baseOpts());
+    const events: AgentEvent[] = [];
+    const done = (async () => { for await (const e of stream) events.push(e); })();
+    queue.push("task");
+    while (r.seen.length < 1) await new Promise((x) => setTimeout(x, 1));
+    await stream.steer!("redirect");
+    r.steered();
+    while (turnEnds(events).length < 2) await new Promise((x) => setTimeout(x, 1));
+    expect(turnEnds(events)[0]!.steerPending).toBe(true);
+    expect(stream.pendingSteers!()).toEqual([]);
+    queue.close();
+    await done;
+  });
+
+  it("pendingSteers gives up on a steer after the follow-up result when the producer never lists uuids", async () => {
+    // A producer that never reports user_message_uuids: the steer is held for one result, then dropped from tracking.
+    const queryFn = ((input: Parameters<QueryFn>[0]) => Object.assign((async function* () {
+      for await (const _m of input.prompt as AsyncIterable<unknown>) {
+        await new Promise((x) => setTimeout(x, 5));
+        yield { type: "result", subtype: "success", total_cost_usd: 0, num_turns: 1, session_id: "s" };
+      }
+    })(), { interrupt: async () => {}, close: () => {} })) as unknown as QueryFn;
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(queryFn).openSession(queue, baseOpts());
+    const events: AgentEvent[] = [];
+    const done = (async () => { for await (const e of stream) events.push(e); })();
+    queue.push("task");
+    await new Promise((x) => setTimeout(x, 1));
+    await stream.steer!("redirect");
+    while (turnEnds(events).length < 1) await new Promise((x) => setTimeout(x, 1));
+    expect(stream.pendingSteers!()).toHaveLength(1); // left for its own turn
+    while (turnEnds(events).length < 2) await new Promise((x) => setTimeout(x, 1));
+    expect(stream.pendingSteers!()).toEqual([]); // its turn ran; nothing further to judge
+    expect(turnEnds(events)[0]!.steerPending).toBe(true);
+    expect(turnEnds(events)[1]).not.toHaveProperty("steerPending");
+    queue.close();
+    await done;
+  });
+
+  it("turns without a steer never carry steerPending", async () => {
+    const r = rig("no-steer");
+    const queue = new MessageQueue();
+    const stream = new ClaudeBackend(r.queryFn).openSession(queue, baseOpts());
+    const done = collect(stream);
+    queue.push("task");
+    while (r.seen.length < 1) await new Promise((x) => setTimeout(x, 1));
+    await new Promise((x) => setTimeout(x, 5));
+    queue.close();
+    const ends = turnEnds(await done);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).not.toHaveProperty("steerPending");
+  });
+});
+
+it("startTurn (master single-turn path) exposes no steer", async () => {
+  const stream = new ClaudeBackend(rawQuery([])).startTurn("hi", baseOpts());
+  expect(stream.steer).toBeUndefined();
+  await collect(stream);
 });
