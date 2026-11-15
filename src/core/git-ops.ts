@@ -28,10 +28,14 @@ export interface GitOps {
   fetch(repoPath: string, branch: string): Promise<void>;
 }
 
-// git < 2.30 rejects `git diff --merge-base` as an unknown option (the C locale keeps the message in English).
+// git < 2.30 rejects `git diff --merge-base`. Real git 2.26.2 exits 129 with ONLY the usage line on stderr
+// ("usage: git diff [<options>] …") — the option is never named — so match exit code 129 plus either that usage line or
+// an explicit "invalid/unknown option: --merge-base". 129 is git's usage-error code; a bad revision is 128.
 export function isUnknownMergeBaseOption(err: unknown): boolean {
-  const msg = String((err as { stderr?: unknown })?.stderr ?? (err as Error)?.message ?? err);
-  return /--merge-base/.test(msg) && /(unknown option|invalid option|unrecognized argument)/i.test(msg);
+  const e = err as { code?: unknown; stderr?: unknown } | null;
+  if (e?.code !== 129) return false;
+  const stderr = String(e.stderr ?? "");
+  return /^usage: git diff\b/m.test(stderr) || /(unknown|invalid) option:? '?--merge-base/i.test(stderr);
 }
 
 export class RealGitOps implements GitOps {

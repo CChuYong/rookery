@@ -86,7 +86,12 @@ describe("splitUnifiedDiff (audit #84 branch diff)", () => {
 
   it("handles renames by using the new path", () => {
     const files = splitUnifiedDiff(["diff --git a/old.ts b/new.ts", "similarity index 100%", "rename from old.ts", "rename to new.ts"].join("\n"));
-    expect(files).toEqual([{ path: "new.ts", status: "R", added: 0, deleted: 0, binary: false, lines: [] }]);
+    expect(files).toEqual([{ path: "new.ts", status: "R", added: 0, deleted: 0, binary: false, lines: [], from: "old.ts" }]);
+  });
+
+  it("records a mode-only change", () => {
+    const files = splitUnifiedDiff(["diff --git a/run.sh b/run.sh", "old mode 100644", "new mode 100755"].join("\n"));
+    expect(files).toEqual([{ path: "run.sh", status: "M", added: 0, deleted: 0, binary: false, lines: [], mode: "100755" }]);
   });
 });
 

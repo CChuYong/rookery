@@ -3,7 +3,9 @@
 // for deletions, `rename to` for renames), with git's C-style quoting decoded — git quotes non-ASCII and special paths
 // (`"b/\355\225\234.md"`). Only lines inside hunks are kept and counted, so a "+++"/"---" content line inside a hunk is
 // still a change, and the daemon's truncation marker (fleet.diff caps at 512 KB) never counts.
-export type DiffFile = { path: string; status: "A" | "D" | "M" | "R"; added: number; deleted: number; binary: boolean; lines: string[] };
+// `from` = the old path of a rename; `mode` = the new file mode of a mode change. Both are only set when present, so a
+// hunk-less file (pure rename, chmod) can say what changed.
+export type DiffFile = { path: string; status: "A" | "D" | "M" | "R"; added: number; deleted: number; binary: boolean; lines: string[]; from?: string; mode?: string };
 
 const TRUNCATION_MARKER = "…(truncated)"; // appended by the daemon's truncateBytes (src/core/truncate.ts)
 
@@ -73,6 +75,8 @@ export function parseUnifiedDiff(diff: string): { files: DiffFile[]; truncated: 
     if (!inHunk) {
       if (line.startsWith("new file mode")) cur.status = "A";
       else if (line.startsWith("deleted file mode")) cur.status = "D";
+      else if (line.startsWith("rename from ")) cur.from = unquoteGitPath(line.slice("rename from ".length));
+      else if (line.startsWith("new mode ")) cur.mode = line.slice("new mode ".length).trim();
       else if (line.startsWith("rename to ")) { cur.status = "R"; cur.path = unquoteGitPath(line.slice("rename to ".length)); }
       else if (line.startsWith("Binary files ")) cur.binary = true;
       else if (line.startsWith("--- ")) { minusPath = sidePath(line.slice(4)); if (minusPath) cur.path = minusPath; }

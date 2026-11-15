@@ -94,12 +94,58 @@ describe("RealGitOps (real git, no network)", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }, 20000);
 
+  // Real git 2.26.2 output for `git diff --merge-base …` (verified in review): exit 129, and stderr is ONLY the usage
+  // line — it never names the option.
+  const OLD_GIT_USAGE = "usage: git diff [<options>] [<commit> [<commit>]] [--] [<path>...]\n";
+  const execErr = (code: number, stderr: string) => Object.assign(new Error(`Command failed: git diff\n${stderr}`), { code, stderr });
+
   it("recognizes an old git's rejection of --merge-base (fallback trigger) and nothing else", () => {
-    expect(isUnknownMergeBaseOption({ stderr: "error: invalid option: --merge-base\n" })).toBe(true);
-    expect(isUnknownMergeBaseOption(new Error("fatal: unrecognized argument: --merge-base"))).toBe(true);
-    expect(isUnknownMergeBaseOption({ stderr: "fatal: bad revision 'nope'\n" })).toBe(false);
-    expect(isUnknownMergeBaseOption({ stderr: "fatal: no merge base found\n" })).toBe(false);
+    expect(isUnknownMergeBaseOption(execErr(129, OLD_GIT_USAGE))).toBe(true);
+    expect(isUnknownMergeBaseOption(execErr(129, "error: invalid option: --merge-base\n"))).toBe(true);
+    expect(isUnknownMergeBaseOption(execErr(128, "fatal: bad revision 'nope'\n"))).toBe(false);
+    expect(isUnknownMergeBaseOption(execErr(128, "fatal: no merge base found\n"))).toBe(false);
+    expect(isUnknownMergeBaseOption(execErr(129, "usage: git merge-base [-a | --all] <commit> <commit>...\n"))).toBe(false);
   });
+
+  it("falls back to merge-base + diff when git rejects --merge-base with the old usage error", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gitops-old-"));
+    const repo = path.join(dir, "repo");
+    fs.mkdirSync(repo);
+    const sh = (args: string[], cwd: string) => execFileSync("git", args, { cwd });
+    sh(["init", "-q"], repo);
+    sh(["config", "user.email", "x@x.com"], repo);
+    sh(["config", "user.name", "x"], repo);
+    fs.writeFileSync(path.join(repo, "README.md"), "hi\n");
+    sh(["add", "-A"], repo);
+    sh(["commit", "-qm", "init"], repo);
+    const g = new RealGitOps();
+    const base = await g.currentBranch(repo);
+    const wt = path.join(dir, "wt");
+    await g.addWorktree(repo, wt, "rookery/old", base);
+    fs.writeFileSync(path.join(wt, "worker.txt"), "mine\n");
+    sh(["add", "-A"], wt);
+    sh(["commit", "-qm", "worker change"], wt);
+    fs.writeFileSync(path.join(repo, "upstream.txt"), "theirs\n");
+    sh(["add", "-A"], repo);
+    sh(["commit", "-qm", "upstream change"], repo);
+
+    // Simulate git 2.24–2.29: the --merge-base call fails exactly like real 2.26.2; everything else is real git.
+    const proto = g as unknown as { git: (cwd: string, args: string[]) => Promise<string> };
+    const realGit = proto.git.bind(g);
+    const calls: string[][] = [];
+    proto.git = async (cwd, args) => {
+      calls.push(args);
+      if (args.includes("--merge-base")) throw execErr(129, OLD_GIT_USAGE);
+      return realGit(cwd, args);
+    };
+    const diff = await g.diff(wt, base);
+    expect(diff).toContain("worker.txt");
+    expect(diff).not.toContain("upstream.txt");
+    expect(calls.map((a) => a[0])).toEqual(["diff", "merge-base", "diff"]);
+    // SEC-1 still holds on the fallback path
+    await expect(g.diff(wt, "--output=/tmp/x")).rejects.toThrow();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 20000);
 
   // SEC-1: base is a free-form string controlled by the model/registration. If git parses it as an "option",
   // `git diff --output=<path>` becomes an arbitrary file write. base must always be treated as a revision (positional) only.

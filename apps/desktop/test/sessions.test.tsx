@@ -271,6 +271,15 @@ describe("Sessions text filter (audit #118)", () => {
     expect(screen.queryByText("old chat")).toBeNull();
   });
 
+  // review round 2: matches only in the archive → no "no matches" line above an archive that has them.
+  it("doesn't say 'no matches' when only archived sessions match", () => {
+    const withArchived = [...many, mk({ id: "a1", label: "zebra notes", archived: true })];
+    render(<Sessions sessions={withArchived as never} activeId={null} onSelect={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "zebra" } });
+    expect(screen.queryByText("일치하는 세션이 없어요.")).toBeNull();
+    expect(screen.getByText(/보관함/)).toBeInTheDocument();
+  });
+
   it("stays hidden for a short list", () => {
     render(<Sessions sessions={many.slice(0, 3) as never} activeId={null} onSelect={() => {}} />);
     expect(screen.queryByPlaceholderText("세션 필터…")).toBeNull();

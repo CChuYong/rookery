@@ -87,7 +87,15 @@ export function BranchDiffView({ workerId, loadDiff }: { workerId: string; loadD
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="shrink-0 truncate border-b border-line px-3 py-1.5 font-mono text-meta text-muted" title={file.path}>{file.path}</div>
-        {file.binary && <div className="px-3 py-2 text-ui text-muted">{t("branchDiff.binary")}</div>}
+        {file.binary ? <div className="px-3 py-2 text-ui text-muted">{t("branchDiff.binary")}</div>
+          : file.lines.length === 0 && (
+            // hunk-less change (pure rename, mode change): say what changed instead of an empty pane
+            <div className="px-3 py-2 text-ui text-muted">
+              {file.status === "R" && file.from ? t("branchDiff.renamedOnly", { from: file.from, to: file.path })
+                : file.mode ? t("branchDiff.modeOnly", { mode: file.mode })
+                : t("branchDiff.noTextChange")}
+            </div>
+          )}
         <pre className="min-h-0 flex-1 overflow-auto py-1 font-mono text-meta leading-relaxed">
           {file.lines.map((line, i) => (
             <div

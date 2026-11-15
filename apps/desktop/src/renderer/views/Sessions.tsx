@@ -372,8 +372,8 @@ function SessionsImpl(p: {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("sessions.filterPlaceholder")} aria-label={t("sessions.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
         </div>
       )}
-      {/* not while the open session is still listed (it's kept visible on purpose) — review m5 */}
-      {query && visible.length === 0 && <div className="px-2 py-3 text-ui text-muted">{t("sessions.noMatches")}</div>}
+      {/* not while the open session is still listed (it's kept visible on purpose) or archived sessions match — review m5 */}
+      {query && visible.length === 0 && archived.length === 0 && <div className="px-2 py-3 text-ui text-muted">{t("sessions.noMatches")}</div>}
 
       {pinnedItems.length > 0 && (
         <div>

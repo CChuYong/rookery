@@ -52,6 +52,15 @@ describe("BranchDiffView", () => {
     expect(await screen.findByText("바이너리 파일이라 내용 비교를 보여 줄 수 없어요")).toBeInTheDocument();
   });
 
+  // review round 2: a pure rename or a mode-only change has no hunks — say what changed instead of an empty pane.
+  it("notes a pure rename and a mode-only change", async () => {
+    const diff = ["diff --git a/old.ts b/new.ts", "similarity index 100%", "rename from old.ts", "rename to new.ts", "diff --git a/run.sh b/run.sh", "old mode 100644", "new mode 100755"].join("\n");
+    render(<BranchDiffView workerId="w1" loadDiff={async () => diff} />);
+    expect(await screen.findByText("이름만 바뀌었어요: old.ts → new.ts")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /run\.sh/ }));
+    expect(screen.getByText("파일 모드만 바뀌었어요 (100755)")).toBeInTheDocument();
+  });
+
   it("is what a branch: workspace tab renders", async () => {
     render(<WorkspaceTab activeTab="branch:w1" pageKey="w1" root="/r" loadBranchDiff={async () => DIFF} />);
     expect(await screen.findByRole("button", { name: /a\.ts/ })).toBeInTheDocument();
