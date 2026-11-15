@@ -18,6 +18,17 @@ describe("RepoModal", () => {
 });
 
 describe("RepoTree", () => {
+  it("the worker rename field is the shared Input (no orange border, fix round 1 / audit #101)", () => {
+    const repos = [{ name: "app", path: "/p", description: "", base: null }];
+    const fleet: FleetRow[] = [{ id: "a1", label: "live-sub", repoPath: "/p", status: "idle", branch: "rookery/a1", model: null, permissionMode: "bypassPermissions" }];
+    render(<RepoTree repos={repos} fleet={fleet} activeSubId={null} onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}} onRenameSub={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByText("live-sub"));
+    fireEvent.click(screen.getByText("이름 변경"));
+    const field = screen.getByDisplayValue("live-sub");
+    expect(field.className).not.toContain("border-accent");
+    expect(field.className).toContain("border-line");
+  });
+
   it("right-click sub → rename/stop/archive/delete; stop only for running/idle; archived subs go to the archive", () => {
     const onArchiveSub = vi.fn();
     const onDeleteSub = vi.fn();

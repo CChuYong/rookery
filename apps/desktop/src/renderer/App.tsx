@@ -28,7 +28,7 @@ import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, sidebarMaxForView
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
-import { optimistic, patchSession, patchWorker } from "./lib/optimistic.js";
+import { latestGate, optimistic, patchSession, patchWorker } from "./lib/optimistic.js";
 import { ROW_SELECTED } from "./lib/ui-tokens.js";
 import { workerComposerState } from "./lib/worker-composer.js";
 import { capabilityCenterRoute, localizeCommandCandidates } from "./lib/command-actions.js";
@@ -92,6 +92,9 @@ declare global {
 }
 
 let client: WsClient | null = null;
+// Last-issued-wins gates for the session/fleet list refetches (optimistic Pin/Archive invalidate them).
+const sessionListGate = latestGate();
+const fleetListGate = latestGate();
 let sessionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let usageTimer: ReturnType<typeof setTimeout> | null = null;
 let startTimer: ReturnType<typeof setTimeout> | null = null; // DSK-10: fallback timer to recover from a stuck 'starting' state (refreshed on every connect)
@@ -678,20 +681,26 @@ export function App(): JSX.Element {
     setComposerEpoch((e) => e + 1);
     useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: latest.id });
   };
-  const refetchSessions = useCallback(() => { void client?.request({ type: "session.list" }).then((r) => useStore.getState().setSessions(r.sessions ?? [])).catch(() => {}); }, []);
+  const refetchSessions = useCallback(() => {
+    const n = sessionListGate.next();
+    void client?.request({ type: "session.list" }).then((r) => { if (sessionListGate.isCurrent(n)) useStore.getState().setSessions(r.sessions ?? []); }).catch(() => {});
+  }, []);
   // Rename session — refetch not needed since it updates live via the session.label event.
   // Inject reqId via request() (schema requires reqId) — the daemon replies with fleet.ack (the label reflects live via session.label; the ack is ignored).
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   // Pin/Archive move the row at once and roll back (with a toast) if the daemon rejects it (audit #56).
+  // A list fetched before the click is dropped (invalidate) so it can't flip the row back; both outcomes refetch.
   const archiveSession = useCallback((id: string, archived: boolean) => {
     const c = client;
     if (!c) return;
-    void optimistic(() => patchSession(id, { archived }), () => c.request({ type: "session.archive", sessionId: id, archived }), { onSuccess: refetchSessions, onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)) });
+    sessionListGate.invalidate();
+    void optimistic(() => patchSession(id, { archived }), () => c.request({ type: "session.archive", sessionId: id, archived }), { onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)), onSettled: refetchSessions });
   }, [refetchSessions]);
   const pinSession = useCallback((id: string, pinned: boolean) => {
     const c = client;
     if (!c) return;
-    void optimistic(() => patchSession(id, { pinned }), () => c.request({ type: "session.pin", sessionId: id, pinned }), { onSuccess: refetchSessions, onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)) });
+    sessionListGate.invalidate();
+    void optimistic(() => patchSession(id, { pinned }), () => c.request({ type: "session.pin", sessionId: id, pinned }), { onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)), onSettled: refetchSessions });
   }, [refetchSessions]);
   // Right-click "Fork" → open the Fork dialog (target provider/model/effort pick + codex-auth gate), not an instant fork.
   const forkSession = useCallback((id: string) => {
@@ -720,7 +729,10 @@ export function App(): JSX.Element {
       refetchSessions();
     }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
   }, [refetchSessions]);
-  const refetchFleet = useCallback(() => { void client?.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {}); }, []);
+  const refetchFleet = useCallback(() => {
+    const n = fleetListGate.next();
+    void client?.request({ type: "fleet.list" }).then((r) => { if (fleetListGate.isCurrent(n)) useStore.getState().setFleet(r.fleet ?? []); }).catch(() => {});
+  }, []);
   // Retry hook for AutomationPage's load-failed row (audit #14) — no other refetch path existed for automation.list.
   const refetchAutomations = useCallback(() => { void client?.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true)); }, []);
   // Rename worker — updates live via the worker.label event. Archive/delete refetch fleet.list.
@@ -728,7 +740,8 @@ export function App(): JSX.Element {
   const archiveSub = useCallback((id: string, archived: boolean) => {
     const c = client;
     if (!c) return;
-    void optimistic(() => patchWorker(id, { archived }), () => c.request({ type: "worker.archive", id, archived }), { onSuccess: refetchFleet, onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)) });
+    fleetListGate.invalidate();
+    void optimistic(() => patchWorker(id, { archived }), () => c.request({ type: "worker.archive", id, archived }), { onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)), onSettled: refetchFleet });
   }, [refetchFleet]);
   const deleteSub = useCallback((id: string) => {
     const store = useStore.getState();

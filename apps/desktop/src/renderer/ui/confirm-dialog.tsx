@@ -41,17 +41,26 @@ export function ConfirmDialog({
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
   const { closing, dismiss } = useDismissTransition(onCancel);
-  const confirmAndClose = (): void => { onConfirm(); dismiss(); };
+  // One choice per dialog: the panel stays mounted ~140ms for its exit, and a double click or Cmd+Enter + click must
+  // not run a non-idempotent action (restore, delete, token rotation) twice. Confirm and secondary share the guard.
+  const chosen = useRef(false);
+  const choose = (action: () => void): void => {
+    if (chosen.current) return;
+    chosen.current = true;
+    action();
+    dismiss();
+  };
+  const confirmAndClose = (): void => choose(onConfirm);
   useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: confirmAndClose });
   useFocusTrap(panelRef);
   return createPortal(
     <div className={dialogOverlayClass({ closing, z: "z-[110]" })}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={dialogPanelClass({ size: "sm", closing })}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={dialogPanelClass({ size: "sm", closing, className: closing ? "pointer-events-none" : undefined })}>
         <div className="mb-1.5 text-title font-medium">{title}</div>
         <p className="text-ui leading-relaxed text-muted">{body}</p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="outline" size="sm" autoFocus onClick={dismiss}>{t("common.cancel")}</Button>
-          {secondary && <Button variant="outline" size="sm" onClick={() => { secondary.onClick(); dismiss(); }}>{secondary.label}</Button>}
+          {secondary && <Button variant="outline" size="sm" onClick={() => choose(secondary.onClick)}>{secondary.label}</Button>}
           <Button variant={variant === "danger" ? "dangerSolid" : "primary"} size="sm" onClick={confirmAndClose}>{confirmLabel}</Button>
         </div>
       </div>

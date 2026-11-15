@@ -34,4 +34,33 @@ describe("ConfirmDialog", () => {
     expect(panel.className).toContain("rounded-xl");
     expect(panel.className).toContain("p-5");
   });
+
+  // The dialog stays mounted ~140ms for its exit; a double click or Cmd+Enter followed by a click must not run the
+  // action twice (fix round 1: checkpoint restore, token rotation and deletes are not idempotent).
+  it("runs confirm at most once across a double click and Cmd+Enter", () => {
+    const onConfirm = vi.fn();
+    render(<ConfirmDialog title="T" body="B" confirmLabel="OK" onConfirm={onConfirm} onCancel={() => {}} />);
+    const ok = screen.getByRole("button", { name: "OK" });
+    fireEvent.click(ok);
+    fireEvent.click(ok);
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirm and secondary share the guard (only the first choice runs)", () => {
+    const onConfirm = vi.fn();
+    const onSecondary = vi.fn();
+    render(<ConfirmDialog title="T" body="B" confirmLabel="Save" secondary={{ label: "Discard", onClick: onSecondary }} onConfirm={onConfirm} onCancel={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(onSecondary).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("goes inert while closing", () => {
+    render(<ConfirmDialog title="T" body="B" confirmLabel="OK" onConfirm={() => {}} onCancel={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(screen.getByRole("dialog").className).toContain("pointer-events-none");
+  });
 });

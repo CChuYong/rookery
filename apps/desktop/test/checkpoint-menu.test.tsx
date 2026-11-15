@@ -47,11 +47,36 @@ describe("CheckpointMenu", () => {
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 1")); // opens the confirm dialog
     expect(onRestore).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "턴 1 시점으로 되돌릴까요?" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "턴 1 시작 전으로 되돌릴까요?" })).toBeInTheDocument();
     confirmRevert();
     expect(onRestore).toHaveBeenCalledWith(0);
     // Closes only after the restore promise settles (success here) — the menu should disappear.
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("a double click on the confirm restores once (fix round 1)", async () => {
+    const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
+    let finish!: () => void;
+    const onRestore = vi.fn(() => new Promise<void>((res) => { finish = res; }));
+    render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("턴 1"));
+    confirmRevert();
+    confirmRevert();
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("says the revert goes back to before the turn started (checkpoints are taken at turn start)", async () => {
+    const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 2, sha: "c", createdAt: "2026-06-20T10:00:00Z" }]);
+    render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 3")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("턴 3"));
+    const dialog = screen.getByRole("dialog", { name: "턴 3 시작 전으로 되돌릴까요?" });
+    expect(dialog).toHaveTextContent("이 턴의 변경");
   });
 
   it("cancelling the dialog restores nothing and keeps the menu open", async () => {

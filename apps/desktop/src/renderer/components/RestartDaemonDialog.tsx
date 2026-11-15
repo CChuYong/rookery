@@ -23,7 +23,7 @@ export function RestartDaemonDialog({ onConfirm, onClose, busy }: { onConfirm: (
         role="dialog"
         aria-modal="true"
         aria-label={t("restartDaemonDialog.title")}
-        className={dialogPanelClass({ size: "sm", closing, className: "flex flex-col gap-3" })}
+        className={dialogPanelClass({ size: "md", closing, className: "flex flex-col gap-3" })}
       >
         <div className="text-title font-medium">{t("restartDaemonDialog.title")}</div>
         <p className="text-ui leading-relaxed text-muted">{t("restartDaemonDialog.body")}</p>

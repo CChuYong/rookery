@@ -5,6 +5,7 @@ import { useRepoTreeStore } from "../store/repotree.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
 import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
+import { Input } from "../ui/input.js";
 import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
 import { baseName } from "../lib/path.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
@@ -132,7 +133,8 @@ function RepoTreeImpl(p: {
     if (renaming?.id === sub.id) {
       return (
         <div key={sub.id} className="px-1 py-1">
-          <input
+          <Input
+            size="sm"
             autoFocus
             value={renaming.value}
             onChange={(e) => setRenaming({ id: sub.id, value: e.target.value })}
@@ -141,7 +143,7 @@ function RepoTreeImpl(p: {
               else if (e.key === "Escape") setRenaming(null);
             }}
             onBlur={() => { p.onRenameSub?.(sub.id, renaming.value.trim() || sub.label); setRenaming(null); }}
-            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-ui text-fg outline-none"
+            className="w-full"
           />
         </div>
       );

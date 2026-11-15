@@ -30,19 +30,33 @@ export function patchWorker(id: string, patch: WorkerFlags): () => void {
   return () => apply(prev);
 }
 
-// Apply now, send, and undo on failure. `apply` returns the rollback (patchSession / patchWorker above).
+// Apply now, send, and undo on failure. `apply` returns the rollback (patchSession / patchWorker above). `onSettled`
+// runs on both paths, last: after a failure the rollback restores the value seen at click time, which may be older
+// than the server's by then, so the caller refetches there too.
 export async function optimistic(
   apply: () => () => void,
   request: () => Promise<unknown>,
-  handlers: { onSuccess?: () => void; onError: (e: unknown) => void },
+  handlers: { onSuccess?: () => void; onError: (e: unknown) => void; onSettled?: () => void },
 ): Promise<void> {
   const rollback = apply();
   try {
     await request();
+    handlers.onSuccess?.();
   } catch (e) {
     rollback();
     handlers.onError(e);
-    return;
+  } finally {
+    handlers.onSettled?.();
   }
-  handlers.onSuccess?.();
+}
+
+// Last-issued-wins gate for list refetches: a slow response from an older request (or one issued before an optimistic
+// change, see invalidate) must not overwrite newer state.
+export function latestGate(): { next: () => number; isCurrent: (n: number) => boolean; invalidate: () => void } {
+  let seq = 0;
+  return {
+    next: () => ++seq,
+    isCurrent: (n) => n === seq,
+    invalidate: () => { seq++; },
+  };
 }

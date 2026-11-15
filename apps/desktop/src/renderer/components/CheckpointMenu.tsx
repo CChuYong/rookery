@@ -67,13 +67,17 @@ export function CheckpointMenu({
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [open, asking]);
+  // In-flight guard (a ref, not the state: two calls in one tick both see the old `restoring`).
+  const inFlight = useRef(false);
   const restore = (seq: number): void => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setRestoring(seq);
     // Close only after settle: both paths reset restoring so a reopened menu is clickable again (the failure toast is
     // fired by onRestore itself).
     void onRestore(seq).then(
-      () => { setOpen(false); setRestoring(null); },
-      () => { setRestoring(null); },
+      () => { inFlight.current = false; setOpen(false); setRestoring(null); },
+      () => { inFlight.current = false; setRestoring(null); },
     );
   };
   // Focus the first turn on open (audit #60 — reuses ContextMenu's precedent). Items load async (fetchCheckpoints
