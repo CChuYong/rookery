@@ -44,7 +44,7 @@ describe("AttentionBell", () => {
     useStore.setState({ fleet: { w1: w("w1", "error") } } as never);
     const onNavigate = vi.fn();
     render(<AttentionBell onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     fireEvent.click(screen.getByText("w-w1"));
     expect(onNavigate).toHaveBeenCalledWith({ workerId: "w1" });
     expect(screen.queryByText("실패")).toBeNull(); // popover closed
@@ -53,7 +53,7 @@ describe("AttentionBell", () => {
   it("shows the worker status as a translated word, not the raw English token (Korean-default UI)", () => {
     useStore.setState({ fleet: { w1: w("w1", "error"), w2: w("w2", "stopped") }, attention: { w2: true } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     expect(screen.getByText(/워커 실패 · 오류/)).toBeInTheDocument(); // not "· error"
     expect(screen.getByText(/· 중지됨/)).toBeInTheDocument(); // not "· stopped"
     expect(screen.queryByText(/· error/)).toBeNull();
@@ -63,8 +63,8 @@ describe("AttentionBell", () => {
   it("dismissing a failure persists the ack (item gone after reopen)", () => {
     useStore.setState({ fleet: { w1: w("w1", "failed") } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
-    fireEvent.click(screen.getByLabelText("묵살"));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
+    fireEvent.click(screen.getByLabelText("닫기"));
     expect(useAcksStore.getState().acked).toContain("wfail:w1:failed");
     expect(screen.getByText(/지금 확인할 일이 없어요/)).toBeInTheDocument(); // list emptied live
   });
@@ -72,8 +72,8 @@ describe("AttentionBell", () => {
   it("dismissing a worker-review item flips the live unread map (no persisted ack)", () => {
     useStore.setState({ fleet: { w1: w("w1", "stopped") }, attention: { w1: true } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
-    fireEvent.click(screen.getByLabelText("묵살"));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
+    fireEvent.click(screen.getByLabelText("닫기"));
     expect(useStore.getState().attention.w1).toBe(false);
     expect(useAcksStore.getState().acked).toEqual([]);
   });
@@ -85,10 +85,10 @@ describe("AttentionBell", () => {
       liveInteractionIds: new Set(["r1"]),
     } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     expect(screen.getByText("응답 대기")).toBeInTheDocument();
     expect(screen.getByText("질문 세션")).toBeInTheDocument();
-    expect(screen.queryByLabelText("묵살")).toBeNull(); // tier 0 resolves itself
+    expect(screen.queryByLabelText("닫기")).toBeNull(); // tier 0 resolves itself
   });
 
   // audit #20: the bell had no tooltip, and a second bell (the OS-notification toggle) sat next to it. The toggle now
@@ -101,14 +101,14 @@ describe("AttentionBell", () => {
   it("hosts the OS-notification toggle and says when notifications are off", () => {
     const onToggleNotify = vi.fn();
     const { rerender } = render(<AttentionBell onNavigate={vi.fn()} notifyOn onToggleNotify={onToggleNotify} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     const toggle = screen.getByRole("button", { name: /^OS 알림/ });
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(toggle);
     expect(onToggleNotify).toHaveBeenCalledTimes(1);
     rerender(<AttentionBell onNavigate={vi.fn()} notifyOn={false} onToggleNotify={onToggleNotify} />);
     expect(screen.getByRole("button", { name: /^OS 알림/ })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByLabelText(/어텐션 큐/)).toHaveAttribute("title", "지금 필요한 것 — OS 알림 꺼짐");
-    expect(screen.getByLabelText(/어텐션 큐/)).toHaveAttribute("aria-label", "어텐션 큐 (0건) — OS 알림 꺼짐"); // review m4
+    expect(screen.getByLabelText(/알림 대기열/)).toHaveAttribute("title", "지금 필요한 것 — OS 알림 꺼짐");
+    expect(screen.getByLabelText(/알림 대기열/)).toHaveAttribute("aria-label", "알림 대기열 (0건) — OS 알림 꺼짐"); // review m4
   });
 });

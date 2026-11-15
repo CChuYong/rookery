@@ -56,7 +56,7 @@ describe("Composer draft persistence (initialText / onDraftChange)", () => {
     render(<Composer onSend={onSend} onSideSend={onSideSend} />);
     const ed = screen.getByRole("textbox");
     setPromptEditorText(ed, "why this approach?");
-    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
     expect(onSideSend).toHaveBeenCalledWith("why this approach?");
     expect(onSend).not.toHaveBeenCalled();
     expect(ed.textContent).toBe("");

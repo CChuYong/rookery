@@ -343,7 +343,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     (applies to Claude AND Codex workers), so it stays here in General. */}
                 <div className="flex flex-col gap-1.5">
                   <Row label={t("settings.workerBudget")} hint={<>{t("settings.workerCostBudgetUsdHint")} {t("speed.budgetEstimated")}</>}>
-                    <Input ref={budgetRef} type="number" className={cn("w-[120px] tabular-nums", budgetInvalid && "border-fail")} value={f.workerCostBudgetUsd ?? ""} placeholder="off" aria-invalid={budgetInvalid || undefined} aria-describedby={budgetInvalid ? "settings-budget-error" : undefined} onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
+                    <Input ref={budgetRef} type="number" className={cn("w-[120px] tabular-nums", budgetInvalid && "border-fail")} value={f.workerCostBudgetUsd ?? ""} placeholder={t("common.noLimit")} aria-invalid={budgetInvalid || undefined} aria-describedby={budgetInvalid ? "settings-budget-error" : undefined} onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
                     <span className="text-ui text-muted">USD</span>
                   </Row>
                   {budgetInvalid && <p id="settings-budget-error" className="text-ui text-fail">{t("workerSpawnModal.budgetInvalid")}</p>}

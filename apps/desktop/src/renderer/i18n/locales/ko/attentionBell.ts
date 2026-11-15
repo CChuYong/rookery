@@ -1,7 +1,7 @@
 import type { Catalog } from "../../types.js";
 export default {
   "attentionBell.title": "지금 필요한 것",
-  "attentionBell.aria": "어텐션 큐 ({count}건)",
+  "attentionBell.aria": "알림 대기열 ({count}건)",
   "attentionBell.empty": "지금 확인할 일이 없어요.",
   "attentionBell.tier0": "응답 대기",
   "attentionBell.tier1": "실패",
@@ -11,12 +11,12 @@ export default {
   "attentionBell.kind_automation-failure": "자동화 실패",
   "attentionBell.kind_worker-review": "워커가 끝났어요 — 확인 필요",
   "attentionBell.kind_session-review": "안 읽은 응답",
-  "attentionBell.dismiss": "묵살",
+  "attentionBell.dismiss": "닫기",
   "attentionBell.notifyTitle": "응답 대기 중",
-  "attentionBell.notifyBody": "{label} 세션이 당신의 답을 기다리고 있어요.",
+  "attentionBell.notifyBody": "{label} 세션이 답을 기다리고 있어요.",
   "attentionBell.titleMuted": "지금 필요한 것 — OS 알림 꺼짐",
   "attentionBell.notifyToggle": "OS 알림",
   "attentionBell.notifyOnState": "켜짐",
   "attentionBell.notifyOffState": "꺼짐",
-  "attentionBell.ariaMuted": "어텐션 큐 ({count}건) — OS 알림 꺼짐",
+  "attentionBell.ariaMuted": "알림 대기열 ({count}건) — OS 알림 꺼짐",
 } satisfies Catalog;

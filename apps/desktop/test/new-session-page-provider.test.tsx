@@ -17,7 +17,7 @@ describe("NewSessionPage provider selector (P2.5 task 4)", () => {
   it("selecting codex passes provider \"codex\" to onStart", () => {
     const onStart = vi.fn();
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={onStart} codexDefaultModel="gpt-5.5" />);
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.click(screen.getByLabelText("시작"));
     expect(onStart.mock.calls[0]![0].provider).toBe("codex");
   });
@@ -28,7 +28,7 @@ describe("NewSessionPage provider selector (P2.5 task 4)", () => {
     const claudeModelSelect = screen.getByTitle("모델 (이 대화에만 적용 — 기본 설정과 무관)");
     expect(claudeModelSelect.tagName).toBe("SELECT");
 
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
 
     // The Composer's own model <select> is gone (its `controls` prop is omitted for codex); the same-titled
     // element is now NewSessionPage's own free-text <input> with the codexDefaultModel placeholder.
@@ -40,7 +40,7 @@ describe("NewSessionPage provider selector (P2.5 task 4)", () => {
   it("the codex free-text model field's typed text flows through to onStart.model", () => {
     const onStart = vi.fn();
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={onStart} codexDefaultModel="gpt-5.5" />);
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     const modelField = screen.getByPlaceholderText("gpt-5.5");
     fireEvent.change(modelField, { target: { value: "gpt-6-mini" } });
     fireEvent.click(screen.getByLabelText("시작"));
@@ -51,7 +51,7 @@ describe("NewSessionPage provider selector (P2.5 task 4)", () => {
   it("a blank codex model field sends model: undefined, not an empty string (P2.5 task 5 pickup)", () => {
     const onStart = vi.fn();
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={onStart} codexDefaultModel="gpt-5.5" />);
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     // Leave the free-text model field untouched (blank) and start.
     fireEvent.click(screen.getByLabelText("시작"));
     expect(onStart.mock.calls[0]![0].model).toBeUndefined();
@@ -60,8 +60,8 @@ describe("NewSessionPage provider selector (P2.5 task 4)", () => {
 
   it("effort remains selectable for codex (not special-cased/hidden)", () => {
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={() => {}} codexDefaultModel="gpt-5.5" />);
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
-    const effortSelect = screen.getByTitle("effort (이 대화에만 적용)");
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
+    const effortSelect = screen.getByTitle("추론 강도 (이 대화에만 적용)");
     expect(effortSelect.tagName).toBe("SELECT");
     fireEvent.change(effortSelect, { target: { value: "xhigh" } });
     expect((effortSelect as HTMLSelectElement).value).toBe("xhigh");

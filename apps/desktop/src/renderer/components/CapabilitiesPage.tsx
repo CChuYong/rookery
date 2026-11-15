@@ -24,7 +24,7 @@ import type {
   CapabilityState,
   CapabilityTarget,
 } from "@daemon/core/capabilities/types.js";
-import { useT } from "../i18n/provider.js";
+import { useLocale, useT } from "../i18n/provider.js";
 import { cn } from "../lib/cn.js";
 import { TAB_ACTIVE, TAB_IDLE } from "../lib/ui-tokens.js";
 import { Button } from "../ui/button.js";
@@ -204,6 +204,7 @@ function EntryGroups({ entries, targetProvider }: { entries: CapabilityEntry[]; 
 
 export function CapabilitiesPage({ target, api, targets, generation, initialTab = "effective", initialKind, pickDirectory, onClose }: CapabilitiesPageProps): JSX.Element {
   const t = useT();
+  const locale = useLocale(); // inspection time in the app language, not the OS locale (audit #121)
   const [snapshot, setSnapshot] = useState<CapabilitySnapshot | null>(null);
   const [loading, setLoading] = useState(false); // first load for this target: nothing to show yet
   const [refreshing, setRefreshing] = useState(false); // reload with the current list kept on screen (audit #90)
@@ -391,7 +392,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                           ? <dd className="font-mono text-fg-dim">{snapshot.appliedRevision.slice(0, 12)}</dd>
                           : <dd className="text-fg-dim">{t("capabilities.appliedRevisionNone")}</dd>}</>
                       )}
-                      <dt className="text-muted">{t("capabilities.generatedAt")}</dt><dd className="font-mono text-fg-dim">{new Date(snapshot.generatedAt).toLocaleString()}</dd>
+                      <dt className="text-muted">{t("capabilities.generatedAt")}</dt><dd className="font-mono text-fg-dim">{new Date(snapshot.generatedAt).toLocaleString(locale)}</dd>
                     </dl>
                   </details>
                 </div>

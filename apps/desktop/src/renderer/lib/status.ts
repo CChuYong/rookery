@@ -1,17 +1,14 @@
 // Visual channels for worker/session status, all in one place. rail = left color rail (result status — replaces the color role of the dot),
-// tag = colorblind-safe mono text (run/pr/fail are a red-green confusion trio, so a text channel is needed).
+// tag = colorblind-safe short text (run/pr/fail are a red-green confusion trio, so a text channel is needed). The tag is
+// localized (status.short_*, audit #59) — it used to be an uppercase English abbreviation (STOP/ORPH/BG) even in ko.
 // The dot (led-live) is split out for 'alive' (running) only, to strengthen the signature.
 const RAIL: Record<string, string> = {
   provisioning: "bg-accent", running: "bg-run", background: "bg-run", idle: "bg-muted", failed: "bg-fail", error: "bg-fail",
   stopped: "bg-stop", orphaned: "bg-nochg", done: "bg-pr",
 };
-const TAG: Record<string, string> = {
-  provisioning: "PREP", running: "RUN", background: "BG", idle: "IDLE", failed: "ERR", error: "ERR",
-  stopped: "STOP", orphaned: "ORPH", done: "DONE",
-};
 // i18n key for a status's full-word display label (status.running/idle/stopped/done/error/failed/orphaned/provisioning) —
 // the one label source shared by StatusBadge (header) and RepoTree's tree tag, so they can never say different words
-// for the same worker (audit #50: tree showed 'ORPH' while the header showed 'orphaned'). TAG above stays as the
+// for the same worker (audit #50: tree showed 'ORPH' while the header showed 'orphaned'). statusShortKey below is the
 // colorblind-safe short alt-channel; this is the accessible full word for text/title.
 const LABEL_KEY: Record<string, string> = {
   provisioning: "status.provisioning", running: "status.running", background: "status.background", idle: "status.idle", failed: "status.failed", error: "status.error",
@@ -34,7 +31,9 @@ const TONE: Record<string, string> = {
 };
 export const railClass = (s: string): string => RAIL[s] ?? "bg-stop";
 export const toneClass = (s: string): string => TONE[s] ?? "text-muted bg-raised border-line";
-export const statusTag = (s: string): string => TAG[s] ?? s.slice(0, 5).toUpperCase();
+// i18n key for the short tag in the repo tree and the master's worker cards (status.short_*). A state without a short
+// word falls back to its full-word key.
+export const statusShortKey = (s: string): string => (s in LABEL_KEY ? `status.short_${s}` : statusLabelKey(s));
 export const statusLabelKey = (s: string): string => LABEL_KEY[s] ?? `status.${s}`;
 // Live = the worker is still working. `background` is a turn that ended while harness-tracked background
 // tasks (run_in_background shells, Dynamic Workflow runs) keep going — the SDK auto-wakes it when they

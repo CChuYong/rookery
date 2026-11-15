@@ -42,7 +42,7 @@ describe("SettingsPage save bar", () => {
   it("Revert drops the draft", () => {
     render(<SettingsPage {...base} />);
     fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "changed" } });
-    fireEvent.click(screen.getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(screen.getByRole("button", { name: "변경 버리기" }));
     expect(screen.getByDisplayValue("rookery")).toBeInTheDocument();
     expect(screen.queryByText(/저장 안 된 변경/)).toBeNull();
   });
@@ -136,9 +136,9 @@ describe("SettingsPage model defaults live together", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
     fireEvent.click(screen.getByText("Slack"));
-    expect(screen.queryByText("마스터 기본 모델 / 강도")).toBeNull();
+    expect(screen.queryByText("마스터 기본 모델 / 추론 강도")).toBeNull();
     fireEvent.click(screen.getByText("모델"));
-    expect(screen.getByText("마스터 기본 모델 / 강도")).toBeInTheDocument();
+    expect(screen.getByText("마스터 기본 모델 / 추론 강도")).toBeInTheDocument();
     const live = useStore.getState().models[0]!.id;
     fireEvent.change(screen.getByLabelText(/^마스터 기본 모델/), { target: { value: live } });
     fireEvent.click(screen.getByRole("button", { name: "저장" }));
@@ -233,7 +233,7 @@ describe("SettingsPage leave guard", () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} onClose={onClose} />);
-    fireEvent.change(screen.getByPlaceholderText("off"), { target: { value: "-3" } });
+    fireEvent.change(screen.getByPlaceholderText("제한 없음"), { target: { value: "-3" } });
     fireEvent.click(screen.getByRole("tab", { name: "Slack" }));
     fireEvent.click(screen.getByLabelText("설정 닫기"));
     fireEvent.click(screen.getByText("저장하고 닫기"));

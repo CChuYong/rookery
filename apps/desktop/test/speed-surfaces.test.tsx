@@ -20,7 +20,7 @@ it("new master inherits each provider default and sends an explicit selection", 
   fireEvent.click(screen.getByRole("button", { name: /Model settings/ })); // speed lives in the model menu (audit #85)
   expect(screen.getByLabelText("Speed")).toHaveValue("");
   expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
-  fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
+  fireEvent.change(screen.getByTitle("Backend"), { target: { value: "codex" } });
   expect(screen.getByRole("option", { name: "Standard (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "fast" } });
   fireEvent.click(screen.getByLabelText("Start"));
@@ -29,7 +29,7 @@ it("new master inherits each provider default and sends an explicit selection", 
 it("worker spawn carries its own selected preference and labels Codex budgets", () => {
   const onSpawn = vi.fn();
   render(english(<WorkerSpawnPage repo="app" defaultModel={settings.workerModel} defaultEffort="high" onSpawn={onSpawn} onClose={vi.fn()} />));
-  fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
+  fireEvent.change(screen.getByTitle("Backend"), { target: { value: "codex" } });
   fireEvent.click(screen.getByRole("button", { name: /Model settings/ })); // speed lives in the model menu, as on the other composers
   expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByRole("combobox", { name: "Speed" }), { target: { value: "standard" } });

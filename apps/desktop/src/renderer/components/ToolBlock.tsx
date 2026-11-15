@@ -114,13 +114,13 @@ export function ToolBlock({
         <div className="ml-5 space-y-2 rounded-md border border-line-soft bg-sunk px-3 py-2">
           {input && (
             <div>
-              <div className="mb-1 text-meta text-muted">input</div>
+              <div className="mb-1 text-meta text-muted">{t("toolBlock.input")}</div>
               <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-meta leading-relaxed text-fg-dim">{input}</pre>
             </div>
           )}
           {result && (
             <div>
-              <div className="mb-1 text-meta text-muted">result</div>
+              <div className="mb-1 text-meta text-muted">{t("toolBlock.result")}</div>
               <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-mono text-meta leading-relaxed text-fg-dim">{result}</pre>
             </div>
           )}

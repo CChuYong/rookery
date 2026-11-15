@@ -10,7 +10,7 @@ beforeEach(() => useStore.getState().setCodexModels(null));
 describe("SpeedControl meaning", () => {
   it("always carries the speed hint as its tooltip when nothing more specific applies", () => {
     render(<SpeedControl speed={null} model="claude-opus-4-8" onChange={vi.fn()} />);
-    expect(screen.getByLabelText("속도")).toHaveAttribute("title", expect.stringContaining("Fast는 비용이 더 들 수 있습니다"));
+    expect(screen.getByLabelText("속도")).toHaveAttribute("title", expect.stringContaining("빠름은 비용이 더 들 수 있어요"));
   });
 
   it("field variant renders a bordered form select with a visible label", () => {

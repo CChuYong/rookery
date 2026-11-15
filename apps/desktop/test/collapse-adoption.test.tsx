@@ -8,15 +8,15 @@ import { ThinkingBlock } from "../src/renderer/components/ThinkingBlock.js";
 describe("ToolBlock detail uses Collapse (render-latch)", () => {
   it("does not render detail until first opened (lazy)", () => {
     render(<ToolBlock name="Read" status="complete" input='{"file_path":"/r/a.ts"}' result="hello" />);
-    expect(screen.queryByText("result")).toBeNull();
+    expect(screen.queryByText("결과")).toBeNull();
   });
 
   it("keeps the detail mounted after open→close (so exit can animate)", () => {
     render(<ToolBlock name="Read" status="complete" input='{"file_path":"/r/a.ts"}' result="hello" />);
     fireEvent.click(screen.getByText("Read")); // open
-    expect(screen.getByText("result")).toBeInTheDocument();
+    expect(screen.getByText("결과")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Read")); // close
-    expect(screen.getByText("result")).toBeInTheDocument(); // latched, still mounted
+    expect(screen.getByText("결과")).toBeInTheDocument(); // latched, still mounted
   });
 });
 

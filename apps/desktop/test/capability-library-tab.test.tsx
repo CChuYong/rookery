@@ -237,7 +237,7 @@ describe("CapabilityLibraryTab", () => {
 
     await waitFor(() => expect(createMcpPack).toHaveBeenCalledWith(expect.objectContaining({ repoId: "repo-1" })));
     expect(await screen.findByText("MCP pack과 레포 연결을 저장했어요.")).toBeInTheDocument();
-    expect(screen.getByText(/Rookery의 Master\/Worker 대상과 secret 설정/)).toBeInTheDocument();
+    expect(screen.getByText(/Rookery의 마스터\/워커 대상과 secret 설정/)).toBeInTheDocument();
     const generatedCard = await screen.findByTestId("capability-pack-generated-pack");
     expect(generatedCard.className).toContain("ring-pr/15");
     expect(within(generatedCard).getByText("검토 필요")).toBeInTheDocument();

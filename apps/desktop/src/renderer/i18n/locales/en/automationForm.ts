@@ -2,7 +2,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "automationForm.eyebrow": "Automation",
   "automationForm.sectionExecution": "Model / Execution",
-  "automationForm.provider": "Agent backend",
+  "automationForm.provider": "Backend",
   "automationForm.model": "Model",
   "automationForm.effort": "Effort",
   "automationForm.permissionMode": "Permission mode",

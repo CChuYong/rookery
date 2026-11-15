@@ -45,7 +45,7 @@ describe("RightSidebar work-root resolution (audit #2, task 11 review)", () => {
     const ws = stubWs(); // resolveRoot falls back to /home/user, which never ends with "w1"
     useStore.setState({ fleet: fleetRow("orphaned") } as never);
     const { container } = render(<RightSidebar open pageKey="w1" subId="w1" cwd={undefined} activeTabPath={null} />);
-    await waitFor(() => expect(screen.getByText("워크트리를 찾을 수 없어요 — 이미 삭제되었거나 재시작으로 세션이 종료됐어요.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("작업 폴더를 찾을 수 없어요 — 이미 삭제됐거나 재시작으로 세션이 끝났어요.")).toBeInTheDocument());
     expect(container.querySelector(".sheen")).toBeNull();
     // Still just one resolve attempt (no retry loop for a terminal status), the single answer settles it.
     expect(ws.resolveRoot).toHaveBeenCalledTimes(1);

@@ -171,7 +171,7 @@ describe("SettingsPage Codex tab", () => {
     render(<SettingsPage {...base} onSave={onSave} />);
     fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     // scope by label to avoid ambiguity with other Codex-tab fields
-    fireEvent.change(screen.getByLabelText(/Codex 턴 유휴 타임아웃/), { target: { value: "60000" } });
+    fireEvent.change(screen.getByLabelText(/Codex 턴 무응답 타임아웃/), { target: { value: "60000" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexTurnIdleTimeoutMs: "60000" }));
@@ -256,13 +256,13 @@ describe("SettingsPage workerCostBudgetUsd field", () => {
 
   it("empty by default shows the 'off' placeholder", () => {
     render(<SettingsPage {...base} />);
-    expect(screen.getByPlaceholderText("off")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("제한 없음")).toBeInTheDocument();
   });
 
   it("editing the field lands in the onSave(f) bulk-save payload", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.change(screen.getByPlaceholderText("off"), { target: { value: "10.5" } });
+    fireEvent.change(screen.getByPlaceholderText("제한 없음"), { target: { value: "10.5" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ workerCostBudgetUsd: "10.5" }));
@@ -310,7 +310,7 @@ describe("SettingsPage Slack tab — slackProvider", () => {
   it("shows the slackProvider select defaulted to the settings value (claude)", () => {
     render(<SettingsPage {...base} />);
     fireEvent.click(screen.getByText("Slack"));
-    const select = screen.getByLabelText(/Slack 에이전트 백엔드/) as HTMLSelectElement;
+    const select = screen.getByLabelText(/Slack 백엔드/) as HTMLSelectElement;
     expect(select.value).toBe("claude");
   });
 
@@ -318,7 +318,7 @@ describe("SettingsPage Slack tab — slackProvider", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
     fireEvent.click(screen.getByText("Slack"));
-    fireEvent.change(screen.getByLabelText(/Slack 에이전트 백엔드/), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText(/Slack 백엔드/), { target: { value: "codex" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ slackProvider: "codex" }));

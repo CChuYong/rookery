@@ -8,4 +8,6 @@ export default {
   "toolBlock.background": "background",
   "toolBlock.complete": "done",
   "toolBlock.error": "error",
+  "toolBlock.input": "Input",
+  "toolBlock.result": "Result",
 } satisfies Catalog;

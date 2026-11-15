@@ -13,7 +13,7 @@ describe("ReposHome (audit #23)", () => {
     expect(actions.length).toBeGreaterThan(0);
     fireEvent.click(actions[0]!);
     expect(onNewWorker).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("왼쪽에서 워커를 고르거나 새로 만들어요.")).toBeInTheDocument();
+    expect(screen.getByText("왼쪽에서 워커를 고르거나 새 워커를 스폰하세요.")).toBeInTheDocument();
   });
 
   it("offers registering a repo when there is none", () => {

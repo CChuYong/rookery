@@ -1,7 +1,7 @@
 import type { Catalog } from "../../types.js";
 export default {
   "workerSpawnModal.title": "New worker",
-  "workerSpawnModal.repoLabel": "Repository",
+  "workerSpawnModal.repoLabel": "Repo",
   "workerSpawnModal.labelLabel": "Label",
   "workerSpawnModal.baseLabel": "Base branch",
   "workerSpawnModal.permLabel": "Permission mode",
@@ -14,7 +14,7 @@ export default {
   "workerSpawnModal.githubHint": "gh auth required in Settings › Integrations",
   "workerSpawnModal.linearHint": "Enter your Linear key in Settings › Integrations",
   "workerSpawnModal.modelTitle": "Model for this worker (independent of defaults)",
-  "workerSpawnModal.provider": "Agent backend",
+  "workerSpawnModal.provider": "Backend",
   "workerSpawnModal.providerClaude": "Claude",
   "workerSpawnModal.providerCodex": "Codex",
   "workerSpawnModal.effortTitle": "Effort",

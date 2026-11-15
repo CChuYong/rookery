@@ -2,7 +2,7 @@ import type { Catalog } from "../../types.js";
 
 export default {
   "workflowActivity.workflows": "Workflow runs",
-  "workflowActivity.nestedAgents": "Nested agents",
+  "workflowActivity.nestedAgents": "Sub-agents",
   "workflowActivity.running": "Running",
   "workflowActivity.completed": "Completed",
   "workflowActivity.failed": "Failed",
@@ -24,7 +24,7 @@ export default {
   "workflowActivity.historyLoading": "Loading agent history…",
   "workflowActivity.historyFailed": "Agent history could not be loaded.",
   "workflowActivity.empty": "No workflow or sub-agent activity yet.",
-  "workflowActivity.taskFallbackName": "Dynamic Workflow",
+  "workflowActivity.taskFallbackName": "Workflow",
   "workflowActivity.starting": "Starting",
   "workflowActivity.thinking": "Thinking",
   "workflowActivity.responding": "Responding",

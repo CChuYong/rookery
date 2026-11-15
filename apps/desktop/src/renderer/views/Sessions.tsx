@@ -432,7 +432,7 @@ function SessionsImpl(p: {
       {confirm && (
         <ConfirmDialog
           title={t("sessions.deleteTitle")}
-          body={<><span className="text-fg-dim">{confirm.name}</span> {t("sessions.deleteBody")}</>}
+          body={t("sessions.deleteBody", { name: confirm.name })}
           confirmLabel={t("common.delete")}
           variant="danger"
           onCancel={() => setConfirm(null)}

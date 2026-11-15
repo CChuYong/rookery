@@ -18,19 +18,23 @@ export function MetricsView({ items, provider }: { items: LogItem[]; provider?: 
   const ctx = m.tokens > 0 ? m : ([...items].reverse().find((it) => it.kind === "metrics" && (it as { tokens: number }).tokens > 0) as typeof m | undefined) ?? m;
   // "completed" is the SDK's normal terminal reason; only other reasons (api_error, max_turns, …) are worth flagging.
   const reason = m.terminalReason && m.terminalReason !== "completed" ? m.terminalReason : undefined;
+  // Known SDK terminal reasons get a localized label (audit #124); an unknown code is shown as-is. The raw code stays
+  // in the title so a bug report can still quote it.
+  const reasonKey = reason ? `sessionMetrics.reason_${reason}` : undefined;
+  const reasonText = reasonKey ? (t(reasonKey) === reasonKey ? reason : t(reasonKey)) : undefined;
   return (
     <span className="flex items-center gap-2.5 text-meta text-muted">
-      <span className={cn("inline-flex items-baseline gap-1", ctxTone(ctx.contextPct))}>
+      <span className={cn("inline-flex items-baseline gap-1", ctxTone(ctx.contextPct))} title={t("sessionMetrics.ctxTitle")}>
         <span className="tabular-nums">{ctx.contextPct}%</span>
-        <span className="text-meta text-muted/70">ctx</span>
+        <span className="text-meta text-muted/70">{t("sessionMetrics.ctx")}</span>
       </span>
-      <span className="metrics-secondary tabular-nums">{fmtTokens(ctx.tokens)} tok</span>
-      <span className="metrics-secondary tabular-nums">{t("sessionMetrics.turns", { count: m.turns })}</span>
-      <span className="metrics-secondary tabular-nums" aria-label={quality === "unavailable" ? t("speed.costUnavailable") : quality === "estimated" ? t("speed.costEstimated") : undefined}>{quality === "unavailable" ? "—" : `${quality === "estimated" ? `${t("speed.estimated")} ` : ""}${fmtUsd(m.cost)}`}</span>
+      <span className="metrics-secondary tabular-nums" title={t("sessionMetrics.tokTitle")}>{t("sessionMetrics.tok", { count: fmtTokens(ctx.tokens) })}</span>
+      <span className="metrics-secondary tabular-nums" title={t("sessionMetrics.turnsTitle")}>{t("sessionMetrics.turns", { count: m.turns })}</span>
+      <span className="metrics-secondary tabular-nums" title={t("sessionMetrics.costTitle")} aria-label={quality === "unavailable" ? t("speed.costUnavailable") : quality === "estimated" ? t("speed.costEstimated") : undefined}>{quality === "unavailable" ? "—" : `${quality === "estimated" ? `${t("speed.estimated")} ` : ""}${fmtUsd(m.cost)}`}</span>
       {reason && (
         <>
           <span className="metrics-secondary h-3 w-px shrink-0 bg-line" aria-hidden />
-          <span className="metrics-secondary text-fail" title={t("sessionMetrics.terminalReason")}>⚠ {reason}</span>
+          <span className="metrics-secondary text-fail" title={`${t("sessionMetrics.terminalReason")} · ${reason}`}>⚠ {reasonText}</span>
         </>
       )}
     </span>

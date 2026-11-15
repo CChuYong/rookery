@@ -22,7 +22,7 @@ describe("NewSessionPage folder menu", () => {
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Opus 4\.8 · 높음/ }));
     const menu = screen.getByRole("dialog");
-    expect(menu).toContainElement(screen.getByTitle("에이전트 백엔드"));
+    expect(menu).toContainElement(screen.getByTitle("백엔드"));
     expect(menu).toContainElement(screen.getByRole("combobox", { name: "속도" }));
   });
 });

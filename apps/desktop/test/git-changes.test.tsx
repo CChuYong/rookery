@@ -89,7 +89,7 @@ describe("GitChanges", () => {
   it("a folder that isn't a git repository says so — no change list, commit box or History", async () => {
     stubWs({ gitInfo: vi.fn(async () => ({ isRepo: false })), gitChanges: vi.fn(async () => { throw new Error("fatal: not a git repository"); }) });
     render(<GitChanges root="/r" pageKey="p1" />);
-    expect(await screen.findByText("이 폴더는 git 저장소가 아니에요.")).toBeInTheDocument();
+    expect(await screen.findByText("이 폴더는 git 레포가 아니에요.")).toBeInTheDocument();
     expect(screen.queryByText("변경 사항이 없어요.")).toBeNull();
     expect(screen.queryByPlaceholderText(/커밋/)).toBeNull();
     expect(screen.queryByText("기록")).toBeNull();

@@ -13,7 +13,7 @@ export default {
   "capabilityCatalog.kind.skill": "Skill",
   "capabilityCatalog.kind.bundle": "Bundle",
   "capabilityCatalog.mcpTitle": "Add an MCP server",
-  "capabilityCatalog.mcpDescription": "Register one MCP server in the Catalog. Choose where to use it later from repository settings.",
+  "capabilityCatalog.mcpDescription": "Register one MCP server in the Catalog. Choose where to use it later from repo settings.",
   "capabilityCatalog.registerMcp": "Register MCP",
   "capabilityCatalog.skillTitle": "Import a skill",
   "capabilityCatalog.skillDescription": "Copy a local skill directory into Rookery's Catalog as a reviewable snapshot.",
@@ -25,6 +25,6 @@ export default {
   "capabilityCatalog.skillRequired": "Enter a name and ID, then choose a skill directory.",
   "capabilityCatalog.skillTrustNotice": "The copied snapshot remains disabled until you review and trust its digest.",
   "capabilityCatalog.createdTitle": "Capability registered in the Catalog.",
-  "capabilityCatalog.createdNext": "Review the item below and trust its current digest. You can then enable it per repository.",
+  "capabilityCatalog.createdNext": "Review the item below and trust its current digest. You can then enable it per repo.",
   "capabilityCatalog.noMatches": "No capabilities match this search.",
 } satisfies Catalog;

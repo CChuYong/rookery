@@ -8,7 +8,7 @@ export default {
   "notice.informational": "{text}",
   "notice.compactFailed": "⚠ Context compaction failed{detail}",
   "notice.requiresAction": "⏸ Input/approval needed",
-  "notice.interrupted": "⏹ Stopped",
+  "notice.interrupted": "⏹ Interrupted",
   "notice.queuedCancelled": "⏹ Cancelled {count} queued request(s)",
   "notice.turnCap": "Turn cap reached (maxTurns={max}, num_turns={turns}) — consider stopping this session.",
   "notice.costUnavailable": "Cost estimate unavailable; review model/tier pricing before continuing. Known spend excludes this turn.",

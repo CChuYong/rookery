@@ -33,7 +33,7 @@ export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { to
         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", running ? "bg-run led-live" : errors ? "bg-fail" : "bg-faint", justSettled && "dot-settle")} />
         <span className="shrink-0 text-fg-dim">{t("toolGroup.toolCalls", { count: tools.length })}</span>
         <span className="truncate text-meta text-faint">{names}</span>
-        {errors > 0 && <span className="ml-1 shrink-0 text-meta text-fail">{errors} error</span>}
+        {errors > 0 && <span className="ml-1 shrink-0 text-meta text-fail">{t(errors === 1 ? "toolGroup.errorsOne" : "toolGroup.errorsMany", { count: errors })}</span>}
       </button>
       <Collapse open={open}>
         <div className="ml-5 flex flex-col gap-0.5 pt-0.5">

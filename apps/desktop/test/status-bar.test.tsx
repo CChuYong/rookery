@@ -31,7 +31,7 @@ describe("StatusBar", () => {
   // visible status bar instead of a bell in the sidebar header plus a second bell-shaped toggle here.
   it("shows exactly one bell — the attention queue — and no separate notification toggle", () => {
     render(<StatusBar {...props} />);
-    expect(screen.getByLabelText(/어텐션 큐/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/알림 대기열/)).toBeInTheDocument();
     expect(screen.queryByLabelText("알림 켜짐 — 클릭해 끄기")).toBeNull();
     expect(screen.queryByLabelText("알림 꺼짐 — 클릭해 켜기")).toBeNull();
   });

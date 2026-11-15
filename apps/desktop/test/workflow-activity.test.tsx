@@ -103,7 +103,7 @@ describe("Dynamic Workflow Activity", () => {
     useStore.setState({ workflows: { w1: { task: run() } } });
     const { rerender } = render(panel(vi.fn(), [{ id: "nested-1", label: "reviewer", items: [{ kind: "message", role: "assistant", content: "nested transcript" }] }]));
     expect(screen.getByText(/워크플로 실행/)).toBeInTheDocument();
-    expect(screen.getByText(/중첩 에이전트/)).toBeInTheDocument();
+    expect(screen.getByText(/하위 에이전트/)).toBeInTheDocument();
     expect(screen.getByText("nested transcript")).toBeInTheDocument();
     act(() => useStore.setState({ workflows: {} }));
     rerender(panel());
@@ -128,7 +128,7 @@ describe("Dynamic Workflow Activity", () => {
     useStore.setState({ fleet: { w1: { id: "w1", status: "stopped" } as never } });
     render(panel());
     expect(screen.getByText("기록된 활동이 없어요 — 하위 에이전트 활동은 실행 중에만 보여요.")).toBeInTheDocument();
-    expect(screen.queryByText(/중첩 에이전트/)).toBeNull();
+    expect(screen.getAllByText(/하위 에이전트/)).toHaveLength(1); // only the empty-state line — no sub-agent section header
     useStore.setState({ fleet: {} });
   });
 

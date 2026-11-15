@@ -131,7 +131,7 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
     expect(await screen.findByRole("heading", { name: "Rookery 기본값" })).toBeInTheDocument();
     expect(loadSnapshot).toHaveBeenCalledWith(rookeryTarget);
-    expect(screen.getByText((content) => content.includes("범위 설정만 보여줍니다"))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("범위 설정만 보여 줘요"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "유효 상태" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "카탈로그" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "할당" })).toBeInTheDocument();
@@ -196,8 +196,8 @@ describe("CapabilitiesPage", () => {
     expect(within(targetSelect).getByRole("option", { name: "Worker 2" })).toBeInTheDocument();
     fireEvent.change(targetSelect, { target: { value: "repo:repo-1" } });
     await waitFor(() => expect(loadSnapshot).toHaveBeenLastCalledWith({ kind: "repo", id: "repo-1", provider: "claude", agent: "master" }));
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "codex" } });
-    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "worker" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("에이전트"), { target: { value: "worker" } });
     await waitFor(() => expect(loadSnapshot).toHaveBeenLastCalledWith({ kind: "repo", id: "repo-1", provider: "codex", agent: "worker" }));
     expect(screen.queryByTestId("capability-worker-reload")).toBeNull();
   });
@@ -279,9 +279,9 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={workerTarget} {...pageProps(api)} />);
 
     await screen.findByTestId("capability-worker-reload");
-    fireEvent.click(screen.getByRole("button", { name: "대기 상태일 때" }));
+    fireEvent.click(screen.getByRole("button", { name: "대기 중일 때" }));
     await waitFor(() => expect(api.reloadWorker).toHaveBeenCalledWith("w1", true));
-    expect(await screen.findByText(/대기 상태가 되면/)).toBeInTheDocument();
+    expect(await screen.findByText(/대기 중이 되면/)).toBeInTheDocument();
   });
 
   it("shows worker reload failures and does not offer reload controls for a master session", async () => {

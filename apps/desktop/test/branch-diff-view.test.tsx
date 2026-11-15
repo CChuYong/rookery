@@ -23,7 +23,7 @@ describe("BranchDiffView", () => {
 
   it("says so when the branch has no changes against its base", async () => {
     render(<BranchDiffView workerId="w1" loadDiff={async () => ""} />);
-    expect(await screen.findByText("베이스 이후 변경이 없어요")).toBeInTheDocument();
+    expect(await screen.findByText("기준 브랜치 이후 변경 사항이 없어요")).toBeInTheDocument();
   });
 
   it("shows an error with a retry when the diff can't be loaded", async () => {

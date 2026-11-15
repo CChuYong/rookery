@@ -1,6 +1,6 @@
 export default {
   "speed.label": "Speed",
-  "speed.hint": "Fast can cost more. The provider checks availability. Changes apply next turn.",
+  "speed.hint": "Fast can cost more. The backend checks availability. Changes apply next turn.",
   "speed.inherit": "{speed} (default)",
   "speed.inherited": "Inherited: {speed}",
   "speed.pending": "Applies next turn",
@@ -8,7 +8,7 @@ export default {
   "speed.activeFast": "Last reported: Fast",
   "speed.activeStandard": "Last reported: Standard",
   "speed.cooldown": "Fast cooldown",
-  "speed.mismatch": "Fast requested, but the provider reported a different speed",
+  "speed.mismatch": "Fast requested, but the backend reported a different speed",
   "speed.requestedFast": "Fast requested; effective speed unknown",
   "speed.requestedStandard": "Standard requested; effective speed unknown",
   "speed.availabilityUnknown": "Availability unknown",

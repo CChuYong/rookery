@@ -10,7 +10,7 @@ import { AssistantMessage } from "./AssistantMessage.js";
 import { UserMarkdown } from "./Markdown.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { cn } from "../lib/cn.js";
-import { railClass, statusTag, statusLabelKey, isLive } from "../lib/status.js";
+import { railClass, statusShortKey, statusLabelKey, isLive } from "../lib/status.js";
 import { scrollToBottom } from "../lib/scroll.js";
 import { useT } from "../i18n/provider.js";
 import { SkeletonRows } from "./Skeleton.js";
@@ -149,7 +149,7 @@ function MessageListImpl({
       // marker for a worker spawned by the master. if onSelectWorker is present (master conversation), click to jump to that worker view (repo tab).
       const wid = it.workerId;
       const dotCls = cn("h-1.5 w-1.5 shrink-0 rounded-full", isLive(it.status) ? "bg-run led-live" : railClass(it.status));
-      const tail = `→ ${statusTag(it.status).toLowerCase()}`;
+      const tail = `→ ${t(statusShortKey(it.status))}`;
       rows.push(
         onSelectWorker ? (
           <button

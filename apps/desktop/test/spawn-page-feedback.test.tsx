@@ -33,7 +33,7 @@ describe("WorkerSpawnPage source and branch failures", () => {
     const picker = screen.getByRole("combobox", { name: "기준 브랜치" });
     expect(picker).toBeDisabled();
     expect(picker).toHaveTextContent(/브랜치를 불러오지 못했어요/);
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls[0]![4]).toBeUndefined(); // base = repo default
   });
 });
@@ -47,7 +47,7 @@ describe("WorkerSpawnPage cost budget validation", () => {
     fireEvent.change(taskBox(), { target: { value: "t1" } });
     // collapsed More shows an error marker
     expect(screen.getByRole("button", { name: /더보기/ })).toHaveAccessibleDescription(/0보다 큰 금액/);
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn).not.toHaveBeenCalled();
     expect(screen.getByTitle("비용 예산 (USD, 이 워커)")).toBeVisible();
     expect(screen.getByTitle("비용 예산 (USD, 이 워커)")).toHaveAttribute("aria-invalid", "true");
@@ -73,6 +73,6 @@ describe("WorkerSpawnPage submit key", () => {
     const menu = screen.getByRole("dialog");
     expect(menu).toContainElement(screen.getByRole("combobox", { name: "권한 모드" }));
     expect(menu).toContainElement(screen.getByRole("combobox", { name: "속도" }));
-    expect(menu).toContainElement(screen.getByTitle("에이전트 백엔드"));
+    expect(menu).toContainElement(screen.getByTitle("백엔드"));
   });
 });

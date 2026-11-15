@@ -45,11 +45,11 @@ describe("RepoTree", () => {
     expect(screen.getByText("arch-sub")).toBeInTheDocument(); // visible when expanded
     // right-click idle worker → End (terminal tree stop) shows
     fireEvent.contextMenu(screen.getByText("live-sub"));
-    fireEvent.click(screen.getByText("종료"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^중지/ }));
     expect(onStopSub).toHaveBeenCalledWith("a1");
     // right-click stopped (archived) worker → no End
     fireEvent.contextMenu(screen.getByText("arch-sub"));
-    expect(screen.queryByText("종료")).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /^중지/ })).toBeNull();
     fireEvent.contextMenu(screen.getByText("live-sub"));
     fireEvent.click(screen.getByText("보관"));
     expect(onArchiveSub).toHaveBeenCalledWith("a1", true);
@@ -94,12 +94,12 @@ describe("RepoTree", () => {
     expect(screen.queryByText("beta-1")).toBeNull(); // filtered out
   });
 
-  it("shows a provisioning worker with the PREP tag (worktree being created)", () => {
+  it("shows a provisioning worker with the 준비 tag (worktree being created)", () => {
     const repos = [{ name: "app", path: "/p", description: "결제", base: null }];
     const fleet: FleetRow[] = [{ id: "a1", label: "spawning-sub", repoPath: "/p", status: "provisioning", branch: "rookery/a1", model: null, permissionMode: "bypassPermissions" }];
     render(<RepoTree repos={repos} fleet={fleet} activeSubId={null} onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}} />);
     expect(screen.getByText("spawning-sub")).toBeInTheDocument();
-    expect(screen.getByText("PREP")).toBeInTheDocument(); // statusTag(provisioning)
+    expect(screen.getByText("준비")).toBeInTheDocument(); // status.short_provisioning
   });
 
   it("groups workers of unregistered repos under Other and fires New repo", () => {

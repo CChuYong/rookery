@@ -6,7 +6,7 @@ import type { FleetRow, LogItem } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
 import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
 import { Input } from "../ui/input.js";
-import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
+import { railClass, statusShortKey, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
 import { baseName } from "../lib/path.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { ContextMenu, type AnchorRect, type MenuItem } from "../components/ContextMenu.js";
@@ -193,7 +193,7 @@ function RepoTreeImpl(p: {
                 (not mono — it's a status word, not a measurement) — but the title carries the full localized word,
                 same label source as the header StatusBadge, so tree and header never disagree (audit #50: tree used
                 to say 'ORPH' while the header said 'orphaned'). */}
-            <span title={t(statusLabelKey(sub.status))} className={cn("shrink-0 text-meta font-medium transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", railClass(sub.status).replace("bg-", "text-"))}>{statusTag(sub.status)}</span>
+            <span title={t(statusLabelKey(sub.status))} className={cn("shrink-0 text-meta font-medium transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", railClass(sub.status).replace("bg-", "text-"))}>{t(statusShortKey(sub.status))}</span>
             {/* unread: worker that finished without being viewed — dot on the right (neutral = ready, red = error; the blue dot
                 means "working", so unread doesn't borrow it — audit #100). Disappears once viewed (select). */}
             {p.attention?.[sub.id] && !active && (
@@ -313,7 +313,7 @@ function RepoTreeImpl(p: {
         <div className="mt-1">
           <button onClick={() => setArchOpen(!archOpen)} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-meta font-medium text-faint hover:text-fg-dim">
             <ChevronRight size={12} className={cn("transition-transform duration-200 ease-out", archOpen && "rotate-90")} />
-            <Archive size={12} /> {t("repoTree.archive")} {archived.length}
+            <Archive size={12} /> {t("repoTree.archivedSection", { count: archived.length })}
           </button>
           <Collapse open={archOpen}><div className="ml-3 flex flex-col gap-0.5 border-l border-line pl-2 opacity-80">{archived.map(subButton)}</div></Collapse>
         </div>
@@ -366,7 +366,7 @@ function RepoTreeImpl(p: {
       {confirm && (
         <ConfirmDialog
           title={t("repoTree.deleteWorkerTitle")}
-          body={<><span className="text-fg-dim">{confirm.name}</span>{t("repoTree.deleteWorkerConfirm")}</>}
+          body={t("repoTree.deleteWorkerConfirm", { name: confirm.name })}
           confirmLabel={t("common.delete")}
           variant="danger"
           onCancel={() => setConfirm(null)}

@@ -25,7 +25,7 @@ describe("WorkerSpawnPage", () => {
 
   it("keeps rarely-used options (label, cost budget) behind More", () => {
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
-    const label = screen.getByPlaceholderText("label (선택)");
+    const label = screen.getByPlaceholderText("라벨 (선택)");
     expect(label).not.toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /더보기/ }));
     expect(label).toBeVisible();
@@ -64,7 +64,7 @@ describe("WorkerSpawnPage", () => {
     const onClose = vi.fn();
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
     fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "spawn once" } });
-    const spawnButton = screen.getByRole("button", { name: "spawn" });
+    const spawnButton = screen.getByRole("button", { name: "스폰" });
 
     fireEvent.click(spawnButton);
 
@@ -89,9 +89,9 @@ describe("WorkerSpawnPage", () => {
     const prompt = screen.getByPlaceholderText(/적어주세요/);
     fireEvent.change(prompt, { target: { value: "preserve this after failure" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "spawn" })).not.toHaveAttribute("aria-busy"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "스폰" })).not.toHaveAttribute("aria-busy"));
     expect(onClose).not.toHaveBeenCalled();
     expect(prompt).toHaveValue("preserve this after failure");
     expect(screen.getByRole("region", { name: "새 워커" })).toBeInTheDocument();
@@ -102,9 +102,9 @@ describe("WorkerSpawnPage", () => {
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" branches={["main", "dev"]} onSpawn={onSpawn} onClose={() => {}} />);
     // Direct-write mode: no search box
     expect(screen.queryByPlaceholderText(/검색/)).toBeNull();
-    fireEvent.change(screen.getByTitle(/base 브랜치/), { target: { value: "dev" } });
+    fireEvent.change(screen.getByTitle(/기준 브랜치/), { target: { value: "dev" } });
     fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "do it" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn).toHaveBeenCalledWith("do it", "", "claude-opus-4-8", "high", "dev", undefined, "bypassPermissions", undefined, undefined); // no ticket → undefined; default permission; default provider (claude) → undefined; no cost budget → undefined
   });
 
@@ -114,10 +114,10 @@ describe("WorkerSpawnPage", () => {
     const sel = screen.getByTitle(/권한 모드|Permission mode/) as HTMLSelectElement;
     expect(sel.value).toBe("bypassPermissions");
     // restricted to bypass + plan (no default/acceptEdits)
-    expect(screen.getByText("Plan Mode")).toBeInTheDocument();
+    expect(screen.getByText("계획 모드")).toBeInTheDocument();
     expect(screen.queryByText("Accept Edits")).toBeNull();
     fireEvent.change(sel, { target: { value: "plan" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "claude-opus-4-8", "high", undefined, undefined, "plan", undefined, undefined]);
   });
 
@@ -133,7 +133,7 @@ describe("WorkerSpawnPage", () => {
     fireEvent.change(input, { target: { value: "ship" } });
     fireEvent.click(await screen.findByText(/ABC-7/));
     await waitFor(() => expect((screen.getByPlaceholderText(/적어주세요/) as HTMLTextAreaElement).value).toContain("do it"));
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls.at(-1)![5]).toEqual({ key: "ABC-7", url: "https://l/ABC-7" });
   });
 
@@ -159,7 +159,7 @@ describe("WorkerSpawnPage", () => {
     await waitFor(() => expect(searchSource).toHaveBeenCalledWith("linear", "ship"));
     fireEvent.click(await screen.findByText(/ABC-7/));
     await waitFor(() => expect((screen.getByPlaceholderText(/적어주세요/) as HTMLTextAreaElement).value).toContain("do it"));
-    expect((screen.getByPlaceholderText("label (선택)") as HTMLInputElement).value).toBe("ABC-7 Ship it");
+    expect((screen.getByPlaceholderText("라벨 (선택)") as HTMLInputElement).value).toBe("ABC-7 Ship it");
     // after selection it shows as a chip and the search box disappears
     expect(screen.queryByPlaceholderText(/티켓 검색/)).toBeNull();
   });
@@ -168,7 +168,7 @@ describe("WorkerSpawnPage", () => {
     const onSpawn = vi.fn();
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     // task left empty (default), click spawn
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn).toHaveBeenCalledWith("", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions", undefined, undefined);
   });
 
@@ -176,7 +176,7 @@ describe("WorkerSpawnPage", () => {
     const onSpawn = vi.fn();
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "fix the bug" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn).toHaveBeenCalledWith("fix the bug", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions", undefined, undefined);
   });
 
@@ -211,18 +211,18 @@ describe("WorkerSpawnPage codex model+effort onSpawn payload (Codex Model Picker
     useStore.getState().setCodexModels(CODEX_MODELS);
     const onSpawn = vi.fn();
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.5" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-5.5", "xhigh", undefined, undefined, "bypassPermissions", "codex", undefined]);
   });
 
   it("codexModels null — onSpawn still carries the typed free-text model + the generic default effort", () => {
     const onSpawn = vi.fn();
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-6" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-6", "high", undefined, undefined, "bypassPermissions", "codex", undefined]); // effort defaults from p.defaultEffort, unchanged by the (absent) catalog
   });
 
@@ -265,13 +265,13 @@ describe("WorkerSpawnPage draft (spawnWorker:<repo>)", () => {
   it("restores the typed task and label after the page is closed and reopened", () => {
     const first = render(page("app"));
     fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "half-written task" } });
-    fireEvent.change(screen.getByPlaceholderText("label (선택)"), { target: { value: "my label" } });
+    fireEvent.change(screen.getByPlaceholderText("라벨 (선택)"), { target: { value: "my label" } });
     first.unmount();
     expect(useDraftStore.getState().byPage["spawnWorker:app"]).toEqual({ text: "half-written task", images: [], label: "my label" });
 
     render(page("app"));
     expect(screen.getByPlaceholderText(/적어주세요/)).toHaveValue("half-written task");
-    expect(screen.getByPlaceholderText("label (선택)")).toHaveValue("my label");
+    expect(screen.getByPlaceholderText("라벨 (선택)")).toHaveValue("my label");
   });
 
   it("keeps drafts per repo", () => {
@@ -284,7 +284,7 @@ describe("WorkerSpawnPage draft (spawnWorker:<repo>)", () => {
     const onClose = vi.fn();
     render(page("app", { onSpawn: () => Promise.resolve(), onClose }));
     fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "ship it" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(useDraftStore.getState().byPage["spawnWorker:app"]).toBeUndefined();
   });
@@ -292,8 +292,8 @@ describe("WorkerSpawnPage draft (spawnWorker:<repo>)", () => {
   it("keeps the draft when the spawn fails", async () => {
     render(page("app", { onSpawn: () => Promise.reject(new Error("boom")) }));
     fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "retry me" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "spawn" })).not.toHaveAttribute("aria-busy"));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "스폰" })).not.toHaveAttribute("aria-busy"));
     expect(useDraftStore.getState().byPage["spawnWorker:app"]?.text).toBe("retry me");
   });
 
@@ -341,7 +341,7 @@ describe("WorkerSpawnPage draft (spawnWorker:<repo>)", () => {
     expect(screen.getByText("ABC-7")).toBeInTheDocument();
     expect(screen.getByText("Ship it")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/티켓 검색/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     await waitFor(() => expect(onSpawn).toHaveBeenCalledTimes(1));
     expect((onSpawn.mock.calls[0] as unknown[])[5]).toEqual({ key: "ABC-7", url: "https://l/ABC-7" });
     await waitFor(() => expect(useDraftStore.getState().byPage["spawnWorker:app"]).toBeUndefined());

@@ -5,7 +5,7 @@ import { CheckpointMenu } from "../src/renderer/components/CheckpointMenu.js";
 // Reverting to a checkpoint discards later changes to tracked files — an irreversible action, so it goes through the
 // shared ConfirmDialog like every other irreversible action (audit #103), not a same-button double click.
 const confirmRevert = (): void => {
-  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "되돌리기" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "복원" }));
 };
 
 describe("CheckpointMenu", () => {
@@ -24,7 +24,7 @@ describe("CheckpointMenu", () => {
         { seq: 1, sha: "b", createdAt: "2026-06-21T14:00:00Z" },
       ]);
       render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
-      fireEvent.click(screen.getByText("되돌리기"));
+      fireEvent.click(screen.getByText("복원"));
       await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
       // Turn 2 (created exactly "now") reads as the relative-time "방금" ("just now"), not a bare clock time.
       expect(screen.getByText("방금")).toBeInTheDocument();
@@ -42,12 +42,12 @@ describe("CheckpointMenu", () => {
     ]);
     const onRestore = vi.fn().mockResolvedValue(undefined);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     expect(fetchCheckpoints).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 1")); // opens the confirm dialog
     expect(onRestore).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "턴 1 시작 전으로 되돌릴까요?" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "턴 1 시작 전으로 파일을 복원할까요?" })).toBeInTheDocument();
     confirmRevert();
     expect(onRestore).toHaveBeenCalledWith(0);
     // Closes only after the restore promise settles (success here) — the menu should disappear.
@@ -59,7 +59,7 @@ describe("CheckpointMenu", () => {
     let finish!: () => void;
     const onRestore = vi.fn(() => new Promise<void>((res) => { finish = res; }));
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 1"));
     confirmRevert();
@@ -72,10 +72,10 @@ describe("CheckpointMenu", () => {
   it("says the revert goes back to before the turn started (checkpoints are taken at turn start)", async () => {
     const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 2, sha: "c", createdAt: "2026-06-20T10:00:00Z" }]);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 3")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 3"));
-    const dialog = screen.getByRole("dialog", { name: "턴 3 시작 전으로 되돌릴까요?" });
+    const dialog = screen.getByRole("dialog", { name: "턴 3 시작 전으로 파일을 복원할까요?" });
     expect(dialog).toHaveTextContent("이 턴의 변경");
   });
 
@@ -83,7 +83,7 @@ describe("CheckpointMenu", () => {
     const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
     const onRestore = vi.fn();
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 1"));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "취소" }));
@@ -96,7 +96,7 @@ describe("CheckpointMenu", () => {
     const fetchCheckpoints = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([]);
     const onRestore = vi.fn();
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("목록을 불러오지 못했어요 — 다시 시도")).toBeInTheDocument());
     expect(screen.queryByText("체크포인트 없음")).toBeNull();
     // Retry re-runs the fetch; this time it resolves to an empty list → the real empty copy shows, not loadFailed.
@@ -110,7 +110,7 @@ describe("CheckpointMenu", () => {
     const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
     const onRestore = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 1")); // ask
     confirmRevert(); // confirm → rejects
@@ -129,7 +129,7 @@ describe("CheckpointMenu", () => {
     const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
     const onRestore = vi.fn().mockResolvedValue(undefined);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     fireEvent.click(screen.getByText("턴 1")); // ask
     confirmRevert(); // confirm → succeeds, closes the menu
@@ -137,7 +137,7 @@ describe("CheckpointMenu", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull()); // the confirm's exit animation has finished
     // Reopen: the row must not be stuck disabled from the previous restore.
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     expect(screen.getByRole("menuitem")).not.toBeDisabled();
     fireEvent.click(screen.getByText("턴 1")); // ask again
@@ -156,7 +156,7 @@ describe("CheckpointMenu keyboard nav (audit #60)", () => {
       { seq: 1, sha: "b", createdAt: "2026-06-20T10:05:00Z" },
     ]);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 2")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText("턴 1").closest('[role="menuitem"]')).toHaveFocus());
   });
@@ -167,7 +167,7 @@ describe("CheckpointMenu keyboard nav (audit #60)", () => {
       { seq: 1, sha: "b", createdAt: "2026-06-20T10:05:00Z" },
     ]);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={vi.fn()} />);
-    fireEvent.click(screen.getByText("되돌리기"));
+    fireEvent.click(screen.getByText("복원"));
     await waitFor(() => expect(screen.getByText("턴 1").closest('[role="menuitem"]')).toHaveFocus());
     fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowDown" });
     expect(screen.getByText("턴 2").closest('[role="menuitem"]')).toHaveFocus();

@@ -94,13 +94,13 @@ export function StatusBar(p: {
     <div className="flex h-6 shrink-0 items-center gap-3 whitespace-nowrap bg-sunk px-2 text-meta text-fg-dim">
       {/* Daemon state appears only when it needs attention (starting / down); a healthy daemon stays out of the way. */}
       {p.daemon !== "up" && (
-        <span className={item} title={`daemon · ${p.daemonStatusText}`}>
+        <span className={item} title={`${t("resourceMonitor.daemon")} · ${p.daemonStatusText}`}>
           <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", p.daemon === "starting" ? "bg-run led-live" : "bg-fail")} />
-          <span>Daemon</span>
+          <span>{t("resourceMonitor.daemon")}</span>
           <span className="truncate text-muted">{p.daemonStatusText}</span>
         </span>
       )}
-      <span className={item} title={`slack · ${p.slackStatusText}`}>
+      <span className={item} title={`Slack · ${p.slackStatusText}`}>
         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-200", p.slack === "up" ? "bg-pr" : p.slack === "connecting" ? "bg-run led-live" : p.slack === "error" ? "bg-fail" : "bg-stop", p.slackJustUp && "status-flash")} />
         <span>Slack</span>
         {p.slack !== "up" && <span className="truncate text-muted">{p.slackStatusText}</span>}

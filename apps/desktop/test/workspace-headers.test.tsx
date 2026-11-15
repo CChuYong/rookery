@@ -24,7 +24,7 @@ describe("WorkerHeader background reason", () => {
   it("shows active workflow count without replacing the worker status", () => {
     useStore.setState({ workflows: { w1: { task: { taskId: "task", workflowName: "audit", summary: "", status: "running", visibility: "live", startedAt: 1, lastActivityAt: 2, counts: { started: 1, active: 1, completed: 0, stopped: 0 }, agents: [] } } } } as never);
     render(<WorkerHeader {...baseProps} worker={{ id: "w1", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 1, types: ["local_workflow"] } } as never} />);
-    expect(screen.getByText("Workflow · 1")).toBeInTheDocument();
+    expect(screen.getByText("워크플로 · 1")).toBeInTheDocument();
     expect(screen.getByText("백그라운드 작업 중")).toBeInTheDocument();
     expect(screen.queryByText("백그라운드 · 1")).toBeNull();
   });
@@ -95,7 +95,7 @@ describe("WorkerHeader background task list", () => {
   it("workflow label still wins when a workflow is running", () => {
     useStore.setState({ workflows: { wt4: { task: { taskId: "task", workflowName: "audit", summary: "", status: "running", visibility: "live", startedAt: 1, lastActivityAt: 2, counts: { started: 1, active: 1, completed: 0, stopped: 0 }, agents: [] } } } } as never);
     render(<WorkerHeader {...baseProps} worker={{ id: "wt4", label: "t", repoPath: "/r", status: "background", branch: null, model: null, bg: { count: 1, types: ["local_workflow"] }, tasks } as never} />);
-    expect(screen.getByText("Workflow · 1")).toBeInTheDocument();
+    expect(screen.getByText("워크플로 · 1")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "백그라운드 작업" })).toBeNull();
   });
 });
@@ -296,7 +296,7 @@ describe("header overflow menu (audit #21)", () => {
     render(<WorkerHeader {...baseProps} termPageKey="w1" dock onStopTask={onStopTask} onFetchCheckpoints={onFetchCheckpoints} worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: "rookery/eng-1", model: null, ticketKey: "ENG-1", ticketUrl: "https://l/ENG-1", tasks } as never} />);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
-    expect(labels).toEqual(["체크포인트로 되돌리기…", "중지: npm test --watchlocal_bash", "티켓 열기: ENG-1", "레이아웃 초기화"]);
+    expect(labels).toEqual(["체크포인트로 복원…", "중지: npm test --watchlocal_bash", "티켓 열기: ENG-1", "레이아웃 초기화"]);
     fireEvent.click(screen.getByRole("menuitem", { name: /중지: npm test/ }));
     expect(onStopTask).toHaveBeenCalledWith("b1");
   });
@@ -305,7 +305,7 @@ describe("header overflow menu (audit #21)", () => {
     const onFetchCheckpoints = vi.fn(async () => [{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
     render(<WorkerHeader {...baseProps} termPageKey="w1" dock onFetchCheckpoints={onFetchCheckpoints} worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: null, model: null } as never} />);
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "체크포인트로 되돌리기…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "체크포인트로 복원…" }));
     expect(onFetchCheckpoints).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("턴 1")).toBeInTheDocument();
   });
@@ -317,7 +317,7 @@ describe("header overflow menu (audit #21)", () => {
     fireEvent.click(screen.getByRole("button", { name: "더보기" }));
     const menu = screen.getByRole("menu");
     expect(menu).toHaveTextContent("42%");
-    expect(menu).toHaveTextContent("1.0k tok");
+    expect(menu).toHaveTextContent("1.0k 토큰");
     fireEvent.click(screen.getByRole("menuitem", { name: "레이아웃 초기화" }));
     expect(useLayoutStore.getState().byPage.p1).toBeUndefined();
   });

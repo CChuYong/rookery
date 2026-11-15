@@ -595,7 +595,7 @@ export function AutomationForm(p: {
                   inputMode="decimal"
                   value={costBudget}
                   onChange={(e) => setCostBudget(e.target.value)}
-                  placeholder="off"
+                  placeholder={t("common.noLimit")}
                   aria-invalid={budgetInvalid || undefined}
                   aria-describedby={budgetInvalid ? "automation-budget-error" : undefined}
                   className={cn(budgetInvalid && "border-fail")}

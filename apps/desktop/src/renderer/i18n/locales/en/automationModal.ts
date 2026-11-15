@@ -30,7 +30,7 @@ export default {
   "automationModal.fromUsersHint": "User ids like U123,U456. Leave empty to match any sender.",
   "automationModal.actionType": "Action",
   "automationModal.prompt": "Prompt",
-  "automationModal.cwd": "Working directory",
+  "automationModal.cwd": "Working folder",
   "automationModal.sessionMode": "Session",
   "automationModal.sessionReuse": "Reuse (keep context)",
   "automationModal.sessionFresh": "Fresh each run",

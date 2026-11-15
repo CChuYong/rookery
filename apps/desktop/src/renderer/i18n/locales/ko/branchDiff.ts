@@ -1,6 +1,6 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "branchDiff.empty": "베이스 이후 변경이 없어요",
+  "branchDiff.empty": "기준 브랜치 이후 변경 사항이 없어요",
   "branchDiff.loadFailed": "브랜치 변경을 불러오지 못했어요",
   "branchDiff.files": "변경된 파일 {count}개",
   "branchDiff.vsForkPoint": "분기 시점 대비 변경",

@@ -6,7 +6,7 @@ export default {
   "workspaceHeaders.rightPanelAria": "Right panel",
   "workspaceHeaders.rightPanelTitle": "Files · Git · Activity",
   "workspaceHeaders.resetLayout": "Reset layout",
-  "workspaceHeaders.slackReadOnly": "slack · read-only",
+  "workspaceHeaders.slackReadOnly": "Slack · read-only",
   "workspaceHeaders.working": "Working",
   "workspaceHeaders.openTicket": "Open ticket",
   "workspaceHeaders.workerEyebrow": "Worker",
@@ -24,6 +24,6 @@ export default {
   "workspaceHeaders.layoutReset": "Panel layout reset for this page",
   "workspaceHeaders.undo": "Undo",
   "workspaceHeaders.overflowTabs": "{count} hidden tabs",
-  "workspaceHeaders.restoreCheckpoint": "Revert to a checkpoint…",
+  "workspaceHeaders.restoreCheckpoint": "Restore checkpoint…",
   "workspaceHeaders.openTicketKey": "Open ticket: {key}",
 } satisfies Catalog;

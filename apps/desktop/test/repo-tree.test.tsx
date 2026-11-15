@@ -274,7 +274,7 @@ describe("RepoTree fallback-label disambiguating subline (audit #46)", () => {
   });
 });
 
-// Audit #50: the tree's status tag is a deliberate colorblind-safe abbreviation (kept short — "ORPH"), but it must
+// Audit #50: the tree's status tag is a deliberate colorblind-safe short word (kept short — "유실"), but it must
 // carry the SAME full-word label as the header StatusBadge via its title, so the two never disagree.
 describe("RepoTree status tag full-word title (audit #50)", () => {
   it("shows the short colorblind tag but titles it with the full localized state name", () => {
@@ -290,7 +290,7 @@ describe("RepoTree status tag full-word title (audit #50)", () => {
         onNewSub={() => {}}
       />,
     );
-    const tag = screen.getByText("ORPH");
+    const tag = screen.getByText("유실");
     expect(tag).toHaveAttribute("title", "유실됨"); // same full word the header StatusBadge shows for this status
   });
 });
@@ -311,7 +311,7 @@ describe("RepoTree right-side cluster yields to the '⋯' button on hover (final
         onNewSub={() => {}}
       />,
     );
-    const tag = screen.getByText("IDLE");
+    const tag = screen.getByText("대기");
     expect(tag.className).toMatch(/\btransition-opacity\b/);
     expect(tag.className).toMatch(/\bgroup-hover:opacity-0\b/);
   });
@@ -449,7 +449,7 @@ describe("RepoTree background-state affordances", () => {
       />,
     );
     fireEvent.contextMenu(screen.getByText("workflow worker"));
-    fireEvent.click(screen.getByText("종료")); // repoTree.menuStop, now "End" (ko 종료) — the terminal tree action
+    fireEvent.click(screen.getByText("중지")); // repoTree.menuStop, now "Stop" (ko 중지) — the terminal tree action
     expect(onStopSub).toHaveBeenCalledWith("wbg");
   });
 
@@ -464,7 +464,7 @@ describe("RepoTree background-state affordances", () => {
       />,
     );
     fireEvent.contextMenu(screen.getByText("legible worker"));
-    expect(screen.getByText("종료")).toBeInTheDocument();
+    expect(screen.getByText("중지")).toBeInTheDocument();
     expect(screen.queryByText("중단")).toBeNull(); // the tree's terminal action no longer collides with the composer's soft "중단"
     expect(screen.getByText(/재시작 시 복구/)).toBeInTheDocument(); // End: reversible
     expect(screen.getByText(/되돌릴 수 없/)).toBeInTheDocument(); // Delete: irreversible

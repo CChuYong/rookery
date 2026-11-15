@@ -53,12 +53,12 @@ describe("CapabilityAssignmentsTab", () => {
     await screen.findByText("새 할당");
     expect(screen.getByLabelText("마스터")).toBeChecked();
     expect(screen.getByLabelText("워커")).toBeChecked();
-    expect(screen.getByLabelText("Side")).not.toBeChecked();
+    expect(screen.getByLabelText("사이드 질문")).not.toBeChecked();
     expect(screen.getByLabelText("UI")).toBeChecked();
 
     fireEvent.change(screen.getByLabelText("범위"), { target: { value: "repo-local" } });
     fireEvent.change(screen.getByLabelText("범위 대상"), { target: { value: "repo-1" } });
-    fireEvent.click(screen.getByLabelText("Side"));
+    fireEvent.click(screen.getByLabelText("사이드 질문"));
     fireEvent.click(screen.getByLabelText("Slack"));
     fireEvent.click(screen.getByLabelText("자동화"));
     fireEvent.click(screen.getByLabelText("외부"));
@@ -77,7 +77,7 @@ describe("CapabilityAssignmentsTab", () => {
     fireEvent.click(screen.getByLabelText("마스터"));
     fireEvent.click(screen.getByLabelText("워커"));
     fireEvent.click(screen.getByRole("button", { name: "할당 만들기" }));
-    expect(screen.getByText("Agent를 하나 이상 선택하세요.")).toBeInTheDocument();
+    expect(screen.getByText("에이전트를 하나 이상 선택하세요.")).toBeInTheDocument();
     expect(setBinding).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText("마스터"));
     fireEvent.click(screen.getByLabelText("UI"));

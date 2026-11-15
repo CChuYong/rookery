@@ -35,9 +35,9 @@ describe("SettingsPage — unified Models tab (Claude/Codex)", () => {
   it("moves the Claude worker-model default out of General into the Claude sub-tab", () => {
     render(<SettingsPage {...base} authStatus={null} />);
     // General is the default tab → no worker-model heading there anymore
-    expect(screen.queryByText("워커 기본 모델 / 강도")).toBeNull();
+    expect(screen.queryByText("워커 기본 모델 / 추론 강도")).toBeNull();
     fireEvent.click(screen.getByText("모델")); // Claude sub-tab is the default
-    expect(screen.getByText("워커 기본 모델 / 강도")).toBeInTheDocument();
+    expect(screen.getByText("워커 기본 모델 / 추론 강도")).toBeInTheDocument();
   });
 
   it("keeps the provider-agnostic worker cost budget in General", () => {

@@ -24,19 +24,19 @@ describe("ConversationPane Side drawer", () => {
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
     const editor = screen.getByRole("textbox");
     setPromptEditorText(editor, "why this approach?");
-    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
     expect(onSideStart).toHaveBeenCalledWith("why this approach?");
-    expect(await screen.findByText("메인 세션의 문맥 · 읽기 전용")).toBeInTheDocument();
+    expect(await screen.findByText("메인 세션의 맥락 · 읽기 전용")).toBeInTheDocument();
     expect(screen.getByText("why this approach?")).toBeInTheDocument();
     // audit #9: jsdom can't evaluate container queries, so lock the contract — inline vs overlay follows the
     // conversation pane's own width (an @container), not a viewport breakpoint.
-    const drawer = screen.getByLabelText("Side 질문");
+    const drawer = screen.getByLabelText("사이드 질문");
     expect(drawer.className).toContain("@min-[760px]:relative");
     expect(drawer.className).not.toContain("md:relative");
     expect(drawer.closest(".conversation-pane")?.className).toContain("@container");
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
-    expect(screen.queryByRole("complementary", { name: "Side 질문" })).toBeNull(); // the drawer (the composer button now shares the name, audit #29)
+    expect(screen.queryByRole("complementary", { name: "사이드 질문" })).toBeNull(); // the drawer (the composer button now shares the name, audit #29)
   });
 
   it("shows live-worktree copy and routes worker Side follow-ups independently", async () => {
@@ -45,8 +45,8 @@ describe("ConversationPane Side drawer", () => {
     render(<ConversationPane kind="worker" id="w1" onSend={() => {}} onSideStart={onSideStart} onSideSend={onSideSend} />);
     const mainEditor = screen.getByRole("textbox");
     setPromptEditorText(mainEditor, "what changed?");
-    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
-    expect(await screen.findByText("이 워커의 문맥 · live worktree · 읽기 전용")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
+    expect(await screen.findByText("이 워커의 맥락 · 실시간 워크트리 · 읽기 전용")).toBeInTheDocument();
     await act(async () => {
       useStore.setState({ sideConversations: { "side-w": { sourceKind: "worker", sourceId: "w1", status: "idle", items: [{ kind: "message", role: "user", content: "what changed?" }] } } } as never);
     });
@@ -76,8 +76,8 @@ describe("ConversationPane Side drawer", () => {
     ]} />);
     const editor = screen.getByRole("textbox");
     setPromptEditorText(editor, "open side");
-    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
-    await screen.findByLabelText("Side 질문");
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
+    await screen.findByLabelText("사이드 질문");
     setPromptEditorText(editor, "/");
     expect(screen.getByText("/review")).toBeInTheDocument();
     expect(screen.queryByText((_text, el) => el?.textContent === "/btw<질문>")).toBeNull();

@@ -64,7 +64,7 @@ describe("NestedAgents", () => {
     );
     expect(screen.getByText("🧩 explore: find X")).toBeInTheDocument();
     expect(screen.getByText("nested doing X")).toBeInTheDocument();
-    expect(screen.getByText(/중첩 에이전트 · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/하위 에이전트 · 1/)).toBeInTheDocument();
   });
 });
 
@@ -404,7 +404,7 @@ describe("MetricsView", () => {
     const items: LogItem[] = [{ kind: "metrics", contextPct: 25, tokens: 50000, turns: 3, durationMs: 12300, cost: 1.25 }];
     render(<MetricsView items={items} />);
     expect(screen.getByText("25%")).toBeInTheDocument();
-    expect(screen.getByText("50.0k tok")).toBeInTheDocument();
+    expect(screen.getByText("50.0k 토큰")).toBeInTheDocument();
     // the test environment has no I18nProvider, so it falls back to ko (metrics render in Korean)
     expect(screen.getByText("3턴")).toBeInTheDocument();
     expect(screen.getByText("$1.25")).toBeInTheDocument();
@@ -416,7 +416,7 @@ describe("MetricsView", () => {
   it("renders the terminalReason with a fail tone when present", () => {
     const items: LogItem[] = [{ kind: "metrics", contextPct: 25, tokens: 50000, turns: 3, durationMs: 12300, cost: 1.25, terminalReason: "api_error" }];
     render(<MetricsView items={items} />);
-    const reason = screen.getByText("⚠ api_error");
+    const reason = screen.getByText("⚠ API 오류");
     expect(reason).toBeInTheDocument();
     expect(reason).toHaveClass("text-fail");
   });

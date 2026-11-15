@@ -27,9 +27,9 @@ describe("Composer model menu", () => {
 
   it("shows only non-default permission and speed choices on the trigger", () => {
     const { rerender } = render(<Composer onSend={() => {}} controls={master} />);
-    expect(screen.queryByRole("button", { name: /Bypass/ })).toBeNull(); // the default mode is not shouted on the bar
+    expect(screen.queryByRole("button", { name: /권한 우회/ })).toBeNull(); // the default mode is not shouted on the bar
     rerender(<Composer onSend={() => {}} controls={{ ...master, permissionMode: "plan", speed: "fast" }} />);
-    expect(screen.getByRole("button", { name: /Opus 4\.8 · 높음 · Plan Mode · Fast/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Opus 4\.8 · 높음 · 계획 모드 · 빠름/ })).toBeInTheDocument();
   });
 
   it("keeps the send button in the right-hand action group with the model trigger (never wraps alone)", () => {
@@ -48,7 +48,7 @@ describe("Composer icon buttons explain themselves", () => {
     const tips = screen.getAllByRole("tooltip", { hidden: true }).map((tip) => tip.textContent);
     expect(tips).toContain("보낼 메시지를 입력하세요");
     expect(tips).toContain("질문을 입력하면 메인 작업을 멈추지 않고 따로 물어볼 수 있어요 (/side)");
-    expect(screen.getByRole("button", { name: "Side 질문" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "사이드 질문" })).toBeDisabled();
   });
 
   it("with text the tooltips name the action", () => {
