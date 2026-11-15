@@ -7,7 +7,8 @@ import { useLayoutStore, emptyLayoutState } from "../../src/renderer/store/layou
 import { useTermStore } from "../../src/renderer/store/terminals.js";
 import { useToastStore } from "../../src/renderer/store/toasts.js";
 import { useWsStore, emptyWsState } from "../../src/renderer/store/workspace.js";
-import type { SerializedGrid, GridNode } from "../../src/renderer/workspace/dock-layout.js";
+import { savedSideColumnWidth, sideColumnWidth, type SerializedGrid, type GridNode } from "../../src/renderer/workspace/dock-layout.js";
+import type { DockviewApi } from "dockview";
 
 // The mounted dock against a real dockview: jsdom has no layout, so these pin the visibility state machine (what is
 // hidden by whom, what the toggles read, what gets saved), not pixel sizes — those live in dock-layout.test.ts.
@@ -107,5 +108,70 @@ describe("WorkspaceDock worker seed (audit #13)", () => {
     const activeKinds = Array.from(container.querySelectorAll(".dv-tab.dv-active-tab .rk-tab")).map((el) => el.getAttribute("data-kind"));
     expect(activeKinds).toContain("git");
     expect(activeKinds).not.toContain("nested");
+  });
+});
+
+// Review fix 1: shrinking squeezes the side column to its minimum before the narrow rule hides it; the dock must
+// remember the width the user chose and bring that back (and save it), not the squeezed one.
+describe("WorkspaceDock side column width through a narrow window (review fix 1)", () => {
+  async function flush(): Promise<void> {
+    await act(async () => { await Promise.resolve(); vi.advanceTimersByTime(500); await Promise.resolve(); });
+  }
+  function mountWithApi(): DockviewApi {
+    let api!: DockviewApi;
+    render(<WorkspaceRenderProvider value={stub}><WorkspaceDock pageKey="p" agentKind="master" onApi={(a) => { api = a; }} /></WorkspaceRenderProvider>);
+    return api;
+  }
+
+  it("returns at 320 after 1440 → 662 → 1188, and saves 320 while narrow", async () => {
+    const api = mountWithApi();
+    act(() => { api.layout(1400, 900); resize(1400); });
+    await flush();
+    expect(sideColumnWidth(api)).toBe(320);
+    act(() => { api.layout(662, 900); resize(662); }); // dockview squeezes first, then the narrow rule hides it
+    await flush();
+    expect(auto().sort()).toEqual(["files", "git"]);
+    expect(savedSideColumnWidth(savedGrid()!)).toBe(320);
+    act(() => { api.layout(1188, 900); resize(1188); });
+    await flush();
+    expect(auto()).toEqual([]);
+    expect(sideColumnWidth(api)).toBe(320);
+  });
+
+  it("remembers a width the user dragged to", async () => {
+    const api = mountWithApi();
+    act(() => { api.layout(1400, 900); resize(1400); });
+    await flush();
+    const sash = document.querySelector(".dv-sash")!;
+    act(() => {
+      sash.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      api.getPanel("panel:files")!.group.api.setSize({ width: 400 });
+      window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+    });
+    act(() => { api.layout(662, 900); resize(662); });
+    await flush();
+    act(() => { api.layout(1400, 900); resize(1400); });
+    await flush();
+    expect(sideColumnWidth(api)).toBe(400);
+  });
+});
+
+// Review fix 3: a page opened in a narrow window hides the side column once — no hide → show → hide flash.
+describe("WorkspaceDock narrow start (review fix 3)", () => {
+  it("never shows the side column again after the first auto-hide", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get() { return (this as HTMLElement).classList.contains("dockview-theme-rookery") ? 600 : 0; } });
+    const history: string[][] = [];
+    const unsub = useDockPanelsStore.subscribe((st) => { history.push([...(st.autoHiddenByPage.p ?? [])]); });
+    try {
+      mount();
+      const firstHide = history.findIndex((h) => h.length > 0);
+      expect(firstHide).toBeGreaterThanOrEqual(0);
+      expect(history.slice(firstHide).every((h) => h.length > 0)).toBe(true);
+      expect(auto().sort()).toEqual(["files", "git"]);
+    } finally {
+      unsub();
+      if (original) Object.defineProperty(HTMLElement.prototype, "clientWidth", original);
+    }
   });
 });

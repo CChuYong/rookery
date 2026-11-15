@@ -114,3 +114,22 @@ describe("MonacoEditor locks the buffer until the file has loaded (audit #17)", 
     expect(write).not.toHaveBeenCalled();
   });
 });
+
+// Review fix 7: a failed first read must not leave the editor locked for good — a later successful file-watch read
+// loads the file and unlocks it.
+describe("MonacoEditor recovers after a failed first read (review fix 7)", () => {
+  it("a file-watch read that succeeds loads the content, clears the banner and unlocks saving", async () => {
+    let changed: (p: string) => void = () => {};
+    const write = vi.fn(async () => ({ ok: true }));
+    const read = vi.fn().mockRejectedValueOnce(new Error("busy")).mockResolvedValue({ content: "later", tooLarge: false });
+    mockWs({ read, write, onChanged: vi.fn((cb: (p: string) => void) => { changed = cb; return () => {}; }) });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    expect(await screen.findByText(OPEN_ERROR)).toBeInTheDocument();
+    await act(async () => { changed("/r/a.ts"); await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => expect(latestEditor().getValue()).toBe("later"));
+    expect(latestEditor().readOnly).toBe(false);
+    await waitFor(() => expect(screen.queryByText(OPEN_ERROR)).toBeNull());
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).toHaveBeenCalledWith("/r/a.ts", "later");
+  });
+});

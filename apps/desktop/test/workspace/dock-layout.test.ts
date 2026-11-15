@@ -10,6 +10,10 @@ import {
   isKindVisible,
   autoHideableRightGroups,
   resetDockSizes,
+  sideColumnWidth,
+  setSideColumnWidth,
+  savedSideColumnWidth,
+  requiredDockWidth,
   INSPECTOR_DEFAULT_WIDTH,
   CONVERSATION_MIN_WIDTH,
   INSPECTOR_MAX_WIDTH,
@@ -196,8 +200,61 @@ describe("resetDockSizes (audit #106)", () => {
     applyDockConstraints(api);
     api.getPanel("panel:files")!.group.api.setSize({ width: 430 });
     api.getPanel("panel:terminal")!.group.api.setSize({ height: 600 });
-    resetDockSizes(api, 240);
+    resetDockSizes(api, 240, "width");
     expect(width(api, "files")).toBe(INSPECTOR_DEFAULT_WIDTH);
+    expect(height(api, "terminal")).toBe(600); // a width sash leaves the terminal height alone (review fix 6)
+    resetDockSizes(api, 240, "height");
     expect(height(api, "terminal")).toBe(240);
+  });
+});
+
+// Review fix 1: dockview squeezes groups proportionally when the window shrinks, so the side column reaches its 220
+// minimum before the narrow-window rule hides it — the width to restore must come from what the user chose.
+describe("side column width memory (review fix 1)", () => {
+  it("reproduces the squeeze and restores the chosen width after growing back", () => {
+    const api = dock();
+    seeded(api);
+    applyDockConstraints(api);
+    expect(sideColumnWidth(api)).toBe(320);
+    api.layout(662, 900); // window shrinks first …
+    expect(sideColumnWidth(api)).toBe(INSPECTOR_MIN_WIDTH); // … the side column is squeezed to its minimum
+    hidePanels(api, ["files", "git"]); // … then the compact rule hides it
+    api.layout(1188, 900);
+    api.getPanel("panel:files")!.group.api.setVisible(true);
+    expect(width(api, "files")).toBe(INSPECTOR_MIN_WIDTH); // what dockview alone would give back
+    setSideColumnWidth(api, 320);
+    expect(width(api, "files")).toBe(320);
+  });
+  it("reads the side column width from a saved layout, and persists an override for a hidden column", () => {
+    const api = dock();
+    seeded(api);
+    applyDockConstraints(api);
+    const group = api.getPanel("panel:files")!.group;
+    api.layout(662, 900);
+    group.api.setVisible(false);
+    const json = api.toJSON();
+    expect(savedSideColumnWidth(json.grid as unknown as SerializedGrid)).toBe(INSPECTOR_MIN_WIDTH);
+    const patched = unhideLeaves(json.grid as unknown as SerializedGrid, new Set([group.id]), () => 320);
+    expect(savedSideColumnWidth(patched)).toBe(320);
+    const fresh = dock(1400, 900);
+    fresh.fromJSON({ ...json, grid: patched as never });
+    expect(isKindVisible(fresh, "files")).toBe(true);
+  });
+  it("savedSideColumnWidth is undefined without a side root column", () => {
+    expect(savedSideColumnWidth({ orientation: "HORIZONTAL", root: { type: "leaf", size: 1, data: { id: "1", views: ["panel:conversation"] } } })).toBeUndefined();
+  });
+});
+
+// Review fix 8: the narrow-window threshold must cover the minimums of every full-height column, e.g. an editor
+// split beside the conversation plus the side column.
+describe("requiredDockWidth (review fix 8)", () => {
+  it("sums root column minimums (each column's own minimum is its widest member)", () => {
+    const api = dock();
+    seeded(api);
+    applyDockConstraints(api);
+    expect(requiredDockWidth(api)).toBe(CONVERSATION_MIN_WIDTH + INSPECTOR_MIN_WIDTH);
+    api.addPanel({ id: "panel:editor:x", component: "editor", params: { pageKey: "p", kind: "editor", tabId: "x" }, position: { referencePanel: "panel:conversation", direction: "right" } } as never);
+    applyDockConstraints(api);
+    expect(requiredDockWidth(api)).toBeGreaterThanOrEqual(CONVERSATION_MIN_WIDTH + INSPECTOR_MIN_WIDTH + 240);
   });
 });

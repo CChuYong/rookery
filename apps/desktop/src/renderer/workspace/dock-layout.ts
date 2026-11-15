@@ -70,8 +70,9 @@ export function rootColumnGroupIds(grid: SerializedGrid): Set<string> {
 
 // Copy of a serialized grid with the given leaves shown again. Used to persist a layout while the narrow-window
 // rule has hidden the side panel: the saved layout keeps the panel at its own width, and the largest visible
-// sibling gives that width back so the branch still adds up (audit #81).
-export function unhideLeaves(grid: SerializedGrid, groupIds: ReadonlySet<string>): SerializedGrid {
+// sibling gives that width back so the branch still adds up (audit #81). `sizeFor` may override the saved size of a
+// leaf being shown — the side column is saved at the width the user chose, not the width the shrink squeezed it to.
+export function unhideLeaves(grid: SerializedGrid, groupIds: ReadonlySet<string>, sizeFor?: (groupId: string) => number | undefined): SerializedGrid {
   if (groupIds.size === 0) return grid;
   const visit = (node: GridNode): GridNode => {
     if (node.type === "leaf") return node;
@@ -79,7 +80,8 @@ export function unhideLeaves(grid: SerializedGrid, groupIds: ReadonlySet<string>
     for (let i = 0; i < children.length; i++) {
       const child = children[i]!;
       if (child.type !== "leaf" || child.visible !== false || !groupIds.has(child.data.id)) continue;
-      const { visible: _hidden, ...shown } = child;
+      const { visible: _hidden, ...rest } = child;
+      const shown = { ...rest, size: sizeFor?.(child.data.id) ?? rest.size };
       children[i] = shown;
       let largest = -1;
       for (let j = 0; j < children.length; j++) {
@@ -163,13 +165,57 @@ export function autoHideableRightGroups(api: DockviewApi): DockviewGroupPanel[] 
   return gridGroups(api).filter((g) => g.api.isVisible && g.panels.length > 0 && g.panels.every((p) => isRightKind(panelKind(p))));
 }
 
-// Double-click on a dock sash (audit #106): put the side column back to its default width and the terminal back to
-// its default height — the IDE way out of a panel dragged to an extreme.
-export function resetDockSizes(api: DockviewApi, terminalHeight: number): void {
+// Double-click on a dock sash (audit #106): a sash between columns puts the side column back to its default width,
+// a sash between rows puts the terminal back to its default height — only the dimension that sash controls.
+export function resetDockSizes(api: DockviewApi, terminalHeight: number, axis: "width" | "height"): void {
   for (const group of gridGroups(api)) {
     if (!group.api.isVisible || group.panels.length === 0) continue;
     const kinds = group.panels.map(panelKind);
-    if (kinds.every(isRightKind)) group.api.setSize({ width: INSPECTOR_DEFAULT_WIDTH });
-    else if (kinds.every((k) => k === "terminal")) group.api.setSize({ height: terminalHeight });
+    if (axis === "width" && kinds.every(isRightKind)) group.api.setSize({ width: INSPECTOR_DEFAULT_WIDTH });
+    else if (axis === "height" && kinds.every((k) => k === "terminal")) group.api.setSize({ height: terminalHeight });
   }
+}
+
+// The side column: the visible full-height root column holding only side panels.
+function sideColumnGroup(api: DockviewApi): DockviewGroupPanel | undefined {
+  const columns = rootColumnGroupIds(api.toJSON().grid as unknown as SerializedGrid);
+  return gridGroups(api).find((g) => columns.has(g.id) && g.api.isVisible && g.panels.length > 0 && g.panels.every((p) => isRightKind(panelKind(p))));
+}
+
+export function sideColumnWidth(api: DockviewApi): number | undefined {
+  return sideColumnGroup(api)?.api.width;
+}
+
+// Put the side column at a width (clamped by its constraints). Used to restore the width the user chose after a
+// shrink squeezed it (review fix 1).
+export function setSideColumnWidth(api: DockviewApi, width: number): void {
+  const group = sideColumnGroup(api);
+  if (group && Math.abs(group.api.width - width) > 1) group.api.setSize({ width });
+}
+
+const SIDE_IDS = new Set(RIGHT_KINDS.map((k) => `panel:${k}`));
+
+// The side column's width as saved in a layout (its root-column leaf size), or undefined if there is none.
+export function savedSideColumnWidth(grid: SerializedGrid): number | undefined {
+  const columns = rootColumnGroupIds(grid);
+  if (grid.root.type !== "branch") return undefined;
+  for (const child of grid.root.data) {
+    if (child.type !== "leaf" || !columns.has(child.data.id)) continue;
+    const views = child.data.views ?? [];
+    if (views.length > 0 && views.every((id) => SIDE_IDS.has(id))) return child.size;
+  }
+  return undefined;
+}
+
+// The narrowest dock that fits every column at its minimum, side column included (hidden or not) — the
+// narrow-window rule must hide the side column below this, not only below a fixed width (review fix 8).
+export function requiredDockWidth(api: DockviewApi): number {
+  const grid = api.toJSON().grid as unknown as SerializedGrid;
+  const minOf = new Map(api.groups.map((g) => [g.id, g.minimumWidth] as const));
+  const visit = (node: GridNode, horizontal: boolean): number => {
+    if (node.type === "leaf") return minOf.get(node.data.id) ?? 0;
+    const widths = node.data.map((c) => visit(c, !horizontal));
+    return horizontal ? widths.reduce((a, b) => a + b, 0) : Math.max(0, ...widths);
+  };
+  return visit(grid.root, grid.orientation === "HORIZONTAL");
 }

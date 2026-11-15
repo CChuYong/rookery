@@ -76,6 +76,18 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       // Read from disk to filter out self-write echoes / spurious events (the issue where a Cmd+S self-save was falsely flagged as "Changed on disk").
       void window.rookery.ws.read(path).then((r) => {
         if (disposed || r.tooLarge) return;
+        // The first read failed: this is the first good content — load it and unlock (review fix 7).
+        if (!loaded) {
+          loaded = true;
+          savedRef.current = r.content;
+          ed.setValue(r.content);
+          const outside = (r as { readOnly?: true }).readOnly === true; // same shape load() reads
+          setReadOnly(outside);
+          ed.updateOptions({ readOnly: outside });
+          setDirty(pageKey, id, false);
+          setBanner(null);
+          return;
+        }
         const action = decideDiskChange({ disk: r.content, lastWritten: lastWrittenRef.current, buffer: ed.getValue(), saved: savedRef.current });
         if (action === "ignore") return;
         if (action === "adopt") {

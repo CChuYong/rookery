@@ -46,7 +46,15 @@ export function TerminalView({ id, onExit }: { id: string; onExit: (id: string) 
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    fit.fit();
+    // The dock hides a terminal by sizing its group to 0 (no display:none). Fitting then yields 1 row, and resizing
+    // the PTY to that makes full-screen programs (vim, less, htop) redraw into a single line on every hide. Skip
+    // fit+resize until the host has room again; the ResizeObserver fires when it does (review fix 2).
+    const hasRoom = (): boolean => host.clientWidth > 0 && host.clientHeight > 0;
+    const fitAndResize = (): void => {
+      if (!hasRoom()) return;
+      try { fit.fit(); window.rookery.term.resize(id, term.cols, term.rows); } catch { /* hidden */ }
+    };
+    if (hasRoom()) fit.fit();
 
     const offData = window.rookery.term.onData((tid, data) => { if (tid === id) term.write(data); });
     const offExit = window.rookery.term.onExit((tid, code) => {
@@ -58,12 +66,10 @@ export function TerminalView({ id, onExit }: { id: string; onExit: (id: string) 
 
     void window.rookery.term.attach(id).then(({ scrollback }) => {
       if (scrollback) term.write(scrollback);
-      try { fit.fit(); window.rookery.term.resize(id, term.cols, term.rows); } catch { /* hidden */ }
+      fitAndResize();
     });
 
-    const ro = new ResizeObserver(() => {
-      try { fit.fit(); window.rookery.term.resize(id, term.cols, term.rows); } catch { /* hidden */ }
-    });
+    const ro = new ResizeObserver(fitAndResize);
     ro.observe(host);
     term.focus();
 
@@ -76,5 +82,6 @@ export function TerminalView({ id, onExit }: { id: string; onExit: (id: string) 
     };
   }, [id, onExit, t]);
 
-  return <div ref={hostRef} className="h-full w-full" />;
+  // data-term-id: lets the Cmd/Ctrl+W handler find the focused terminal (review fix 4).
+  return <div ref={hostRef} data-term-id={id} className="h-full w-full" />;
 }

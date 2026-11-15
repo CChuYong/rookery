@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { DockviewReact } from "dockview-react";
 import type { DockviewReadyEvent, DockviewApi, AddPanelPositionOptions, SerializedDockview, DockviewTheme } from "dockview";
 import { useT } from "../i18n/provider.js";
@@ -22,11 +22,15 @@ import {
   panelKind,
   reopenPosition,
   resetDockSizes,
+  requiredDockWidth,
+  savedSideColumnWidth,
+  setSideColumnWidth,
+  sideColumnWidth,
   unhideLeaves,
   INSPECTOR_DEFAULT_WIDTH,
   type SerializedGrid,
 } from "./dock-layout.js";
-import { enhanceOverflowHandles, revealActiveTabs } from "./dock-dom.js";
+import { enhanceOverflowHandles, enhanceOverflowMenus, revealActiveTabs, sashAxis, touchesTabChrome } from "./dock-dom.js";
 import "./dockview-theme.css";
 
 // dockview v7 applies its own theme class to the shell (default: Abyss, a navy palette) and that class wins over
@@ -54,7 +58,8 @@ function sameKinds(a: readonly HideableKind[], b: readonly HideableKind[]): bool
 // written when a tab's × closes a panel) and the narrow-window rule (autoHiddenByPage, written only here). The dock
 // is reconciled to "hidden = either". Hiding a whole group uses dockview's group visibility, so the group keeps its
 // place and size and comes back exactly as it was (audit #5); a panel sharing a group with others is removed instead.
-export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKind: "master" | "worker" }): JSX.Element {
+// `onApi` is a test seam: it hands out the live DockviewApi so a test can drive real container sizes.
+export function WorkspaceDock({ pageKey, agentKind, onApi }: { pageKey: string; agentKind: "master" | "worker"; onApi?: (api: DockviewApi) => void }): JSX.Element {
   const t = useT();
   const apiRef = useRef<DockviewApi | null>(null);
   const reconcilingRef = useRef(false); // suppress store writes while WE add/remove/hide panels
@@ -67,6 +72,12 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   const [compact, setCompact] = useState(false);
   const compactRef = useRef(compact);
   compactRef.current = compact;
+  const appliedCompactRef = useRef<boolean | null>(null); // the compact value the dock last acted on
+  const dockWidthRef = useRef(0);
+  // The side column width the user chose (seed/default, saved layout, last sash drag). Shrinking the window squeezes
+  // the column proportionally — down to its minimum before the narrow rule hides it — so this, not the live width, is
+  // what comes back and what gets saved (review fix 1).
+  const sideWidthRef = useRef(INSPECTOR_DEFAULT_WIDTH);
   const closeTabConfirm = useCloseTabShortcut(pageKey);
 
   // addPanel-time translation (see panel-titles.ts) — this is what gets persisted into the saved layout JSON.
@@ -143,6 +154,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
       // in template order, so git/nested find the files group again.
       for (const k of toShow) api.getPanel(fixedPanelId(k))?.group.api.setVisible(true);
       for (const k of toShow) if (!api.getPanel(fixedPanelId(k))) reopen(api, k);
+      if (toShow.some((k) => k !== "terminal")) setSideColumnWidth(api, sideWidthRef.current);
       // Hide last: showing a group can also reveal a panel that should stay hidden alongside one that shouldn't.
       hidePanels(api, kinds.filter((k) => wantHidden(k) && isKindVisible(api, k)));
     } finally {
@@ -154,6 +166,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   // Narrow-window rule: entering compact hides the visible side-only groups and records them as auto-hidden;
   // leaving it clears the record, and the reconcile shows them again at the width they had (audit #4 #5).
   const applyCompact = (api: DockviewApi, nextCompact: boolean): void => {
+    appliedCompactRef.current = nextCompact;
     if (nextCompact) {
       const kinds = autoHideableRightGroups(api).flatMap((g) => g.panels.map(panelKind)) as HideableKind[];
       const merged = [...new Set([...autoHidden(), ...kinds])];
@@ -171,7 +184,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     const auto = autoHidden();
     if (auto.length === 0) return json;
     const ids = new Set(api.groups.filter((g) => !g.api.isVisible && g.panels.length > 0 && g.panels.every((p) => auto.includes(panelKind(p) as HideableKind))).map((g) => g.id));
-    return { ...json, grid: unhideLeaves(json.grid as unknown as SerializedGrid, ids) as unknown as SerializedDockview["grid"] };
+    return { ...json, grid: unhideLeaves(json.grid as unknown as SerializedGrid, ids, () => sideWidthRef.current) as unknown as SerializedDockview["grid"] };
   };
 
   // Reconcile editor panels against the page's non-agent workspace tabs: add missing (as tabs in the conversation
@@ -214,6 +227,16 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     try { panel.api.setActive(); } finally { reconcilingRef.current = false; }
   };
 
+  // Narrow = below the comfort width, or too narrow for every column at its minimum (review fix 8).
+  const isCompactFor = (api: DockviewApi | null, width: number): boolean =>
+    width > 0 && (shouldCompactDock(width) || (!!api && width < requiredDockWidth(api)));
+
+  // Outside the narrow rule, the side column keeps the width the user chose while the window resizes (an IDE
+  // sidebar keeps its pixels) instead of drifting with dockview's proportional resize.
+  const keepSideWidth = (api: DockviewApi): void => {
+    if (!compactRef.current) setSideColumnWidth(api, sideWidthRef.current);
+  };
+
   const persist = (api: DockviewApi): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { if (!disposedRef.current) useLayoutStore.getState().save_(pageKey, serialize(api)); }, 400);
@@ -240,13 +263,14 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     // Any group the restored JSON has hidden was hidden by the user (auto-hidden groups are saved visible).
     if (autoHidden().length > 0) selfWrite(() => dockState().setAutoHidden_(pageKey, []));
     mirrorHidden(api);
-    if (compactRef.current) applyCompact(api, true);
+    applyCompact(api, compactRef.current);
     syncEditors(api);
     syncActive(api);
     revealTabsSoon();
   };
 
   const loadJson = (api: DockviewApi, json: SerializedDockview | undefined): void => {
+    sideWidthRef.current = (json && savedSideColumnWidth(json.grid as unknown as SerializedGrid)) || INSPECTOR_DEFAULT_WIDTH;
     reconcilingRef.current = true;
     try {
       if (json) { try { api.fromJSON(json); } catch { api.clear(); seed(api); } }
@@ -261,6 +285,7 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   const resetLayout = (api: DockviewApi): void => {
     const previous = serialize(api);
     const keepTerminal = isKindVisible(api, "terminal");
+    sideWidthRef.current = INSPECTOR_DEFAULT_WIDTH;
     reconcilingRef.current = true;
     try { api.clear(); seed(api, keepTerminal); } finally { reconcilingRef.current = false; }
     afterContentChange(api);
@@ -278,11 +303,19 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
   const onReady = (event: DockviewReadyEvent): void => {
     const api = event.api;
     apiRef.current = api;
+    onApi?.(api);
     // Measure once up front so a page opened in a narrow window doesn't flash its side panel before the
     // ResizeObserver's first callback.
     const startWidth = wrapperRef.current?.clientWidth ?? 0;
-    if (startWidth > 0) { compactRef.current = shouldCompactDock(startWidth); setCompact(compactRef.current); }
+    dockWidthRef.current = startWidth;
+    if (startWidth > 0) compactRef.current = shouldCompactDock(startWidth);
     loadJson(api, useLayoutStore.getState().byPage[pageKey] as SerializedDockview | undefined);
+    // Now that the layout is known, include its column minimums in the decision (review fix 8).
+    if (startWidth > 0) {
+      const next = isCompactFor(api, startWidth);
+      if (next !== compactRef.current) { compactRef.current = next; applyCompact(api, next); }
+      setCompact(next);
+    }
 
     const disposables: Disposable[] = [];
     // User-closing a panel: editors → reflect in the workspace store; conversation → re-add (it must always exist);
@@ -310,7 +343,13 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     const queueConstraints = (): void => {
       if (constraintsQueued) return;
       constraintsQueued = true;
-      queueMicrotask(() => { constraintsQueued = false; if (!disposedRef.current) applyDockConstraints(api); });
+      queueMicrotask(() => {
+        constraintsQueued = false;
+        if (disposedRef.current) return;
+        applyDockConstraints(api);
+        // A new column (e.g. an editor split beside the conversation) can raise the width the dock needs.
+        if (dockWidthRef.current > 0) setCompact(isCompactFor(api, dockWidthRef.current));
+      });
     };
     disposables.push(api.onDidAddPanel(queueConstraints), api.onDidMovePanel(queueConstraints), api.onDidRemoveGroup(queueConstraints));
     disposables.push(api.onDidLayoutChange(() => {
@@ -404,8 +443,19 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
-      if (width > 0) setCompact(shouldCompactDock(width));
-      revealTabsSoon();
+      if (width > 0) {
+        dockWidthRef.current = width;
+        const next = isCompactFor(apiRef.current, width);
+        compactRef.current = next; // read by keepSideWidth below before React re-renders
+        setCompact(next);
+      }
+      // After dockview's own resize pass: hold the side column at its chosen width, keep active tabs in view.
+      requestAnimationFrame(() => {
+        const api = apiRef.current;
+        if (disposedRef.current || !api) return;
+        keepSideWidth(api);
+        if (wrapperRef.current) revealActiveTabs(wrapperRef.current);
+      });
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -414,7 +464,11 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
 
   useEffect(() => {
     const api = apiRef.current;
-    if (api && !disposedRef.current) applyCompact(api, compact);
+    // Act only on a real change: onReady may already have applied the measured value, and this effect's first run
+    // sees the stale first-render state — re-applying it flashed the side column hide → show → hide (review fix 3).
+    // compactRef, not the render's `compact`: onReady (which runs after this render) may have measured a newer value.
+    const want = compactRef.current;
+    if (api && !disposedRef.current && appliedCompactRef.current !== want) applyCompact(api, want);
     // applyCompact closes over this page's stable pageKey/agentKind and is only driven by the measured flag.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compact]);
@@ -425,21 +479,46 @@ export function WorkspaceDock({ pageKey, agentKind }: { pageKey: string; agentKi
     const el = wrapperRef.current;
     if (!el) return;
     const label = (count: number): string => t("workspaceHeaders.overflowTabs", { count });
-    enhanceOverflowHandles(el, label);
-    const mo = new MutationObserver(() => enhanceOverflowHandles(el, label));
-    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    const enhance = (): void => { enhanceOverflowHandles(el, label); enhanceOverflowMenus(el); };
+    enhance();
+    // Only tab chrome matters; the panels' content (streamed transcript, xterm, Monaco) mutates constantly, so the
+    // records are filtered and the work is batched to one frame (review fix 5).
+    let queued = false;
+    const mo = new MutationObserver((records) => {
+      if (queued || !touchesTabChrome(records)) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; enhance(); });
+    });
+    mo.observe(el, { childList: true, subtree: true });
     return () => mo.disconnect();
   }, [t]);
 
-  // Double-click a sash: side column and terminal back to their default sizes (audit #106).
+  // Double-click a sash: the dimension that sash controls goes back to its default — side column width for a sash
+  // between columns, terminal height for one between rows (audit #106, review fix 6).
   const onDoubleClick = (e: ReactMouseEvent): void => {
     const api = apiRef.current;
-    if (!api || !(e.target as HTMLElement).closest?.(".dv-sash")) return;
-    resetDockSizes(api, terminalSeedHeight(termCount()));
+    const axis = api && e.target instanceof Element ? sashAxis(e.target) : null;
+    if (!api || !axis) return;
+    if (axis === "width") sideWidthRef.current = INSPECTOR_DEFAULT_WIDTH;
+    resetDockSizes(api, terminalSeedHeight(termCount()), axis);
+  };
+
+  // A finished sash drag records the side column width as the user's choice (only outside the narrow rule, where
+  // the width is not being forced down).
+  const onPointerDownCapture = (e: ReactPointerEvent): void => {
+    if (!(e.target instanceof Element) || !e.target.closest(".dv-sash")) return;
+    const onUp = (): void => {
+      window.removeEventListener("pointerup", onUp);
+      const api = apiRef.current;
+      if (!api || disposedRef.current || compactRef.current) return;
+      const width = sideColumnWidth(api);
+      if (width) sideWidthRef.current = width;
+    };
+    window.addEventListener("pointerup", onUp);
   };
 
   return (
-    <div ref={wrapperRef} onDoubleClick={onDoubleClick} className="dockview-theme-dark dockview-theme-rookery min-h-0 w-full flex-1">
+    <div ref={wrapperRef} onDoubleClick={onDoubleClick} onPointerDownCapture={onPointerDownCapture} className="dockview-theme-dark dockview-theme-rookery min-h-0 w-full flex-1">
       <DockviewReact components={dockComponents} defaultTabComponent={RookeryTab} onReady={onReady} theme={ROOKERY_DOCK_THEME} />
       {closeTabConfirm}
     </div>
