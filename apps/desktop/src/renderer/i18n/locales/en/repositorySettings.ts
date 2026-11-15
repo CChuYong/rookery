@@ -9,7 +9,7 @@ export default {
   "repositorySettings.empty": "The Catalog is empty. Register an MCP server, skill, or pack first.",
   "repositorySettings.openCatalog": "Open Capability Center",
   "repositorySettings.openAdvanced": "Advanced assignments",
-  "repositorySettings.previewEffective": "Preview Effective",
+  "repositorySettings.previewEffective": "Preview effective state",
   "repositorySettings.search": "Search repository capabilities",
   "repositorySettings.noMatches": "No capabilities match this search.",
   "repositorySettings.mode": "Assignment",

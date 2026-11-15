@@ -14,4 +14,5 @@ export default {
   "toast.workerSpawned": "워커를 생성했어요",
   "toast.keySaved": "키를 저장했어요",
   "toast.restored": "체크포인트로 되돌렸어요",
+  "toast.mcpTokenRegenerated": "토큰을 재발급했어요 — 외부 클라이언트에 새 URL을 다시 등록하세요",
 } satisfies Catalog;

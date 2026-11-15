@@ -54,7 +54,7 @@ describe("SettingsPage Anthropic API key input", () => {
     expect(onSaveAnthropicKey).toHaveBeenCalledWith("sk-ant-abc123");
   });
 
-  it("clears the input field after saving", () => {
+  it("clears the input field after saving", async () => {
     const onSaveAnthropicKey = vi.fn();
     render(<SettingsPage {...base} onSaveAnthropicKey={onSaveAnthropicKey} />);
     fireEvent.click(screen.getByText("모델"));
@@ -62,7 +62,8 @@ describe("SettingsPage Anthropic API key input", () => {
     fireEvent.change(input, { target: { value: "sk-ant-xyz" } });
     const saveButtons = screen.getAllByText("저장");
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
-    expect(input).toHaveValue("");
+    // cleared once the save is confirmed (a microtask later), not before (audit #94)
+    await waitFor(() => expect(input).toHaveValue(""));
   });
 
   it("Save button is disabled when the input is blank", () => {
@@ -97,7 +98,7 @@ describe("SettingsPage Rookery capability defaults", () => {
     await waitFor(() => expect(quickSetBinding).toHaveBeenCalledWith({
       packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master", "worker"],
     }));
-    fireEvent.click(screen.getByRole("button", { name: "Effective 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유효 상태 미리보기" }));
     expect(onPreviewCapabilities).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "저장됨" })).toBeNull();
   });
@@ -141,7 +142,7 @@ describe("SettingsPage Codex tab", () => {
     expect(input).toHaveAttribute("type", "password");
   });
 
-  it("calls onSaveCodexKey with the typed key, clears the field, and shows a saved note (no auth-status probe)", () => {
+  it("calls onSaveCodexKey with the typed key, clears the field, and shows a saved note (no auth-status probe)", async () => {
     const onSaveCodexKey = vi.fn();
     render(<SettingsPage {...base} onSaveCodexKey={onSaveCodexKey} />);
     fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
@@ -151,7 +152,7 @@ describe("SettingsPage Codex tab", () => {
     // identifies this dedicated key-save button (mirrors the Anthropic-key block's single-match idiom).
     fireEvent.click(screen.getByText("저장"));
     expect(onSaveCodexKey).toHaveBeenCalledWith("sk-codex-abc");
-    expect(input).toHaveValue("");
+    await waitFor(() => expect(input).toHaveValue("")); // after the confirmed save (audit #94)
     // Same placeholder pattern the slack token fields use to indicate "already saved" (no separate auth-status check for codex).
     expect(screen.getByPlaceholderText("저장됨 — 교체하려면 새 값을 입력하세요")).toBeInTheDocument();
   });
@@ -361,16 +362,17 @@ describe("SettingsPage unsaved-changes guard", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("Save & close runs save then closes", () => {
+  it("Save & close runs save then closes", async () => {
     const order: string[] = [];
-    const onSave = vi.fn(() => order.push("save"));
-    const onClose = vi.fn(() => order.push("close"));
+    const onSave = vi.fn(() => { order.push("save"); });
+    const onClose = vi.fn(() => { order.push("close"); });
     render(<SettingsPage {...base} onClose={onClose} onSave={onSave} />);
     makeDirty();
     fireEvent.click(closeBtn());
     fireEvent.click(screen.getByText("저장하고 닫기"));
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    // closes once the save resolved (a failed save keeps the page, audit #93)
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(order).toEqual(["save", "close"]);
   });
 

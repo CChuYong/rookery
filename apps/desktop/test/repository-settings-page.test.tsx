@@ -49,7 +49,7 @@ describe("RepositorySettingsPage", () => {
   it("opens the repository Effective preview", async () => {
     const onPreviewEffective = vi.fn();
     render(<RepositorySettingsPage repo={{ id: "repo-1", name: "Rookery", path: "/code/rookery" }} api={api()} generation={0} onClose={() => {}} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={onPreviewEffective} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Effective 미리보기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유효 상태 미리보기" }));
     expect(onPreviewEffective).toHaveBeenCalledOnce();
   });
 });

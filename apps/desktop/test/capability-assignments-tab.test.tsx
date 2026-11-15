@@ -93,7 +93,7 @@ describe("CapabilityAssignmentsTab", () => {
     expect(within(card).getByText(/더 구체적인 일치 범위/)).toBeInTheDocument();
     expect(within(card).getByText(/Main Session/)).toBeInTheDocument();
     fireEvent.click(within(card).getByRole("button", { name: "편집" }));
-    fireEvent.click(screen.getByLabelText(/비활성 tombstone/));
+    fireEvent.click(screen.getByLabelText(/이 범위에서 끄기/));
     fireEvent.click(screen.getByRole("button", { name: "저장" }));
     await waitFor(() => expect(setBinding).toHaveBeenCalledWith("binding-1", expect.objectContaining({ enabled: false, scopeKind: "session", scopeRef: "session-1" })));
   });

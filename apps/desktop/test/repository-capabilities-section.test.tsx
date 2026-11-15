@@ -106,7 +106,7 @@ describe("RepositoryCapabilitiesSection", () => {
     const onPreviewEffective = vi.fn();
     render(<RepositoryCapabilitiesSection repoId="repo-1" api={api()} generation={0} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={onPreviewEffective} />);
     await screen.findByText("Docs MCP");
-    fireEvent.click(screen.getByRole("button", { name: "Effective 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유효 상태 미리보기" }));
     expect(onPreviewEffective).toHaveBeenCalledOnce();
   });
 });

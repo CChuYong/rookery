@@ -120,31 +120,81 @@ function stateDotTone(state: CapabilityState): string {
   return "bg-stop";
 }
 
-function EntryRow({ entry }: { entry: CapabilityEntry }): JSX.Element {
+// Effective list (audit #98): entries grouped by kind under one header each, dense rows. Meta every row in a group
+// shares (source, scope, evidence) is stated once in the group header; a row lists only what differs. The provider
+// is shown only when it differs from the target's (it used to repeat "Claude" on every row). Labels are sans, values
+// plain; only paths stay mono (#113).
+type MetaKey = "source" | "scope" | "evidence";
+const META_KEYS: MetaKey[] = ["source", "scope", "evidence"];
+const KIND_ORDER: CapabilityKind[] = ["instruction", "skill", "command", "tool", "mcp", "hook", "plugin", "app"];
+
+function metaValue(entry: CapabilityEntry, key: MetaKey, t: (k: string) => string): string {
+  if (key === "source") return entry.source;
+  if (key === "scope") return t(SCOPE_KEYS[entry.scope]);
+  return t(EVIDENCE_KEYS[entry.evidence]);
+}
+
+function providerName(provider: CapabilityEntry["provider"]): string {
+  return provider === "rookery" ? "Rookery" : provider === "claude" ? "Claude" : "Codex";
+}
+
+function MetaItem({ label, value }: { label: string; value: string }): JSX.Element {
+  return <span className="inline-flex min-w-0 items-baseline gap-1"><span className="shrink-0 text-faint">{label}</span>{value}</span>;
+}
+
+function EntryRow({ entry, shared, targetProvider }: { entry: CapabilityEntry; shared: Partial<Record<MetaKey, string>>; targetProvider: CapabilityEntry["provider"] }): JSX.Element {
   const t = useT();
+  const own = META_KEYS.filter((key) => shared[key] === undefined);
+  const showProvider = entry.provider !== targetProvider;
+  const hasMeta = own.length > 0 || showProvider || !!entry.managed;
   return (
-    <div data-testid={`capability-${entry.id}`} className="px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-faint"><KindIcon kind={entry.kind} /></span>
-        <h3 className={cn("text-body font-medium text-fg", entry.kind === "command" && "font-mono")}>{entry.name}</h3>
-        <span className="text-meta text-muted">{t(KIND_KEYS[entry.kind])}</span>
-        <span className="inline-flex items-center gap-1.5 text-meta text-fg-dim"><span className={cn("h-1.5 w-1.5 rounded-full", stateDotTone(entry.state))} aria-hidden /> {t(STATE_KEYS[entry.state])}</span>
+    <div data-testid={`capability-${entry.id}`} className="px-3 py-1.5">
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span className={cn("shrink-0 text-body font-medium text-fg", entry.kind === "command" && "font-mono")}>{entry.name}</span>
+        {entry.description && <span className="min-w-0 flex-1 truncate text-ui text-muted" title={entry.description}>{entry.description}</span>}
+        {!entry.description && <span className="flex-1" />}
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-meta text-fg-dim" title={t(STATE_KEYS[entry.state])}>
+          <span className={cn("h-1.5 w-1.5 rounded-full", stateDotTone(entry.state))} aria-hidden />
+          {/* "Applied" is the normal case; only the states that need a look carry a word. */}
+          {entry.state === "applied" ? <span className="sr-only">{t(STATE_KEYS[entry.state])}</span> : t(STATE_KEYS[entry.state])}
+        </span>
       </div>
-      {entry.description && <p className="mt-1 line-clamp-2 text-ui text-fg-dim">{entry.description}</p>}
-      {entry.detail && <p className="mt-1 break-words font-mono text-meta text-faint">{entry.detail}</p>}
-      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-ui text-faint">
-        <span>{entry.source}</span>
-        <span>{t(SCOPE_KEYS[entry.scope])}</span>
-        <span>{t(EVIDENCE_KEYS[entry.evidence])}</span>
-        <span>{entry.provider === "rookery" ? "Rookery" : entry.provider === "claude" ? "Claude" : "Codex"}</span>
-        {entry.managed && (
-          <span className="inline-flex items-center gap-1.5">
-            <span>{entry.managed.packId}</span>
-            <span className="h-2.5 w-px bg-line-soft" aria-hidden />
-            <span>{entry.managed.scopeKind}</span>
-          </span>
-        )}
-      </div>
+      {entry.detail && <p className="mt-0.5 truncate font-mono text-meta text-faint" title={entry.detail}>{entry.detail}</p>}
+      {hasMeta && (
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-muted">
+          {own.map((key) => <MetaItem key={key} label={t(`capabilities.meta.${key}`)} value={metaValue(entry, key, t)} />)}
+          {showProvider && <MetaItem label={t("capabilities.meta.provider")} value={providerName(entry.provider)} />}
+          {entry.managed && <MetaItem label={t("capabilities.meta.pack")} value={`${entry.managed.packId} (${t(`capabilities.bindingScope.${entry.managed.scopeKind}`)})`} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EntryGroups({ entries, targetProvider }: { entries: CapabilityEntry[]; targetProvider: CapabilityEntry["provider"] }): JSX.Element {
+  const t = useT();
+  const groups = KIND_ORDER.map((kind) => ({ kind, items: entries.filter((entry) => entry.kind === kind) })).filter((group) => group.items.length > 0);
+  return (
+    <div className="flex flex-col gap-4">
+      {groups.map(({ kind, items }) => {
+        const shared: Partial<Record<MetaKey, string>> = {};
+        for (const key of META_KEYS) {
+          const first = metaValue(items[0]!, key, t);
+          if (items.every((entry) => metaValue(entry, key, t) === first)) shared[key] = first;
+        }
+        return (
+          <section key={kind} aria-label={t(KIND_KEYS[kind])}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-line px-3 pb-1.5 text-meta text-muted">
+              <span className="inline-flex items-center gap-1.5 text-ui font-medium text-fg-dim"><span className="text-faint"><KindIcon kind={kind} /></span>{t(KIND_KEYS[kind])}</span>
+              <span className="tabular-nums">{items.length}</span>
+              {META_KEYS.filter((key) => shared[key] !== undefined).map((key) => <MetaItem key={key} label={t(`capabilities.meta.${key}`)} value={shared[key]!} />)}
+            </div>
+            <div className="divide-y divide-line-soft">
+              {items.map((entry) => <EntryRow key={entry.id} entry={entry} shared={shared} targetProvider={targetProvider} />)}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -255,7 +305,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="drag flex h-10 shrink-0 items-center gap-2 px-5">
+      <header className="drag flex h-10 shrink-0 items-center gap-2 px-4">
         <Blocks size={14} className="text-faint" />
         <span className="text-body font-medium text-fg">{t("capabilities.title")}</span>
         <nav className="no-drag ml-2 flex h-full items-center gap-3" aria-label={t("capabilities.title")}>
@@ -316,28 +366,31 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                 )}
               </div>
               {snapshot && (
-                <div className="flex flex-wrap items-start gap-x-5 gap-y-1.5 border-t border-line-soft px-3.5 py-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-title font-medium text-fg">
-                        {snapshot.target.kind === "rookery" ? t("capabilities.targetRookery") : snapshot.target.label}
-                      </h2>
-                      <span className="text-meta text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : snapshot.target.kind === "worker" ? t("capabilities.targetWorker") : snapshot.target.kind === "repo" ? t("capabilities.targetRepo") : t("capabilities.targetRookery")}</span>
-                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="text-meta text-accent">{t("capabilities.preview")}</span>}
-                      <span className="text-meta text-muted">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
-                      {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="text-meta text-muted">{t(`capabilities.agent.${snapshot.target.agent}`)}</span>}
-                    </div>
-                    {snapshot.target.cwd && <p className="mt-1 truncate font-mono text-ui text-faint" title={snapshot.target.cwd}>{snapshot.target.cwd}</p>}
-                    {snapshot.desiredRevision && (
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-meta text-muted">
-                        <span>{t("capabilities.desiredRevision", { revision: snapshot.desiredRevision.slice(0, 12) })}{snapshot.desiredBlocked ? ` · ${t("capabilities.desiredBlocked")}` : ""}</span>
-                        {(snapshot.target.kind === "session" || snapshot.target.kind === "worker") && <span>{snapshot.appliedRevision
-                          ? t("capabilities.appliedRevision", { revision: snapshot.appliedRevision.slice(0, 12) })
-                          : t("capabilities.appliedRevisionNone")}</span>}
-                      </div>
-                    )}
+                <div className="border-t border-line-soft px-3.5 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-title font-medium text-fg">
+                      {snapshot.target.kind === "rookery" ? t("capabilities.targetRookery") : snapshot.target.label}
+                    </h2>
+                    <span className="text-meta text-muted">{snapshot.target.kind === "session" ? t("capabilities.targetSession") : snapshot.target.kind === "worker" ? t("capabilities.targetWorker") : snapshot.target.kind === "repo" ? t("capabilities.targetRepo") : t("capabilities.targetRookery")}</span>
+                    {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="text-meta text-muted">{t("capabilities.preview")}</span>}
+                    <span className="text-meta text-muted">{snapshot.target.provider === "codex" ? "Codex" : "Claude"}</span>
+                    {(snapshot.target.kind === "repo" || snapshot.target.kind === "rookery") && <span className="text-meta text-muted">{t(`capabilities.agent.${snapshot.target.agent}`)}</span>}
                   </div>
-                  <p className="shrink-0 text-right font-mono text-meta text-faint">{t("capabilities.generatedAt", { time: new Date(snapshot.generatedAt).toLocaleString() })}</p>
+                  {snapshot.desiredBlocked && <p className="mt-1 flex items-center gap-1.5 text-ui text-warn"><CircleAlert size={12} aria-hidden /> {t("capabilities.desiredBlocked")}</p>}
+                  {/* Revision hashes, the working directory and the inspection time are reference detail, folded away. */}
+                  <details className="group mt-1.5">
+                    <summary className="w-fit cursor-pointer select-none rounded-sm text-meta text-muted hover:text-fg-dim focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi">{t("capabilities.details")}</summary>
+                    <dl className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-0.5 text-meta">
+                      {snapshot.target.cwd && (<><dt className="text-muted">{t("capabilities.cwd")}</dt><dd className="truncate font-mono text-fg-dim" title={snapshot.target.cwd}>{snapshot.target.cwd}</dd></>)}
+                      {snapshot.desiredRevision && (<><dt className="text-muted">{t("capabilities.desiredRevision")}</dt><dd className="font-mono text-fg-dim">{snapshot.desiredRevision.slice(0, 12)}</dd></>)}
+                      {snapshot.desiredRevision && (snapshot.target.kind === "session" || snapshot.target.kind === "worker") && (
+                        <><dt className="text-muted">{t("capabilities.appliedRevision")}</dt>{snapshot.appliedRevision
+                          ? <dd className="font-mono text-fg-dim">{snapshot.appliedRevision.slice(0, 12)}</dd>
+                          : <dd className="text-fg-dim">{t("capabilities.appliedRevisionNone")}</dd>}</>
+                      )}
+                      <dt className="text-muted">{t("capabilities.generatedAt")}</dt><dd className="font-mono text-fg-dim">{new Date(snapshot.generatedAt).toLocaleString()}</dd>
+                    </dl>
+                  </details>
                 </div>
               )}
             </section>
@@ -360,18 +413,22 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                 </p>
               )}
 
-              <section data-testid="capability-summary" className="flex flex-wrap border-y border-line">
-                {(Object.keys(counts) as CapabilityState[]).map((state, index) => {
-                  const value = counts[state];
-                  const isProblem = state === "blocked" || state === "error" || state === "unavailable";
-                  return (
-                    <div key={state} className={cn("flex min-w-[104px] flex-1 flex-col gap-0.5 px-3.5 py-2", index > 0 && "border-l border-line-soft")}>
-                      <span className={cn("font-mono text-title tabular-nums", value === 0 ? "text-faint" : isProblem ? "text-fail" : "text-fg")}>{value}</span>
-                      <span className="text-meta text-muted">{t(STATE_KEYS[state])}</span>
-                    </div>
-                  );
-                })}
-              </section>
+              {/* Only the states that occur (most of the eight are usually 0), on an even grid that doesn't break into
+                  rows of different widths when the window narrows (audit #98). */}
+              {(Object.keys(counts) as CapabilityState[]).some((state) => counts[state] > 0) && (
+                <section data-testid="capability-summary" className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-px overflow-hidden border-y border-line bg-line-soft">
+                  {(Object.keys(counts) as CapabilityState[]).filter((state) => counts[state] > 0).map((state) => {
+                    const value = counts[state];
+                    const isProblem = state === "blocked" || state === "error" || state === "unavailable";
+                    return (
+                      <div key={state} className="flex flex-col gap-0.5 bg-ink px-3 py-2">
+                        <span className={cn("text-title tabular-nums", isProblem ? "text-fail" : "text-fg")}>{value}</span>
+                        <span className="truncate text-meta text-muted" title={t(STATE_KEYS[state])}>{t(STATE_KEYS[state])}</span>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
 
               {workerNeedsReload && (
                 <section data-testid="capability-worker-reload" className="rounded-[var(--radius)] border border-warn/30 bg-warn/5 px-3.5 py-3">
@@ -424,9 +481,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               {visibleEntries.length === 0 ? (
                 <EmptyState layout="stack">{t("capabilities.empty")}</EmptyState>
               ) : (
-                <section className="divide-y divide-line-soft border-y border-line">
-                  {visibleEntries.map((entry) => <EntryRow key={entry.id} entry={entry} />)}
-                </section>
+                <EntryGroups entries={visibleEntries} targetProvider={snapshot.target.provider} />
               )}
             </>
           ) : null}

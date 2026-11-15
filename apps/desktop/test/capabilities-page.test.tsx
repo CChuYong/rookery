@@ -76,7 +76,10 @@ describe("CapabilitiesPage", () => {
     expect(screen.getByText("team-rules")).toBeInTheDocument();
     expect(screen.getAllByText("적용 예정").length).toBeGreaterThan(0);
     expect(screen.getAllByText("억제됨").length).toBeGreaterThan(0);
-    expect(screen.getByText(/원하는 리비전 1234567890ab/)).toBeInTheDocument();
+    // revision detail: sans label + mono hash, folded under Details (audit #98/#113)
+    expect(screen.getByText("목표 리비전")).toBeInTheDocument();
+    expect(screen.getByText("1234567890ab")).toHaveClass("font-mono");
+    expect(screen.getByText("활성화가 차단됐어요")).toBeInTheDocument();
     expect(within(screen.getByTestId("capability-summary")).getByText("2")).toBeInTheDocument();
   });
 
@@ -186,7 +189,7 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
     await screen.findByRole("heading", { name: "Rookery 기본값" });
 
-    const targetSelect = screen.getByLabelText("Effective 대상");
+    const targetSelect = screen.getByLabelText("확인 대상");
     expect(within(targetSelect).getByRole("option", { name: "Rookery 기본값" })).toBeInTheDocument();
     expect(within(targetSelect).getByRole("option", { name: "Repo One" })).toBeInTheDocument();
     expect(within(targetSelect).getByRole("option", { name: "Main" })).toBeInTheDocument();
@@ -256,8 +259,9 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={target} {...pageProps(makeApi(async () => runtimeSnapshot))} />);
 
     await screen.findByText("Codex Main");
-    expect(screen.getByText(/원하는 리비전 abcdef123456/)).toBeInTheDocument();
-    expect(screen.getByText(/적용된 리비전 001122334455/)).toBeInTheDocument();
+    expect(screen.getByText("abcdef123456")).toBeInTheDocument(); // target revision
+    expect(screen.getByText("적용된 리비전")).toBeInTheDocument();
+    expect(screen.getByText("001122334455")).toBeInTheDocument();
     expect(screen.getAllByText("다음 턴에 적용").length).toBeGreaterThan(0);
     expect(screen.getAllByText("재시작 필요").length).toBeGreaterThan(0);
   });
@@ -300,3 +304,27 @@ describe("CapabilitiesPage", () => {
     expect(screen.queryByTestId("capability-worker-reload")).toBeNull();
   });
 });
+
+// audit #98: a calmer Effective view — only the states that occur, meta stated once per kind group.
+describe("CapabilitiesPage Effective density", () => {
+  it("hides zero counters in the summary", async () => {
+    render(<CapabilitiesPage {...pageProps(makeApi(async () => snapshot))} target={target} />);
+    const summary = await screen.findByTestId("capability-summary");
+    expect(within(summary).queryByText("0")).toBeNull();
+    expect(within(summary).queryByText("오류")).toBeNull(); // no error entries → no error counter
+    expect(within(summary).getByText("차단됨")).toBeInTheDocument();
+  });
+
+  it("states a group's shared meta once in its header and leaves the provider off rows that match the target", async () => {
+    render(<CapabilitiesPage {...pageProps(makeApi(async () => snapshot))} target={target} />);
+    await screen.findByText("release");
+    const hooks = screen.getByRole("region", { name: "훅" });
+    expect(within(hooks).getAllByText("Codex hooks/list")).toHaveLength(1); // header only, not repeated on the row
+    expect(within(screen.getByTestId("capability-hook")).queryByText("Codex")).toBeNull(); // same provider as the target
+    // A Rookery-provided entry on a Codex target still says where it comes from.
+    expect(within(screen.getByTestId("capability-command")).getByText("Rookery")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "도구 & MCP" }));
+    expect(within(screen.getByTestId("capability-managed-side-mcp")).getByText("Rookery")).toBeInTheDocument();
+  });
+});
+

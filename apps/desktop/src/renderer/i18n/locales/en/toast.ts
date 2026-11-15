@@ -14,4 +14,5 @@ export default {
   "toast.workerSpawned": "Worker spawned",
   "toast.keySaved": "Key saved",
   "toast.restored": "Restored to checkpoint",
+  "toast.mcpTokenRegenerated": "Token regenerated — register the new URL in your external clients",
 } satisfies Catalog;

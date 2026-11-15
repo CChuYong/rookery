@@ -394,16 +394,21 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: 3 }));
   });
 
-  it("non-numeric, zero, or negative cost budget resolves to null in the payload", () => {
+  // An entered budget that isn't a positive amount used to be dropped silently (saved as "no budget"); it now blocks
+  // the save with an inline message, the same rule as the spawn page (Task 4 carry-over).
+  it.each(["-1", "0", "abc"])("an invalid cost budget (%s) blocks save with an inline message", (value) => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
     const promptEditor = screen.getByLabelText("프롬프트");
     setPromptEditorText(promptEditor, "do something");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
-    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "-1" } });
+    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value } });
+    expect(screen.getByText("0보다 큰 금액을 입력하거나 비워 두세요")).toBeInTheDocument();
+    expect(screen.getByLabelText("비용 예산 (USD)")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("저장").closest("button")).toBeDisabled();
     fireEvent.click(screen.getByText("저장"));
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: null }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("initialises the cost-budget input from init.costBudgetUsd", () => {
@@ -544,8 +549,8 @@ describe("AutomationForm worker-settled trigger", () => {
     render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "handoff" } });
     fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "worker" } });
-    // defaults: 종료+실패 on, idle off
-    expect((screen.getByLabelText(/종료됨/) as HTMLInputElement).checked).toBe(true);
+    // defaults: 중지+실패 on, idle off
+    expect((screen.getByLabelText(/중지됨/) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText(/실패/) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText(/작업 완료/) as HTMLInputElement).checked).toBe(false);
     // opt into idle + pick repo + label filter
@@ -569,12 +574,25 @@ describe("AutomationForm worker-settled trigger", () => {
     render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "x" } });
     fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "worker" } });
-    fireEvent.click(screen.getByLabelText(/종료됨/));
+    fireEvent.click(screen.getByLabelText(/중지됨/));
     fireEvent.click(screen.getByLabelText(/실패/));
     const promptEditor = screen.getByLabelText("프롬프트");
     setPromptEditorText(promptEditor, "p");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/w" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// audit #96: the form asks what to run before how to run it — the Action block comes before the execution settings,
+// whose defaults (model, speed, max turns) depend on the action kind.
+describe("AutomationForm field order", () => {
+  it("puts the Action select before the Model / Execution section", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    const action = screen.getByLabelText("액션");
+    const execution = screen.getByText("모델 / 실행");
+    expect(action.compareDocumentPosition(execution) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const trigger = screen.getByLabelText("트리거");
+    expect(trigger.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

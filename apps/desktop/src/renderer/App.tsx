@@ -8,6 +8,7 @@ import { defaultSpeed } from "./lib/speed.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeftClose, ChevronLeft, ChevronRight, Plus, Loader2, MessageSquare, FolderGit2, X } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
+import type { ClientMessage } from "@daemon/protocol/messages.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import type { CapabilityPreviewTarget, CapabilityTarget } from "@daemon/core/capabilities/types.js";
@@ -1066,14 +1067,27 @@ export function App(): JSX.Element {
     (client ? client.request({ type: "worker.restore", id, seq }) : Promise.reject(new Error("not connected")))
       .then(() => { toast.success(tRef.current("toast.restored")); })
       .catch((e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); throw e; });
-  const saveSettings = useCallback((next: SettingsValues) => {
-    const c = client; if (!c) return;
-    void c.request({ type: "settings.set", settings: next }).then((r) => {
+  // Returns the request so the Settings page keeps its draft (and stays open on "Save and close") until the daemon
+  // accepted it; a failure is reported once here and rethrown for the page (audit #93).
+  const saveSettings = useCallback((next: SettingsValues): Promise<void> => {
+    const c = client;
+    if (!c) { toast.error(tRef.current("toast.saveFailed")); return Promise.reject(new Error("not connected")); }
+    return c.request({ type: "settings.set", settings: next }).then((r) => {
       useStore.getState().setSettings(r.settings);
       // A scope change (mcpExposure) reconciles the External MCP server daemon-side → refetch the URL/status.
       void c.request({ type: "mcp.status" }).then((m) => useStore.getState().setMcpStatus({ scope: m.scope, url: m.url })).catch(() => {});
-    }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+    }, (e) => { toast.error(tRef.current("toast.saveFailed"), String(e)); throw e; });
   }, []);
+  // Write-only secret saves (API keys, tokens): resolve once the daemon stored the value — the Settings page clears the
+  // field only then (audit #94). The follow-up status refetch runs on its own; its failure isn't a failed save.
+  const saveSecret = (patch: Extract<ClientMessage, { type: "settings.set" }>["settings"], refetch?: (c: WsClient) => Promise<void>): Promise<void> => {
+    const c = client;
+    if (!c) { toast.error(tRef.current("toast.saveFailed")); return Promise.reject(new Error("not connected")); }
+    return c.request({ type: "settings.set", settings: patch }).then(() => {
+      toast.success(tRef.current("toast.keySaved"));
+      if (refetch) void refetch(c).catch(() => {});
+    }, (e) => { toast.error(tRef.current("toast.saveFailed"), String(e)); throw e; });
+  };
   // Composer attach/drop — reads only the window bridge for stability (avoids a new ref every render → Conversation memo effect).
   const onAttachFile = useCallback(() => window.rookery.pickFile(), []);
   const onDropFiles = useCallback((files: File[]) => files.map((f) => window.rookery.getPathForFile(f)).filter(Boolean), []);
@@ -1473,38 +1487,26 @@ export function App(): JSX.Element {
             integrationsFailed={s.integrationsFailed}
             authStatusFailed={s.authStatusFailed}
             onRecheckStatus={() => (client ? requestStatusChecks(client) : Promise.reject(new Error("not connected")))}
-            onSaveLinearKey={(key) => {
-              // Reuse toast.keySaved (already used by the sibling Slack-tokens/Anthropic-key saves below) — the
-              // Linear key card doesn't otherwise change on screen until integrations.status round-trips (audit #54).
-              void client?.request({ type: "settings.set", settings: { linearApiKey: key } })
-                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "integrations.status" }); })
-                .then((r) => { if (r) useStore.getState().setIntegrations({ github: r.github, linear: r.linear }); })
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
-            onSaveSlackTokens={(bot, app) => {
-              // slack.status arrives via the daemon's live reconcile-on-save broadcast — no extra refetch needed here (audit #8).
-              void client?.request({ type: "settings.set", settings: { slackBotToken: bot, slackAppToken: app } })
-                .then(() => toast.success(tRef.current("toast.keySaved")))
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
-            onSaveAnthropicKey={(key) => {
-              void client?.request({ type: "settings.set", settings: { anthropicApiKey: key } })
-                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "auth.status" }); })
-                .then((r) => { if (r) useStore.getState().setAuthStatus(r); })
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
-            onSaveCodexKey={(key) => {
-              // Refetch the codex auth probe after saving — the new key provisions the redirected CODEX_HOME,
-              // so the Codex sub-tab's readiness card reflects the change (mirrors onSaveAnthropicKey).
-              void client?.request({ type: "settings.set", settings: { codexApiKey: key } })
-                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "codex.authStatus" }); })
-                .then((r) => { if (r) useStore.getState().setCodexAuthStatus(r.status ?? "unavailable"); })
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
+            onSaveLinearKey={(key) => saveSecret({ linearApiKey: key }, async (c) => {
+              // The Linear key card doesn't otherwise change on screen until integrations.status round-trips (audit #54).
+              const r = await c.request({ type: "integrations.status" });
+              useStore.getState().setIntegrations({ github: r.github, linear: r.linear });
+            })}
+            // slack.status arrives via the daemon's live reconcile-on-save broadcast — no extra refetch needed here (audit #8).
+            onSaveSlackTokens={(bot, app) => saveSecret({ slackBotToken: bot, slackAppToken: app })}
+            onSaveAnthropicKey={(key) => saveSecret({ anthropicApiKey: key }, async (c) => {
+              useStore.getState().setAuthStatus(await c.request({ type: "auth.status" }));
+            })}
+            // Refetch the codex auth probe after saving — the new key provisions the redirected CODEX_HOME, so the
+            // Codex sub-tab's readiness card reflects the change (mirrors onSaveAnthropicKey).
+            onSaveCodexKey={(key) => saveSecret({ codexApiKey: key }, async (c) => {
+              const r = await c.request({ type: "codex.authStatus" });
+              useStore.getState().setCodexAuthStatus(r.status ?? "unavailable");
+            })}
             mcpStatus={s.mcpStatus}
             onRegenerateMcpToken={() => {
               void client?.request({ type: "mcp.regenerate_token" })
-                .then((r) => { useStore.getState().setMcpStatus({ scope: r.scope, url: r.url }); toast.success(tRef.current("toast.keySaved")); })
+                .then((r) => { useStore.getState().setMcpStatus({ scope: r.scope, url: r.url }); toast.success(tRef.current("toast.mcpTokenRegenerated")); })
                 .catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e)));
             }}
           />
@@ -1523,13 +1525,10 @@ export function App(): JSX.Element {
                   editJob === "new"
                     ? ({ type: "automation.create" as const, automation: input })
                     : ({ type: "automation.update" as const, id: editJob.id, patch: input });
-                try {
-                  await client?.request(msg);
-                  setEditJob(null);
-                } catch (e) {
-                  toast.error(tRef.current("toast.automationFailed"), String(e));
-                  throw e; // rethrow → AutomationForm's own catch surfaces the inline submitError
-                }
+                // A failure is shown once, inline under the form header (AutomationForm's submitError) — no toast too.
+                if (!client) throw new Error(tRef.current("toast.saveFailed"));
+                await client.request(msg);
+                setEditJob(null);
               }}
             />
           ) : (
@@ -1549,7 +1548,11 @@ export function App(): JSX.Element {
                 const req = client?.request({ type: "automation.set_enabled", id, enabled });
                 return req ? req.then(() => {}, (e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); throw e; }) : Promise.resolve(); // rethrow → AutomationPage reverts the optimistic toggle
               }}
-              onDelete={(id) => { void client?.request({ type: "automation.delete", id }).catch((e) => toast.error(tRef.current("toast.deleteFailed"), String(e))); }}
+              onDelete={(id) => {
+                // Returned so the page can bring back its optimistically removed row if the delete fails.
+                const req = client?.request({ type: "automation.delete", id });
+                return req ? req.then(() => {}, (e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); throw e; }) : Promise.reject(new Error("not connected"));
+              }}
               onEdit={(job) => setEditJob(job)}
               onNew={() => setEditJob("new")}
               onViewSessions={(id) => { s.setSessionFilter({ source: "automation", automationId: id }); navigate({ overlay: null, showRepos: false }); }}
