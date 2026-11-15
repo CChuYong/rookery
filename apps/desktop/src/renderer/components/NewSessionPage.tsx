@@ -145,7 +145,7 @@ export function NewSessionPage(p: {
           {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
         </Select>
       ) : (
-        <Input size="xs" className={cn(CHIP_FIELD, "w-28")} value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
+        <Input size="xs" className={cn(CHIP_FIELD, "w-28 focus:bg-raised")} value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
       )}
       {effortSupported(effortModel) && (
         <Select size="xs" className={CHIP_FIELD} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>

@@ -9,6 +9,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 export interface Draft {
   text: string;
   images: ImageRef[];
+  label?: string; // spawn page drafts only: the worker label typed next to the task
 }
 export const EMPTY_DRAFT: Draft = { text: "", images: [] };
 export function imageRefs(images: readonly ImageRef[]): ImageRef[] {
@@ -33,14 +34,14 @@ export function migrateDrafts(persisted: unknown): DraftState {
         typeof value.text === "string" &&
         Array.isArray(value.images)
       ) {
+        let images: ImageRef[] = [];
         try {
-          byPage[key] = {
-            text: value.text,
-            images: imageRefs(validateImageRefs(value.images)),
-          };
+          images = imageRefs(validateImageRefs(value.images));
         } catch {
-          byPage[key] = { text: value.text, images: [] };
+          images = [];
         }
+        byPage[key] = { text: value.text, images };
+        if (typeof value.label === "string" && value.label) byPage[key].label = value.label;
       }
     }
   return { byPage };
@@ -83,17 +84,41 @@ function sideDraftSource(key: string): string | undefined {
   return /^side:(?:master|worker):(.+)$/.exec(key)?.[1];
 }
 
+// The full-page worker spawn form keeps its unsent task + label per target repo (repo name, as shown on the page).
+export function spawnDraftKey(repo: string): string {
+  return `spawnWorker:${repo}`;
+}
+const SPAWN_DRAFT_PREFIX = "spawnWorker:";
+
+// Save a spawn page draft; an empty task and label removes the entry (like setDraft).
+export function setSpawnDraft(
+  s: DraftState,
+  repo: string,
+  task: string,
+  label: string,
+): DraftState {
+  const key = spawnDraftKey(repo);
+  if (!task && !label) return setDraft(s, key, "");
+  const draft: Draft = { text: task, images: [] };
+  if (label) draft.label = label;
+  return { ...s, byPage: { ...s.byPage, [key]: draft } };
+}
+
 // Remove drafts not in the known page keys (session ids ∪ live worker ids) — prevents dead-worker drafts from piling up (same convention as pruneWsPages).
+// Spawn page drafts (spawnWorker:<repo>) are always kept: the boot-time prune runs once sessions + fleet arrive, which
+// does not wait for the repo list, so pruning by repo here could wipe a live draft. Their count is bounded by the
+// registered repo names, and App clears a repo's spawn draft when that repo is removed.
 export function pruneDrafts(s: DraftState, knownKeys: Set<string>): DraftState {
   const byPage: DraftState["byPage"] = {};
   for (const [k, v] of Object.entries(s.byPage))
-    if (knownKeys.has(k) || knownKeys.has(sideDraftSource(k) ?? ""))
+    if (k.startsWith(SPAWN_DRAFT_PREFIX) || knownKeys.has(k) || knownKeys.has(sideDraftSource(k) ?? ""))
       byPage[k] = v;
   return { ...s, byPage };
 }
 
 interface DraftStore extends DraftState {
   setDraft_: (key: string, text: string, images?: ImageRef[]) => void;
+  setSpawnDraft_: (repo: string, task: string, label: string) => void;
 }
 
 export const useDraftStore = create<DraftStore>()(
@@ -102,6 +127,8 @@ export const useDraftStore = create<DraftStore>()(
       ...emptyDraftState(),
       setDraft_: (key, text, images) =>
         set((s) => setDraft(s, key, text, images)),
+      setSpawnDraft_: (repo, task, label) =>
+        set((s) => setSpawnDraft(s, repo, task, label)),
     }),
     {
       name: "rookery.drafts",

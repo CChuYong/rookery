@@ -30,12 +30,26 @@ export function sameLoc(a: Location, b: Location): boolean {
   return a.overlay === b.overlay && a.showRepos === b.showRepos && a.sessionId === b.sessionId && a.subId === b.subId && a.repoId === b.repoId;
 }
 
+// Apply a patch to a location. Leaving a repo-scoped overlay (repoSettings/spawnWorker) drops its repoId unless the patch sets one.
+function patched(loc: Location, patch: Partial<Location>): Location {
+  const next: Location = { ...loc, ...patch };
+  if (patch.overlay !== undefined && patch.overlay !== "repoSettings" && patch.overlay !== "spawnWorker" && patch.repoId === undefined) next.repoId = null;
+  return next;
+}
+
 // Update the current location with a patch. If the location actually changes, push the current one onto back and clear forward (browser-style).
 export function navigate(st: NavState, patch: Partial<Location>): NavState {
-  const next: Location = { ...st.loc, ...patch };
-  if (patch.overlay !== undefined && patch.overlay !== "repoSettings" && patch.overlay !== "spawnWorker" && patch.repoId === undefined) next.repoId = null;
+  const next = patched(st.loc, patch);
   if (sameLoc(next, st.loc)) return st; // same location → no-op (avoids polluting history)
   return { loc: next, back: [...st.back, st.loc], forward: [] }; // new transition → discard forward (the future we had undone)
+}
+
+// Like navigate, but the current entry is replaced instead of pushed (history.replaceState). Used when the current page
+// is a one-shot form that must not be revisited — after a successful spawn, Back skips the spent spawn page.
+export function replace(st: NavState, patch: Partial<Location>): NavState {
+  const next = patched(st.loc, patch);
+  if (sameLoc(next, st.loc)) return st;
+  return { loc: next, back: st.back, forward: [] };
 }
 
 export function back(st: NavState): NavState {

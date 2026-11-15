@@ -605,6 +605,17 @@ describe("store navigation (single location model)", () => {
     expect([useStore.getState().overlay, useStore.getState().activeSessionId]).toEqual([null, "s1"]); // closes and keeps the session
   });
 
+  it("navigateReplace replaces the current entry (post-spawn: Back must not reopen the spawn page) and clears unread", () => {
+    useStore.setState({ overlay: null, showRepos: false, activeSessionId: "s1", activeWorkerId: null, repoSettingsId: null, navBack: [], navFwd: [], attention: { w1: true } });
+    const g = () => useStore.getState();
+    g().navigate({ overlay: "spawnWorker", showRepos: true, repoId: "r1" });
+    g().navigateReplace({ overlay: null, showRepos: true, subId: "w1" });
+    expect([g().overlay, g().activeWorkerId, g().repoSettingsId, g().navBack.length, g().navFwd.length]).toEqual([null, "w1", null, 1, 0]);
+    expect(g().attention.w1).toBe(false);
+    g().goBack();
+    expect([g().overlay, g().activeSessionId, g().showRepos]).toEqual([null, "s1", false]);
+  });
+
   it("restoreLocation sets location with empty history (restore entry)", () => {
     useStore.setState({ navBack: [{ overlay: null, showRepos: false, sessionId: "old", subId: null, repoId: null }], navFwd: [] });
     useStore.getState().restoreLocation({ overlay: null, showRepos: true, sessionId: null, subId: "a9", repoId: null });

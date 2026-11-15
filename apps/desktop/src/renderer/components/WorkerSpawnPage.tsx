@@ -8,6 +8,7 @@ import { Input, Select, Textarea } from "../ui/input.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
+import { spawnDraftKey, useDraftStore } from "../store/drafts.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
@@ -36,8 +37,13 @@ export function WorkerSpawnPage(p: {
   const [speed, setSpeed] = useState<SpeedPreference | null>(null);
   const settings = useStore((s) => s.settings);
   const [mode, setMode] = useState<Mode>("direct");
-  const [task, setTask] = useState("");
-  const [label, setLabel] = useState("");
+  // The task and label persist per repo in the drafts store (spawnWorker:<repo>), so closing the page, switching away or
+  // reloading never loses a half-written task. Read once on mount; every edit writes through.
+  const [task, setTaskState] = useState(() => useDraftStore.getState().byPage[spawnDraftKey(p.repo)]?.text ?? "");
+  const [label, setLabelState] = useState(() => useDraftStore.getState().byPage[spawnDraftKey(p.repo)]?.label ?? "");
+  const saveDraft = (nextTask: string, nextLabel: string): void => useDraftStore.getState().setSpawnDraft_(p.repo, nextTask, nextLabel);
+  const setTask = (v: string): void => { setTaskState(v); saveDraft(v, label); };
+  const setLabel = (v: string): void => { setLabelState(v); saveDraft(task, v); };
   // Agent backend for this worker. Default "claude" (wire-minimal: the spawn() builder below sends `undefined`
   // for claude and only sends an explicit value for "codex", matching the daemon's provider?: "claude"|"codex" contract).
   const [provider, setProvider] = useState<"claude" | "codex">("claude");
@@ -91,8 +97,9 @@ export function WorkerSpawnPage(p: {
   const switchMode = (m: Mode) => { setMode(m); setSelected(null); setQ(""); setResults([]); setHighlight(-1); };
   const pickSource = (item: SourceItem) => {
     const built = buildSourceTask(item);
-    setTask(built.task);
-    setLabel(built.label);
+    setTaskState(built.task);
+    setLabelState(built.label);
+    saveDraft(built.task, built.label);
     setSelected(item);
   };
   const clearSelected = () => { setSelected(null); setQ(""); };
@@ -123,6 +130,7 @@ export function WorkerSpawnPage(p: {
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
     const cb = costBudget.trim() ? Number(costBudget) : undefined;
     const costBudgetUsd = cb != null && Number.isFinite(cb) && cb > 0 ? cb : undefined;
+    const draftRepo = p.repo; // the repo select is disabled while spawning, but pin the key anyway
     spawningRef.current = true;
     setSpawning(true);
     try {
@@ -142,6 +150,7 @@ export function WorkerSpawnPage(p: {
       // renderer request contract. Avoiding an unconditional `await undefined` also keeps state updates in
       // the originating click batch for synchronous consumers.
       if (result) await result;
+      useDraftStore.getState().setSpawnDraft_(draftRepo, "", ""); // spawned: the draft is spent
       dismiss();
     } catch {
       // App owns the localized error toast. Keep this modal and every local draft field mounted for retry.
@@ -151,6 +160,19 @@ export function WorkerSpawnPage(p: {
   };
   // The repo row re-targets the form without discarding the draft: only repo-bound state (base branch, the picked
   // issue/ticket and its search) resets — the task, label and model choices survive the switch.
+  // App remounts the page per repo (its page key includes the repo), so the draft is carried in the store: it moves to
+  // the picked repo unless that repo already holds a draft of its own (never overwrite one; the current draft then stays
+  // under this repo).
+  const changeRepo = (next: string): void => {
+    if (next !== p.repo && (task || label)) {
+      const drafts = useDraftStore.getState();
+      if (!drafts.byPage[spawnDraftKey(next)]) {
+        drafts.setSpawnDraft_(next, task, label);
+        drafts.setSpawnDraft_(p.repo, "", "");
+      }
+    }
+    p.onRepoChange?.(next);
+  };
   const firstRepo = useRef(p.repo);
   useEffect(() => {
     if (firstRepo.current === p.repo) return;
@@ -196,7 +218,7 @@ export function WorkerSpawnPage(p: {
                 className="h-auto min-w-0 border-0 bg-transparent px-0.5 font-mono text-title font-medium text-fg underline decoration-line underline-offset-4 hover:decoration-fg-dim focus:ring-0"
                 value={p.repo}
                 disabled={spawning}
-                onChange={(e) => p.onRepoChange!(e.target.value)}
+                onChange={(e) => changeRepo(e.target.value)}
                 aria-label={t("workerSpawnModal.repoLabel")}
                 title={t("workerSpawnModal.repoLabel")}
               >
@@ -222,7 +244,6 @@ export function WorkerSpawnPage(p: {
                   <Input
                     autoFocus
                     className="mx-3 mt-3 w-auto"
-                    style={{ outline: "none" }}
                     size="sm"
                     placeholder={mode === "github" ? t("workerSpawnModal.searchGithub") : t("workerSpawnModal.searchLinear")}
                     value={q}
@@ -268,9 +289,7 @@ export function WorkerSpawnPage(p: {
               <Textarea
                 autoFocus={mode === "direct"}
                 aria-labelledby="worker-spawn-heading"
-                // The whole box shows focus (focus-within border); the global focus-visible outline (unlayered, so it beats
-                // utility classes) would otherwise draw an orange ring around just the textarea's half of the box.
-                style={{ outline: "none" }}
+                // The whole box shows focus (focus-within border); text fields are outside the global focus-visible outline.
                 className="min-h-[84px] resize-none border-0 bg-transparent px-4 pt-3.5 text-prose focus:ring-0"
                 placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
                 value={task}

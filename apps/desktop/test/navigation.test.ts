@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initialNav, navigate, back, forward, reset, sameLoc, type Location } from "../src/renderer/store/navigation.js";
+import { initialNav, navigate, back, forward, reset, replace, sameLoc, type Location } from "../src/renderer/store/navigation.js";
 
 const L = (p: Partial<Location> = {}): Location => ({ overlay: null, showRepos: false, sessionId: null, subId: null, repoId: null, ...p });
 
@@ -89,5 +89,25 @@ describe("navigation model", () => {
     expect(st.loc).toEqual(L({ showRepos: true, subId: "w1" }));
     st = forward(st);
     expect(st.loc).toEqual(L({ overlay: "capabilities", showRepos: true, subId: "w1" }));
+  });
+
+  it("replace swaps the current entry without pushing back and clears forward", () => {
+    let st = navigate(initialNav, { sessionId: "s1" });
+    st = navigate(st, { overlay: "spawnWorker", showRepos: true, repoId: "r1" });
+    st = navigate(st, { overlay: "settings" });
+    st = back(st); // forward now holds the settings page
+    expect(st.forward.length).toBe(1);
+    const backBefore = st.back;
+    st = replace(st, { overlay: null, showRepos: true, subId: "w1" });
+    expect(st.loc).toEqual(L({ sessionId: "s1", showRepos: true, subId: "w1" })); // repoId dropped with the overlay, like navigate
+    expect(st.back).toBe(backBefore); // no new back entry: Back skips the replaced spawn page
+    expect(st.forward).toEqual([]);
+    st = back(st);
+    expect(st.loc).toEqual(L({ sessionId: "s1" }));
+  });
+
+  it("replace to the same location is a no-op", () => {
+    const st = navigate(initialNav, { sessionId: "s1" });
+    expect(replace(st, { sessionId: "s1" })).toBe(st);
   });
 });
