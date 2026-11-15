@@ -1,4 +1,5 @@
 import type { ImageRef } from "@daemon/core/image-input.js";
+import type { SourceProviderId } from "@daemon/core/source-intake.js";
 import { validateImageRefs } from "../lib/image-limits.js";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -10,6 +11,23 @@ export interface Draft {
   text: string;
   images: ImageRef[];
   label?: string; // spawn page drafts only: the worker label typed next to the task
+  source?: SpawnDraftSource; // spawn page drafts only: the picked GitHub issue / Linear ticket (its mode is `provider`)
+}
+// The picked source item minus its body (the body already lives in the task text). Enough to restore the chip and to
+// send ticketKey (identifier) / ticketUrl (url) on spawn.
+export interface SpawnDraftSource {
+  provider: SourceProviderId;
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+}
+function spawnDraftSource(value: unknown): SpawnDraftSource | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  if (v.provider !== "github" && v.provider !== "linear") return undefined;
+  if (![v.id, v.identifier, v.title, v.url].every((field) => typeof field === "string")) return undefined;
+  return { provider: v.provider, id: v.id as string, identifier: v.identifier as string, title: v.title as string, url: v.url as string };
 }
 export const EMPTY_DRAFT: Draft = { text: "", images: [] };
 export function imageRefs(images: readonly ImageRef[]): ImageRef[] {
@@ -42,6 +60,8 @@ export function migrateDrafts(persisted: unknown): DraftState {
         }
         byPage[key] = { text: value.text, images };
         if (typeof value.label === "string" && value.label) byPage[key].label = value.label;
+        const source = spawnDraftSource(value.source);
+        if (source) byPage[key].source = source;
       }
     }
   return { byPage };
@@ -90,17 +110,20 @@ export function spawnDraftKey(repo: string): string {
 }
 const SPAWN_DRAFT_PREFIX = "spawnWorker:";
 
-// Save a spawn page draft; an empty task and label removes the entry (like setDraft).
+// Save a spawn page draft; an empty task, label and source removes the entry (like setDraft).
 export function setSpawnDraft(
   s: DraftState,
   repo: string,
   task: string,
   label: string,
+  source?: SpawnDraftSource,
 ): DraftState {
   const key = spawnDraftKey(repo);
-  if (!task && !label) return setDraft(s, key, "");
+  if (!task && !label && !source) return setDraft(s, key, "");
   const draft: Draft = { text: task, images: [] };
   if (label) draft.label = label;
+  const picked = spawnDraftSource(source); // strips extra fields (e.g. a SourceItem's body)
+  if (picked) draft.source = picked;
   return { ...s, byPage: { ...s.byPage, [key]: draft } };
 }
 
@@ -118,7 +141,7 @@ export function pruneDrafts(s: DraftState, knownKeys: Set<string>): DraftState {
 
 interface DraftStore extends DraftState {
   setDraft_: (key: string, text: string, images?: ImageRef[]) => void;
-  setSpawnDraft_: (repo: string, task: string, label: string) => void;
+  setSpawnDraft_: (repo: string, task: string, label: string, source?: SpawnDraftSource) => void;
 }
 
 export const useDraftStore = create<DraftStore>()(
@@ -127,8 +150,8 @@ export const useDraftStore = create<DraftStore>()(
       ...emptyDraftState(),
       setDraft_: (key, text, images) =>
         set((s) => setDraft(s, key, text, images)),
-      setSpawnDraft_: (repo, task, label) =>
-        set((s) => setSpawnDraft(s, repo, task, label)),
+      setSpawnDraft_: (repo, task, label, source) =>
+        set((s) => setSpawnDraft(s, repo, task, label, source)),
     }),
     {
       name: "rookery.drafts",

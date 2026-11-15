@@ -69,6 +69,7 @@ import { RightSidebar } from "./components/RightSidebar.js";
 import { useWsStore, pruneWsPages } from "./store/workspace.js";
 import { useLayoutStore } from "./store/layout.js";
 import { useDraftStore, pruneDrafts, clearAcceptedDraft } from "./store/drafts.js";
+import { switchSpawnRepo, openSpawnedWorker } from "./lib/spawn-navigation.js";
 import { readViewState, writeViewState } from "./lib/view-state.js";
 import { WorkspaceTab } from "./components/WorkspaceTab.js";
 import { TabBar } from "./components/TabBar.js";
@@ -875,6 +876,7 @@ export function App(): JSX.Element {
   const spawnSub = async (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number, speed?: SpeedPreference | null): Promise<void> => {
     const c = client;
     const repo = spawnRepo;
+    const repoId = spawnRepoRow?.id ?? null; // the spawn page this request came from (see openSpawnedWorker)
     if (!c || !repo) {
       const error = new Error("not connected");
       toast.error(tRef.current("toast.spawnFailed"), String(error));
@@ -890,8 +892,9 @@ export function App(): JSX.Element {
       .then((response) => useStore.getState().setFleet(response.fleet ?? []))
       .catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
     if (result.id) {
-      // Replace (not push) the spawn page's history entry: Back must not reopen the spent spawn form.
-      useStore.getState().navigateReplace({ overlay: null, showRepos: true, subId: result.id });
+      // Replace the spawn page's history entry if the user is still on it (Back must not reopen the spent form);
+      // push if they navigated elsewhere while the spawn was in flight.
+      openSpawnedWorker(result.id, repoId);
       loadWorkerHistory(result.id);
       toast.success(tRef.current("toast.workerSpawned"));
     }
@@ -907,6 +910,7 @@ export function App(): JSX.Element {
   }, []);
   const onStop = useCallback((id: string) => { void client?.request({ type: "fleet.stop", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []); // RepoTree right-click 'stop'
   const onNewRepo = useCallback(() => setRepoModal(true), []);
+  // Repo tree "+": opening the spawn page is a real navigation, so it pushes (the page's own repo select replaces).
   const onNewSub = useCallback((name: string) => {
     const repo = useStore.getState().repos.find((r) => r.name === name);
     if (repo) navigate({ overlay: "spawnWorker", showRepos: true, repoId: repo.id });
@@ -1306,7 +1310,7 @@ export function App(): JSX.Element {
           <WorkerSpawnPage
             repo={spawnRepo}
             repos={s.repos}
-            onRepoChange={onNewSub}
+            onRepoChange={switchSpawnRepo}
             defaultModel={s.settings?.workerModel ?? "claude-opus-4-8"}
             defaultEffort={s.settings?.workerEffort ?? "high"}
             codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}

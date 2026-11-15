@@ -321,6 +321,45 @@ describe("WorkerSpawnPage draft (spawnWorker:<repo>)", () => {
     expect(screen.getByPlaceholderText(/Ctrl\+Enter/)).toHaveValue("web's own draft");
   });
 
+  it("restores the picked ticket with the draft, so a reopened page still spawns with ticketKey/ticketUrl", async () => {
+    const items: SourceItem[] = [{ provider: "linear", id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7", body: "do it", state: "Todo" }];
+    const integrations = { github: { available: false }, linear: { configured: true, valid: true } };
+    const first = render(page("app", { integrations, searchSource: async () => items }));
+    fireEvent.click(screen.getByText("Linear"));
+    const input = screen.getByPlaceholderText(/티켓 검색/);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "ship" } });
+    fireEvent.click(await screen.findByText(/ABC-7/));
+    await waitFor(() => expect((screen.getByPlaceholderText(/Ctrl\+Enter/) as HTMLTextAreaElement).value).toContain("do it"));
+    first.unmount();
+    expect(useDraftStore.getState().byPage["spawnWorker:app"]?.source).toEqual({ provider: "linear", id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7" });
+
+    const onSpawn = vi.fn(() => Promise.resolve());
+    render(page("app", { integrations, searchSource: async () => items, onSpawn }));
+    // The picked ticket is shown again (Linear mode, chip instead of the search box) and rides on the spawn.
+    expect(screen.getByText("ABC-7")).toBeInTheDocument();
+    expect(screen.getByText("Ship it")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/티켓 검색/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    await waitFor(() => expect(onSpawn).toHaveBeenCalledTimes(1));
+    expect((onSpawn.mock.calls[0] as unknown[])[5]).toEqual({ key: "ABC-7", url: "https://l/ABC-7" });
+    await waitFor(() => expect(useDraftStore.getState().byPage["spawnWorker:app"]).toBeUndefined());
+  });
+
+  it("clearing the picked ticket or switching mode drops it from the draft", async () => {
+    const source = { provider: "linear" as const, id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7" };
+    const integrations = { github: { available: true }, linear: { configured: true, valid: true } };
+    useDraftStore.getState().setSpawnDraft_("app", "task", "ABC-7", source);
+    const first = render(page("app", { integrations, searchSource: async () => [] }));
+    fireEvent.click(screen.getByRole("button", { name: "선택 해제" }));
+    expect(useDraftStore.getState().byPage["spawnWorker:app"]).toEqual({ text: "task", images: [], label: "ABC-7" });
+    first.unmount();
+    useDraftStore.getState().setSpawnDraft_("app", "task", "ABC-7", source);
+    render(page("app", { integrations, searchSource: async () => [] }));
+    fireEvent.click(screen.getByText("GitHub"));
+    expect(useDraftStore.getState().byPage["spawnWorker:app"]?.source).toBeUndefined();
+  });
+
   it("text fields carry no inline outline override (focus styling comes from CSS)", () => {
     render(page("app"));
     expect(screen.getByPlaceholderText(/Ctrl\+Enter/).getAttribute("style") ?? "").not.toContain("outline");
