@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
+import { WorkerSpawnPage } from "../src/renderer/components/WorkerSpawnPage.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
@@ -15,7 +15,7 @@ function renderModal(searchSource = vi.fn().mockResolvedValue(items), extra: { c
   const onClose = vi.fn();
   const { defaultEffort = "high", ...rest } = extra;
   render(
-    <WorkerSpawnModal
+    <WorkerSpawnPage
       repo="app"
       defaultModel="claude-opus-4-8"
       defaultEffort={defaultEffort}
@@ -40,7 +40,7 @@ async function openGithubResults() {
   return input;
 }
 
-describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
+describe("WorkerSpawnPage source search keyboard nav (audit #27)", () => {
   it("Escape closes only the source-results popup and leaves the spawn dialog mounted", async () => {
     const { onClose } = renderModal();
     const input = await openGithubResults();
@@ -48,7 +48,7 @@ describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
     fireEvent.keyDown(input, { key: "Escape" });
 
     expect(screen.queryByRole("listbox")).toBeNull();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "새 워커" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -102,11 +102,11 @@ describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
   });
 });
 
-describe("WorkerSpawnModal provider selector (P1.5 task 4)", () => {
+describe("WorkerSpawnPage provider selector (P1.5 task 4)", () => {
   it("defaults to claude — onSpawn's trailing provider arg is undefined (wire-minimal)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(onSpawn.mock.calls[0]![7]).toBeUndefined();
   });
@@ -115,7 +115,7 @@ describe("WorkerSpawnModal provider selector (P1.5 task 4)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![7]).toBe("codex");
   });
 
@@ -137,7 +137,7 @@ const CODEX_MODELS: CodexModelInfo[] = [
   { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
 ];
 
-describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task 3)", () => {
+describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 3)", () => {
   beforeEach(() => {
     useStore.setState({ codexModels: null }); // reset the singleton store before each test
   });
@@ -177,7 +177,7 @@ describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task
     const { onSpawn } = renderModal(undefined, { codexDefaultModel: "gpt-5.5", defaultEffort: "max" });
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     const effortArg = onSpawn.mock.calls[0]![3];
     expect(effortArg).not.toBe("max");
     expect(CODEX_MODELS[0].supportedEfforts).toContain(effortArg); // gpt-5.5's default (xhigh), a real level
@@ -227,18 +227,18 @@ describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.4" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![2]).toBe("gpt-5.4"); // spawnModel
     expect(onSpawn.mock.calls[0]![3]).toBe("medium"); // effort (gpt-5.4's defaultEffort)
     expect(onSpawn.mock.calls[0]![7]).toBe("codex"); // provider
   });
 });
 
-describe("WorkerSpawnModal cost budget (cost budget guard Task 3)", () => {
+describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
   it("empty cost budget → onSpawn's trailing costBudgetUsd arg is undefined", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
   });
 
@@ -246,7 +246,7 @@ describe("WorkerSpawnModal cost budget (cost budget guard Task 3)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByTitle("비용 예산 (USD, 이 워커)"), { target: { value: "5" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![8]).toBe(5);
   });
 
@@ -256,7 +256,7 @@ describe("WorkerSpawnModal cost budget (cost budget guard Task 3)", () => {
 
     fireEvent.change(input, { target: { value } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "t1" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
   });
 });

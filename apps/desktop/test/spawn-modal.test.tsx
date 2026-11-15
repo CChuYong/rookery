@@ -1,22 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
+import { WorkerSpawnPage } from "../src/renderer/components/WorkerSpawnPage.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
-describe("WorkerSpawnModal", () => {
-  it("bounds the dialog to the viewport and keeps its body scrollable", () => {
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveClass("max-h-[calc(100vh-2rem)]", "overflow-hidden");
-    expect(dialog.querySelector("[data-dialog-scroll-body]")).toHaveClass("overflow-y-auto");
-    expect(dialog.querySelector("[data-dialog-footer]")).toBeInTheDocument();
+describe("WorkerSpawnPage", () => {
+  it("renders as a scrollable full page: one heading naming the repo, one task box, quiet meta controls", () => {
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" branches={["main"]} onSpawn={() => {}} onClose={() => {}} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("region", { name: "새 워커" })).toHaveClass("overflow-y-auto");
+    expect(screen.getByRole("heading", { name: /app\s?에서 워커에게 무엇을 맡길까요\?/ })).toBeInTheDocument();
+    expect(screen.queryByText("app", { selector: ".text-muted *" })).toBeNull(); // no separate repo label under the box
+    // where/how controls sit under the box with accessible names
+    expect(screen.getByRole("combobox", { name: "기준 브랜치" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "권한 모드" })).toBeInTheDocument();
+  });
+
+  it("keeps rarely-used options (label, cost budget) behind More", () => {
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    const label = screen.getByPlaceholderText("label (선택)");
+    expect(label).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /더보기/ }));
+    expect(label).toBeVisible();
+    expect(screen.getByText("비용 예산 (USD, 이 워커)")).toBeVisible();
+  });
+
+  it("switches the target repo from the meta row", () => {
+    const onRepoChange = vi.fn();
+    render(<WorkerSpawnPage repo="app" repos={[{ name: "app", path: "/app" }, { name: "web", path: "/web" }]} onRepoChange={onRepoChange} defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    const repo = screen.getByRole("combobox", { name: "레포" });
+    expect(repo).toHaveValue("app");
+    fireEvent.change(repo, { target: { value: "web" } });
+    expect(onRepoChange).toHaveBeenCalledWith("web");
   });
 
   it("keeps the prompt and dialog open on Escape, then closes only from Cancel", async () => {
     const onClose = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={onClose} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={onClose} />);
     const prompt = screen.getByPlaceholderText(/Ctrl\+Enter/);
     fireEvent.change(prompt, { target: { value: "keep this worktree prompt" } });
 
@@ -24,9 +45,9 @@ describe("WorkerSpawnModal", () => {
 
     expect(onClose).not.toHaveBeenCalled();
     expect(prompt).toHaveValue("keep this worktree prompt");
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "새 워커" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
@@ -35,7 +56,7 @@ describe("WorkerSpawnModal", () => {
     const pending = new Promise<void>((resolve) => { resolveSpawn = resolve; });
     const onSpawn = vi.fn(() => pending);
     const onClose = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
     fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "spawn once" } });
     const spawnButton = screen.getByRole("button", { name: "spawn" });
 
@@ -43,8 +64,8 @@ describe("WorkerSpawnModal", () => {
 
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(spawnButton).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
-    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    expect(screen.getByRole("button", { name: "닫기" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByPlaceholderText(/Ctrl\+Enter/), { key: "Enter", ctrlKey: true });
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
 
@@ -58,7 +79,7 @@ describe("WorkerSpawnModal", () => {
   it("keeps the complete prompt available for retry when spawn rejects", async () => {
     const onSpawn = vi.fn().mockRejectedValue(new Error("daemon unavailable"));
     const onClose = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={onClose} />);
     const prompt = screen.getByPlaceholderText(/Ctrl\+Enter/);
     fireEvent.change(prompt, { target: { value: "preserve this after failure" } });
 
@@ -67,37 +88,37 @@ describe("WorkerSpawnModal", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "spawn" })).not.toHaveAttribute("aria-busy"));
     expect(onClose).not.toHaveBeenCalled();
     expect(prompt).toHaveValue("preserve this after failure");
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "새 워커" })).toBeInTheDocument();
   });
 
   it("defaults to direct-write mode (no search box) and passes base through onSpawn", () => {
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" branches={["main", "dev"]} onSpawn={onSpawn} onClose={() => {}} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" branches={["main", "dev"]} onSpawn={onSpawn} onClose={() => {}} />);
     // Direct-write mode: no search box
     expect(screen.queryByPlaceholderText(/검색/)).toBeNull();
     fireEvent.change(screen.getByTitle(/base 브랜치/), { target: { value: "dev" } });
     fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "do it" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn).toHaveBeenCalledWith("do it", "", "claude-opus-4-8", "high", "dev", undefined, "bypassPermissions", undefined, undefined); // no ticket → undefined; default permission; default provider (claude) → undefined; no cost budget → undefined
   });
 
   it("defaults permission to bypassPermissions and threads the selected mode (plan) through onSpawn", () => {
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     const sel = screen.getByTitle(/권한 모드|Permission mode/) as HTMLSelectElement;
     expect(sel.value).toBe("bypassPermissions");
     // restricted to bypass + plan (no default/acceptEdits)
     expect(screen.getByText("Plan Mode")).toBeInTheDocument();
     expect(screen.queryByText("Accept Edits")).toBeNull();
     fireEvent.change(sel, { target: { value: "plan" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "claude-opus-4-8", "high", undefined, undefined, "plan", undefined, undefined]);
   });
 
   it("passes the selected ticket {key,url} to onSpawn", async () => {
     const items: SourceItem[] = [{ provider: "linear", id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7", body: "do it", state: "Todo" }];
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
       integrations={{ github: { available: false }, linear: { configured: true, valid: true } }}
       searchSource={async () => items} onSpawn={onSpawn} onClose={() => {}} />);
     fireEvent.click(screen.getByText("Linear"));
@@ -106,12 +127,12 @@ describe("WorkerSpawnModal", () => {
     fireEvent.change(input, { target: { value: "ship" } });
     fireEvent.click(await screen.findByText(/ABC-7/));
     await waitFor(() => expect((screen.getByPlaceholderText(/Ctrl\+Enter/) as HTMLTextAreaElement).value).toContain("do it"));
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls.at(-1)![5]).toEqual({ key: "ABC-7", url: "https://l/ABC-7" });
   });
 
   it("disables a source segment when its integration is not connected", () => {
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
       integrations={{ github: { available: false }, linear: { configured: false } }}
       searchSource={async () => []} onSpawn={() => {}} onClose={() => {}} />);
     expect(screen.getByText("GitHub")).toBeDisabled();
@@ -122,7 +143,7 @@ describe("WorkerSpawnModal", () => {
   it("switches to Linear mode, searches, and fills task+label on select", async () => {
     const items: SourceItem[] = [{ provider: "linear", id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7", body: "do it", state: "Todo" }];
     const searchSource = vi.fn(async () => items);
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
       integrations={{ github: { available: false }, linear: { configured: true, valid: true } }}
       searchSource={searchSource} onSpawn={() => {}} onClose={() => {}} />);
     fireEvent.click(screen.getByText("Linear"));
@@ -139,24 +160,24 @@ describe("WorkerSpawnModal", () => {
 
   it("empty task → spawn button calls onSpawn with task='' (idle worker)", () => {
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     // task left empty (default), click spawn
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn).toHaveBeenCalledWith("", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions", undefined, undefined);
   });
 
   it("non-empty task → spawn button still calls onSpawn with trimmed task", () => {
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "fix the bug" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn).toHaveBeenCalledWith("fix the bug", "", "claude-opus-4-8", "high", undefined, undefined, "bypassPermissions", undefined, undefined);
   });
 
   it("shows the results dropdown only while the search box is focused", async () => {
     const items: SourceItem[] = [{ provider: "linear", id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7", body: "do it" }];
     const searchSource = vi.fn(async () => items);
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high"
       integrations={{ github: { available: false }, linear: { configured: true, valid: true } }}
       searchSource={searchSource} onSpawn={() => {}} onClose={() => {}} />);
     fireEvent.click(screen.getByText("Linear"));
@@ -174,7 +195,7 @@ const CODEX_MODELS: CodexModelInfo[] = [
   { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
 ];
 
-describe("WorkerSpawnModal codex model+effort onSpawn payload (Codex Model Picker Task 3)", () => {
+describe("WorkerSpawnPage codex model+effort onSpawn payload (Codex Model Picker Task 3)", () => {
   beforeEach(() => {
     useStore.setState({ codexModels: null }); // reset the singleton store before each test
   });
@@ -182,19 +203,48 @@ describe("WorkerSpawnModal codex model+effort onSpawn payload (Codex Model Picke
   it("codexModels seeded — onSpawn carries the dropdown-selected model + its pre-selected default effort", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.5" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-5.5", "xhigh", undefined, undefined, "bypassPermissions", "codex", undefined]);
   });
 
   it("codexModels null — onSpawn still carries the typed free-text model + the generic default effort", () => {
     const onSpawn = vi.fn();
-    render(<WorkerSpawnModal repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-6" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-6", "high", undefined, undefined, "bypassPermissions", "codex", undefined]); // effort defaults from p.defaultEffort, unchanged by the (absent) catalog
+  });
+
+  it("spawns with Cmd/Ctrl+Enter from inside the form", () => {
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    const prompt = screen.getByPlaceholderText(/Ctrl\+Enter/);
+    fireEvent.change(prompt, { target: { value: "do it" } });
+    fireEvent.keyDown(prompt, { key: "Enter", metaKey: true });
+    expect(onSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not capture window-level keys (sidebar menus keep their Escape, outside Cmd+Enter does nothing)", () => {
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    window.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(false);
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    expect(onSpawn).not.toHaveBeenCalled();
+  });
+
+  it("switching repo keeps the typed task but resets the repo-bound base branch", () => {
+    const repos = [{ name: "app", path: "/app" }, { name: "web", path: "/web" }];
+    const { rerender } = render(<WorkerSpawnPage repo="app" repos={repos} onRepoChange={() => {}} branches={["main", "dev"]} defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "keep me" } });
+    fireEvent.change(screen.getByTitle(/Base branch|기준|worktree/), { target: { value: "dev" } });
+    rerender(<WorkerSpawnPage repo="web" repos={repos} onRepoChange={() => {}} branches={["main"]} defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    expect(screen.getByPlaceholderText(/Ctrl\+Enter/)).toHaveValue("keep me");
+    expect(screen.getByTitle(/Base branch|기준|worktree/)).toHaveValue("");
   });
 });

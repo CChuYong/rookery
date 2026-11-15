@@ -1,6 +1,15 @@
 import type { Catalog } from "../../types.js";
 export default {
   "workerSpawnModal.title": "새 워커",
+  "workerSpawnModal.repoLabel": "레포",
+  "workerSpawnModal.labelLabel": "라벨",
+  "workerSpawnModal.baseLabel": "기준 브랜치",
+  "workerSpawnModal.permLabel": "권한 모드",
+  "workerSpawnModal.headingBefore": "",
+  "workerSpawnModal.headingAfter": "에서 워커에게 무엇을 맡길까요?",
+  "workerSpawnModal.sourceLabel": "작업 출처",
+  "workerSpawnModal.more": "더보기",
+  "workerSpawnModal.spawnHint": "스폰 (⌘/Ctrl+Enter)",
   "workerSpawnModal.modeDirect": "직접 작성",
   "workerSpawnModal.githubHint": "설정 › 연동에서 gh 인증이 필요해요",
   "workerSpawnModal.linearHint": "설정 › 연동에서 Linear 키를 입력하세요",
@@ -23,8 +32,8 @@ export default {
   "workerSpawnModal.noResults": "결과 없음",
   "workerSpawnModal.labelPlaceholder": "label (선택)",
   "workerSpawnModal.costBudgetPlaceholder": "예산 $",
-  "workerSpawnModal.taskPlaceholderSource": "선택한 이슈·티켓 내용이 채워져요. 추가 지시를 더해도 좋아요…  (⌘/Ctrl+Enter로 spawn)",
-  "workerSpawnModal.taskPlaceholderDirect": "이 레포에서 시킬 작업을 적어주세요…  (⌘/Ctrl+Enter로 spawn) (비워두면 빈 워커로 떠서 첫 메시지로 시작)",
+  "workerSpawnModal.taskPlaceholderSource": "위에서 이슈를 고르고 추가 지시를 적어주세요…  ⌘/Ctrl+Enter로 스폰",
+  "workerSpawnModal.taskPlaceholderDirect": "시킬 작업을 적어주세요 — 비우면 빈 워커로 시작해요.  ⌘/Ctrl+Enter로 스폰",
   "workerSpawnModal.footerNote": "worktree(rookery/<id>)를 만들어 그 안에서 작업합니다. 모델/effort는 spawn 시점에 고정돼요.",
   "workerSpawnModal.spawn": "spawn",
 } satisfies Catalog;

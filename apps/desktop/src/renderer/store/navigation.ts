@@ -5,7 +5,8 @@
 //  a ref stack + a 4-axis diff effect, which made back/forward and selection highlighting get out of sync —
 //  this model is the single source.)
 
-export type Overlay = "settings" | "newSession" | "automation" | "capabilities" | "repoSettings" | null;
+// spawnWorker: the full-page worker spawn form; like repoSettings it carries its target repo in `repoId`.
+export type Overlay = "settings" | "newSession" | "automation" | "capabilities" | "repoSettings" | "spawnWorker" | null;
 
 export interface Location {
   overlay: Overlay;
@@ -32,7 +33,7 @@ export function sameLoc(a: Location, b: Location): boolean {
 // Update the current location with a patch. If the location actually changes, push the current one onto back and clear forward (browser-style).
 export function navigate(st: NavState, patch: Partial<Location>): NavState {
   const next: Location = { ...st.loc, ...patch };
-  if (patch.overlay !== undefined && patch.overlay !== "repoSettings" && patch.repoId === undefined) next.repoId = null;
+  if (patch.overlay !== undefined && patch.overlay !== "repoSettings" && patch.overlay !== "spawnWorker" && patch.repoId === undefined) next.repoId = null;
   if (sameLoc(next, st.loc)) return st; // same location → no-op (avoids polluting history)
   return { loc: next, back: [...st.back, st.loc], forward: [] }; // new transition → discard forward (the future we had undone)
 }

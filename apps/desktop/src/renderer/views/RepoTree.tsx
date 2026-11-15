@@ -10,7 +10,7 @@ import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
 import { shortBranch } from "../lib/branch.js";
-import { WorkerCost, FleetBurn } from "../components/WorkerCost.js";
+import { WorkerCost } from "../components/WorkerCost.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { useT, useLocale } from "../i18n/provider.js";
@@ -272,7 +272,6 @@ function RepoTreeImpl(p: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto">
-      <FleetBurn rows={live} />
       {live.length > 4 && (
         <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 transition-colors focus-within:border-accent/50">
           <Search size={12} className="shrink-0 text-muted" />

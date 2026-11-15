@@ -1,6 +1,15 @@
 import type { Catalog } from "../../types.js";
 export default {
   "workerSpawnModal.title": "New worker",
+  "workerSpawnModal.repoLabel": "Repository",
+  "workerSpawnModal.labelLabel": "Label",
+  "workerSpawnModal.baseLabel": "Base branch",
+  "workerSpawnModal.permLabel": "Permission mode",
+  "workerSpawnModal.headingBefore": "What should the worker do in ",
+  "workerSpawnModal.headingAfter": "?",
+  "workerSpawnModal.sourceLabel": "Task source",
+  "workerSpawnModal.more": "More",
+  "workerSpawnModal.spawnHint": "Spawn (⌘/Ctrl+Enter)",
   "workerSpawnModal.modeDirect": "Write directly",
   "workerSpawnModal.githubHint": "gh auth required in Settings › Integrations",
   "workerSpawnModal.linearHint": "Enter your Linear key in Settings › Integrations",
@@ -23,8 +32,8 @@ export default {
   "workerSpawnModal.noResults": "No results",
   "workerSpawnModal.labelPlaceholder": "label (optional)",
   "workerSpawnModal.costBudgetPlaceholder": "budget $",
-  "workerSpawnModal.taskPlaceholderSource": "The selected issue/ticket fills in here. Feel free to add more instructions…  (⌘/Ctrl+Enter to spawn)",
-  "workerSpawnModal.taskPlaceholderDirect": "Describe what to do in this repo…  (⌘/Ctrl+Enter to spawn) (leave empty to spawn an idle worker and start it with your first message)",
+  "workerSpawnModal.taskPlaceholderSource": "Pick an issue above, then add any instructions…  ⌘/Ctrl+Enter to spawn",
+  "workerSpawnModal.taskPlaceholderDirect": "Describe the task — leave empty for an idle worker.  ⌘/Ctrl+Enter to spawn",
   "workerSpawnModal.footerNote": "Creates a worktree (rookery/<id>) and works inside it. Model/effort are locked in at spawn time.",
   "workerSpawnModal.spawn": "Spawn",
 } satisfies Catalog;

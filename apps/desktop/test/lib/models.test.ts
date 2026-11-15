@@ -65,7 +65,7 @@ describe("codexDefaultEffort", () => {
 });
 
 // The single source of truth for "the effort actually in play" — derived at render time (no effect-syncing).
-// Every effort surface (master composer via App.tsx masterControls, WorkerSpawnModal, NewSessionPage) resolves
+// Every effort surface (master composer via App.tsx masterControls, WorkerSpawnPage, NewSessionPage) resolves
 // through this, so a Claude-vocab level (e.g. 'max') can never render blank or be submitted on a codex model.
 describe("effectiveEffort", () => {
   it("passes the choice through for claude (any vocab, including 'max')", () => {

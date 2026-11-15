@@ -82,12 +82,12 @@ export function AutomationForm(p: {
 
   // Agent backend for this automation's created sessions/workers (Task 3: P3 automation-origin codex).
   // Applies to BOTH master and worker actions, so it lives in the shared Model/Execution section below
-  // rather than inside the per-kind action block. Mirrors WorkerSpawnModal's provider idiom.
+  // rather than inside the per-kind action block. Mirrors WorkerSpawnPage's provider idiom.
   const [provider, setProvider] = useState<"claude" | "codex">(init?.provider === "codex" ? "codex" : "claude");
 
   // Model / Execution fields (Task 4: newly added). Provider-aware split (finding [12]): keep the Claude and
   // codex model ids in SEPARATE state so flipping the provider back and forth never clobbers either field
-  // with the other provider's id (mirrors WorkerSpawnModal/NewSessionPage). The saved model belongs to the
+  // with the other provider's id (mirrors WorkerSpawnPage/NewSessionPage). The saved model belongs to the
   // automation's saved provider, so seed only that side. `effectiveModel` is the one actually submitted.
   const initProvider = init?.provider === "codex" ? "codex" : "claude";
   const [model, setModel] = useState(initProvider === "codex" ? "" : (init?.model ?? ""));
@@ -107,7 +107,7 @@ export function AutomationForm(p: {
   // Create/update is a real round-trip (the server validates cron) → reflect the saving state on Save (otherwise the user clicks twice)
   const [saving, setSaving] = useState(false);
 
-  // Codex model/effort catalog coupling (Task 4) — mirrors WorkerSpawnModal/NewSessionPage's derived-consts idiom.
+  // Codex model/effort catalog coupling (Task 4) — mirrors WorkerSpawnPage/NewSessionPage's derived-consts idiom.
   // `codexModels` present (non-null) AND provider is codex → the model select sources from the catalog and the
   // effort select is driven by the selected model's supportedEfforts (falling back to the generic EFFORTS
   // vocabulary when the model is unknown to the catalog, e.g. an out-of-list saved override).

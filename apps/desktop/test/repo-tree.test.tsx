@@ -392,12 +392,10 @@ describe("RepoTree fleet-provided cost (no open needed)", () => {
         onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
       />,
     );
-    // With a single fleet worker, the FleetBurn total is numerically identical to this row's cost (both $2.50) —
-    // scope to the per-row WorkerCost span via its title so this asserts the row, not the (also-correct) burn total.
     expect(screen.getByTitle("이 워커의 누적 비용")).toHaveTextContent("$2.50");
   });
 
-  it("the fleet-burn total sums fleet costUsd across workers even when none are opened", () => {
+  it("shows no fleet-wide total row above the tree (per-worker costs only)", () => {
     render(
       <RepoTree
         repos={[repo] as never}
@@ -406,7 +404,9 @@ describe("RepoTree fleet-provided cost (no open needed)", () => {
         onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}}
       />,
     );
-    expect(screen.getByText("$3.75")).toBeInTheDocument();
+    expect(screen.queryByText("$3.75")).toBeNull();
+    expect(screen.queryByText("fleet")).toBeNull();
+    expect(screen.getByText("$2.50")).toBeInTheDocument();
   });
 });
 

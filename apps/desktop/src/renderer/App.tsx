@@ -34,7 +34,7 @@ import type { CapabilityCenterRoute } from "./lib/command-actions.js";
 import { useT } from "./i18n/provider.js";
 import { RepoTree } from "./views/RepoTree.js";
 import { RepoModal } from "./components/RepoModal.js";
-import { WorkerSpawnModal } from "./components/WorkerSpawnModal.js";
+import { WorkerSpawnPage } from "./components/WorkerSpawnPage.js";
 import { ForkDialog } from "./components/ForkDialog.js";
 import { DataConsentModal } from "./components/DataConsentModal.js";
 import { OnboardingModal } from "./components/OnboardingModal.js";
@@ -299,7 +299,10 @@ export function App(): JSX.Element {
     navigate({ overlay: "capabilities" });
   }, [navigate]);
   const [repoModal, setRepoModal] = useState(false);
-  const [spawnRepo, setSpawnRepo] = useState<string | null>(null);
+  // The spawn page's target repo lives in the navigation Location (overlay "spawnWorker" + repoId), so back/forward
+  // and sidebar navigation treat it like every other full page.
+  const spawnRepoRow = s.overlay === "spawnWorker" ? s.repos.find((repo) => repo.id === s.repoSettingsId) ?? null : null;
+  const spawnRepo = spawnRepoRow?.name ?? null;
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
   // Cross-provider fork dialog target (master session or worker) — the right-click "Fork" opens this instead of an instant fork.
   const [forkTarget, setForkTarget] = useState<{ kind: "master" | "worker"; id: string; sourceProvider: string } | null>(null);
@@ -325,7 +328,8 @@ export function App(): JSX.Element {
   useEffect(() => { if (overlay !== "automation") setEditJob(null); }, [overlay]);
   // When the spawn modal opens, load the base-branch candidates for that repo.
   useEffect(() => {
-    if (!spawnRepo || !client) { setSpawnBranches([]); return; }
+    setSpawnBranches([]); // never offer the previous repo's branches while the new repo's list loads
+    if (!spawnRepo || !client) return;
     let live = true; // prevent a late response from the previous repo from overwriting when spawnRepo changes
     void client.request({ type: "repo.branches", repo: spawnRepo }).then((r) => { if (live) setSpawnBranches(r.branches ?? []); }).catch(() => { if (live) setSpawnBranches([]); });
     return () => { live = false; };
@@ -901,7 +905,10 @@ export function App(): JSX.Element {
   }, []);
   const onStop = useCallback((id: string) => { void client?.request({ type: "fleet.stop", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []); // RepoTree right-click 'stop'
   const onNewRepo = useCallback(() => setRepoModal(true), []);
-  const onNewSub = useCallback((name: string) => setSpawnRepo(name), []);
+  const onNewSub = useCallback((name: string) => {
+    const repo = useStore.getState().repos.find((r) => r.name === name);
+    if (repo) navigate({ overlay: "spawnWorker", showRepos: true, repoId: repo.id });
+  }, [navigate]);
   // Rejects on failure (no swallow-to-empty) so CheckpointMenu can render a distinct error state instead of a false "no checkpoints".
   const fetchCheckpoints = (id: string): Promise<Checkpoint[]> =>
     client ? client.request({ type: "worker.checkpoints", id }).then((r) => r.checkpoints ?? []) : Promise.reject(new Error("not connected"));
@@ -986,6 +993,8 @@ export function App(): JSX.Element {
   const repoSettingsRepo = useMemo(() => s.repos.find((repo) => repo.id === s.repoSettingsId) ?? null, [s.repos, s.repoSettingsId]);
   useEffect(() => {
     if (overlay === "repoSettings" && s.fleetLoaded && !repoSettingsRepo) navigate({ overlay: null });
+    // same for the spawn page: its repo was unregistered (or a stale restored location) → leave instead of spinning
+    if (overlay === "spawnWorker" && s.fleetLoaded && !repoSettingsRepo) navigate({ overlay: null });
   }, [navigate, overlay, repoSettingsRepo, s.fleetLoaded]);
   const fleet = useMemo(() => Object.values(s.fleet), [s.fleet]); // used in RepoTree (Repos view)
   // Master composer model/effort controls — inline would be a new ref every render, breaking the Conversation memo. Keep the same ref
@@ -1140,7 +1149,7 @@ export function App(): JSX.Element {
   // Including high-frequency fields like token/usage/metrics would replay enter on every in-page stream tick,
   // which is worse than static. TerminalPanel sits outside this wrapper (protects the live xterm).
   const pageId = overlay
-    ? `ov:${overlay}:${overlay === "repoSettings" ? s.repoSettingsId ?? "missing" : ""}`
+    ? `ov:${overlay}:${overlay === "repoSettings" || overlay === "spawnWorker" ? s.repoSettingsId ?? "missing" : ""}`
     : s.daemon === "down"
       ? "daemon-down"
       : showRepos
@@ -1290,6 +1299,22 @@ export function App(): JSX.Element {
             onPreviewEffective={() => openRepoCapabilityPreview(repoSettingsRepo.id)}
           />
         ) : overlay === "repoSettings" ? (
+          <div className="flex flex-1 items-center justify-center gap-2 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
+        ) : overlay === "spawnWorker" && spawnRepo ? (
+          <WorkerSpawnPage
+            repo={spawnRepo}
+            repos={s.repos}
+            onRepoChange={onNewSub}
+            defaultModel={s.settings?.workerModel ?? "claude-opus-4-8"}
+            defaultEffort={s.settings?.workerEffort ?? "high"}
+            codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}
+            branches={spawnBranches}
+            integrations={s.integrations ?? undefined}
+            searchSource={searchSource}
+            onSpawn={spawnSub}
+            onClose={closeOverlay}
+          />
+        ) : overlay === "spawnWorker" ? (
           <div className="flex flex-1 items-center justify-center gap-2 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
         ) : overlay === "capabilities" ? (
           <CapabilitiesPage
@@ -1586,19 +1611,6 @@ export function App(): JSX.Element {
       <Toaster />
       {restartConfirm && <RestartDaemonDialog busy={restarting} onClose={() => setRestartConfirm(false)} onConfirm={() => void doRestart()} />}
       {repoModal && <RepoModal repos={s.repos} onRegister={onRegister} onClose={() => setRepoModal(false)} />}
-      {spawnRepo && (
-        <WorkerSpawnModal
-          repo={spawnRepo}
-          defaultModel={s.settings?.workerModel ?? "claude-opus-4-8"}
-          defaultEffort={s.settings?.workerEffort ?? "high"}
-          codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}
-          branches={spawnBranches}
-          integrations={s.integrations ?? undefined}
-          searchSource={searchSource}
-          onSpawn={spawnSub}
-          onClose={() => setSpawnRepo(null)}
-        />
-      )}
       {forkTarget && (
         <ForkDialog
           kind={forkTarget.kind}

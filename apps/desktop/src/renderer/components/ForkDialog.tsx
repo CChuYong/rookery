@@ -38,7 +38,7 @@ export function ForkDialog(p: {
   // Default the target to the OTHER provider (the handoff intent). Same-provider is still selectable (native fork).
   const [provider, setProvider] = useState<Provider>(p.sourceProvider === "claude" ? "codex" : "claude");
   // Separate model states so switching provider back and forth doesn't clobber either field's value
-  // (Claude <Select> and codex field remember their own last value — same idiom as WorkerSpawnModal).
+  // (Claude <Select> and codex field remember their own last value — same idiom as WorkerSpawnPage).
   const [model, setModel] = useState(claudeDefaultModel);
   const [codexModel, setCodexModel] = useState("");
   const [effort, setEffort] = useState(defaultEffort);
@@ -48,7 +48,7 @@ export function ForkDialog(p: {
   // The model text actually in play — the Claude catalog selection, or the codex field (select or free-text).
   const effectiveModel = provider === "codex" ? codexModel : model;
   // The codex model whose effort vocabulary applies — the picked model, or the daemon default when "" (same
-  // idiom as WorkerSpawnModal/NewSessionPage), so the "" selection offers that model's real efforts.
+  // idiom as WorkerSpawnPage/NewSessionPage), so the "" selection offers that model's real efforts.
   const effortModel = effectiveModel || codexDefaultModel || "";
   const codexEfforts = provider === "codex" && codexModels != null ? codexEffortsFor(effortModel, codexModels) : null;
   const effortOptions: readonly string[] = codexEfforts && codexEfforts.length > 0 ? codexEfforts : EFFORTS;

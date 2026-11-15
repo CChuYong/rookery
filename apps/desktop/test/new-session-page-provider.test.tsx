@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { NewSessionPage } from "../src/renderer/components/NewSessionPage.js";
 
 // P2.5 Task 4 (Track D): new-session provider selector — direct template is
-// WorkerSpawnModal's provider-selector describe block (test/worker-spawn-modal.test.tsx).
+// WorkerSpawnPage's provider-selector describe block (test/worker-spawn-modal.test.tsx).
 // useT falls back to ko when no I18nProvider is mounted, so labels below are the ko strings.
 describe("NewSessionPage provider selector (P2.5 task 4)", () => {
   it("defaults to claude — onStart's provider is undefined (wire-minimal)", () => {

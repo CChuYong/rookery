@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import appSource from "../src/renderer/App.tsx?raw";
 import { NewSessionPage } from "../src/renderer/components/NewSessionPage.js";
-import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
+import { WorkerSpawnPage } from "../src/renderer/components/WorkerSpawnPage.js";
 import { AutomationForm } from "../src/renderer/components/AutomationForm.js";
 import { SettingsPage } from "../src/renderer/components/SettingsPage.js";
 import { ConversationPane } from "../src/renderer/components/ConversationPane.js";
@@ -27,10 +27,11 @@ it("new master inherits each provider default and sends an explicit selection", 
 });
 it("worker spawn carries its own selected preference and labels Codex budgets", () => {
   const onSpawn = vi.fn();
-  render(english(<WorkerSpawnModal repo="app" defaultModel={settings.workerModel} defaultEffort="high" onSpawn={onSpawn} onClose={vi.fn()} />));
+  render(english(<WorkerSpawnPage repo="app" defaultModel={settings.workerModel} defaultEffort="high" onSpawn={onSpawn} onClose={vi.fn()} />));
   fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
+  fireEvent.click(screen.getByRole("button", { name: /More/ })); // speed lives behind More on the spawn page
   expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "standard" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Speed" }), { target: { value: "standard" } });
   fireEvent.click(screen.getByRole("button", { name: /Spawn|Start/ }));
   expect(onSpawn.mock.calls[0]?.[9]).toBe("standard");
   expect(screen.getByText(/Codex costs and budget checks are estimates/)).toBeInTheDocument();
