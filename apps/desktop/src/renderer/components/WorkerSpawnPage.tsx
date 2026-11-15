@@ -204,6 +204,7 @@ export function WorkerSpawnPage(p: {
                   <Input
                     autoFocus
                     className="mx-3 mt-3 w-auto"
+                    style={{ outline: "none" }}
                     size="sm"
                     placeholder={mode === "github" ? t("workerSpawnModal.searchGithub") : t("workerSpawnModal.searchLinear")}
                     value={q}
@@ -249,6 +250,9 @@ export function WorkerSpawnPage(p: {
               <Textarea
                 autoFocus={mode === "direct"}
                 aria-labelledby="worker-spawn-heading"
+                // The whole box shows focus (focus-within border); the global focus-visible outline (unlayered, so it beats
+                // utility classes) would otherwise draw an orange ring around just the textarea's half of the box.
+                style={{ outline: "none" }}
                 className="min-h-[84px] resize-none border-0 bg-transparent px-4 pt-3.5 text-prose focus:ring-0"
                 placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
                 value={task}
