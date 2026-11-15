@@ -10,7 +10,10 @@ export interface Toast {
   kind: ToastKind;
   text: string;
   detail?: string;
+  // Optional one-click follow-up (e.g. Undo after Reset layout); running it also dismisses the toast.
+  action?: ToastAction;
 }
+export interface ToastAction { label: string; onClick: () => void }
 
 const MAX_VISIBLE = 4;
 
@@ -41,5 +44,5 @@ export const useToastStore = create<ToastStore>((set) => ({
 export const toast = {
   error: (text: string, detail?: string): number => useToastStore.getState().push({ kind: "error", text, detail }),
   success: (text: string): number => useToastStore.getState().push({ kind: "success", text }),
-  info: (text: string): number => useToastStore.getState().push({ kind: "info", text }),
+  info: (text: string, action?: ToastAction): number => useToastStore.getState().push({ kind: "info", text, ...(action ? { action } : {}) }),
 };

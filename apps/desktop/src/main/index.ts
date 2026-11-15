@@ -2,6 +2,7 @@ import { readSelectedAttachment } from "./selected-attachment.js";
 import { app, BrowserWindow, ipcMain, dialog, Notification, screen, shell, session } from "electron";
 import { buildCsp, isAllowedNavigation, decideWindowOpen } from "./csp.js";
 import { loadWindowState, serializeWindowState } from "./window-state.js";
+import { windowShortcut } from "./window-shortcuts.js";
 import { join, resolve, dirname } from "node:path";
 import { homedir, cpus, totalmem, tmpdir } from "node:os";
 import fs from "node:fs";
@@ -437,6 +438,15 @@ function createWindow(): void {
   const sendMax = (): void => { try { win.webContents.send("win:maximized", win.isMaximized()); } catch { /* */ } };
   win.on("maximize", sendMax);
   win.on("unmaximize", sendMax);
+  // Cmd/Ctrl+W → close the active editor tab in the renderer; Shift+Cmd/Ctrl+W → close the window (audit #82).
+  // before-input-event runs ahead of the menu accelerators, so preventDefault stops the default menu's Close Window.
+  win.webContents.on("before-input-event", (event, input) => {
+    const action = windowShortcut(input, process.platform);
+    if (!action) return;
+    event.preventDefault();
+    if (action === "closeWindow") win.close();
+    else win.webContents.send("app:closeTab");
+  });
   // On window close, save the normal bounds + maximized state (restored on next launch).
   win.on("close", () => {
     try {

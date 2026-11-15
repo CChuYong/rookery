@@ -34,6 +34,10 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
     });
     edRef.current = ed;
     const id = `file:${path}`;
+    // Locked until the file has loaded, and kept locked when it can't be (read failure / too large): typing into the
+    // empty placeholder buffer and pressing Cmd+S would otherwise overwrite the real file (audit #17).
+    let loaded = false;
+    ed.updateOptions({ readOnly: true });
 
     const load = async (): Promise<void> => {
       let r: { content: string; tooLarge: boolean; readOnly?: true };
@@ -41,8 +45,9 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       catch { if (!disposed) setBanner("error"); return; } // outside the work folder / read failure → banner (so the reject doesn't leak as unhandled)
       if (disposed) return;
       setReadOnly(r.readOnly === true);
-      ed.updateOptions({ readOnly: r.readOnly === true });
       if (r.tooLarge) { setBanner("toolarge"); return; }
+      loaded = true;
+      ed.updateOptions({ readOnly: r.readOnly === true });
       savedRef.current = r.content;
       ed.setValue(r.content);
       setDirty(pageKey, id, false);
@@ -52,7 +57,7 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
 
     ed.onDidChangeModelContent(() => setDirty(pageKey, id, ed.getValue() !== savedRef.current));
     const save = (): void => {
-      if (ed.getOption(monaco.editor.EditorOption.readOnly)) return; // outside the work folder: nothing to save
+      if (!loaded || ed.getOption(monaco.editor.EditorOption.readOnly)) return; // not loaded, or outside the work folder: nothing to save
       const value = ed.getValue();
       lastWrittenRef.current = value; // synchronous record — even if the watcher echo arrives before the write's .then, it's recognized as a self-write
       void window.rookery.ws.write(path, value).then((res) => {

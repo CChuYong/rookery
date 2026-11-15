@@ -93,7 +93,8 @@ export function ConversationPane({
     setSide(null);
   }, [side, onSideClose]);
   return (
-    <div className="relative flex min-h-0 flex-1">
+    // @container: the side drawer decides inline vs overlay from this pane's width (audit #9).
+    <div className="conversation-pane @container relative flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         <Conversation key={draftGeneration} onRestoreInput={kind === "worker" && rest.disabled ? restoreInput : undefined} onRecoverInput={kind === "worker" && rest.disabled ? rest.onRecover : undefined} items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} controls={rest.controls ? { ...rest.controls, speedPending: speedPendingNextTurn(items), speedObservation: latestSpeedObservation(items), speedLastObservation: lastReportedSpeed(items) } : undefined} commands={composerCommands} busy={busy} initialText={initialDraft.text} initialImages={initialDraft.images} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
         {pending.length > 0 && (

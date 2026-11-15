@@ -20,6 +20,14 @@ class FakeEditor {
 
 export const __instances: FakeEditor[] = [];
 
+class FakeDiffEditor {
+  private model: { original: { dispose(): void }; modified: { dispose(): void } } | null = null;
+  setModel(m: { original: { dispose(): void }; modified: { dispose(): void } }): void { this.model = m; }
+  getModel(): { original: { dispose(): void }; modified: { dispose(): void } } | null { return this.model; }
+  dispose(): void {}
+}
+export const __diffInstances: FakeDiffEditor[] = [];
+
 export const editor = {
   EditorOption: { readOnly: 91 },
   create: (_host: unknown, _opts?: unknown): FakeEditor => {
@@ -27,6 +35,12 @@ export const editor = {
     __instances.push(e);
     return e;
   },
+  createDiffEditor: (_host: unknown, _opts?: unknown): FakeDiffEditor => {
+    const e = new FakeDiffEditor();
+    __diffInstances.push(e);
+    return e;
+  },
+  createModel: (value: string, _lang?: string): { value: string; dispose(): void } => ({ value, dispose() {} }),
 };
 
 export const languages = { getLanguages: (): Array<{ id: string; extensions?: string[]; filenames?: string[] }> => [] };

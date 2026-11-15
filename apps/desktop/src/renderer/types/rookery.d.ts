@@ -102,6 +102,8 @@ export interface RookeryWin {
   close(): void;
   isMaximized(): Promise<boolean>;
   onMaximizeChange(cb: (maximized: boolean) => void): () => void;
+  // Cmd/Ctrl+W pressed (main intercepts it so it no longer closes the window, audit #82).
+  onCloseTab(cb: () => void): () => void;
 }
 
 // Type of window.rookery.update — auto-update controls/status for the settings "About" section.

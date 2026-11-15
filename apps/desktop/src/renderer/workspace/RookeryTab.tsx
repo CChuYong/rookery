@@ -87,17 +87,30 @@ export function RookeryTab(props: IDockviewPanelHeaderProps): JSX.Element {
     <>
       {/* data-kind drives the group-header-height rule in dockview-theme.css (files/git/nested/terminal get a
           shorter strip than the main editor/conversation group). */}
-      <div onContextMenu={onContextMenu} data-kind={params.kind} className={`rk-tab group flex h-full items-center gap-1.5 text-ui select-none ${params.kind === "editor" ? "px-3" : "px-2"}`}>
+      <div onContextMenu={onContextMenu} data-kind={params.kind} className={`rk-tab group flex h-full min-w-0 max-w-full items-center gap-1.5 text-ui select-none ${params.kind === "editor" ? "px-3" : "px-2"}`}>
         <Icon size={14} className="shrink-0 text-muted" />
-        <span title={tooltip} className="max-w-[168px] truncate">{label}</span>
+        <span title={tooltip} className="min-w-0 max-w-[168px] truncate">
+          {label}
+          {dirty && <span className="sr-only"> ({t("tabBar.unsaved")})</span>}
+        </span>
         {closable && (
           <button
             onMouseDown={(e) => e.stopPropagation()} /* don't start a tab drag when clicking close */
             onClick={(e) => { e.stopPropagation(); if (dirty) setConfirming({ ids: params.kind === "editor" ? [params.tabId] : [], title: label, dirtyCount: 1, bulk: false, closeApi: true }); else api.close(); }}
             aria-label={t("tabBar.closeTab")}
-            className="tab-close ml-0.5 rounded-sm p-0.5 text-muted opacity-0 transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            data-dirty={dirty || undefined}
+            // An unsaved tab always shows a dot where the × sits; hovering or focusing the tab swaps it for the ×
+            // (VS Code's pattern, audit #15).
+            className={`tab-close ml-0.5 shrink-0 rounded-sm p-0.5 text-muted transition-opacity duration-150 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 ${dirty ? "opacity-100" : "opacity-0"}`}
           >
-            <X size={14} />
+            {dirty ? (
+              <>
+                <span aria-hidden className="tab-dirty-dot flex h-3.5 w-3.5 items-center justify-center group-hover:hidden group-focus-within:hidden"><span className="h-2 w-2 rounded-full bg-fg-dim" /></span>
+                <X size={14} className="hidden group-hover:block group-focus-within:block" />
+              </>
+            ) : (
+              <X size={14} />
+            )}
           </button>
         )}
       </div>

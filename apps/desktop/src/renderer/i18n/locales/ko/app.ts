@@ -33,4 +33,5 @@ export default {
   "app.emptyRepoHint": "왼쪽 레포에서 워커를 선택하거나, 레포 헤더의 + 버튼으로 새 워커를 스폰하세요. 세션 탭에서 마스터에게 새로 스폰해 달라고 요청해도 돼요.",
   "app.slackReadOnly": "Slack 세션 — Slack에서 대화하세요",
   "app.composerPlaceholder": "메시지 입력…  (/ 명령, Shift+Enter 줄바꿈, @로 파일 첨부)",
+  "app.resizeSidebar": "사이드바 폭 조절 (더블클릭하면 기본 폭)",
 } satisfies Catalog;

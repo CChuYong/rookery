@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Plus, SquareTerminal, X } from "lucide-react";
 import { useTermStore } from "../store/terminals.js";
 import { TerminalView } from "./TerminalView.js";
@@ -9,6 +9,8 @@ import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
 
 const EMPTY = { tabs: [], activeTabId: null, open: false }; // stable ref — avoids creating a new object every render when the page is empty
+// Last shell request answered per page (module-level so a remount doesn't answer the same request twice).
+const answeredShellRequest = new Map<string, number>();
 
 // Bottom terminal drawer. Tab bar for one agent page (sessionId = page key) + the active tab's xterm + a top-edge resize handle.
 export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: string; subId: string | null; cwd?: string; dock?: boolean }): JSX.Element {
@@ -24,11 +26,28 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
   // Commit to the store at drag end → persisted via persist(rookery.term), restored on the next run.
   const { height, startDrag, resizing } = useResizableHeight(height0, { min: 120, max: 800, onCommit: setHeight_ });
 
+  // In-flight guard: a double click (or a click racing a dock request) must not spawn two shells (audit #80).
+  const creating = useRef(false);
   const newTab = async (): Promise<void> => {
-    const r = await window.rookery.term.create({ sessionId, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
-    if (r.error || !r.id) { toast.error(t("terminalPanel.openFailed"), r.error || undefined); return; }
-    open_(sessionId, { id: r.id, title: cwd ? baseName(cwd) || "zsh" : "zsh", exited: false });
+    if (creating.current) return;
+    creating.current = true;
+    try {
+      const r = await window.rookery.term.create({ sessionId, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
+      if (r.error || !r.id) { toast.error(t("terminalPanel.openFailed"), r.error || undefined); return; }
+      open_(sessionId, { id: r.id, title: cwd ? baseName(cwd) || "zsh" : "zsh", exited: false });
+    } finally {
+      creating.current = false;
+    }
   };
+  // Answer the dock's "open a shell" request (terminal toggle / Ctrl+` on a page with no shell yet, audit #80).
+  const shellRequest = useTermStore((st) => st.shellRequests[sessionId] ?? 0);
+  useEffect(() => {
+    if (!dock || shellRequest <= (answeredShellRequest.get(sessionId) ?? 0)) return;
+    answeredShellRequest.set(sessionId, shellRequest);
+    void newTab();
+    // newTab closes over this page's props; the effect only reacts to a new request number.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dock, sessionId, shellRequest]);
   const close = (id: string): void => { window.rookery.term.kill(id); close_(sessionId, id); };
   // Stable onExit — it goes into TerminalView's effect deps, so keep one per page (a new closure every render would recreate the xterm).
   const onExit = useCallback((id: string) => markExit_(sessionId, id), [markExit_, sessionId]);

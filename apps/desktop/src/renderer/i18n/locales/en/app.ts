@@ -33,4 +33,5 @@ export default {
   "app.emptyRepoHint": "Pick a worker from the repos on the left, use the + button on a repo header to spawn a new one, or ask the master to spawn one from Sessions.",
   "app.slackReadOnly": "Slack session — chat from Slack",
   "app.composerPlaceholder": "Type a message…  (/ commands, Shift+Enter for newline, @ to attach files)",
+  "app.resizeSidebar": "Resize sidebar (double-click for the default width)",
 } satisfies Catalog;

@@ -128,3 +128,28 @@ describe("RookeryTab tab context menu", () => {
     expect(useWsStore.getState().byPage.p1?.tabs.map((t) => t.id)).toEqual(["agent"]);
   });
 });
+
+// audit #15: an unsaved editor tab shows it without hovering.
+function renderEditor() {
+  const api = { title: "x.ts", onDidTitleChange: () => ({ dispose: () => {} }), close: vi.fn() };
+  const props = { api, containerApi: {}, tabLocation: "header", params: { pageKey: "p1", kind: "editor", tabId: "file:/x.ts" } };
+  return render(<RookeryTab {...(props as unknown as IDockviewPanelHeaderProps)} />);
+}
+describe("RookeryTab unsaved marker (audit #15)", () => {
+  it("a dirty editor tab shows a visible dot and announces 'unsaved'; a clean one doesn't", () => {
+    useWsStore.setState({
+      byPage: { p1: { tabs: [{ id: "file:/x.ts", kind: "file", path: "/x.ts", title: "x.ts", dirty: true }], activeTabId: "file:/x.ts" } },
+    } as never);
+    const { container, unmount } = renderEditor();
+    expect(container.querySelector(".tab-dirty-dot")).not.toBeNull();
+    expect(container.querySelector('.tab-close[data-dirty="true"]')).toHaveClass("opacity-100");
+    expect(screen.getByText("(저장 안 됨)", { exact: false })).toHaveClass("sr-only");
+    unmount();
+    useWsStore.setState({
+      byPage: { p1: { tabs: [{ id: "file:/x.ts", kind: "file", path: "/x.ts", title: "x.ts", dirty: false }], activeTabId: "file:/x.ts" } },
+    } as never);
+    const clean = renderEditor();
+    expect(clean.container.querySelector(".tab-dirty-dot")).toBeNull();
+    expect(clean.container.querySelector(".tab-close")).toHaveClass("opacity-0");
+  });
+});

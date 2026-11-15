@@ -13,7 +13,7 @@ import type { FleetRow, LogItem } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
 import { useT } from "../i18n/provider.js";
 import { shortBranch } from "../lib/branch.js";
-import { useDockPanelsStore, isHidden, isGroupOpen, rightGroupKindsFor, type HideableKind } from "../store/dock-panels.js";
+import { useDockPanelsStore, isHidden, panelToggleState, rightGroupKindsFor, type HideableKind } from "../store/dock-panels.js";
 import { useLayoutStore } from "../store/layout.js";
 
 const EMPTY_HIDDEN: HideableKind[] = []; // stable ref for the "nothing hidden yet" case
@@ -104,31 +104,45 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
   // fixed panel has a way back. "Right panel" toggles Files·Git·(worker) Nested as
   // one group, matching the pre-dock single right-sidebar toggle.
   const hidden = useDockPanelsStore((s) => (termPageKey ? s.hiddenByPage[termPageKey] ?? EMPTY_HIDDEN : EMPTY_HIDDEN));
+  const autoHidden = useDockPanelsStore((s) => (termPageKey ? s.autoHiddenByPage[termPageKey] ?? EMPTY_HIDDEN : EMPTY_HIDDEN));
   const rightGroupKinds = rightGroupKindsFor(agentKind);
   const dockTerminalOpen = !isHidden(hidden, "terminal");
-  const dockRightOpen = isGroupOpen(hidden, rightGroupKinds);
+  // "auto" = hidden only because the window is narrow (audit #4): it must not look like the user closed it.
+  const rightState = panelToggleState(hidden, autoHidden, rightGroupKinds);
+  const rightTitle = rightState === "open" ? t("workspaceHeaders.rightPanelHide") : rightState === "auto" ? t("workspaceHeaders.rightPanelAutoHidden") : t("workspaceHeaders.rightPanelShow");
   return (
     <>
       <OpenInAppMenu subId={subId} cwd={cwd} />
-      {!dock && <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>}
-      {!dock && termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
+      {!dock && <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} aria-pressed={termPageOpen} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>}
+      {!dock && termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} aria-pressed={rightOpen} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
       {dock && termPageKey && (
-        // dock mode: the panel can be dragged anywhere, so "(bottom panel)" would lie here — use the plain tab
-        // label instead (same reasoning as #49a's tab rename). The legacy (!dock) toggle above keeps terminalTitle.
-        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} title={t("workspaceHeaders.terminalTab")} className={btn(dockTerminalOpen)}>
+        // dock mode: the panel can be dragged anywhere, so "(bottom panel)" would lie here (#49a) — the tooltip says
+        // "Show/Hide terminal" instead. aria-label stays the panel name; aria-pressed carries the state (audit #11).
+        // The legacy (!dock) toggle above keeps terminalTitle.
+        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} aria-pressed={dockTerminalOpen} title={dockTerminalOpen ? t("workspaceHeaders.terminalHide") : t("workspaceHeaders.terminalShow")} className={btn(dockTerminalOpen)}>
           <SquareTerminal size={14} />
         </button>
       )}
       {dock && termPageKey && (
-        <button onClick={() => useDockPanelsStore.getState().toggleGroup_(termPageKey, rightGroupKinds)} aria-label={t("workspaceHeaders.rightPanelAria")} title={t("workspaceHeaders.rightPanelTitle")} className={btn(dockRightOpen)}>
+        <button
+          onClick={() => useDockPanelsStore.getState().toggleGroup_(termPageKey, rightGroupKinds)}
+          aria-label={t("workspaceHeaders.rightPanelAria")}
+          aria-pressed={rightState === "open"}
+          data-state={rightState}
+          title={rightTitle}
+          // auto-hidden: a dashed outline instead of the plain "off" look, so a panel the window squeezed out reads
+          // differently from one the user closed (audit #4).
+          className={cn(btn(rightState === "open"), rightState === "auto" && "border border-dashed border-thumb-hi")}
+        >
           <PanelRight size={14} />
         </button>
       )}
       {dock && termPageKey && (
-        // Reset layout (audit #57) — doesn't touch the dockview API directly, mirrors the toggles above: it
-        // just clears this page's saved layout, and WorkspaceDock reconciles by wiping+reseeding the live dock
-        // (its own store subscription — the actual dockview manipulation is covered by a live check).
-        <button onClick={() => useLayoutStore.getState().clear_(termPageKey)} aria-label={t("workspaceHeaders.resetLayout")} title={t("workspaceHeaders.resetLayout")} className={btn(false)}>
+        // Reset layout (audit #57) — doesn't touch the dockview API directly, mirrors the toggles above: it clears
+        // this page's saved layout and bumps its reset counter, and WorkspaceDock reseeds the live dock (keeping an
+        // open terminal) and offers Undo (audit #79). Scope: this page's panels only; the sidebar width is global
+        // and has its own double-click reset.
+        <button onClick={() => useLayoutStore.getState().reset_(termPageKey)} aria-label={t("workspaceHeaders.resetLayout")} title={t("workspaceHeaders.resetLayoutTitle")} className={btn(false)}>
           <RotateCcw size={14} />
         </button>
       )}

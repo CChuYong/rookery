@@ -78,3 +78,39 @@ describe("MonacoEditor save-failure feedback (#10)", () => {
     expect(screen.queryByText(READ_ONLY)).toBeNull();
   });
 });
+
+// audit #17: until a file has actually loaded (or when it can't be), the empty buffer must not be editable or
+// savable — Cmd+S there would overwrite the real file with a few typed characters.
+describe("MonacoEditor locks the buffer until the file has loaded (audit #17)", () => {
+  it("is read-only and won't save while the first read is still in flight", async () => {
+    let finish!: (v: { content: string; tooLarge: boolean }) => void;
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(() => new Promise((r) => { finish = r; })), write });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+    await act(async () => finish({ content: "hello", tooLarge: false }));
+    expect(latestEditor().readOnly).toBe(false);
+  });
+
+  it("stays read-only and won't save after a read failure", async () => {
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(async () => { throw new Error("nope"); }), write });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    expect(await screen.findByText(OPEN_ERROR)).toBeInTheDocument();
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("stays read-only and won't save a file too large to open", async () => {
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(async () => ({ content: "", tooLarge: true })), write });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    await screen.findByText("미리보기 불가 — 바이너리이거나 너무 큰 파일이에요.");
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+  });
+});

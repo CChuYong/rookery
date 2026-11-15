@@ -15,4 +15,13 @@ export default {
   "workspaceHeaders.backgroundTasks": "백그라운드 · {count}",
   "workspaceHeaders.stopTask": "중지: {description}",
   "workspaceHeaders.tasksMenu": "백그라운드 작업",
+  "workspaceHeaders.terminalShow": "터미널 열기",
+  "workspaceHeaders.terminalHide": "터미널 닫기",
+  "workspaceHeaders.rightPanelShow": "파일·변경·활동 열기",
+  "workspaceHeaders.rightPanelHide": "파일·변경·활동 닫기",
+  "workspaceHeaders.rightPanelAutoHidden": "창이 좁아서 파일·변경·활동을 숨겼어요 — 클릭하면 열려요",
+  "workspaceHeaders.resetLayoutTitle": "이 페이지의 패널 배치 초기화 (열린 터미널은 유지돼요)",
+  "workspaceHeaders.layoutReset": "이 페이지의 패널 배치를 초기화했어요",
+  "workspaceHeaders.undo": "실행 취소",
+  "workspaceHeaders.overflowTabs": "숨은 탭 {count}개",
 } satisfies Catalog;

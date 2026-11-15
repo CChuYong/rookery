@@ -80,7 +80,9 @@ export function SideConversationDrawer({
   return (
     <aside
       aria-label={t("sideConversation.title")}
-      className="absolute inset-0 z-30 flex min-h-0 flex-col border-l border-line bg-surface shadow-2xl md:relative md:inset-auto md:z-auto md:w-[360px] md:shrink-0 md:shadow-none"
+      // Inline beside the conversation only when the conversation pane (a container, not the viewport) has room for
+      // both; otherwise it overlays the pane instead of squeezing the conversation to a sliver (audit #9).
+      className="side-conversation-drawer absolute inset-0 z-30 flex min-h-0 flex-col border-l border-line bg-surface shadow-2xl @min-[760px]:relative @min-[760px]:inset-auto @min-[760px]:z-auto @min-[760px]:w-[360px] @min-[760px]:shrink-0 @min-[760px]:shadow-none"
     >
       <header className="flex h-10 shrink-0 items-center gap-2 px-3">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">

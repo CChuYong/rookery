@@ -5,18 +5,21 @@ import type { FixedKind } from "./panel-ids.js";
 // authoring dockview grid JSON, which keeps the seed unit-testable.
 export interface SeedPanel {
   kind: FixedKind;
-  // referencePanel kind; undefined = the root panel (added first, no position).
+  // referencePanel kind. Undefined with no direction = the root panel (added first, no position); undefined WITH a
+  // direction = an edge of the whole dock (dockview's absolute position).
   anchor?: FixedKind;
-  // relative placement against the anchor. "within" stacks as a tab in the anchor's group.
+  // placement against the anchor (or the dock edge). "within" stacks as a tab in the anchor's group.
   direction?: "right" | "below" | "within";
 }
 
 export function defaultPanels(agentKind: "master" | "worker"): SeedPanel[] {
-  // conversation (root/center) · files right of it · git stacked with files ·
-  // terminal below conversation · (worker only) nested stacked with files/git.
+  // conversation (root/center) · files as a full-height column on the dock's right edge · git stacked with files ·
+  // terminal below the conversation only · (worker only) nested stacked with files/git. The side column is anchored
+  // to the dock edge, not to the conversation: next to a conversation that already has a terminal below it,
+  // "right of the conversation" splits the conversation's column in half (audit #5 #6).
   const seeds: SeedPanel[] = [
     { kind: "conversation" },
-    { kind: "files", anchor: "conversation", direction: "right" },
+    { kind: "files", direction: "right" },
     { kind: "git", anchor: "files", direction: "within" },
     { kind: "terminal", anchor: "conversation", direction: "below" },
   ];

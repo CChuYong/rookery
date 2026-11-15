@@ -197,17 +197,20 @@ function MessageListImpl({
           stick.current = bottom;
           setAtBottom(bottom);
         }}
-        // [&>*]:shrink-0 — prevents the flexbox bug where direct children get vertically squished when the window shrinks (the container scrolls instead).
-        // mx-auto max-w-[720px] — a centered reading column (T3 Code), not edge-to-edge prose.
-        className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-2.5 overflow-y-auto px-6 py-5 [&>*]:shrink-0"
+        // The scroller spans the whole pane so its scrollbar sits at the pane edge and the wheel works over the side
+        // margins too (audit #14); the centered 720px reading column (T3 Code) lives inside it.
+        className="min-h-0 w-full flex-1 overflow-y-auto"
       >
-        {rows}
-        {waiting && (
-          <div role="status" className="rise-in flex h-6 items-center gap-1.5 self-start px-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent text-accent led-live" />
-            <span className="text-ui text-muted">{t("messageList.thinking")}</span>
-          </div>
-        )}
+        {/* [&>*]:shrink-0 — prevents the flexbox bug where direct children get vertically squished when the window shrinks. */}
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-2.5 px-6 py-5 [&>*]:shrink-0">
+          {rows}
+          {waiting && (
+            <div role="status" className="rise-in flex h-6 items-center gap-1.5 self-start px-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent text-accent led-live" />
+              <span className="text-ui text-muted">{t("messageList.thinking")}</span>
+            </div>
+          )}
+        </div>
       </div>
       {!atBottom && (
         <button

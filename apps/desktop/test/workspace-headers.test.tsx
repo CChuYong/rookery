@@ -166,7 +166,7 @@ describe("WorkerHeader terminology (reserved-word contract)", () => {
 // (the actual dockview panel add/remove is WorkspaceDock's job, covered by a
 // live check — this only pins that the header wires the right store calls).
 describe("HeaderControls dock-mode toggles (audit #48)", () => {
-  beforeEach(() => { useDockPanelsStore.setState({ hiddenByPage: {} }); });
+  beforeEach(() => { useDockPanelsStore.setState({ hiddenByPage: {}, autoHiddenByPage: {} }); });
 
   it("SessionHeader (master): legacy toggle buttons are absent in dock mode, dock toggles are present instead", () => {
     render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);
@@ -198,10 +198,47 @@ describe("HeaderControls dock-mode toggles (audit #48)", () => {
   });
 });
 
+// audit #4 #11: the toggles say what they will do and whether the panel is open.
+describe("HeaderControls dock-mode toggle state (audit #4 #11)", () => {
+  beforeEach(() => { useDockPanelsStore.setState({ hiddenByPage: {}, autoHiddenByPage: {} }); });
+  const renderSession = () => render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);
+
+  it("terminal toggle exposes aria-pressed and a verb tooltip that follows the state", () => {
+    renderSession();
+    const btn = screen.getByLabelText("터미널");
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+    expect(btn).toHaveAttribute("title", "터미널 닫기");
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    expect(btn).toHaveAttribute("title", "터미널 열기");
+  });
+
+  it("right toggle stays on while Files is still showing with Git closed, and a click hides the rest (audit #8)", () => {
+    useDockPanelsStore.setState({ hiddenByPage: { p1: ["git"] }, autoHiddenByPage: {} });
+    renderSession();
+    const btn = screen.getByLabelText("우측 패널");
+    expect(btn).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(btn);
+    expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual(["git", "files"]);
+  });
+
+  it("a panel hidden by the narrow window reads as 'auto', not as closed, and a click opens it", () => {
+    useDockPanelsStore.setState({ hiddenByPage: { p1: [] }, autoHiddenByPage: { p1: ["files", "git"] } });
+    renderSession();
+    const btn = screen.getByLabelText("우측 패널");
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    expect(btn).toHaveAttribute("data-state", "auto");
+    expect(btn).toHaveAttribute("title", "창이 좁아서 파일·변경·활동을 숨겼어요 — 클릭하면 열려요");
+    fireEvent.click(btn);
+    expect(useDockPanelsStore.getState().autoHiddenByPage.p1).toEqual([]);
+    expect(btn).toHaveAttribute("data-state", "open");
+  });
+});
+
 // audit #57: the "Reset layout" header control only needs to clear this page's saved layout — the live
 // dockview wipe+reseed is WorkspaceDock's own layoutStore subscription (verified live, same as #48 above).
 describe("HeaderControls reset-layout button (audit #57)", () => {
-  beforeEach(() => { useLayoutStore.setState(emptyLayoutState()); });
+  beforeEach(() => { useLayoutStore.setState({ ...emptyLayoutState(), resetSeq: {} }); });
 
   it("is absent outside dock mode", () => {
     render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" />);
@@ -215,6 +252,7 @@ describe("HeaderControls reset-layout button (audit #57)", () => {
     fireEvent.click(screen.getByLabelText("레이아웃 초기화"));
     expect(useLayoutStore.getState().byPage.p1).toBeUndefined();
     expect(useLayoutStore.getState().byPage["other-page"]).toEqual({ grid: 2 });
+    expect(useLayoutStore.getState().resetSeq.p1).toBe(1); // the live dock reseeds on this, saved layout or not (audit #81)
   });
 
   it("WorkerHeader (dock mode): reset button targets the worker's page key", () => {

@@ -24,7 +24,7 @@ import { ConversationPane } from "./components/ConversationPane.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { useResizableWidth } from "./lib/useResizableWidth.js";
 import { useViewportSize } from "./lib/useViewportSize.js";
-import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, shouldCompactDock, sidebarMaxForViewport } from "./lib/layout-budget.js";
+import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, sidebarMaxForViewport } from "./lib/layout-budget.js";
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
@@ -374,8 +374,6 @@ export function App(): JSX.Element {
     max: sidebarMaxForViewport(viewport.width),
     side: "left",
   });
-  const mainViewportWidth = viewport.width - (collapsed ? 56 : leftPanel.width + 6);
-  const compactDock = shouldCompactDock(mainViewportWidth);
   const compactSidebar = isCompactSidebar(leftPanel.width);
   const shortViewport = isShortViewport(viewport.height);
   const toggleSidebar = () =>
@@ -1281,7 +1279,7 @@ export function App(): JSX.Element {
           </div>
         )}
       </aside>
-      {!collapsed && <ResizeHandle onPointerDown={leftPanel.startDrag} />}
+      {!collapsed && <ResizeHandle onPointerDown={leftPanel.startDrag} handle={leftPanel.handle} label={t("app.resizeSidebar")} />}
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-ink">
         {/* The WS dropped (e.g. daemon restart) — the live stream is dead and won't resume until reconnect, so an in-progress
@@ -1455,7 +1453,7 @@ export function App(): JSX.Element {
                   dock
                 />
                 <WorkspaceRenderProvider value={workerRender}>
-                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" compact={compactDock} />
+                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
                 </WorkspaceRenderProvider>
               </div>
             ) : (
@@ -1529,7 +1527,7 @@ export function App(): JSX.Element {
               dock
             />
             <WorkspaceRenderProvider value={masterRender}>
-              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" compact={compactDock} />
+              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
             </WorkspaceRenderProvider>
           </div>
         ) : (

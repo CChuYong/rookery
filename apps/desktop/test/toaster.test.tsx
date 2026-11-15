@@ -45,3 +45,16 @@ describe("Toaster auto-expire", () => {
     expect(screen.getByText("B")).toBeInTheDocument(); // B is still within its own TTL
   });
 });
+
+// audit #79: Reset layout offers Undo through a toast action.
+describe("Toaster action", () => {
+  it("renders the action button; clicking runs it and dismisses the toast", () => {
+    const onClick = vi.fn();
+    renderToaster();
+    act(() => { toast.info("Layout reset", { label: "Undo", onClick }); });
+    act(() => { screen.getByRole("button", { name: "Undo" }).click(); });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(EXIT); });
+    expect(screen.queryByText("Layout reset")).toBeNull();
+  });
+});

@@ -34,15 +34,14 @@ export function ActivityPanelBody({ subId, loadAgentHistory }: { subId: string |
 const Fill = ({ children }: { children: ReactNode }): JSX.Element => <div className="flex h-full min-h-0 flex-col">{children}</div>;
 const Scroll = ({ children }: { children: ReactNode }): JSX.Element => <div className="h-full min-h-0 overflow-y-auto">{children}</div>;
 
-// The terminal group may collapse to its header + TerminalPanel's single "New terminal" row. dockview's default
-// group minimum is 100px, which would leave an empty band under that row, so lower the minimum for whichever group
-// hosts the terminal (applies to seeded and restored layouts alike; re-applied if the panel moves to another group).
+// The terminal group may collapse to its header + TerminalPanel's single "New terminal" row. Its lower minimum
+// height comes from WorkspaceDock's applyDockConstraints (dock-layout.ts), which owns every group's constraints —
+// setting one here too would fight it when the terminal shares a group with the conversation.
 function TerminalDockPanel({ api, params }: IDockviewPanelProps): JSX.Element {
   const group = api.group;
   const pageKey = (params as PanelParams).pageKey;
   useEffect(() => {
     if (!group) return;
-    group.api.setConstraints({ minimumHeight: TERMINAL_COLLAPSED_HEIGHT });
     // A group that was seeded collapsed got clamped up to dockview's old 100px floor before this constraint existed;
     // with no terminals open on the page, settle it back to the collapsed height (a deliberately larger size is kept).
     const openCount = useTermStore.getState().layout[pageKey]?.count ?? 0;

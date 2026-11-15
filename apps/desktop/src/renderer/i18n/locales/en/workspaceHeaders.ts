@@ -15,4 +15,13 @@ export default {
   "workspaceHeaders.backgroundTasks": "Background · {count}",
   "workspaceHeaders.stopTask": "Stop: {description}",
   "workspaceHeaders.tasksMenu": "Background tasks",
+  "workspaceHeaders.terminalShow": "Show terminal",
+  "workspaceHeaders.terminalHide": "Hide terminal",
+  "workspaceHeaders.rightPanelShow": "Show Files · Changes · Activity",
+  "workspaceHeaders.rightPanelHide": "Hide Files · Changes · Activity",
+  "workspaceHeaders.rightPanelAutoHidden": "Files · Changes · Activity hidden because the window is narrow — click to show",
+  "workspaceHeaders.resetLayoutTitle": "Reset this page's panel layout (open terminals stay)",
+  "workspaceHeaders.layoutReset": "Panel layout reset for this page",
+  "workspaceHeaders.undo": "Undo",
+  "workspaceHeaders.overflowTabs": "{count} hidden tabs",
 } satisfies Catalog;

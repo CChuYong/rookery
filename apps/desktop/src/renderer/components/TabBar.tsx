@@ -8,6 +8,7 @@ import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
 import { editorTooltip } from "../workspace/panel-ids.js";
 import { TabCloseConfirm } from "./TabCloseConfirm.js";
 import { ContextMenu, type MenuItem } from "./ContextMenu.js";
+import { useCloseTabShortcut } from "../lib/useCloseTabShortcut.js";
 
 export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: string }): JSX.Element {
   const t = useT();
@@ -16,6 +17,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
   const closeTabs = useWsStore((s) => s.closeTabs_);
   const tabs = pageRec?.tabs ?? [{ id: "agent", kind: "agent" as const }];
   const active = pageRec?.activeTabId ?? "agent";
+  const closeTabConfirm = useCloseTabShortcut(pageKey); // Cmd/Ctrl+W (audit #82)
   // Dirty tabs (audit #44) route through the shared TabCloseConfirm instead of closing immediately;
   // clean tabs keep the old no-dialog close. `confirming` is a snapshot so the dialog's exit
   // animation survives the tab already having been removed from `tabs` on Discard.
@@ -62,7 +64,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
         const title = tab.kind === "agent" ? agentLabel : tab.title;
         const dirty = tab.kind === "file" && tab.dirty;
         return (
-          <div key={tab.id} data-seg={tab.id} onContextMenu={(e) => onContextMenu(e, tab)} className={cn("group flex shrink-0 items-center gap-1.5 border-r border-line-soft px-3 text-ui transition-colors duration-150", tab.id === active ? "bg-ink text-fg" : "text-muted hover:text-fg-dim")}>
+          <div key={tab.id} data-seg={tab.id} onContextMenu={(e) => onContextMenu(e, tab)} className={cn("group flex shrink-0 items-center gap-1.5 border-r border-line-soft px-3 text-ui transition-colors duration-150", tab.id === active ? "bg-raised text-fg" : "text-muted hover:text-fg-dim")}>
             <button onClick={() => setActive(pageKey, tab.id)} className="flex items-center gap-1.5">
               <Icon size={14} className="text-muted" />
               <span title={editorTooltip(tab.id)} className="max-w-[140px] truncate">{title}</span>
@@ -84,6 +86,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
         />
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.tab)} onClose={() => setMenu(null)} />}
+      {closeTabConfirm}
     </div>
   );
 }

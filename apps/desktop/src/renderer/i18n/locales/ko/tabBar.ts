@@ -8,4 +8,5 @@ export default {
   "tabBar.unsavedBody": "'{name}' 탭을 닫으면 편집 내용이 사라져요.",
   "tabBar.unsavedManyBody": "저장 안 된 변경이 있는 탭 {count}개를 닫으면 편집 내용이 사라져요.",
   "tabBar.discardClose": "저장 안 함",
+  "tabBar.unsaved": "저장 안 됨",
 } satisfies Catalog;

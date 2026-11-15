@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld("rookery", {
       ipcRenderer.on("win:maximized", h);
       return () => { ipcRenderer.removeListener("win:maximized", h); };
     },
+    // Cmd/Ctrl+W from main: close the active editor tab (audit #82).
+    onCloseTab: (cb: () => void) => {
+      const h = (): void => cb();
+      ipcRenderer.on("app:closeTab", h);
+      return () => { ipcRenderer.removeListener("app:closeTab", h); };
+    },
   },
   // App version + auto-update controls (settings "About" section: show version, manual check, install).
   getVersion: () => ipcRenderer.invoke("app:version") as Promise<string>,

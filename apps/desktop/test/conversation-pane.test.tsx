@@ -28,6 +28,12 @@ describe("ConversationPane Side drawer", () => {
     expect(onSideStart).toHaveBeenCalledWith("why this approach?");
     expect(await screen.findByText("메인 세션의 문맥 · 읽기 전용")).toBeInTheDocument();
     expect(screen.getByText("why this approach?")).toBeInTheDocument();
+    // audit #9: jsdom can't evaluate container queries, so lock the contract — inline vs overlay follows the
+    // conversation pane's own width (an @container), not a viewport breakpoint.
+    const drawer = screen.getByLabelText("Side 질문");
+    expect(drawer.className).toContain("@min-[760px]:relative");
+    expect(drawer.className).not.toContain("md:relative");
+    expect(drawer.closest(".conversation-pane")?.className).toContain("@container");
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
     expect(screen.queryByLabelText("Side 질문")).toBeNull();
