@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { WorkerCost, FleetBurn } from "../src/renderer/components/WorkerCost.js";
+import { WorkerCost } from "../src/renderer/components/WorkerCost.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { LogItem } from "../src/renderer/store/reduce.js";
 
@@ -27,29 +27,11 @@ describe("WorkerCost", () => {
   });
 });
 
-describe("FleetBurn", () => {
-  it("sums the latest cost across only the given live worker rows", () => {
-    useStore.setState({ workerLogs: { w1: [metrics(0.4)], w2: [metrics(0.1)], wArchived: [metrics(9.99)] } });
-    render(<FleetBurn rows={[{ id: "w1" }, { id: "w2" }]} />);
-    expect(screen.getByText("$0.50")).toBeInTheDocument(); // wArchived excluded
-  });
-
-  it("renders nothing when no listed worker has cost", () => {
-    const { container } = render(<FleetBurn rows={[{ id: "x" }, { id: "y" }]} />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it("prefers the fleet-provided costUsd over the log when higher (no log loaded)", () => {
-    render(<FleetBurn rows={[{ id: "w1", costUsd: 2.5 }, { id: "w2", costUsd: 1.25 }]} />);
-    expect(screen.getByText("$3.75")).toBeInTheDocument();
-  });
-});
-
-it("unavailable worker and fleet totals never look like reliable zero", () => {
+it("an unavailable worker cost never looks like a reliable zero", () => {
   useStore.setState({ workerLogs: { w1: [{ ...metrics(0), costAccuracy: "unavailable" }] } });
-  render(<><WorkerCost workerId="w1" /><FleetBurn rows={[{ id: "w1", costUsd: 0, costAccuracy: "unavailable" }]} /></>);
+  render(<WorkerCost workerId="w1" />);
   expect(screen.queryByText("$0.00")).toBeNull();
-  expect(screen.getAllByLabelText(/집계가 불완전/)).toHaveLength(2);
+  expect(screen.getAllByLabelText(/집계가 불완전/)).toHaveLength(1);
 });
 it("Codex snapshot costs remain explicitly estimated without loading history", () => {
   useStore.setState({ fleet: { w1: { id: "w1", provider: "codex", costAccuracy: "estimated" } as import("../src/renderer/store/reduce.js").FleetRow } });
