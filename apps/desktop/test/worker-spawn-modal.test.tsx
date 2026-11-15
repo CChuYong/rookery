@@ -106,7 +106,7 @@ describe("WorkerSpawnPage provider selector (P1.5 task 4)", () => {
   it("defaults to claude — onSpawn's trailing provider arg is undefined (wire-minimal)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(onSpawn.mock.calls[0]![7]).toBeUndefined();
   });
@@ -115,7 +115,7 @@ describe("WorkerSpawnPage provider selector (P1.5 task 4)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![7]).toBe("codex");
   });
 
@@ -177,7 +177,7 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
     const { onSpawn } = renderModal(undefined, { codexDefaultModel: "gpt-5.5", defaultEffort: "max" });
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     const effortArg = onSpawn.mock.calls[0]![3];
     expect(effortArg).not.toBe("max");
     expect(CODEX_MODELS[0].supportedEfforts).toContain(effortArg); // gpt-5.5's default (xhigh), a real level
@@ -227,7 +227,7 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
     fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.4" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![2]).toBe("gpt-5.4"); // spawnModel
     expect(onSpawn.mock.calls[0]![3]).toBe("medium"); // effort (gpt-5.4's defaultEffort)
     expect(onSpawn.mock.calls[0]![7]).toBe("codex"); // provider
@@ -238,7 +238,7 @@ describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
   it("empty cost budget → onSpawn's trailing costBudgetUsd arg is undefined", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
   });
 
@@ -246,7 +246,7 @@ describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByTitle("비용 예산 (USD, 이 워커)"), { target: { value: "5" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![8]).toBe(5);
   });
 
@@ -256,7 +256,7 @@ describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
 
     fireEvent.change(input, { target: { value } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "t1" } });
-    fireEvent.click(screen.getByText("spawn"));
+    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
     expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
   });
 });

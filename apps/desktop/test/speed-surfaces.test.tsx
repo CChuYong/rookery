@@ -29,8 +29,9 @@ it("worker spawn carries its own selected preference and labels Codex budgets", 
   const onSpawn = vi.fn();
   render(english(<WorkerSpawnPage repo="app" defaultModel={settings.workerModel} defaultEffort="high" onSpawn={onSpawn} onClose={vi.fn()} />));
   fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
+  fireEvent.click(screen.getByRole("button", { name: /More/ })); // speed lives behind More on the spawn page
   expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "standard" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Speed" }), { target: { value: "standard" } });
   fireEvent.click(screen.getByRole("button", { name: /Spawn|Start/ }));
   expect(onSpawn.mock.calls[0]?.[9]).toBe("standard");
   expect(screen.getByText(/Codex costs and budget checks are estimates/)).toBeInTheDocument();

@@ -3,9 +3,8 @@ import { SpeedControl } from "./SpeedControl.js";
 import { defaultSpeed } from "../lib/speed.js";
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
-import { Folder, X } from "lucide-react";
+import { ArrowUp, Folder, GitBranch, Loader2, ShieldOff, SlidersHorizontal, X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
-import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
@@ -169,69 +168,43 @@ export function WorkerSpawnPage(p: {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void spawn(); }
   };
 
-  const fieldLabel = "text-meta font-medium text-muted";
-  const controlField = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
+  // Quiet text controls (NewSessionPage's chip style): no borders, a lift on hover.
+  const ghost = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
+  const metaGhost = "h-6 min-w-0 border-0 bg-transparent px-1 text-meta text-muted hover:bg-raised hover:text-fg-dim focus:ring-0";
+  const [moreOpen, setMoreOpen] = useState(false);
 
   return (
     <>
       <div className="drag flex h-10 shrink-0 items-center gap-2 px-4 text-body">
         <span className="font-medium text-fg">{t("workerSpawnModal.title")}</span>
-        <span className="text-faint" aria-hidden>/</span>
-        <span className="min-w-0 truncate font-mono text-ui text-fg-dim">{p.repo}</span>
         <button onClick={dismiss} disabled={spawning} aria-label={t("common.close")} className="no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
           <X size={14} />
         </button>
       </div>
 
+      {/* One question, one box (the reference: a centred heading, the composer, a quiet meta row). Everything that is
+          rarely touched lives behind small controls under the box or the "More" toggle. */}
       <div role="region" aria-label={t("workerSpawnModal.title")} onKeyDown={onFormKeyDown} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
-        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 pb-10 pt-10">
-          <h1 id="worker-spawn-heading" className="text-title font-medium text-fg-dim">{t("workerSpawnModal.heading")}</h1>
+        <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col justify-center gap-3 pb-[12vh] pt-10">
+          <h1 id="worker-spawn-heading" className="mb-2 text-center text-[22px] font-medium tracking-tight text-fg">
+            {t("workerSpawnModal.headingIn", { repo: p.repo })}
+          </h1>
 
-          {/* Repository — registered repos as ghost buttons (same idiom as NewSessionPage's working-folder row). */}
-          {p.repos && p.repos.length > 1 && p.onRepoChange && (
-            <div className="flex flex-col items-start gap-1.5">
-              <p id="worker-spawn-repo-label" className={fieldLabel}>{t("workerSpawnModal.repoLabel")}</p>
-              <div role="group" aria-labelledby="worker-spawn-repo-label" className="flex flex-wrap gap-1">
-                {p.repos.map((r) => (
-                  <button
-                    key={r.name}
-                    title={r.path}
-                    aria-pressed={r.name === p.repo}
-                    disabled={spawning}
-                    onClick={() => p.onRepoChange!(r.name)}
-                    className={cn("flex h-6 items-center gap-1.5 rounded px-2 text-ui transition-colors",
-                      r.name === p.repo ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised hover:text-fg")}
-                  >
-                    <Folder size={12} /> {r.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Source — write directly / GitHub issues·PRs / Linear tickets */}
-          <Segment
-            items={MODES}
-            value={mode}
-            onChange={switchMode}
-            variant="underline"
-            className="gap-1 self-start border-b border-line-soft"
-            itemClassName="px-2 py-1 text-ui"
-          />
-
-          {/* GitHub/Linear mode: search → select → the task below is auto-filled (editable) */}
-          {sourceMode && p.searchSource && (
-            <div className="flex flex-col gap-1.5">
-              {selected ? (
-                <div className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-ui">
-                  <span className="shrink-0 font-mono text-meta text-accent">{selected.identifier}</span>
-                  <span className="truncate text-fg">{selected.title}</span>
-                  <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={14} /></button>
-                </div>
-              ) : (
-                <>
+          <div className="relative">
+            <div className="flex flex-col rounded-xl border border-line bg-surface transition-colors focus-within:border-fg-dim/40">
+              {/* GitHub/Linear: the picked item, or its search field, sits at the top of the box */}
+              {sourceMode && p.searchSource && (
+                selected ? (
+                  <div className="mx-3 mt-3 flex items-center gap-2 rounded-md bg-raised px-2.5 py-1.5 text-ui">
+                    <span className="shrink-0 font-mono text-meta text-accent">{selected.identifier}</span>
+                    <span className="truncate text-fg">{selected.title}</span>
+                    <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={14} /></button>
+                  </div>
+                ) : (
                   <Input
                     autoFocus
+                    className="mx-3 mt-3 w-auto"
+                    size="sm"
                     placeholder={mode === "github" ? t("workerSpawnModal.searchGithub") : t("workerSpawnModal.searchLinear")}
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
@@ -249,148 +222,171 @@ export function WorkerSpawnPage(p: {
                     aria-controls="worker-spawn-source-results"
                     aria-activedescendant={highlight >= 0 && highlight < results.length ? `worker-spawn-source-result-${highlight}` : undefined}
                   />
-                  {dropdownOpen && (
-                    // onMouseDown preventDefault: keeps the input focused so a click on a result isn't swallowed by blur.
-                    <div id="worker-spawn-source-results" role="listbox" className="max-h-80 overflow-y-auto rounded-md border border-line bg-surface" onMouseDown={(e) => e.preventDefault()}>
-                      {searching && results.length === 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
-                      {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
-                      {results.map((it, i) => (
-                        <button
-                          key={`${it.provider}:${it.id}`}
-                          id={`worker-spawn-source-result-${i}`}
-                          role="option"
-                          aria-selected={i === highlight}
-                          onClick={() => pickSource(it)}
-                          className={cn("flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
-                        >
-                          <span className="shrink-0 font-mono text-meta text-accent">{it.identifier}</span>
-                          <span className="truncate text-fg">{it.title}</span>
-                          {it.state && <span className="ml-auto shrink-0 text-meta text-muted">{it.state}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Task box — the composer surface: a roomy textarea, then provider · model · effort · speed. */}
-          <div className="flex flex-col rounded-lg border border-line bg-surface transition-colors focus-within:border-fg-dim/40">
-            <Textarea
-              autoFocus={mode === "direct"}
-              aria-labelledby="worker-spawn-heading"
-              className="min-h-[160px] resize-y border-0 bg-transparent px-3 py-3 text-prose focus:ring-0"
-              placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-            />
-            <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
-              {/* Agent backend for this worker. */}
-              <Select size="xs" className={controlField} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")} aria-label={t("workerSpawnModal.provider")}>
-                <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
-                <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
-              </Select>
-              {provider === "codex" ? (
-                codexModels != null ? (
-                  // codex catalog fetched — dropdown; picking a model also pre-selects its default effort.
-                  <Select
-                    size="xs"
-                    className={controlField}
-                    value={codexModel}
-                    onChange={(e) => {
-                      const nm = e.target.value;
-                      setCodexModel(nm);
-                      const de = codexDefaultEffort(nm, codexModels);
-                      if (de) setEffort(de);
-                    }}
-                    title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}
-                  >
-                    {/* "" = use the codexWorkerModel settings default (never auto-pick a catalog model). */}
-                    <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
-                    {codexModels.map((m) => (
-                      <option key={m.id} value={m.id}>{m.displayName}</option>
-                    ))}
-                    {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
-                  </Select>
-                ) : (
-                  // codex catalog unavailable — free text, daemon default when empty.
-                  <Input
-                    size="xs"
-                    className="h-6 w-40"
-                    value={codexModel}
-                    onChange={(e) => setCodexModel(e.target.value)}
-                    placeholder={p.codexDefaultModel}
-                    title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}
-                  />
                 )
-              ) : (
-                <Select size="xs" className={controlField} value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}>
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
-                  ))}
-                  {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
-                </Select>
               )}
-              {effortSupported(effectiveModel) && (
-                <Select size="xs" className={controlField} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")} aria-label={t("workerSpawnModal.effortTitle")}>
-                  {effortOptions.map((ef) => (
-                    <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+              {sourceMode && p.searchSource && !selected && dropdownOpen && (
+                // onMouseDown preventDefault: keeps the input focused so a click on a result isn't swallowed by blur.
+                <div id="worker-spawn-source-results" role="listbox" className="mx-3 mt-1 max-h-72 overflow-y-auto rounded-md border border-line bg-ink" onMouseDown={(e) => e.preventDefault()}>
+                  {searching && results.length === 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
+                  {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
+                  {results.map((it, i) => (
+                    <button
+                      key={`${it.provider}:${it.id}`}
+                      id={`worker-spawn-source-result-${i}`}
+                      role="option"
+                      aria-selected={i === highlight}
+                      onClick={() => pickSource(it)}
+                      className={cn("flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
+                    >
+                      <span className="shrink-0 font-mono text-meta text-accent">{it.identifier}</span>
+                      <span className="truncate text-fg">{it.title}</span>
+                      {it.state && <span className="ml-auto shrink-0 text-meta text-muted">{it.state}</span>}
+                    </button>
                   ))}
-                </Select>
+                </div>
               )}
-              <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "worker")} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
+
+              <Textarea
+                autoFocus={mode === "direct"}
+                aria-labelledby="worker-spawn-heading"
+                className="min-h-[84px] resize-none border-0 bg-transparent px-4 pt-3.5 text-prose focus:ring-0"
+                placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
+                value={task}
+                onChange={(e) => setTask(e.target.value)}
+              />
+
+              {/* Box footer: source on the left; agent backend · model · effort and the send button on the right. */}
+              <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2.5">
+                <Segment
+                  items={MODES}
+                  value={mode}
+                  onChange={switchMode}
+                  variant="pill"
+                  aria-label={t("workerSpawnModal.sourceLabel")}
+                  className="gap-0.5"
+                  itemClassName="px-1.5 py-0.5 text-meta"
+                />
+                <span className="ml-auto" />
+                <Select size="xs" className={ghost} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")} aria-label={t("workerSpawnModal.provider")}>
+                  <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+                  <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+                </Select>
+                {provider === "codex" ? (
+                  codexModels != null ? (
+                    <Select
+                      size="xs"
+                      className={ghost}
+                      value={codexModel}
+                      onChange={(e) => {
+                        const nm = e.target.value;
+                        setCodexModel(nm);
+                        const de = codexDefaultEffort(nm, codexModels);
+                        if (de) setEffort(de);
+                      }}
+                      title={t("workerSpawnModal.modelTitle")}
+                      aria-label={t("workerSpawnModal.modelTitle")}
+                    >
+                      {/* "" = use the codexWorkerModel settings default (never auto-pick a catalog model). */}
+                      <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
+                      {codexModels.map((m) => (
+                        <option key={m.id} value={m.id}>{m.displayName}</option>
+                      ))}
+                      {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
+                    </Select>
+                  ) : (
+                    <Input size="xs" className="h-6 w-36" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")} />
+                  )
+                ) : (
+                  <Select size="xs" className={ghost} value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                    {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
+                  </Select>
+                )}
+                {effortSupported(effectiveModel) && (
+                  <Select size="xs" className={ghost} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")} aria-label={t("workerSpawnModal.effortTitle")}>
+                    {effortOptions.map((ef) => (
+                      <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+                    ))}
+                  </Select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void spawn()}
+                  disabled={spawning}
+                  aria-label={t("workerSpawnModal.spawn")}
+                  aria-busy={spawning || undefined}
+                  title={t("workerSpawnModal.spawnHint")}
+                  className="ml-1 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-colors hover:bg-fg/90 disabled:bg-raised disabled:text-faint"
+                >
+                  {spawning ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={15} />}
+                </button>
+              </div>
             </div>
           </div>
-          {provider === "codex" && <p className="-mt-2 text-meta text-muted">{t("speed.budgetEstimated")}</p>}
 
-          {/* Options — every control carries a visible label (the dialog relied on placeholders alone). */}
-          <section className="flex flex-col gap-3 border-t border-line-soft pt-4">
-            <h2 className="text-ui font-medium text-fg-dim">{t("workerSpawnModal.optionsTitle")}</h2>
-            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+          {/* Meta row under the box: where it runs (repo, base branch) and how (permission), plus "More". */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2">
+            {p.repos && p.repos.length > 1 && p.onRepoChange ? (
+              <span className="flex items-center gap-0.5 text-muted">
+                <Folder size={12} className="shrink-0" aria-hidden />
+                <Select size="xs" className={metaGhost} value={p.repo} disabled={spawning} onChange={(e) => p.onRepoChange!(e.target.value)} aria-label={t("workerSpawnModal.repoLabel")} title={t("workerSpawnModal.repoLabel")}>
+                  {p.repos.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+                </Select>
+              </span>
+            ) : (
+              <span className="flex h-6 items-center gap-1 px-1 text-meta text-muted"><Folder size={12} aria-hidden /> {p.repo}</span>
+            )}
+            <span className="ml-auto" />
+            {p.branches && p.branches.length > 0 && (
+              <span className="flex items-center gap-0.5 text-muted">
+                <GitBranch size={12} className="shrink-0" aria-hidden />
+                <Select size="xs" className={metaGhost} value={base} onChange={(e) => setBase(e.target.value)} title={t("workerSpawnModal.baseTitle")} aria-label={t("workerSpawnModal.baseLabel")}>
+                  <option value="">{t("workerSpawnModal.baseDefault")}</option>
+                  {p.branches.map((b) => (
+                    <option key={b} value={b}>{t("workerSpawnModal.baseOption", { branch: b })}</option>
+                  ))}
+                </Select>
+              </span>
+            )}
+            <span className="flex items-center gap-0.5 text-muted">
+              <ShieldOff size={12} className="shrink-0" aria-hidden />
+              {/* Only bypassPermissions / plan for workers; changeable later in the composer. */}
+              <Select size="xs" className={metaGhost} value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")} aria-label={t("workerSpawnModal.permLabel")}>
+                <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>
+                <option value="plan">{t("workerSpawnModal.permPlan")}</option>
+              </Select>
+            </span>
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-expanded={moreOpen}
+              className="flex h-6 items-center gap-1 rounded px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+            >
+              <SlidersHorizontal size={12} aria-hidden /> {t("workerSpawnModal.more")}
+            </button>
+          </div>
+
+          {/* Rarely-touched options: label, a per-worker cost budget, and speed. */}
+          {/* Kept mounted (hidden) so typed values survive collapsing the panel. */}
+          <div hidden={!moreOpen} className="grid grid-cols-1 gap-x-4 gap-y-2 px-2 sm:grid-cols-2">
               <label className="flex min-w-0 flex-col gap-1">
-                <span className={fieldLabel}>{t("workerSpawnModal.labelLabel")}</span>
+                <span className="text-meta text-muted">{t("workerSpawnModal.labelLabel")}</span>
                 <Input size="sm" placeholder={t("workerSpawnModal.labelPlaceholder")} value={label} onChange={(e) => setLabel(e.target.value)} />
               </label>
-              {p.branches && p.branches.length > 0 && (
-                <label className="flex min-w-0 flex-col gap-1">
-                  <span className={fieldLabel}>{t("workerSpawnModal.baseLabel")}</span>
-                  <Select size="sm" value={base} onChange={(e) => setBase(e.target.value)} title={t("workerSpawnModal.baseTitle")}>
-                    <option value="">{t("workerSpawnModal.baseDefault")}</option>
-                    {p.branches.map((b) => (
-                      <option key={b} value={b}>{t("workerSpawnModal.baseOption", { branch: b })}</option>
-                    ))}
-                  </Select>
-                </label>
-              )}
               <label className="flex min-w-0 flex-col gap-1">
-                <span className={fieldLabel}>{t("workerSpawnModal.permLabel")}</span>
-                {/* Only bypassPermissions / plan for workers; changeable later in the composer. */}
-                <Select size="sm" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")}>
-                  <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>
-                  <option value="plan">{t("workerSpawnModal.permPlan")}</option>
-                </Select>
-              </label>
-              <label className="flex min-w-0 flex-col gap-1">
-                <span className={fieldLabel}>{t("workerSpawnModal.costBudget")}</span>
+                <span className="text-meta text-muted">{t("workerSpawnModal.costBudget")}</span>
                 {/* Empty = the workerCostBudgetUsd settings default applies (not unconditionally "no limit"). */}
-                <Input
-                  size="sm"
-                  inputMode="decimal"
-                  value={costBudget}
-                  onChange={(e) => setCostBudget(e.target.value)}
-                  placeholder={t("workerSpawnModal.costBudgetPlaceholder")}
-                  title={t("workerSpawnModal.costBudget")}
-                />
+                <Input size="sm" inputMode="decimal" value={costBudget} onChange={(e) => setCostBudget(e.target.value)} placeholder={t("workerSpawnModal.costBudgetPlaceholder")} title={t("workerSpawnModal.costBudget")} />
               </label>
-            </div>
-            <p className="text-meta text-muted">{t("workerSpawnModal.footerNote")}</p>
-          </section>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" disabled={spawning} onClick={dismiss}>{t("common.cancel")}</Button>
-            <Button variant="primary" loading={spawning} onClick={() => void spawn()}>{t("workerSpawnModal.spawn")}</Button>
+              <label className="flex min-w-0 flex-col gap-1">
+                <span className="text-meta text-muted">{t("speed.label")}</span>
+                <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "worker")} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
+              </label>
+              <p className="text-meta text-faint sm:col-span-2">{t("workerSpawnModal.footerNote")}</p>
           </div>
+          {provider === "codex" && <p className="px-2 text-meta text-faint">{t("speed.budgetEstimated")}</p>}
         </div>
       </div>
     </>

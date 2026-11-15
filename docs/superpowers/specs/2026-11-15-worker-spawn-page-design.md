@@ -14,18 +14,16 @@ full main-area page; spawning a worker should feel the same.
   repo tree's `+` navigates there; a successful spawn selects the new worker (existing `selectSub`), which closes the page.
 - **Component:** `WorkerSpawnPage` replaces `WorkerSpawnModal`. All form logic moves over unchanged (provider/model/effort
   resolution, speed, cost budget parsing, source search + keyboard handling, spawn-once guard, error keeps the form).
-- **Layout (IDE skill: 13px chrome, no hero, labels over placeholders):**
-  - Title bar like New Session: `New worker` · repo breadcrumb · close ×.
-  - Centred 720px column: one quiet heading; a repo row (registered repos as ghost buttons, shown when more than one is
-    registered — switching repo re-targets branches and source search and keeps the typed task, label and model
-    choices; only the base branch and a picked issue/ticket reset); source tabs (Write directly / GitHub / Linear).
-  - Source mode: a full-width search field with an inline results list (taller, no clipping); the picked item shows as a
-    row with a clear button.
-  - Task box styled like the composer surface (larger textarea) with a bottom control row: provider · model · effort ·
-    speed as quiet selects. ⌘/Ctrl+Enter spawns while focus is inside the form.
-  - "Options" section under it: a labeled 2-column grid — Label, Base branch, Permission mode, Cost budget (USD) — each
-    with a 12px label, plus the worktree footnote and the Codex estimate note.
-  - Footer actions: Cancel (closes the page) and Spawn.
+- **Layout (revised after owner feedback: "as minimal as the reference — merge into the text box, hide what's rarely
+  touched behind small buttons"):**
+  - Title bar: `New worker` and a close ×.
+  - Centred column: one heading that names the repo ("What should the worker do in orbitkit?"), then a single rounded
+    box — the task textarea; in source mode the issue/ticket search (with an inline results list) or the picked item sits
+    at the top of the box; the box footer holds the source switch (Write directly / GitHub / Linear) on the left and
+    agent backend · model · effort plus a round send button on the right.
+  - A quiet meta row under the box: repo (a select when more than one repo is registered), base branch, permission
+    mode, and "More".
+  - "More" reveals label, cost budget and speed (kept mounted while hidden, so values survive collapsing).
 - **Keys:** the page is not a modal (sidebar and status bar stay live), so it captures no window-level keys — menus keep
   their own Escape. Escape does not close the page (keeps the typed task safe); Escape inside the source search only
   closes the results list. The repo row is disabled while a spawn is in flight.
