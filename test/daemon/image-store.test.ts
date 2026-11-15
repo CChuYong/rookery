@@ -385,17 +385,19 @@ describe("image dedupe and garbage collection", () => {
     repos.addSessionEvent({ sessionId: "s1", seq: 2, type: "error", payloadJson: JSON.stringify({ type: "error", retryInput: { text: "", images: [retry] } }) });
     repos.addWorkerEvent({ workerId: "w1", seq: 1, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "user", images: [worker] }) });
     repos.addWorkerEvent({ workerId: "w1", seq: 2, type: "error", payloadJson: JSON.stringify({ kind: "error", retryInput: { text: "", images: [workerRetry] } }) });
-    repos.addMessage({ sessionId: "s1", role: "user", content: `image ${message.id}` });
+    // messages.content is a plain-text index: a bare id there is not a ref.
+    repos.addMessage({ sessionId: "s1", role: "user", content: `image ${message!.id}` });
     clock.ms += 30 * DAY;
-    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 1, bytes });
-    for (const kept of [master, worker, retry, workerRetry, message]) {
-      expect(store.get(kept.id).base64).toBe(png);
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 2, bytes: 2 * bytes });
+    for (const kept of [master, worker, retry, workerRetry]) {
+      expect(store.get(kept!.id).base64).toBe(png);
     }
     expect(repos.getImage(orphan!.id)).toBeUndefined();
-    expect(fs.readdirSync(dir)).toHaveLength(5);
+    expect(repos.getImage(message!.id)).toBeUndefined();
+    expect(fs.readdirSync(dir)).toHaveLength(4);
     // Deleting the session (cascades the worker) releases every reference.
     repos.deleteSession("s1");
-    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 5, bytes: 5 * bytes });
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 4, bytes: 4 * bytes });
     expect(fs.readdirSync(dir)).toEqual([]);
     db.close();
   });
@@ -466,17 +468,28 @@ describe("ImageGcScheduler", () => {
       vi.advanceTimersByTime(50);
       expect(run).toHaveBeenCalledTimes(1);
       expect(lines).toEqual(["[rookery] image gc: removed 2 unreferenced image(s), 140 bytes\n"]);
+      // A delete-triggered pass that removes nothing stays quiet; the boot pass always reports.
+      run.mockImplementationOnce(() => ({ deleted: 0, bytes: 0 }));
+      scheduler.schedule();
+      vi.advanceTimersByTime(50);
+      expect(lines).toHaveLength(1);
+      run.mockImplementationOnce(() => ({ deleted: 0, bytes: 0 }));
+      scheduler.schedule("delete");
+      scheduler.schedule("boot");
+      vi.advanceTimersByTime(50);
+      expect(lines[1]).toBe("[rookery] image gc: removed 0 unreferenced image(s), 0 bytes\n");
       run.mockImplementationOnce(() => { throw new Error("db closed"); });
       scheduler.schedule();
       vi.advanceTimersByTime(50);
-      expect(lines[1]).toMatch(/^\[rookery\] image gc failed: .*db closed/);
+      expect(lines[2]).toMatch(/^\[rookery\] image gc failed: .*db closed/);
+      expect(run).toHaveBeenCalledTimes(4);
       scheduler.schedule();
       scheduler.stop();
       vi.advanceTimersByTime(50);
-      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).toHaveBeenCalledTimes(4);
       scheduler.schedule(); // stopped: no further runs
       vi.advanceTimersByTime(50);
-      expect(run).toHaveBeenCalledTimes(2);
+      expect(run).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }

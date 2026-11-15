@@ -144,10 +144,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     process.stderr.write(`[rookery] image store unavailable: ${String(err)}\n`);
   }
   const bus = new EventBus();
-  // Image GC (docs/reference/images.md): one coalesced pass shortly after boot, and again after every
-  // permanent session/worker deletion. Runs off the request path; failures are logged, never thrown.
+  // Image GC (docs/reference/images.md): one coalesced, deferred pass shortly after boot, and again after
+  // permanent session/worker deletions (never inside the request handler; the pass itself is synchronous and
+  // bounded by a SQLite-narrowed reference scan). Failures are logged, never thrown.
   const imageGc = images ? new ImageGcScheduler(images) : undefined;
-  imageGc?.schedule();
+  imageGc?.schedule("boot");
   const stopImageGcOnWorkerDelete = bus.subscribe(ALL_CHANNEL, (event) => {
     if (event.type === "worker.deletion" && event.phase === "completed") imageGc?.schedule();
   });

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import fs from "node:fs";
 import { openDb } from "../../src/persistence/db.js";
-import { Repositories } from "../../src/persistence/repositories.js";
+import { Repositories, IMAGE_REF_SESSION_EVENT_TYPES, IMAGE_REF_WORKER_EVENT_TYPES } from "../../src/persistence/repositories.js";
 
 function makeRepos(): Repositories {
   let n = 0;
@@ -864,17 +865,52 @@ describe("image GC/dedupe metadata", () => {
     expect(repos.imageGcCandidates(cutoff)).toEqual([{ id: B, byteLength: 10 }]);
   });
 
-  it("collects referenced candidate ids from session events, worker events (retry inputs) and messages", () => {
+  it("finds refs in every ref-carrying shape (master/worker user messages and error retry inputs)", () => {
     repos.createSession({ id: "s1", cwd: "/x" });
     repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/x", label: "w" });
-    repos.addSessionEvent({ sessionId: "s1", seq: 1, type: "master.message", payloadJson: JSON.stringify({ role: "user", images: [ref(A)] }) });
+    repos.addSessionEvent({ sessionId: "s1", seq: 1, type: "master.message", payloadJson: JSON.stringify({ type: "master.message", role: "user", images: [ref(A)] }) });
+    repos.addSessionEvent({ sessionId: "s1", seq: 2, type: "error", payloadJson: JSON.stringify({ type: "error", retryInput: { text: "", images: [ref(C)] } }) });
     repos.addWorkerEvent({ workerId: "w1", seq: 1, type: "error", payloadJson: JSON.stringify({ kind: "error", retryInput: { text: "", images: [ref(B)] } }) });
-    repos.addMessage({ sessionId: "s1", role: "user", content: `see ${C.toUpperCase()}` });
-    const found = repos.referencedImageIds(new Set([A, B, C, D]));
-    expect([...found].sort()).toEqual([A, B, C]);
-    // Only candidates are reported; unrelated UUID-shaped text is ignored.
-    expect([...repos.referencedImageIds(new Set([E]))]).toEqual([]);
+    repos.addWorkerEvent({ workerId: "w1", seq: 2, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "user", images: [{ ...ref(D), id: D.toUpperCase() }] }) });
+    const found = repos.referencedImageIds(new Set([A, B, C, D, E]));
+    expect([...found].sort()).toEqual([A, B, C, D]);
     expect([...repos.referencedImageIds(new Set())]).toEqual([]);
+  });
+
+  it("never regex-scans rows SQLite filtered out (no \"images\" key, or a non-ref event type)", () => {
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/x", label: "w" });
+    // The candidate id appears in each row's text, but none of these rows can carry a ref.
+    repos.addSessionEvent({ sessionId: "s1", seq: 1, type: "master.message", payloadJson: JSON.stringify({ type: "master.message", role: "assistant", content: `id ${A}` }) });
+    repos.addSessionEvent({ sessionId: "s1", seq: 2, type: "master.tool", payloadJson: JSON.stringify({ type: "master.tool", images: [ref(A)] }) });
+    repos.addMessage({ sessionId: "s1", role: "user", content: `see ${A}` });
+    for (let seq = 0; seq < 5000; seq++) {
+      repos.addWorkerEvent({ workerId: "w1", seq, type: "tool_result", payloadJson: JSON.stringify({ kind: "tool_result", content: `"images" ${A} ${"x".repeat(200)}` }) });
+    }
+    repos.addWorkerEvent({ workerId: "w1", seq: 5000, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "assistant", content: `id ${A}` }) });
+    const matchAll = vi.spyOn(String.prototype, "matchAll");
+    try {
+      expect([...repos.referencedImageIds(new Set([A]))]).toEqual([]);
+      expect(matchAll).not.toHaveBeenCalled();
+      repos.addWorkerEvent({ workerId: "w1", seq: 5001, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "user", images: [ref(A)] }) });
+      expect([...repos.referencedImageIds(new Set([A]))]).toEqual([A]);
+      expect(matchAll).toHaveBeenCalledTimes(1); // only the single image-bearing row reached JS
+    } finally {
+      matchAll.mockRestore();
+    }
+  });
+
+  it("tripwire: every event shape with an images field is a scanned event type", () => {
+    const source = fs.readFileSync(new URL("../../src/core/events.ts", import.meta.url), "utf8");
+    const lines = source.split("\n").filter((line) => /\bimages\??:/.test(line));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      const session = /\btype: "([^"]+)"/.exec(line)?.[1];
+      const worker = /\bkind: "([^"]+)"/.exec(line)?.[1];
+      expect(session ?? worker, `unclassified images field: ${line.trim()}`).toBeDefined();
+      if (session) expect(IMAGE_REF_SESSION_EVENT_TYPES as readonly string[]).toContain(session);
+      if (worker) expect(IMAGE_REF_WORKER_EVENT_TYPES as readonly string[]).toContain(worker);
+    }
   });
 
   it("deletes image metadata and the quota aggregate drops", () => {

@@ -202,8 +202,9 @@ export class ImageStore implements ImageResolver {
     }
   }
   // Reclaim images that are older than the grace window (by last use, else creation) AND not referenced by
-  // any persisted transcript (session/worker events incl. retry inputs, messages). Synchronous, like upload,
-  // so it can never interleave with a quota reservation. Only regular files directly inside the images dir
+  // any persisted transcript (session/worker events incl. retry inputs, messages). Synchronous on the event
+  // loop, like upload, so it can never interleave with a quota reservation; the cost is bounded by the
+  // reference scan, which SQLite narrows to ref-carrying event types containing an `"images"` key. Only regular files directly inside the images dir
   // are unlinked; a symlinked or non-file entry keeps both its row and its entry. Crash leftovers (files
   // without a row, temporaries) are outside this policy and stay counted against the quota.
   collectGarbage(options: { graceMs?: number; now?: number } = {}): ImageGcResult {
@@ -334,17 +335,22 @@ export class ImageStore implements ImageResolver {
   }
 }
 
-// Coalesces GC triggers (boot, permanent session/worker deletion) into one deferred run off the request
-// path. A failing run is logged, never thrown: GC must not crash boot or a delete.
+// Coalesces GC triggers (boot, permanent session/worker deletion) into one deferred run, so a burst of
+// deletes costs one pass and no pass runs inside a request handler. The pass itself is synchronous on the
+// event loop. A failing run is logged, never thrown: GC must not crash boot or a delete. A summary line is
+// logged when something was removed, or always for a pass that includes the boot trigger.
 export class ImageGcScheduler {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  private bootPending = false;
   constructor(
     private readonly store: Pick<ImageStore, "collectGarbage">,
     private readonly options: { delayMs?: number; log?: (line: string) => void } = {},
   ) {}
-  schedule(): void {
-    if (this.stopped || this.timer) return;
+  schedule(reason: "boot" | "delete" = "delete"): void {
+    if (this.stopped) return;
+    if (reason === "boot") this.bootPending = true;
+    if (this.timer) return;
     this.timer = setTimeout(() => this.run(), this.options.delayMs ?? 1000);
     this.timer.unref?.();
   }
@@ -355,10 +361,13 @@ export class ImageGcScheduler {
   }
   private run(): void {
     this.timer = undefined;
+    const boot = this.bootPending;
+    this.bootPending = false;
     const log = this.options.log ?? ((line: string) => process.stderr.write(line));
     try {
       const { deleted, bytes } = this.store.collectGarbage();
-      log(`[rookery] image gc: removed ${deleted} unreferenced image(s), ${bytes} bytes\n`);
+      if (deleted > 0 || boot)
+        log(`[rookery] image gc: removed ${deleted} unreferenced image(s), ${bytes} bytes\n`);
     } catch (error) {
       log(`[rookery] image gc failed: ${String(error)}\n`);
     }
