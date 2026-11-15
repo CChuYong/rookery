@@ -541,6 +541,9 @@ export class Worker {
     // An in-flight steer is claimed too (listed first — it was sent before anything deferred): even if the provider
     // accepts it later, the stopped worker never runs it, so it gets the same notice and never an echo.
     const dropped: DeferredInstruction[] = [...this.claimInflightSteer(), ...this.deferred.splice(0)];
+    // Accepted steers the provider still holds unread were echoed as delivered but die with the subprocess →
+    // a retryable error each (same as abandon/stream error), never also a notice (they are not in `dropped`).
+    const lost = this.takeUnconsumedSteers();
     this.queue.close();
     this.abort.abort();
     try {
@@ -552,6 +555,7 @@ export class Worker {
     for (const d of dropped) {
       this.record({ kind: "notice", text: `Dropped deferred instruction (stopped): ${d.text.slice(0, 120)}` });
     }
+    for (const d of lost) this.recordRetryable(d, "Not delivered: the worker was stopped before it read this message.");
   }
 
   // Hard-kill the subprocess WITHOUT marking the worker terminal — the orchestrator's recover() uses this to tear

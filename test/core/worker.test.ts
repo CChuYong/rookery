@@ -2565,6 +2565,62 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     expect(steerErr[0]!.message).toContain("boom");
   });
 
+  it("stop records a retryable error for an accepted steer the model never read", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-s", undefined, [imgRef]);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1); // echoed at acceptance
+    await x.agent.stop();
+    expect(x.agent.status()).toBe("stopped");
+    const errs = x.errors();
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.clientMsgId).toBe("c-s");
+    expect(errs[0]!.retryInput).toEqual({ text: "redirect", images: [imgRef] });
+    expect(errs[0]!.message).toMatch(/stopped/i);
+    expect(x.notices().some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+  });
+
+  it("stop with an accepted unread steer AND an in-flight steer: one error for the first, one notice for the second", async () => {
+    const pend: AgentInput[] = [];
+    const h = held();
+    let calls = 0;
+    const steer = vi.fn<Steer>(async (input) => {
+      calls += 1;
+      if (calls === 1) { pend.push(input); return true; }
+      return h.promise; // the second steer is still out when stop() lands
+    });
+    const x = mk(steer, { pendingSteers: () => [...pend] });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first", "c-1");
+    await x.flush();
+    x.agent.send("second", "c-2");
+    await x.agent.stop();
+    h.resolve(true);
+    await x.flush();
+    expect(x.errors().map((e) => e.clientMsgId)).toEqual(["c-1"]);
+    expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (stopped): second"))).toHaveLength(1);
+    expect(x.notices().some((n) => n.includes("first"))).toBe(false);
+    expect(x.users().some((u) => u.content === "second")).toBe(false);
+  });
+
+  it("stop after the steer was consumed by a turn records nothing for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-s");
+    await x.flush();
+    r.pend.length = 0;
+    x.emit(turnEnd());
+    await x.flush();
+    await x.agent.stop();
+    expect(x.errors()).toEqual([]);
+  });
+
   it("streams without pendingSteers keep today's recover behavior (nothing recorded for an accepted steer)", async () => {
     const x = mk(vi.fn<Steer>(async () => true));
     x.agent.start("task");

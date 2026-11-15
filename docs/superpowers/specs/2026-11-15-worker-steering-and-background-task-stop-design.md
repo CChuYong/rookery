@@ -251,7 +251,18 @@ Isolated daemon (port 8899, temp `ROOKERY_HOME`), Claude SDK CLI 2.1.325, Codex 
   **Recover / stream error do lose it**: the steer lives only in the SDK subprocess's input queue until a tool
   boundary or the next turn. The adapter now reports accepted steers that no result has listed yet
   (`AgentStream.pendingSteers()`); `abandon()` and the consume loop's error path record a retryable `error`
-  (`clientMsgId` + `retryInput`) for each, like deferred entries. Unit-tested only; not live-probed.
+  (`clientMsgId` + `retryInput`) for each, like deferred entries.
+- **Recover / stop with an unread steer: live-probed (session leftovers, Task 2).** Isolated daemon, Haiku 5.5
+  (effort low), task "run `sleep 20` in the foreground, then reply DONE"; a conversational steer sent 2.5 s after
+  the Bash `tool_use` (echoed at once), then 1.5 s later:
+  - `worker.recover`: exactly one `error` "Not delivered: the worker was recovered before it read this message."
+    with the steer's `clientMsgId` and `retryInput {text}`, then `idle`. No dropped-instruction notice.
+  - `fleet.stop`: before this task `stop()` recorded nothing for an accepted steer (it only noticed in-flight and
+    deferred ones), so the echo looked delivered while the message died with the subprocess. `stop()` now shares
+    the same helper: after `stopped`, exactly one `error` "Not delivered: the worker was stopped before it read this
+    message." with `clientMsgId` + `retryInput`, and no notice. An in-flight (not yet accepted) steer still gets
+    the single "Dropped deferred instruction (stopped)" notice and no echo (unit-tested, including both kinds in
+    one stop). Neither run produced a `result`; spend was a few cents.
 - **Codex.** `turn/steer` mid-turn was accepted and delivered as a real user message in the same turn (rollout:
   user message right after the original task, one `task_complete`). gpt-6.1-terra acted on it; gpt-6-luna (low)
   received it but ignored it. At the end of a turn (11 probes with a 0–150 ms delay after the final assistant text)
