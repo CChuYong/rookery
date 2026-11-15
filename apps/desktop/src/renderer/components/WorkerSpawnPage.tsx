@@ -2,13 +2,13 @@ import type { SpeedPreference } from "@daemon/core/speed.js";
 import { SpeedControl } from "./SpeedControl.js";
 import { defaultSpeed } from "../lib/speed.js";
 import { useEffect, useRef, useState } from "react";
+import type React from "react";
 import { Folder, X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
@@ -150,9 +150,24 @@ export function WorkerSpawnPage(p: {
       setSpawning(false);
     }
   };
-  // ⌘/Ctrl+Enter spawns from anywhere on the page; Escape is deliberately ignored so a typed task is never lost
-  // (the source search's own Escape still closes just its results list).
-  useModalKeys({ escape: "ignore", onSubmit: spawn });
+  // The repo row re-targets the form without discarding the draft: only repo-bound state (base branch, the picked
+  // issue/ticket and its search) resets — the task, label and model choices survive the switch.
+  const firstRepo = useRef(p.repo);
+  useEffect(() => {
+    if (firstRepo.current === p.repo) return;
+    firstRepo.current = p.repo;
+    setBase("");
+    setSelected(null);
+    setQ("");
+    setResults([]);
+    setHighlight(-1);
+  }, [p.repo]);
+  // ⌘/Ctrl+Enter spawns while focus is inside the form. This is a page, not a modal: the sidebar and status bar stay
+  // live, so no window-level key capture (that would swallow Escape for their menus). Escape is intentionally inert
+  // here so a typed task is never lost; the source search's own Escape still closes just its results list.
+  const onFormKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void spawn(); }
+  };
 
   const fieldLabel = "text-meta font-medium text-muted";
   const controlField = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
@@ -168,20 +183,21 @@ export function WorkerSpawnPage(p: {
         </button>
       </div>
 
-      <div role="region" aria-label={t("workerSpawnModal.title")} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
+      <div role="region" aria-label={t("workerSpawnModal.title")} onKeyDown={onFormKeyDown} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 pb-10 pt-10">
-          <div className="text-title font-medium text-fg-dim">{t("workerSpawnModal.heading")}</div>
+          <h1 id="worker-spawn-heading" className="text-title font-medium text-fg-dim">{t("workerSpawnModal.heading")}</h1>
 
           {/* Repository — registered repos as ghost buttons (same idiom as NewSessionPage's working-folder row). */}
           {p.repos && p.repos.length > 1 && p.onRepoChange && (
             <div className="flex flex-col items-start gap-1.5">
-              <p className={fieldLabel}>{t("workerSpawnModal.repoLabel")}</p>
-              <div className="flex flex-wrap gap-1">
+              <p id="worker-spawn-repo-label" className={fieldLabel}>{t("workerSpawnModal.repoLabel")}</p>
+              <div role="group" aria-labelledby="worker-spawn-repo-label" className="flex flex-wrap gap-1">
                 {p.repos.map((r) => (
                   <button
                     key={r.name}
                     title={r.path}
                     aria-pressed={r.name === p.repo}
+                    disabled={spawning}
                     onClick={() => p.onRepoChange!(r.name)}
                     className={cn("flex h-6 items-center gap-1.5 rounded px-2 text-ui transition-colors",
                       r.name === p.repo ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised hover:text-fg")}
@@ -263,6 +279,7 @@ export function WorkerSpawnPage(p: {
           <div className="flex flex-col rounded-lg border border-line bg-surface transition-colors focus-within:border-fg-dim/40">
             <Textarea
               autoFocus={mode === "direct"}
+              aria-labelledby="worker-spawn-heading"
               className="min-h-[160px] resize-y border-0 bg-transparent px-3 py-3 text-prose focus:ring-0"
               placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
               value={task}
@@ -270,7 +287,7 @@ export function WorkerSpawnPage(p: {
             />
             <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
               {/* Agent backend for this worker. */}
-              <Select size="xs" className={controlField} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
+              <Select size="xs" className={controlField} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")} aria-label={t("workerSpawnModal.provider")}>
                 <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
                 <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
               </Select>
@@ -287,7 +304,7 @@ export function WorkerSpawnPage(p: {
                       const de = codexDefaultEffort(nm, codexModels);
                       if (de) setEffort(de);
                     }}
-                    title={t("workerSpawnModal.modelTitle")}
+                    title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}
                   >
                     {/* "" = use the codexWorkerModel settings default (never auto-pick a catalog model). */}
                     <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
@@ -304,11 +321,11 @@ export function WorkerSpawnPage(p: {
                     value={codexModel}
                     onChange={(e) => setCodexModel(e.target.value)}
                     placeholder={p.codexDefaultModel}
-                    title={t("workerSpawnModal.modelTitle")}
+                    title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}
                   />
                 )
               ) : (
-                <Select size="xs" className={controlField} value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")}>
+                <Select size="xs" className={controlField} value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}>
                   {models.map((m) => (
                     <option key={m.id} value={m.id}>{m.label}</option>
                   ))}
@@ -316,7 +333,7 @@ export function WorkerSpawnPage(p: {
                 </Select>
               )}
               {effortSupported(effectiveModel) && (
-                <Select size="xs" className={controlField} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
+                <Select size="xs" className={controlField} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")} aria-label={t("workerSpawnModal.effortTitle")}>
                   {effortOptions.map((ef) => (
                     <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
                   ))}

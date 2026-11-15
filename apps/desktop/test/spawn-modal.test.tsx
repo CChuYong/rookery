@@ -52,7 +52,7 @@ describe("WorkerSpawnPage", () => {
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(spawnButton).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
-    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(screen.getByPlaceholderText(/Ctrl\+Enter/), { key: "Enter", ctrlKey: true });
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
 
@@ -204,5 +204,34 @@ describe("WorkerSpawnPage codex model+effort onSpawn payload (Codex Model Picker
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-6" } });
     fireEvent.click(screen.getByText("spawn"));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "gpt-6", "high", undefined, undefined, "bypassPermissions", "codex", undefined]); // effort defaults from p.defaultEffort, unchanged by the (absent) catalog
+  });
+
+  it("spawns with Cmd/Ctrl+Enter from inside the form", () => {
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    const prompt = screen.getByPlaceholderText(/Ctrl\+Enter/);
+    fireEvent.change(prompt, { target: { value: "do it" } });
+    fireEvent.keyDown(prompt, { key: "Enter", metaKey: true });
+    expect(onSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not capture window-level keys (sidebar menus keep their Escape, outside Cmd+Enter does nothing)", () => {
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={onSpawn} onClose={() => {}} />);
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    window.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(false);
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    expect(onSpawn).not.toHaveBeenCalled();
+  });
+
+  it("switching repo keeps the typed task but resets the repo-bound base branch", () => {
+    const repos = [{ name: "app", path: "/app" }, { name: "web", path: "/web" }];
+    const { rerender } = render(<WorkerSpawnPage repo="app" repos={repos} onRepoChange={() => {}} branches={["main", "dev"]} defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "keep me" } });
+    fireEvent.change(screen.getByTitle(/Base branch|기준|worktree/), { target: { value: "dev" } });
+    rerender(<WorkerSpawnPage repo="web" repos={repos} onRepoChange={() => {}} branches={["main"]} defaultModel="claude-opus-4-8" defaultEffort="high" onSpawn={() => {}} onClose={() => {}} />);
+    expect(screen.getByPlaceholderText(/Ctrl\+Enter/)).toHaveValue("keep me");
+    expect(screen.getByTitle(/Base branch|기준|worktree/)).toHaveValue("");
   });
 });

@@ -328,7 +328,8 @@ export function App(): JSX.Element {
   useEffect(() => { if (overlay !== "automation") setEditJob(null); }, [overlay]);
   // When the spawn modal opens, load the base-branch candidates for that repo.
   useEffect(() => {
-    if (!spawnRepo || !client) { setSpawnBranches([]); return; }
+    setSpawnBranches([]); // never offer the previous repo's branches while the new repo's list loads
+    if (!spawnRepo || !client) return;
     let live = true; // prevent a late response from the previous repo from overwriting when spawnRepo changes
     void client.request({ type: "repo.branches", repo: spawnRepo }).then((r) => { if (live) setSpawnBranches(r.branches ?? []); }).catch(() => { if (live) setSpawnBranches([]); });
     return () => { live = false; };
@@ -1299,7 +1300,6 @@ export function App(): JSX.Element {
           <div className="flex flex-1 items-center justify-center gap-2 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>
         ) : overlay === "spawnWorker" && spawnRepo ? (
           <WorkerSpawnPage
-            key={spawnRepo}
             repo={spawnRepo}
             repos={s.repos}
             onRepoChange={onNewSub}
