@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Zap, CircleAlert, Eye, X } from "lucide-react";
+import { Bell, BellOff, Zap, CircleAlert, Eye, X } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store/store.js";
 import { useAcksStore } from "../store/acks.js";
@@ -40,7 +40,9 @@ export function attentionPanelPosition(rect: TriggerRect, viewport: ViewportRect
 // Header bell: the single ranked "지금 나를 기다리는 것" surface (attention-queue design).
 // Tier 0 (blocked on a human answer) drives the urgent badge tone; clicking a row navigates to it.
 // Dismissal routes by kind: failures → persisted ack (acks store), review items → flip the live unread map.
-export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): JSX.Element {
+// It also hosts the OS-notification toggle (audit #20: one bell, not two) — the glyph turns into a muted bell while
+// notifications are off. `variant="statusbar"` is the 20px status-bar trigger.
+export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; notifyOn?: boolean; onToggleNotify?: () => void; variant?: "header" | "statusbar" }): JSX.Element {
   const t = useT();
   const s = useStore(
     useShallow((st) => ({
@@ -132,6 +134,10 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
     : kind === "worker-failure" || kind === "automation-failure" ? <CircleAlert size={14} className="text-fail" />
     : <Eye size={14} className="text-muted" />;
 
+  const muted = p.notifyOn === false;
+  const statusbar = p.variant === "statusbar";
+  const BellGlyph = muted ? BellOff : Bell;
+
   return (
     <>
       <button
@@ -139,13 +145,19 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
         onClick={toggle}
         aria-label={t("attentionBell.aria", { count: items.length })}
         aria-expanded={open}
-        className={cn("no-drag relative flex h-6 w-6 items-center justify-center rounded-md transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
+        title={muted ? t("attentionBell.titleMuted") : t("attentionBell.title")}
+        className={cn(
+          "no-drag relative flex items-center justify-center transition-colors",
+          statusbar ? "h-5 w-5 rounded-sm" : "h-6 w-6 rounded-md",
+          open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim",
+        )}
       >
-        <Bell size={14} />
+        <BellGlyph size={statusbar ? 12 : 14} />
         {items.length > 0 && (
           <span
             className={cn(
-              "absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-0.5 text-meta font-medium leading-none",
+              "absolute flex items-center justify-center rounded-full px-0.5 text-meta font-medium leading-none",
+              statusbar ? "-right-1 -top-1 h-[13px] min-w-[13px]" : "-right-0.5 -top-0.5 h-[15px] min-w-[15px]",
               urgent > 0 ? "bg-accent text-white" : "bg-line text-fg ring-1 ring-sunk",
             )}
           >
@@ -161,7 +173,20 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
           style={{ top: pos.top, left: pos.left }}
           className={cn("fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden", MENU_SURFACE)}
         >
-          <div className="px-2.5 pb-1 pt-1.5 text-meta font-medium text-faint">{t("attentionBell.title")}</div>
+          <div className="flex items-center gap-2 px-2.5 pb-1 pt-1.5">
+            <span className="min-w-0 flex-1 text-meta font-medium text-faint">{t("attentionBell.title")}</span>
+            {p.onToggleNotify && (
+              <button
+                onClick={p.onToggleNotify}
+                aria-pressed={!muted}
+                title={muted ? t("app.notifyOffTitle") : t("app.notifyOnTitle")}
+                className="no-drag flex shrink-0 items-center gap-1 rounded px-1 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+              >
+                <span>{t("attentionBell.notifyToggle")}</span>
+                <span className={muted ? "text-faint" : "text-fg-dim"}>{muted ? t("attentionBell.notifyOffState") : t("attentionBell.notifyOnState")}</span>
+              </button>
+            )}
+          </div>
           {items.length === 0 ? (
             <div className="px-2.5 pb-3 pt-1 text-ui text-muted">{t("attentionBell.empty")}</div>
           ) : (

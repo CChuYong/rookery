@@ -38,7 +38,7 @@ function AppGlyph({ app, size }: { app: DetectedApp; size: number }): JSX.Elemen
 }
 
 // Open the current work root (cwd/worker worktree) directly in an installed IDE/Finder/Terminal.
-// Split button: left = last-selected app icon (click = run immediately), right = dropdown (change app). The selection is remembered in localStorage.
+// Split button: left = last-selected app icon + "Open in <app>" (click = run immediately), right = ▾ dropdown (change app). The selection is remembered in localStorage.
 // The root is freshly resolved right before launch (ws.resolveRoot) — to handle the case where the worker worktree is created asynchronously.
 export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: string }): JSX.Element {
   const t = useT();
@@ -113,13 +113,16 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
     <div className="relative flex items-center">
       {/* quiet ghost split button — no permanent border/fill, just the two hover targets with a hairline between them. */}
       <div className="no-drag flex h-6 items-center overflow-hidden rounded-md">
+        {/* audit #24: the verb sits on the side that acts — "[icon] Open in <app>" launches, the chevron only picks.
+            The label drops at narrow header widths (globals.css), leaving the icon. */}
         <button
           onClick={() => selected && choose(selected.id, false)}
           aria-label={t("openInAppMenu.openCurrentFolder")}
           title={selected ? t("openInAppMenu.openInApp", { name: selected.name }) : t("openInAppMenu.openInOtherApp")}
-          className="flex h-full w-6 items-center justify-center text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+          className="flex h-full min-w-6 items-center justify-center gap-1.5 px-1 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
         >
           {selected ? <AppGlyph app={selected} size={14} /> : <AppWindow size={14} />}
+          <span className="workspace-header-openin-label max-w-[14ch] truncate">{selected ? t("openInAppMenu.openInApp", { name: selected.name }) : t("openInAppMenu.label")}</span>
         </button>
         <button
           ref={triggerRef}
@@ -128,10 +131,8 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
           aria-haspopup="menu"
           aria-expanded={open}
           title={t("openInAppMenu.selectOtherApp")}
-          className={cn("flex h-full items-center gap-1 border-l border-line px-1.5 text-meta transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
+          className={cn("flex h-full items-center border-l border-line px-1 transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
         >
-          {/* short text label (audit #59) — the icon+chevron split button used to be unlabeled and read as a stray glyph in the header */}
-          <span>{t("openInAppMenu.label")}</span>
           <ChevronDown size={12} />
         </button>
       </div>

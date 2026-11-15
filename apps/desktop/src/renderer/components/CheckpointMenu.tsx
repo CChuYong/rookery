@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { History, Loader2 } from "lucide-react";
 import { Button } from "../ui/button.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
@@ -29,14 +30,23 @@ function checkpointTimeLabel(iso: string, now: number, t: TFunc, locale: Locale)
   return t("relativeTime.daysAgo", { n: rel.value });
 }
 
+type Anchor = { bottom: number; right: number };
+const MENU_GAP = 4;
+const VIEWPORT_GUTTER = 8;
+
 // Per-worker-turn checkpoint restore menu. Fetches on open; on item click, asks in the shared ConfirmDialog (reverting
 // discards later changes to tracked files — irreversible, audit #103) then restores.
+// The dropdown is portaled with fixed positioning so the workspace header's overflow:hidden can't clip it, and
+// `openRequest` opens it from elsewhere (the narrow header's overflow menu, audit #21), anchored at that rect — this
+// works even while the menu's own button is hidden.
 export function CheckpointMenu({
   fetchCheckpoints,
   onRestore,
+  openRequest,
 }: {
   fetchCheckpoints: () => Promise<Checkpoint[]>;
   onRestore: (seq: number) => Promise<void>;
+  openRequest?: { seq: number; rect: Anchor };
 }): JSX.Element {
   const t = useT();
   const locale = useLocale();
@@ -46,6 +56,8 @@ export function CheckpointMenu({
   const [asking, setAsking] = useState<number | null>(null); // the seq whose revert the ConfirmDialog is asking about
   const [restoring, setRestoring] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null); // the wrapper around the trigger button (Button takes no ref)
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   // Shared by the initial open-fetch and the error state's retry button.
   const load = (): void => {
@@ -54,12 +66,24 @@ export function CheckpointMenu({
     void fetchCheckpoints().then(setItems).catch(() => setLoadError(true));
   };
 
-  const toggle = () => {
-    if (open) { setOpen(false); return; }
+  const openAt = (rect: Anchor | null): void => {
+    setAnchor(rect);
     setOpen(true);
     setAsking(null);
     load();
   };
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    const r = triggerRef.current?.getBoundingClientRect();
+    openAt(r ? { bottom: r.bottom, right: r.right } : null);
+  };
+  const lastRequest = useRef(openRequest?.seq);
+  useEffect(() => {
+    if (!openRequest || openRequest.seq === lastRequest.current) return;
+    lastRequest.current = openRequest.seq;
+    openAt(openRequest.rect);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new request seq is the only trigger
+  }, [openRequest?.seq]);
   // Escape closes the open menu — unless the confirm dialog is up, whose own Escape only cancels the dialog.
   useEffect(() => {
     if (!open || asking !== null) return;
@@ -98,14 +122,20 @@ export function CheckpointMenu({
   };
 
   return (
-    <div className="relative">
+    <div ref={triggerRef} className="relative">
       <Button variant="ghost" size="sm" onClick={toggle} title={t("checkpointMenu.buttonTitle")} aria-haspopup="menu" aria-expanded={open}>
         <History size={14} /> {t("checkpointMenu.restore")}
       </Button>
-      {open && (
+      {open && createPortal(
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className={cn("menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto", MENU_SURFACE)}>
+          <div
+            ref={menuRef}
+            onKeyDown={onMenuKeyDown}
+            role="menu"
+            style={anchor ? { top: anchor.bottom + MENU_GAP, right: Math.max(VIEWPORT_GUTTER, window.innerWidth - anchor.right) } : undefined}
+            className={cn("menu-pop fixed z-40 max-h-72 w-64 origin-top-right overflow-y-auto", MENU_SURFACE)}
+          >
             <div className="px-2 py-1 text-meta leading-relaxed text-muted">
               {t("checkpointMenu.hint")}
             </div>
@@ -132,7 +162,8 @@ export function CheckpointMenu({
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body,
       )}
       {asking !== null && (
         <ConfirmDialog

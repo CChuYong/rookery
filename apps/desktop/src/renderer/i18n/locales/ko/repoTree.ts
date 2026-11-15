@@ -24,4 +24,9 @@ export default {
   "repoTree.onlyActiveTitle": "실행·대기·안 본 워커만 보기",
   "repoTree.noMatches": "일치하는 워커가 없어요.",
   "repoTree.loadFailed": "목록을 불러오지 못했어요",
+  "repoTree.repoMenu": "{repo} 메뉴",
+  "repoTree.menuRemoveRepo": "레포 등록 해제…",
+  "repoTree.menuRemoveRepoHint": "등록만 해제해요 · 파일은 그대로 남아요",
+  "repoTree.menuBranchDiff": "브랜치 전체 변경 보기",
+  "repoTree.menuBranchDiffHint": "베이스 이후 이 워커의 모든 변경 (읽기 전용)",
 } satisfies Catalog;

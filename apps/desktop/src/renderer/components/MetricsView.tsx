@@ -5,7 +5,8 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 
 // Renders the metrics segment — finds the last metrics item in the LogItem array and shows ctx%/tok/turns/cost.
-// Shared by both the session header (SessionMetrics) and the worker header (WorkerMetrics).
+// Shared by both the session header (SessionMetrics) and the worker header (WorkerMetrics). Everything but ctx% carries
+// `metrics-secondary`, which a narrow header drops (globals.css) so the context pressure stays visible (audit #21).
 export function MetricsView({ items, provider }: { items: LogItem[]; provider?: string }): JSX.Element | null {
   const t = useT();
   const m = [...items].reverse().find((it) => it.kind === "metrics") as
@@ -23,13 +24,13 @@ export function MetricsView({ items, provider }: { items: LogItem[]; provider?: 
         <span className="tabular-nums">{ctx.contextPct}%</span>
         <span className="text-meta text-muted/70">ctx</span>
       </span>
-      <span className="tabular-nums">{fmtTokens(ctx.tokens)} tok</span>
-      <span className="tabular-nums">{t("sessionMetrics.turns", { count: m.turns })}</span>
-      <span className="tabular-nums" aria-label={quality === "unavailable" ? t("speed.costUnavailable") : quality === "estimated" ? t("speed.costEstimated") : undefined}>{quality === "unavailable" ? "—" : `${quality === "estimated" ? `${t("speed.estimated")} ` : ""}${fmtUsd(m.cost)}`}</span>
+      <span className="metrics-secondary tabular-nums">{fmtTokens(ctx.tokens)} tok</span>
+      <span className="metrics-secondary tabular-nums">{t("sessionMetrics.turns", { count: m.turns })}</span>
+      <span className="metrics-secondary tabular-nums" aria-label={quality === "unavailable" ? t("speed.costUnavailable") : quality === "estimated" ? t("speed.costEstimated") : undefined}>{quality === "unavailable" ? "—" : `${quality === "estimated" ? `${t("speed.estimated")} ` : ""}${fmtUsd(m.cost)}`}</span>
       {reason && (
         <>
-          <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
-          <span className="text-fail" title={t("sessionMetrics.terminalReason")}>⚠ {reason}</span>
+          <span className="metrics-secondary h-3 w-px shrink-0 bg-line" aria-hidden />
+          <span className="metrics-secondary text-fail" title={t("sessionMetrics.terminalReason")}>⚠ {reason}</span>
         </>
       )}
     </span>

@@ -18,4 +18,5 @@ export default {
   "usagePanel.resets": "{time} 리셋",
   "usagePanel.expand": "사용량 펼치기",
   "usagePanel.collapse": "사용량 접기",
+  "usagePanel.details": "사용량 자세히",
 } satisfies Catalog;

@@ -262,3 +262,71 @@ describe("HeaderControls reset-layout button (audit #57)", () => {
     expect(useLayoutStore.getState().byPage.w1).toBeUndefined();
   });
 });
+
+// audit #22: both headers use one control order — metrics → (worker) checkpoint → Open in → overflow → reset →
+// terminal → right panel — so the panel toggles never jump when switching between a session and a worker.
+describe("header control order (audit #22)", () => {
+  beforeEach(() => { useDockPanelsStore.setState({ hiddenByPage: {}, autoHiddenByPage: {} }); });
+  const order = (container: HTMLElement): string[] =>
+    Array.from(container.querySelector(".workspace-header-controls")!.children).map((el) =>
+      (el as HTMLElement).className.match(/workspace-header-(metrics|checkpoint|overflow|reset)/)?.[1] ?? el.getAttribute("aria-label") ?? el.tagName.toLowerCase());
+
+  it("session and worker headers end with the same reset → terminal → right panel run, metrics first", () => {
+    const s = render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);
+    const sessionOrder = order(s.container);
+    s.unmount();
+    const w = render(<WorkerHeader {...baseProps} termPageKey="w1" dock worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: "rookery/a0", model: null } as never} />);
+    const workerOrder = order(w.container);
+    expect(sessionOrder[0]).toBe("metrics");
+    expect(workerOrder.slice(0, 2)).toEqual(["metrics", "checkpoint"]);
+    expect(sessionOrder.slice(-4)).toEqual(["overflow", "reset", "터미널", "우측 패널"]);
+    expect(workerOrder.slice(-4)).toEqual(["overflow", "reset", "터미널", "우측 패널"]);
+  });
+});
+
+// audit #21: below 720px the header drops metrics, checkpoint, ticket, the background-task menu and Reset layout —
+// a "…" overflow menu (shown only at that width, via the container query) keeps every one of them reachable.
+describe("header overflow menu (audit #21)", () => {
+  beforeEach(() => { useLayoutStore.setState({ ...emptyLayoutState(), resetSeq: {} }); useDockPanelsStore.setState({ hiddenByPage: {}, autoHiddenByPage: {} }); });
+  const tasks = [{ id: "b1", type: "local_bash", description: "npm test --watch" }];
+
+  it("worker: lists checkpoint restore, task stops, the ticket and Reset layout", () => {
+    const onStopTask = vi.fn();
+    const onFetchCheckpoints = vi.fn(async () => []);
+    render(<WorkerHeader {...baseProps} termPageKey="w1" dock onStopTask={onStopTask} onFetchCheckpoints={onFetchCheckpoints} worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: "rookery/eng-1", model: null, ticketKey: "ENG-1", ticketUrl: "https://l/ENG-1", tasks } as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    const labels = screen.getAllByRole("menuitem").map((el) => el.textContent);
+    expect(labels).toEqual(["체크포인트로 되돌리기…", "중지: npm test --watchlocal_bash", "티켓 열기: ENG-1", "레이아웃 초기화"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: /중지: npm test/ }));
+    expect(onStopTask).toHaveBeenCalledWith("b1");
+  });
+
+  it("worker: the checkpoint item opens the checkpoint menu", async () => {
+    const onFetchCheckpoints = vi.fn(async () => [{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
+    render(<WorkerHeader {...baseProps} termPageKey="w1" dock onFetchCheckpoints={onFetchCheckpoints} worker={{ id: "w1", label: "t", repoPath: "/r", status: "running", branch: null, model: null } as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "체크포인트로 되돌리기…" }));
+    expect(onFetchCheckpoints).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("턴 1")).toBeInTheDocument();
+  });
+
+  it("session: shows the metrics and Reset layout, and Reset layout clears this page's layout", () => {
+    useLayoutStore.getState().save_("p1", { grid: 1 });
+    useStore.setState({ logsBySession: { s1: [{ kind: "metrics", contextPct: 42, tokens: 1000, turns: 3, cost: 0.5 }] }, sessions: [] } as never);
+    render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);
+    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toHaveTextContent("42%");
+    expect(menu).toHaveTextContent("1.0k tok");
+    fireEvent.click(screen.getByRole("menuitem", { name: "레이아웃 초기화" }));
+    expect(useLayoutStore.getState().byPage.p1).toBeUndefined();
+  });
+
+  it("keeps a short ctx% in the header itself: tokens/turns/cost carry the droppable class, ctx does not", () => {
+    useStore.setState({ logsBySession: { s1: [{ kind: "metrics", contextPct: 42, tokens: 1000, turns: 3, cost: 0.5 }] }, sessions: [] } as never);
+    const { container } = render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);
+    const metrics = container.querySelector(".workspace-header-metrics")!;
+    expect(metrics.querySelector(".metrics-secondary")).not.toBeNull();
+    expect(Array.from(metrics.querySelectorAll(".metrics-secondary")).some((el) => el.textContent?.includes("%"))).toBe(false);
+  });
+});

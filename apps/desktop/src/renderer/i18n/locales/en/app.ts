@@ -34,4 +34,7 @@ export default {
   "app.slackReadOnly": "Slack session — chat from Slack",
   "app.composerPlaceholder": "Type a message…  (/ commands, Shift+Enter for newline, @ to attach files)",
   "app.resizeSidebar": "Resize sidebar (double-click for the default width)",
+  "app.newWorker": "New worker",
+  "app.reposHomeHint": "Pick a worker on the left, or start a new one.",
+  "app.reposHomeEmpty": "No repos registered yet.",
 } satisfies Catalog;

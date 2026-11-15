@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { IDockviewPanelHeaderProps } from "dockview";
-import { MessageSquare, FileText, GitCompare, GitCommitHorizontal, SquareTerminal, Files, GitBranch, Bot, X, type LucideIcon } from "lucide-react";
+import { MessageSquare, FileText, GitCompare, GitCompareArrows, GitCommitHorizontal, SquareTerminal, Files, GitBranch, Bot, X, type LucideIcon } from "lucide-react";
 import { useT } from "../i18n/provider.js";
 import { editorTooltip, type PanelParams } from "./panel-ids.js";
 import { fixedPanelTitle } from "./panel-titles.js";
@@ -23,7 +23,7 @@ function iconFor(params: PanelParams): LucideIcon {
     case "git": return GitBranch;
     case "nested": return Bot;
     case "editor":
-      return params.tabId.startsWith("diff:") ? GitCompare : params.tabId.startsWith("commit:") ? GitCommitHorizontal : FileText;
+      return params.tabId.startsWith("diff:") ? GitCompare : params.tabId.startsWith("commit:") ? GitCommitHorizontal : params.tabId.startsWith("branch:") ? GitCompareArrows : FileText;
   }
 }
 

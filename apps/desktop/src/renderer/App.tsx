@@ -6,7 +6,7 @@ import type { SpeedPreference } from "@daemon/core/speed.js";
 import { persistSpeedPreference, type SpeedWriteState } from "./lib/speed-preference.js";
 import { defaultSpeed } from "./lib/speed.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellRing, BellOff, Plus, Clock, RotateCcw, Loader2, Blocks, MessageSquare, FolderGit2 } from "lucide-react";
+import { PanelLeftClose, ChevronLeft, ChevronRight, Plus, Loader2, MessageSquare, FolderGit2 } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
@@ -53,12 +53,13 @@ import type { CapabilityCenterApi } from "./components/capabilities/types.js";
 import { WorkerHeader, SessionHeader } from "./components/WorkspaceHeaders.js";
 import { WindowControls } from "./components/WindowControls.js";
 import { DaemonDownBanner } from "./components/DaemonDownBanner.js";
-import { Tooltip } from "./components/Tooltip.js";
 import { RestartDaemonDialog } from "./components/RestartDaemonDialog.js";
-import { ResourceMonitor } from "./components/ResourceMonitor.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { SettingsPage } from "./components/SettingsPage.js";
-import { AttentionBell } from "./components/AttentionBell.js";
+import { SidebarRail } from "./components/SidebarRail.js";
+import { ReposHome } from "./components/ReposHome.js";
+import { useHistoryShortcuts } from "./lib/useHistoryShortcuts.js";
+import { shortBranch } from "./lib/branch.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
 import { Button } from "./ui/button.js";
 import { Toaster } from "./components/Toaster.js";
@@ -243,6 +244,8 @@ export function App(): JSX.Element {
   tRef.current = t;
   const canBack = s.navBack.length > 0;
   const canFwd = s.navFwd.length > 0;
+  // Cmd+[ / Cmd+] (Alt+←/→ off macOS) and the mouse back/forward buttons (audit #10).
+  useHistoryShortcuts(goBack, goForward);
   // "mission control is online" beat — flash the dot the instant it reaches up (falling edge of "not up"). Keeps led-live.
   const daemonJustUp = useJustEnded(s.daemon !== "up");
   const slackJustUp = useJustEnded(s.slack !== "up");
@@ -941,6 +944,23 @@ export function App(): JSX.Element {
     const repo = useStore.getState().repos.find((r) => r.name === name);
     if (repo) navigate({ overlay: "spawnWorker", showRepos: true, repoId: repo.id });
   }, [navigate]);
+  // Sidebar "New worker" row / rail / Repos home (audit #83): the spawn page for the open worker's repo (else the first
+  // repo — the page has its own repo picker); with no repo registered yet, the register dialog.
+  const newWorker = useCallback(() => {
+    const st = useStore.getState();
+    const activePath = st.activeWorkerId ? st.fleet[st.activeWorkerId]?.repoPath : undefined;
+    const repo = st.repos.find((r) => r.path === activePath) ?? st.repos[0];
+    if (repo) onNewSub(repo.name);
+    else setRepoModal(true);
+  }, [onNewSub]);
+  // Whole-branch diff (fleet.diff) as a read-only tab on the worker's page (audit #84).
+  const loadBranchDiff = useCallback((id: string): Promise<string> =>
+    client ? client.request({ type: "fleet.diff", id }).then((r) => r.diff ?? "") : Promise.reject(new Error("not connected")), []);
+  const openBranchDiff = useCallback((id: string) => {
+    const w = useStore.getState().fleet[id];
+    useWsStore.getState().openBranchDiff_(id, id, w?.branch ? shortBranch(w.branch) : id.slice(0, 8));
+    selectSub(id);
+  }, [selectSub]);
   // Rejects on failure (no swallow-to-empty) so CheckpointMenu can render a distinct error state instead of a false "no checkpoints".
   const fetchCheckpoints = (id: string): Promise<Checkpoint[]> =>
     client ? client.request({ type: "worker.checkpoints", id }).then((r) => r.checkpoints ?? []) : Promise.reject(new Error("not connected"));
@@ -1117,10 +1137,10 @@ export function App(): JSX.Element {
             placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
           />
         ),
-        editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} />,
+        editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} loadBranchDiff={loadBranchDiff} />,
         terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} dock />,
         files: () => (wsRootState === "ready" ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback),
-        git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : workRootFallback),
+        git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} onViewBranchDiff={() => openBranchDiff(activeSub.id)} /> : workRootFallback),
         nested: () => <ActivityPanelBody subId={activeSub.id} loadAgentHistory={loadWorkflowAgentHistory} />,
       }
     : null;
@@ -1207,81 +1227,39 @@ export function App(): JSX.Element {
             title bar handles this, so .win-chrome hides this strip + shrinks the pt (globals.css). */}
         <div className="mac-drag-strip drag absolute inset-x-0 top-0 h-10" />
         {!collapsed && (
-          // Same strip as the traffic lights: back/forward + the attention bell + collapse sit at its right edge,
-          // using the window-chrome row instead of a second one below it.
+          // Same strip as the traffic lights: back/forward + collapse sit at its right edge, using the window-chrome row
+          // instead of a second one below it. Back/forward stay at every sidebar width (audit #10; 3 x 24px fit the
+          // 220px minimum next to the traffic lights). The attention bell lives in the status bar (audit #19 #20).
           <div className="absolute inset-x-0 top-0 z-20 flex h-10 items-center justify-end gap-0.5 pr-2">
-            {!compactSidebar && (
-              <>
-                <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                  <ChevronLeft size={14} />
-                </button>
-                <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                  <ChevronRight size={14} />
-                </button>
-              </>
-            )}
-            <AttentionBell onNavigate={onAttentionNav} />
+            <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+              <ChevronLeft size={14} />
+            </button>
+            <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+              <ChevronRight size={14} />
+            </button>
             <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} title={t("app.collapseSidebar")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim">
               <PanelLeftClose size={14} />
             </button>
           </div>
         )}
         {collapsed ? (
-          <>
-            <button
-              onClick={toggleSidebar}
-              aria-label={t("app.expandSidebar")}
-              title={t("app.expandSidebar")}
-              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim"
-            >
-              <PanelLeft size={14} />
-            </button>
-            <button
-              onClick={goBack}
-              disabled={!canBack}
-              aria-label={t("app.back")}
-              title={t("app.back")}
-              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <button
-              onClick={goForward}
-              disabled={!canFwd}
-              aria-label={t("app.forward")}
-              title={t("app.forward")}
-              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
-            >
-              <ChevronRight size={14} />
-            </button>
-            <ResourceMonitor snapshot={resources} collapsed onRefresh={pollResourcesOnce} onOpenChange={setResOpen} />
-            <button onClick={toggleNotify} aria-label={notifyOn ? t("app.notifyOff") : t("app.notifyOn")} title={notifyOn ? t("app.notifyOff") : t("app.notifyOn")} className="no-drag mt-auto rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim">
-              {notifyOn ? <BellRing size={14} /> : <BellOff size={14} />}
-            </button>
-            <Tooltip label={t("app.restartDaemon")} side="right">
-              <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim disabled:opacity-40">
-                <RotateCcw size={14} className={cn(restarting && "animate-spin motion-reduce:animate-none")} />
-              </button>
-            </Tooltip>
-            {/* Automation is a top-level feature (audit #22) — the collapsed rail needs the same reachable-from-anywhere
-                entry as the expanded footer, not just restart/Settings. */}
-            <AttentionBell onNavigate={onAttentionNav} />
-            <Tooltip label={t("app.capabilityCenter")} side="right">
-              <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Blocks size={14} />
-              </button>
-            </Tooltip>
-            <Tooltip label={t("app.automation")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Clock size={14} />
-              </button>
-            </Tooltip>
-            <Tooltip label={t("app.settings")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag mb-1 rounded-md p-1.5 transition-colors", overlay === "settings" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Settings size={14} />
-              </button>
-            </Tooltip>
-          </>
+          // Navigation rail (audit #19): expand, history, Sessions/Repos with their unread dots, and the new-item entry
+          // for the current view. The status-bar items it used to repeat stay in the status bar.
+          <SidebarRail
+            onExpand={toggleSidebar}
+            onBack={goBack}
+            onForward={goForward}
+            canBack={canBack}
+            canFwd={canFwd}
+            view={overlay && overlay !== "newSession" && overlay !== "spawnWorker" ? null : showRepos ? "repos" : "sessions"}
+            sessionsUnread={Object.values(s.sessionAttention).some(Boolean)}
+            reposUnread={Object.values(s.attention).some(Boolean)}
+            onSessions={() => navigate({ overlay: null, showRepos: false })}
+            onRepos={() => navigate({ overlay: null, showRepos: true })}
+            onNew={showRepos ? newWorker : create}
+            newLabel={showRepos ? t("app.newWorker") : t("app.newSession")}
+            newActive={overlay === (showRepos ? "spawnWorker" : "newSession")}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-2 pt-2">
             {/* Sessions / Repos — a flat nav list (not a segmented pill track), same row grammar as the tree below it. */}
@@ -1299,8 +1277,17 @@ export function App(): JSX.Element {
                 <Plus size={14} className="shrink-0" /> {t("app.newSession")}
               </button>
             )}
+            {/* Repos view: the same labelled entry for a new worker (audit #83) — the per-repo + is hover-only now. */}
+            {showRepos && (
+              <button
+                onClick={newWorker}
+                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "spawnWorker" ? ROW_SELECTED : "text-fg-dim hover:bg-raised/60 hover:text-fg")}
+              >
+                <Plus size={14} className="shrink-0" /> {t("app.newWorker")}
+              </button>
+            )}
             {showRepos ? (
-              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
+              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} onViewBranchDiff={openBranchDiff} />
             ) : (
               <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
@@ -1524,16 +1511,14 @@ export function App(): JSX.Element {
                       placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
                     />
                   ) : (
-                    <WorkspaceTab activeTab={activeTab} pageKey={termPageKey!} root={wsRoot} />
+                    <WorkspaceTab activeTab={activeTab} pageKey={termPageKey!} root={wsRoot} loadBranchDiff={loadBranchDiff} />
                   )}
                 </div>
               </div>
             </>
             )
           ) : (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-ui text-muted">
-              <p className="max-w-sm">{t("app.emptyRepoHint")}</p>
-            </div>
+            <ReposHome hasRepos={s.repos.length > 0} onNewWorker={newWorker} onNewRepo={onNewRepo} />
           )
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
@@ -1638,6 +1623,8 @@ export function App(): JSX.Element {
         onToggleSettings={() => navigate({ overlay: overlay === "settings" ? null : "settings" })}
         restarting={restarting}
         onRestart={() => setRestartConfirm(true)}
+        onAttentionNav={onAttentionNav}
+        routeKey={pageId}
       />
 
       <Toaster />

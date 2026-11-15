@@ -90,4 +90,24 @@ describe("AttentionBell", () => {
     expect(screen.getByText("질문 세션")).toBeInTheDocument();
     expect(screen.queryByLabelText("묵살")).toBeNull(); // tier 0 resolves itself
   });
+
+  // audit #20: the bell had no tooltip, and a second bell (the OS-notification toggle) sat next to it. The toggle now
+  // lives inside this popover, and the one bell shows a muted glyph + title while OS notifications are off.
+  it("has a tooltip naming what it is", () => {
+    render(<AttentionBell onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button")).toHaveAttribute("title", "지금 필요한 것");
+  });
+
+  it("hosts the OS-notification toggle and says when notifications are off", () => {
+    const onToggleNotify = vi.fn();
+    const { rerender } = render(<AttentionBell onNavigate={vi.fn()} notifyOn onToggleNotify={onToggleNotify} />);
+    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    const toggle = screen.getByRole("button", { name: /OS 알림/ });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(toggle);
+    expect(onToggleNotify).toHaveBeenCalledTimes(1);
+    rerender(<AttentionBell onNavigate={vi.fn()} notifyOn={false} onToggleNotify={onToggleNotify} />);
+    expect(screen.getByRole("button", { name: /OS 알림/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText(/어텐션 큐/)).toHaveAttribute("title", "지금 필요한 것 — OS 알림 꺼짐");
+  });
 });

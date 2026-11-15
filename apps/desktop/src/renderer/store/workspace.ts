@@ -7,7 +7,10 @@ export type Tab =
   | { id: "agent"; kind: "agent" }
   | { id: string; kind: "file"; path: string; title: string; dirty: boolean }
   | { id: string; kind: "diff"; path: string; title: string }
-  | { id: string; kind: "commit"; hash: string; title: string };
+  | { id: string; kind: "commit"; hash: string; title: string }
+  // The whole worker branch vs its base (fleet.diff), read-only (audit #84). Additive union member — older persisted
+  // pages stay valid, so no persist version bump.
+  | { id: string; kind: "branch"; workerId: string; title: string };
 
 export interface WsPage { tabs: Tab[]; activeTabId: string }
 export interface RightState { open: boolean; width: number; segment: "files" | "git" | "worker" }
@@ -53,6 +56,14 @@ export function openCommit(s: WsState, key: string, hash: string, subject: strin
   const id = `commit:${hash}`;
   if (cur.tabs.some((t) => t.id === id)) return put(s, key, { ...cur, activeTabId: id });
   const tab: Tab = { id, kind: "commit", hash, title: subject.slice(0, 32) || hash.slice(0, 7) };
+  return put(s, key, { tabs: [...cur.tabs, tab], activeTabId: id });
+}
+
+export function openBranchDiff(s: WsState, key: string, workerId: string, title: string): WsState {
+  const cur = page(s, key);
+  const id = `branch:${workerId}`;
+  if (cur.tabs.some((t) => t.id === id)) return put(s, key, { ...cur, activeTabId: id });
+  const tab: Tab = { id, kind: "branch", workerId, title };
   return put(s, key, { tabs: [...cur.tabs, tab], activeTabId: id });
 }
 
@@ -113,6 +124,7 @@ interface WsStore extends WsState {
   openFile_: (key: string, path: string) => void;
   openDiff_: (key: string, path: string) => void;
   openCommit_: (key: string, hash: string, subject: string) => void;
+  openBranchDiff_: (key: string, workerId: string, title: string) => void;
   closeTab_: (key: string, id: string) => void;
   closeTabs_: (key: string, ids: string[]) => void;
   setActive_: (key: string, id: string) => void;
@@ -131,6 +143,7 @@ export const useWsStore = create<WsStore>()(
       openFile_: (key, path) => set((s) => openFile(s, key, path)),
       openDiff_: (key, path) => set((s) => openDiff(s, key, path)),
       openCommit_: (key, hash, subject) => set((s) => openCommit(s, key, hash, subject)),
+      openBranchDiff_: (key, workerId, title) => set((s) => openBranchDiff(s, key, workerId, title)),
       closeTab_: (key, id) => set((s) => closeTab(s, key, id)),
       closeTabs_: (key, ids) => set((s) => closeTabs(s, key, ids)),
       setActive_: (key, id) => set((s) => setActive(s, key, id)),

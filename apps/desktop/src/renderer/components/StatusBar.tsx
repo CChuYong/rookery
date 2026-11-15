@@ -1,12 +1,52 @@
-import { Bell, BellRing, BellOff, Blocks, Clock, RotateCcw, Settings } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Blocks, Clock, Power, Settings } from "lucide-react";
 import type { SlackStatus } from "@daemon/core/events.js";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
 import type { ResourceSnapshot } from "../types/rookery.js";
+import type { AttentionNav } from "../lib/attention-queue.js";
 import { cn } from "../lib/cn.js";
+import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { UsagePanel } from "./UsagePanel.js";
 import { ResourceMonitor } from "./ResourceMonitor.js";
+import { AttentionBell } from "./AttentionBell.js";
 import { Tooltip } from "./Tooltip.js";
+
+// Usage strip + its detail popover (audit #25): the strip is a button, the popover is the full UsagePanel (titles,
+// reset times, provider tabs, hints). It opens upward and closes on Escape, an outside click or a route change.
+function UsageItem({ usage, loadFailed, routeKey }: { usage: UsageSnapshot | null; loadFailed?: boolean; routeKey?: string }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const lastRoute = useRef(routeKey);
+  useEffect(() => {
+    if (lastRoute.current === routeKey) return;
+    lastRoute.current = routeKey;
+    setOpen(false);
+  }, [routeKey]);
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    const resize = (): void => setOpen(false);
+    window.addEventListener("keydown", esc);
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("keydown", esc); window.removeEventListener("resize", resize); };
+  }, [open]);
+  return (
+    <span className="relative flex min-w-0 shrink items-center">
+      {/* the strip is the one item that gives way in a narrow window, so the right-hand entry points never clip */}
+      <span className="flex min-w-0 shrink items-center overflow-hidden">
+        <UsagePanel usage={usage} loadFailed={loadFailed} variant="statusbar" onOpenDetails={() => setOpen((v) => !v)} detailsOpen={open} />
+      </span>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div role="dialog" className={cn("absolute bottom-full left-0 z-50 mb-1 w-[300px] whitespace-normal", MENU_SURFACE)}>
+            <UsagePanel usage={usage} loadFailed={loadFailed} />
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
 
 // Orca/VS Code-style bottom status bar: daemon/slack state, usage meters, resource memory, notifications, and the
 // always-reachable automation/capability/settings entry points — everything that used to crowd the sidebar footer
@@ -33,10 +73,13 @@ export function StatusBar(p: {
   onToggleSettings: () => void;
   restarting: boolean;
   onRestart: () => void;
+  onAttentionNav: (nav: AttentionNav) => void;
+  routeKey?: string; // the current page — popovers close when it changes (audit #27)
 }): JSX.Element {
   const t = useT();
-  // Shared item shell — a 20px-high hover target with 12px gaps between items (DESIGN status-bar spec).
-  const item = "no-drag flex h-5 shrink-0 items-center gap-1.5 rounded-sm px-1.5 text-meta transition-colors hover:bg-raised";
+  // Shared item shell — 20px high with 12px gaps between items (DESIGN status-bar spec). Plain state readouts get no
+  // hover lift: only things that do something on click look clickable (audit #25).
+  const item = "no-drag flex h-5 shrink-0 items-center gap-1.5 rounded-sm px-1.5 text-meta";
   const iconBtn = (active: boolean) =>
     cn("no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded-sm transition-colors", active ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim");
 
@@ -56,21 +99,12 @@ export function StatusBar(p: {
         {p.slack !== "up" && <span className="truncate text-muted">{p.slackStatusText}</span>}
       </span>
 
-      {/* the usage strip is the one item that gives way in a narrow window, so the right-hand entry points never clip */}
-      <span className="flex min-w-0 shrink items-center overflow-hidden">
-        <UsagePanel usage={p.usage} loadFailed={p.usageLoadFailed} variant="statusbar" />
-      </span>
+      <UsageItem usage={p.usage} loadFailed={p.usageLoadFailed} routeKey={p.routeKey} />
 
-      <ResourceMonitor snapshot={p.resources} onRefresh={p.onResourceRefresh} onOpenChange={p.onResourceOpenChange} variant="statusbar" />
+      <ResourceMonitor snapshot={p.resources} onRefresh={p.onResourceRefresh} onOpenChange={p.onResourceOpenChange} variant="statusbar" closeKey={p.routeKey} />
 
-      <button
-        onClick={p.onToggleNotify}
-        aria-label={p.notifyOn ? t("app.notifyOnTitle") : t("app.notifyOffTitle")}
-        title={p.notifyOn ? t("app.notifyOnTitle") : t("app.notifyOffTitle")}
-        className={cn("no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded-sm transition-colors hover:bg-raised", p.notifyOn ? "text-fg-dim" : "text-muted")}
-      >
-        {p.notifyOn ? <BellRing size={12} /> : <BellOff size={12} />}
-      </button>
+      {/* The one bell (audit #19 #20): the attention queue, which also holds the OS-notification toggle. */}
+      <AttentionBell onNavigate={p.onAttentionNav} notifyOn={p.notifyOn} onToggleNotify={p.onToggleNotify} variant="statusbar" />
 
       {/* right-aligned cluster — always-reachable entry points (audit #22), moved out of the sidebar footer */}
       <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -86,7 +120,8 @@ export function StatusBar(p: {
         </Tooltip>
         <Tooltip label={t("app.restartDaemon")} side="top" align="end">
           <button onClick={p.onRestart} disabled={p.restarting} aria-label={t("app.restartDaemon")} className={cn(iconBtn(false), "disabled:opacity-40")}>
-            <RotateCcw size={12} className={cn(p.restarting && "animate-spin motion-reduce:animate-none")} />
+            {/* Power, not RotateCcw — that glyph is "undo"-shaped and was shared with Reset layout and git Revert (audit #20) */}
+            <Power size={12} className={cn(p.restarting && "animate-pulse motion-reduce:animate-none")} />
           </button>
         </Tooltip>
         <Tooltip label={t("app.settings")} side="top" align="end">

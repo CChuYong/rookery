@@ -68,4 +68,20 @@ describe("GitChanges", () => {
     const page = useWsStore.getState().byPage["pX"];
     expect(page?.tabs.some((t) => t.kind === "commit" && t.id === "commit:abc123")).toBe(true);
   });
+
+  // audit #84: once a worker commits, this panel is empty — the worker's whole-branch diff is one click away here.
+  it("offers 'View branch diff' (header + empty state) only when the page is a worker", async () => {
+    stubWs({ gitChanges: vi.fn(async () => []) });
+    const onViewBranchDiff = vi.fn();
+    const { unmount } = render(<GitChanges root="/r" pageKey="w1" onViewBranchDiff={onViewBranchDiff} />);
+    await waitFor(() => expect(screen.getByText("변경 사항이 없어요.")).toBeInTheDocument());
+    const entries = screen.getAllByRole("button", { name: "브랜치 전체 변경 보기" });
+    expect(entries).toHaveLength(2);
+    fireEvent.click(entries[1]!);
+    expect(onViewBranchDiff).toHaveBeenCalledTimes(1);
+    unmount();
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await waitFor(() => expect(screen.getByText("변경 사항이 없어요.")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "브랜치 전체 변경 보기" })).toBeNull();
+  });
 });

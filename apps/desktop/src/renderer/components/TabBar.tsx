@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { MessageSquare, FileText, GitCompare, GitCommitHorizontal, X } from "lucide-react";
+import { MessageSquare, FileText, GitCompare, GitCompareArrows, GitCommitHorizontal, X } from "lucide-react";
 import { useWsStore, type Tab } from "../store/workspace.js";
 import { cn } from "../lib/cn.js";
 import { TAB_IDLE, TAB_LINE } from "../lib/ui-tokens.js";
@@ -61,7 +61,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
         />
       )}
       {tabs.map((tab) => {
-        const Icon = tab.kind === "agent" ? MessageSquare : tab.kind === "diff" ? GitCompare : tab.kind === "commit" ? GitCommitHorizontal : FileText;
+        const Icon = tab.kind === "agent" ? MessageSquare : tab.kind === "diff" ? GitCompare : tab.kind === "commit" ? GitCommitHorizontal : tab.kind === "branch" ? GitCompareArrows : FileText;
         const title = tab.kind === "agent" ? agentLabel : tab.title;
         const dirty = tab.kind === "file" && tab.dirty;
         return (

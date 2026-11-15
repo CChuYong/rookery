@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { RefreshCw, Plus, Minus, RotateCcw, GitBranch, ArrowUp, ArrowDown, UploadCloud, ChevronDown } from "lucide-react";
+import { RefreshCw, Plus, Minus, Undo2, GitBranch, GitCompareArrows, ArrowUp, ArrowDown, UploadCloud, ChevronDown } from "lucide-react";
 import { useWsStore } from "../store/workspace.js";
 import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
@@ -35,7 +35,9 @@ function Stat({ added, deleted }: { added: number; deleted: number }): JSX.Eleme
   );
 }
 
-export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageKey: string; version?: number }): JSX.Element {
+// `onViewBranchDiff` (worker pages only) opens the worker's whole-branch diff — the place to look once its work is
+// committed and this list is empty (audit #84).
+export function GitChanges({ root, pageKey, version = 0, onViewBranchDiff }: { root: string; pageKey: string; version?: number; onViewBranchDiff?: () => void }): JSX.Element {
   const t = useT();
   const [changes, setChanges] = useState<Change[] | null>(null);
   const [info, setInfo] = useState<Info | null>(null);
@@ -113,7 +115,7 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
             tab order even while invisible — a `hidden` swap can never receive focus). */}
         <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><Stat added={c.added} deleted={c.deleted} /></span>
         <span className="absolute right-2.5 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          {section === "unstaged" && <IconBtn title={t("gitChanges.revert")} onClick={() => setConfirm({ path: c.path, untracked: isUntracked(c) })}><RotateCcw size={12} /></IconBtn>}
+          {section === "unstaged" && <IconBtn title={t("gitChanges.revert")} onClick={() => setConfirm({ path: c.path, untracked: isUntracked(c) })}><Undo2 size={12} /></IconBtn>}
           {section === "staged"
             ? <IconBtn title={t("gitChanges.unstage")} onClick={() => void act(() => window.rookery.ws.gitUnstage(root, c.path))}><Minus size={14} /></IconBtn>
             : <IconBtn title={t("gitChanges.stage")} onClick={() => void act(() => window.rookery.ws.gitStage(root, c.path))}><Plus size={14} /></IconBtn>}
@@ -149,6 +151,11 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
                 <UploadCloud size={12} />
               </Button>
             )}
+            {onViewBranchDiff && (
+              <Button variant="ghost" size="iconSm" onClick={onViewBranchDiff} title={t("repoTree.menuBranchDiff")} aria-label={t("repoTree.menuBranchDiff")}>
+                <GitCompareArrows size={12} />
+              </Button>
+            )}
             <Button variant="ghost" size="iconSm" onClick={reload} title={t("common.refresh")} aria-label={t("common.refresh")}><RefreshCw size={12} /></Button>
           </span>
         </div>
@@ -176,7 +183,12 @@ export function GitChanges({ root, pageKey, version = 0 }: { root: string; pageK
             {changes === null ? (
               <SkeletonRows rows={6} />
             ) : staged.length === 0 && unstaged.length === 0 ? (
-              <div className="px-3 py-3 text-ui text-muted">{t("gitChanges.noChanges")}</div>
+              <div className="px-3 py-3 text-ui text-muted">
+                {t("gitChanges.noChanges")}
+                {onViewBranchDiff && (
+                  <button onClick={onViewBranchDiff} className="ml-1.5 text-ui text-fg-dim underline-offset-2 hover:text-fg hover:underline">{t("repoTree.menuBranchDiff")}</button>
+                )}
+              </div>
             ) : (
               <>
                 {staged.length > 0 && (

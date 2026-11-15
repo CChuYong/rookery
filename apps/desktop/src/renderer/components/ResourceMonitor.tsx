@@ -40,12 +40,14 @@ export function ResourceMonitor({
   onRefresh,
   onOpenChange,
   variant = "sidebar",
+  closeKey,
 }: {
   snapshot: ResourceSnapshot | null;
   collapsed?: boolean;
   onRefresh?: () => void;
   onOpenChange?: (open: boolean) => void;
   variant?: "sidebar" | "statusbar"; // statusbar: borderless 11px trigger that opens the popover upward (bottom bar has no room below it)
+  closeKey?: string; // the current route: a change closes the popover (audit #27)
 }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -69,6 +71,22 @@ export function ResourceMonitor({
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close/onOpenChange are recreated every render; open alone gates (re)bind
+  }, [open]);
+  // Close on a route change or a window resize (audit #27): keyboard/focus navigation never crosses the click-catcher
+  // overlay, so the popover used to stay open over the next page's form.
+  const lastKey = useRef(closeKey);
+  useEffect(() => {
+    if (lastKey.current === closeKey) return;
+    lastKey.current = closeKey;
+    if (open) close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a route change should close
+  }, [closeKey]);
+  useEffect(() => {
+    if (!open) return;
+    const onResize = (): void => close();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close/onOpenChange are recreated every render
   }, [open]);
   // Move focus inside on open — the Refresh button when present, otherwise the panel itself (audit #61: previously
   // opening left focus on the trigger button, so keyboard users had no way to tell the popover had opened).

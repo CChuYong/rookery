@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { ChevronRight, FolderGit2, Plus, Trash2, Archive, Search, Loader2, MoreHorizontal, Settings2 } from "lucide-react";
+import { ChevronRight, FolderGit2, Plus, Archive, Search, Loader2, MoreHorizontal, Settings2 } from "lucide-react";
 import { useStore } from "../store/store.js";
 import { useRepoTreeStore } from "../store/repotree.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
@@ -9,7 +9,7 @@ import { Input } from "../ui/input.js";
 import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
 import { baseName } from "../lib/path.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
-import { ContextMenu } from "../components/ContextMenu.js";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
 import { shortBranch } from "../lib/branch.js";
 import { WorkerCost } from "../components/WorkerCost.js";
@@ -87,6 +87,7 @@ function RepoTreeImpl(p: {
   onForkSub?: (id: string) => void; // right-click → fork this worker (duplicate context + worktree into a new worker)
   onArchiveSub?: (id: string, archived: boolean) => void;
   onDeleteSub?: (id: string) => void;
+  onViewBranchDiff?: (id: string) => void; // worker menu → the whole-branch diff (fleet.diff) in a read-only tab (audit #84)
 }): JSX.Element {
   const t = useT();
   // Fold state lives in a persisted store, NOT component state: the sidebar conditionally renders
@@ -97,6 +98,7 @@ function RepoTreeImpl(p: {
   const archOpen = useRepoTreeStore((s) => s.archOpen); // archive collapsed by default
   const setArchOpen = useRepoTreeStore((s) => s.setArchOpen);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [repoMenu, setRepoMenu] = useState<{ key: string; title: string; repoId?: string; removable: boolean; canAdd: boolean; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<{ name: string } | null>(null);
@@ -222,9 +224,17 @@ function RepoTreeImpl(p: {
         <span className="ml-auto shrink-0 pl-1 text-meta tabular-nums text-faint">{subs.length}</span>
       </>
     );
+    // Row actions show on hover/focus only (audit #83); the always-visible spawn entry is the sidebar's "New worker"
+    // row. Unregister lives in the ⋯ menu (also on right-click) instead of one slip away from +.
+    const reveal = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100";
+    const hasMenu = opts.canAdd || opts.removable || (!!opts.repoId && !!p.onRepoSettings);
+    const openRepoMenu = (x: number, y: number): void => setRepoMenu({ key, title, repoId: opts.repoId, removable: opts.removable, canAdd: opts.canAdd, x, y });
     return (
       <div key={key}>
-        <div className="group flex items-center rounded-md pr-1 hover:bg-raised/60">
+        <div
+          className="group flex items-center rounded-md pr-1 hover:bg-raised/60"
+          onContextMenu={hasMenu ? (e) => { e.preventDefault(); openRepoMenu(e.clientX, e.clientY); } : undefined}
+        >
           {foldable ? (
             <button onClick={() => setCollapsed(key, open)} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left">
               {headerInner}
@@ -233,12 +243,11 @@ function RepoTreeImpl(p: {
             <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5">{headerInner}</div>
           )}
           {opts.canAdd && (
-            // Primary repo action: visible at rest, not gated behind row hover.
             <button
               onClick={() => p.onNewSub(key)}
               aria-label={t("repoTree.spawnWorker")}
               title={t("repoTree.spawnWorker")}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg"
+              className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg", reveal)}
             >
               <Plus size={14} />
             </button>
@@ -248,19 +257,20 @@ function RepoTreeImpl(p: {
               onClick={() => p.onRepoSettings?.(opts.repoId!)}
               aria-label={t("repoTree.repoSettings", { repo: title })}
               title={t("repoTree.repoSettings", { repo: title })}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg"
+              className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg", reveal)}
             >
               <Settings2 size={14} />
             </button>
           )}
-          {opts.removable && (
+          {hasMenu && (
             <button
-              onClick={() => setRemoveConfirm({ name: key })}
-              aria-label={t("repoTree.removeRepo")}
-              title={t("repoTree.removeRepo")}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fail"
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openRepoMenu(r.left, r.bottom + 4); }}
+              aria-label={t("repoTree.repoMenu", { repo: title })}
+              title={t("repoTree.repoMenu", { repo: title })}
+              aria-haspopup="menu"
+              className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg", reveal)}
             >
-              <Trash2 size={14} />
+              <MoreHorizontal size={14} />
             </button>
           )}
         </div>
@@ -323,6 +333,7 @@ function RepoTreeImpl(p: {
           items={[
             { label: t("repoTree.menuRename"), onClick: () => setRenaming({ id: menu.id, value: menuSub.label }) },
             { label: t("repoTree.menuFork"), onClick: () => p.onForkSub?.(menu.id) },
+            ...(p.onViewBranchDiff ? [{ label: t("repoTree.menuBranchDiff"), hint: t("repoTree.menuBranchDiffHint"), onClick: () => p.onViewBranchDiff?.(menu.id) }] : []),
             // stop: whenever the worker is not terminal (running/background/idle) — keeps the worktree and pauses
             // (resumable). `background` especially: fleet.stop tears down the subprocess tree and is the ONLY way
             // to kill background tasks (interrupt aborts a turn and deliberately leaves them alive), so hiding it
@@ -333,6 +344,19 @@ function RepoTreeImpl(p: {
             { label: menuSub.archived ? t("repoTree.menuUnarchive") : t("repoTree.menuArchive"), onClick: () => p.onArchiveSub?.(menu.id, !menuSub.archived) },
             { label: t("repoTree.menuDelete"), hint: t("repoTree.menuDeleteHint"), danger: true, onClick: () => setConfirm({ id: menu.id, name: menuSub.label }) },
           ]}
+        />
+      )}
+
+      {repoMenu && (
+        <ContextMenu
+          x={repoMenu.x}
+          y={repoMenu.y}
+          onClose={() => setRepoMenu(null)}
+          items={[
+            ...(repoMenu.canAdd ? [{ label: t("repoTree.spawnWorker"), onClick: () => p.onNewSub(repoMenu.key) }] : []),
+            ...(repoMenu.repoId && p.onRepoSettings ? [{ label: t("repoTree.repoSettings", { repo: repoMenu.title }), onClick: () => p.onRepoSettings?.(repoMenu.repoId!) }] : []),
+            ...(repoMenu.removable ? [{ label: t("repoTree.menuRemoveRepo"), hint: t("repoTree.menuRemoveRepoHint"), danger: true, onClick: () => setRemoveConfirm({ name: repoMenu.key }) }] : []),
+          ] satisfies MenuItem[]}
         />
       )}
 

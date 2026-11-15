@@ -1,0 +1,41 @@
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { BranchDiffView } from "../src/renderer/components/BranchDiffView.js";
+import { WorkspaceTab } from "../src/renderer/components/WorkspaceTab.js";
+
+const DIFF = [
+  "diff --git a/src/a.ts b/src/a.ts", "--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1,2 +1,2 @@", " keep", "-old", "+new",
+  "diff --git a/b.md b/b.md", "new file mode 100644", "--- /dev/null", "+++ b/b.md", "@@ -0,0 +1 @@", "+hello",
+].join("\n");
+
+// audit #84: after a worker commits, Git Changes is empty — this tab shows everything it changed since its base.
+describe("BranchDiffView", () => {
+  it("loads the worker's diff and lists files with counts; picking a file shows its hunks", async () => {
+    const loadDiff = vi.fn(async () => DIFF);
+    render(<BranchDiffView workerId="w1" loadDiff={loadDiff} />);
+    expect(loadDiff).toHaveBeenCalledWith("w1");
+    expect(await screen.findByRole("button", { name: /a\.ts/ })).toBeInTheDocument();
+    expect(screen.getByText("-old")).toBeInTheDocument(); // first file selected by default
+    fireEvent.click(screen.getByRole("button", { name: /b\.md/ }));
+    expect(screen.getByText("+hello")).toBeInTheDocument();
+    expect(screen.queryByText("-old")).toBeNull();
+  });
+
+  it("says so when the branch has no changes against its base", async () => {
+    render(<BranchDiffView workerId="w1" loadDiff={async () => ""} />);
+    expect(await screen.findByText("베이스 이후 변경이 없어요")).toBeInTheDocument();
+  });
+
+  it("shows an error with a retry when the diff can't be loaded", async () => {
+    const loadDiff = vi.fn().mockRejectedValueOnce(new Error("nope")).mockResolvedValueOnce(DIFF);
+    render(<BranchDiffView workerId="w1" loadDiff={loadDiff} />);
+    fireEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(loadDiff).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: /a\.ts/ })).toBeInTheDocument();
+  });
+
+  it("is what a branch: workspace tab renders", async () => {
+    render(<WorkspaceTab activeTab="branch:w1" pageKey="w1" root="/r" loadBranchDiff={async () => DIFF} />);
+    expect(await screen.findByRole("button", { name: /a\.ts/ })).toBeInTheDocument();
+  });
+});

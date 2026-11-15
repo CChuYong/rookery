@@ -89,4 +89,24 @@ describe("ResourceMonitor keyboard/focus (audit #61)", () => {
     expect(screen.queryByText("Desktop App")).toBeNull();
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
   });
+
+  // audit #27: keyboard/focus navigation never crosses the click-catcher overlay, so the popover used to stay open
+  // over the next page's form. It now closes when the route changes or the window is resized.
+  it("closes when its closeKey (the current route) changes", () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = renderEn(<ResourceMonitor snapshot={snap} onOpenChange={onOpenChange} closeKey="ov:spawnWorker" />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Desktop App")).toBeInTheDocument();
+    rerender(<I18nProvider systemLocale="en-US"><ResourceMonitor snapshot={snap} onOpenChange={onOpenChange} closeKey="ov:automation" /></I18nProvider>);
+    expect(screen.queryByText("Desktop App")).toBeNull();
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("closes when the window is resized", () => {
+    renderEn(<ResourceMonitor snapshot={snap} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Desktop App")).toBeInTheDocument();
+    fireEvent(window, new Event("resize"));
+    expect(screen.queryByText("Desktop App")).toBeNull();
+  });
 });

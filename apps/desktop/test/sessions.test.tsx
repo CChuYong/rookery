@@ -246,3 +246,20 @@ describe("Sessions fallback-name disambiguating subline (audit #46)", () => {
     expect(screen.queryByText("방금")).toBeNull();
   });
 });
+
+// audit #118: RepoTree had a text filter past a handful of workers; Sessions had none.
+describe("Sessions text filter (audit #118)", () => {
+  const many = Array.from({ length: 9 }, (_, i) => mk({ id: `s${i}`, label: i === 4 ? "release cadence" : `chat ${i}` }));
+  it("appears once there are more than 8 sessions and filters rows by name", () => {
+    render(<Sessions sessions={many as never} activeId={null} onSelect={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "CADENCE" } });
+    expect(screen.getByText("release cadence")).toBeInTheDocument();
+    expect(screen.queryByText("chat 1")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "nothing-like-this" } });
+    expect(screen.getByText("일치하는 세션이 없어요.")).toBeInTheDocument();
+  });
+  it("stays hidden for a short list", () => {
+    render(<Sessions sessions={many.slice(0, 3) as never} activeId={null} onSelect={() => {}} />);
+    expect(screen.queryByPlaceholderText("세션 필터…")).toBeNull();
+  });
+});

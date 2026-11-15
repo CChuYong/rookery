@@ -34,4 +34,7 @@ export default {
   "app.slackReadOnly": "Slack 세션 — Slack에서 대화하세요",
   "app.composerPlaceholder": "메시지 입력…  (/ 명령, Shift+Enter 줄바꿈, @로 파일 첨부)",
   "app.resizeSidebar": "사이드바 폭 조절 (더블클릭하면 기본 폭)",
+  "app.newWorker": "새 워커",
+  "app.reposHomeHint": "왼쪽에서 워커를 고르거나 새로 만들어요.",
+  "app.reposHomeEmpty": "등록된 레포가 없어요.",
 } satisfies Catalog;

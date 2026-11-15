@@ -24,4 +24,6 @@ export default {
   "workspaceHeaders.layoutReset": "Panel layout reset for this page",
   "workspaceHeaders.undo": "Undo",
   "workspaceHeaders.overflowTabs": "{count} hidden tabs",
+  "workspaceHeaders.restoreCheckpoint": "Revert to a checkpoint…",
+  "workspaceHeaders.openTicketKey": "Open ticket: {key}",
 } satisfies Catalog;

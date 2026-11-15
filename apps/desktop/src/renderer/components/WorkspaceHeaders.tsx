@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { SquareTerminal, PanelRight, Ticket, RotateCcw, ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { SquareTerminal, PanelRight, Ticket, LayoutTemplate, ChevronDown, MoreHorizontal } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { baseName } from "../lib/path.js";
 import { StatusBadge, ProviderBadge } from "./StatusBadge.js";
@@ -8,7 +9,7 @@ import type { Checkpoint } from "./CheckpointMenu.js";
 import { SessionMetrics } from "./SessionMetrics.js";
 import { MetricsView } from "./MetricsView.js";
 import { OpenInAppMenu } from "./OpenInAppMenu.js";
-import { ContextMenu } from "./ContextMenu.js";
+import { ContextMenu, type MenuItem } from "./ContextMenu.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
 import { useT } from "../i18n/provider.js";
@@ -90,10 +91,47 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
   return null;
 }
 
+// "…" overflow (audit #21): the narrow header (≤720px, globals.css) drops metrics, checkpoint, ticket, the task menu
+// and Reset layout — this menu, shown only at that width, keeps every one of them reachable. The metrics ride along
+// as a read-only header block.
+function HeaderOverflow({ items, header }: { items: MenuItem[]; header?: ReactNode }): JSX.Element | null {
+  const t = useT();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  if (items.length === 0 && !header) return null;
+  return (
+    <>
+      <button
+        aria-label={t("common.moreActions")}
+        title={t("common.moreActions")}
+        aria-haspopup="menu"
+        aria-expanded={menu !== null}
+        onMouseDown={(e) => { if (menu) e.stopPropagation(); }}
+        onClick={(e) => {
+          if (menu) { setMenu(null); return; }
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.left, y: r.bottom + 2 });
+        }}
+        className={cn("workspace-header-overflow no-drag h-6 w-6 items-center justify-center rounded-md transition-colors", menu ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} header={header} items={items} />}
+    </>
+  );
+}
+
+// Read-only metrics block at the top of the overflow menu (hidden when there are no metrics yet).
+function OverflowMetrics({ children }: { children: ReactNode }): JSX.Element {
+  return <div className="border-b border-line-soft px-2.5 pb-1.5 pt-1 empty:hidden">{children}</div>;
+}
+
 // Shared right-side toggles for the worker/session header (open in other app + terminal bottom panel + right panel). The right toggle only shows when a page exists.
-function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd, dock, agentKind = "master" }: {
+// Order (audit #22, both headers): Open in → overflow → Reset layout → terminal → right panel, so the panel toggles
+// always sit at the far right.
+function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, onToggleRight, subId, cwd, dock, agentKind = "master", overflowItems = [], overflowHeader }: {
   termPageKey: string | null; termPageOpen: boolean; rightOpen: boolean; onToggleTerm: () => void; onToggleRight: () => void;
   subId?: string | null; cwd?: string; dock?: boolean; agentKind?: "master" | "worker";
+  overflowItems?: MenuItem[]; overflowHeader?: ReactNode;
 }): JSX.Element {
   const t = useT();
   // Active = a neutral lift (bg-raised + fg), never the accent fill — the accent is reserved for lines/focus/current-item.
@@ -110,9 +148,22 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
   // "auto" = hidden only because the window is narrow (audit #4): it must not look like the user closed it.
   const rightState = panelToggleState(hidden, autoHidden, rightGroupKinds);
   const rightTitle = rightState === "open" ? t("workspaceHeaders.rightPanelHide") : rightState === "auto" ? t("workspaceHeaders.rightPanelAutoHidden") : t("workspaceHeaders.rightPanelShow");
+  const resetLayout = (): void => { if (termPageKey) useLayoutStore.getState().reset_(termPageKey); };
+  const overflow = dock && termPageKey ? [...overflowItems, { label: t("workspaceHeaders.resetLayout"), onClick: resetLayout }] : overflowItems;
   return (
     <>
       <OpenInAppMenu subId={subId} cwd={cwd} />
+      <HeaderOverflow items={overflow} header={overflowHeader} />
+      {dock && termPageKey && (
+        // Reset layout (audit #57) — doesn't touch the dockview API directly, mirrors the toggles below: it clears
+        // this page's saved layout and bumps its reset counter, and WorkspaceDock reseeds the live dock (keeping an
+        // open terminal) and offers Undo (audit #79). Scope: this page's panels only; the sidebar width is global
+        // and has its own double-click reset. LayoutTemplate, not RotateCcw — that glyph also meant "restart daemon"
+        // and "git revert" (audit #20). In the overflow menu at narrow widths.
+        <button onClick={resetLayout} aria-label={t("workspaceHeaders.resetLayout")} title={t("workspaceHeaders.resetLayoutTitle")} className={cn("workspace-header-reset", btn(false))}>
+          <LayoutTemplate size={14} />
+        </button>
+      )}
       {!dock && <button onClick={onToggleTerm} aria-label={t("workspaceHeaders.terminalAria")} aria-pressed={termPageOpen} title={t("workspaceHeaders.terminalTitle")} className={btn(termPageOpen)}><SquareTerminal size={14} /></button>}
       {!dock && termPageKey && <button onClick={onToggleRight} aria-label={t("workspaceHeaders.rightPanelAria")} aria-pressed={rightOpen} title={t("workspaceHeaders.rightPanelTitle")} className={btn(rightOpen)}><PanelRight size={14} /></button>}
       {dock && termPageKey && (
@@ -137,15 +188,6 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
           <PanelRight size={14} />
         </button>
       )}
-      {dock && termPageKey && (
-        // Reset layout (audit #57) — doesn't touch the dockview API directly, mirrors the toggles above: it clears
-        // this page's saved layout and bumps its reset counter, and WorkspaceDock reseeds the live dock (keeping an
-        // open terminal) and offers Undo (audit #79). Scope: this page's panels only; the sidebar width is global
-        // and has its own double-click reset.
-        <button onClick={() => useLayoutStore.getState().reset_(termPageKey)} aria-label={t("workspaceHeaders.resetLayout")} title={t("workspaceHeaders.resetLayoutTitle")} className={btn(false)}>
-          <RotateCcw size={14} />
-        </button>
-      )}
     </>
   );
 }
@@ -159,8 +201,23 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
 }): JSX.Element {
   const t = useT();
   const repoName = baseName(worker.repoPath);
+  // The overflow's "Restore checkpoint…" opens the CheckpointMenu (whose own button is hidden at that width) anchored
+  // at the overflow button.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [cpRequest, setCpRequest] = useState<{ seq: number; rect: { bottom: number; right: number } } | undefined>(undefined);
+  const overflowItems: MenuItem[] = [
+    {
+      label: t("workspaceHeaders.restoreCheckpoint"),
+      onClick: () => {
+        const r = headerRef.current?.querySelector(".workspace-header-overflow")?.getBoundingClientRect();
+        setCpRequest((cur) => ({ seq: (cur?.seq ?? 0) + 1, rect: r ? { bottom: r.bottom, right: r.right } : { bottom: 44, right: window.innerWidth - 8 } }));
+      },
+    },
+    ...(worker.tasks ?? []).map((task) => ({ label: t("workspaceHeaders.stopTask", { description: taskMenuLabel(task) }), hint: task.type, onClick: () => onStopTask?.(task.id) })),
+    ...(worker.ticketKey && worker.ticketUrl ? [{ label: t("workspaceHeaders.openTicketKey", { key: worker.ticketKey }), onClick: () => void window.rookery.openExternal(worker.ticketUrl!) }] : []),
+  ];
   return (
-    <div className="workspace-header drag flex h-10 shrink-0 items-center gap-2 px-4 text-body">
+    <div ref={headerRef} className="workspace-header drag flex h-10 shrink-0 items-center gap-2 px-4 text-body">
       {/* breadcrumb: repo (muted) / worker title (fg, medium) — T3's "repo / title" pattern. */}
       <span className="workspace-header-repo shrink-0 truncate text-muted" title={worker.repoPath}>{repoName}</span>
       <span className="workspace-header-repo shrink-0 text-faint" aria-hidden>/</span>
@@ -184,11 +241,12 @@ export function WorkerHeader({ worker, termPageKey, termPageOpen, rightOpen, onT
           <Ticket size={12} /> {worker.ticketKey}
         </button>
       )}
-      {/* One group at the far right, order: metrics → restore → terminal → sidebar. View-diff/stop/discard moved to the RepoTree right-click menu. */}
+      {/* One group at the far right, order: metrics → restore → Open in → overflow → reset → terminal → sidebar (same
+          as the session header). Branch diff/stop/delete live in the RepoTree worker menu (⋯ / right-click). */}
       <div className="workspace-header-controls no-drag ml-auto flex shrink-0 items-center gap-1">
-        <div className="workspace-header-metrics"><WorkerMetrics workerId={worker.id} /></div>
-        <div className="workspace-header-checkpoint"><CheckpointMenu fetchCheckpoints={onFetchCheckpoints} onRestore={onRestore} /></div>
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} dock={dock} agentKind="worker" />
+        <div className="workspace-header-metrics mr-1"><WorkerMetrics workerId={worker.id} /></div>
+        <div className="workspace-header-checkpoint"><CheckpointMenu fetchCheckpoints={onFetchCheckpoints} onRestore={onRestore} openRequest={cpRequest} /></div>
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} subId={worker.id} dock={dock} agentKind="worker" overflowItems={overflowItems} overflowHeader={<OverflowMetrics><WorkerMetrics workerId={worker.id} /></OverflowMetrics>} />
       </div>
     </div>
   );
@@ -225,9 +283,10 @@ export function SessionHeader({ name, sessionId, cwd, provider, readOnly, runnin
           <span className="h-1.5 w-1.5 rounded-full bg-run led-live" /> {t("workspaceHeaders.working")}
         </span>
       )}
-      <div className="workspace-header-controls ml-auto flex shrink-0 items-center gap-2.5">
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} agentKind="master" />
-        {sessionId && <div className="workspace-header-metrics"><SessionMetrics sessionId={sessionId} /></div>}
+      {/* Same order and gap as the worker header (audit #22): metrics → Open in → overflow → reset → terminal → panel. */}
+      <div className="workspace-header-controls no-drag ml-auto flex shrink-0 items-center gap-1">
+        {sessionId && <div className="workspace-header-metrics mr-1"><SessionMetrics sessionId={sessionId} /></div>}
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} agentKind="master" overflowHeader={sessionId ? <OverflowMetrics><SessionMetrics sessionId={sessionId} /></OverflowMetrics> : undefined} />
       </div>
     </div>
   );

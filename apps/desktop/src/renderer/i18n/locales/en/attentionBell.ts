@@ -14,4 +14,8 @@ export default {
   "attentionBell.dismiss": "Dismiss",
   "attentionBell.notifyTitle": "Awaiting your reply",
   "attentionBell.notifyBody": "Session {label} is waiting for your answer.",
+  "attentionBell.titleMuted": "Needs you now — OS notifications off",
+  "attentionBell.notifyToggle": "OS notifications",
+  "attentionBell.notifyOnState": "On",
+  "attentionBell.notifyOffState": "Off",
 } satisfies Catalog;

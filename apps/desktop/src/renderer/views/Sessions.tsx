@@ -1,5 +1,5 @@
 import { memo, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder } from "lucide-react";
+import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder, Search } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
 import { ContextMenu } from "../components/ContextMenu.js";
@@ -111,6 +111,8 @@ function groupByAutomation(sessions: Session[], automations: AutomationLite[], t
 }
 
 const sessName = (s: Session): string => s.label || baseName(s.cwd) || s.id;
+// Same idea as RepoTree's worker filter (shown past 4 live workers); sessions pile up faster, so a higher bar.
+const SEARCH_MIN = 8;
 // A session has no explicit title → its name fell back to the cwd folder (or id). This is what makes the sidebar a
 // wall of identical labels (audit #46, e.g. 'clover-space' x6) when several sessions share a working directory.
 const isFallbackNamed = (s: Session): boolean => !s.label;
@@ -150,6 +152,7 @@ function SessionsImpl(p: {
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [q, setQ] = useState(""); // text filter by session name (audit #118), shown past SEARCH_MIN sessions
   const [scrolled, setScrolled] = useState(false); // when not at the top, show a fade/blur below the header (scroll shadow)
   // List-arrival animation: seed with the sessions present at first non-empty load; only sessions that appear AFTER that
   // rise-in (avoids a flash-storm of the whole list on cold load / reconnect). Mirrors RepoTree/GitChanges.
@@ -214,7 +217,10 @@ function SessionsImpl(p: {
   const sourceFiltered = effectiveSource === "all" ? active : active.filter((s) => srcOf(s.origin) === effectiveSource);
   // automationId focus (cross-link): only that automation's sessions.
   const focusedAuto = effectiveSource === "automation" && filter.automationId;
-  const filtered = focusedAuto ? sourceFiltered.filter((s) => s.originRef === filter.automationId) : sourceFiltered;
+  const autoFiltered = focusedAuto ? sourceFiltered.filter((s) => s.originRef === filter.automationId) : sourceFiltered;
+  const showSearch = active.length > SEARCH_MIN;
+  const query = showSearch ? q.trim().toLowerCase() : "";
+  const filtered = query ? autoFiltered.filter((s) => sessName(s).toLowerCase().includes(query)) : autoFiltered;
   // The session you're currently viewing must never disappear from the sidebar just because the source filter (or
   // automation focus) would otherwise exclude it (audit #21) — otherwise there's no location highlight anywhere.
   const activeSession = p.activeId ? active.find((s) => s.id === p.activeId) : undefined;
@@ -358,6 +364,14 @@ function SessionsImpl(p: {
       ) : (
         (p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-ui leading-relaxed text-muted">{t("sessions.empty")}</div>
       )}
+
+      {showSearch && (
+        <div className="mx-1 mb-1 mt-0.5 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 transition-colors focus-within:border-accent/50">
+          <Search size={12} className="shrink-0 text-muted" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("sessions.filterPlaceholder")} aria-label={t("sessions.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
+        </div>
+      )}
+      {query && filtered.length === 0 && <div className="px-2 py-3 text-ui text-muted">{t("sessions.noMatches")}</div>}
 
       {pinnedItems.length > 0 && (
         <div>

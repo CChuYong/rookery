@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { emptyWsState, openFile, openDiff, openCommit, closeTab, closeTabs, setActive, setDirty, toggleRight, setSegment, setRightWidth, pruneWsPages, toggleDir, collapseAll, expandAncestors, type Tab } from "../src/renderer/store/workspace.js";
+import { emptyWsState, openFile, openDiff, openCommit, openBranchDiff, closeTab, closeTabs, setActive, setDirty, toggleRight, setSegment, setRightWidth, pruneWsPages, toggleDir, collapseAll, expandAncestors, type Tab } from "../src/renderer/store/workspace.js";
 
 describe("workspace reducer", () => {
   it("a fresh page has a pinned agent tab", () => {
@@ -85,6 +85,18 @@ describe("workspace reducer", () => {
     const tab = s.byPage.p1.tabs.find((t) => t.id === "commit:abc123def");
     expect(tab).toEqual({ id: "commit:abc123def", kind: "commit", hash: "abc123def", title: "y".repeat(32) });
     expect(s.byPage.p1.activeTabId).toBe("commit:abc123def");
+  });
+
+  // audit #84: the whole-branch diff opens as one read-only tab per worker.
+  it("openBranchDiff adds one branch-diff tab per worker and re-activates it on reopen", () => {
+    let s = emptyWsState();
+    s = openBranchDiff(s, "w1", "w1", "feature-x");
+    expect(s.byPage.w1.tabs.find((t) => t.id === "branch:w1")).toEqual({ id: "branch:w1", kind: "branch", workerId: "w1", title: "feature-x" });
+    expect(s.byPage.w1.activeTabId).toBe("branch:w1");
+    s = setActive(s, "w1", "agent");
+    s = openBranchDiff(s, "w1", "w1", "feature-x");
+    expect(s.byPage.w1.tabs.filter((t) => t.id === "branch:w1")).toHaveLength(1);
+    expect(s.byPage.w1.activeTabId).toBe("branch:w1");
   });
 
   it("right sidebar: toggle, segment, width clamp", () => {

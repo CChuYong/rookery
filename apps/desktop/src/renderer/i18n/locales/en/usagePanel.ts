@@ -18,4 +18,5 @@ export default {
   "usagePanel.resets": "resets {time}",
   "usagePanel.expand": "Expand usage",
   "usagePanel.collapse": "Collapse usage",
+  "usagePanel.details": "Usage details",
 } satisfies Catalog;

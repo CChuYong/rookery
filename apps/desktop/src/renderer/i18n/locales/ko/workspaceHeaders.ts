@@ -24,4 +24,6 @@ export default {
   "workspaceHeaders.layoutReset": "이 페이지의 패널 배치를 초기화했어요",
   "workspaceHeaders.undo": "실행 취소",
   "workspaceHeaders.overflowTabs": "숨은 탭 {count}개",
+  "workspaceHeaders.restoreCheckpoint": "체크포인트로 되돌리기…",
+  "workspaceHeaders.openTicketKey": "티켓 열기: {key}",
 } satisfies Catalog;

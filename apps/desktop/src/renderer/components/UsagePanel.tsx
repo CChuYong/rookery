@@ -102,7 +102,9 @@ function StatInline({ label, value }: { label: string; value: string }): JSX.Ele
   );
 }
 
-function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar" }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar" }): JSX.Element {
+// `onOpenDetails` (statusbar only) turns the meter run into a button that opens the detail panel (audit #25); the
+// Claude/Codex switch stays a sibling so buttons never nest.
+function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar", onOpenDetails, detailsOpen }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar"; onOpenDetails?: () => void; detailsOpen?: boolean }): JSX.Element {
   const t = useT();
   // Provider tab: Claude is the default (user direction); not persisted (YAGNI).
   const [tab, setTab] = useState<"claude" | "codex">("claude");
@@ -114,7 +116,21 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
   const showBody = !compact || expanded;
 
   if (variant === "statusbar") {
-    if (!usage) return <span className="text-faint">{loadFailed ? t("usagePanel.loadFailed") : t("usagePanel.loading")}</span>;
+    const details = (body: ReactNode): JSX.Element =>
+      onOpenDetails ? (
+        <button
+          type="button"
+          onClick={onOpenDetails}
+          aria-label={t("usagePanel.details")}
+          aria-haspopup="dialog"
+          aria-expanded={!!detailsOpen}
+          title={t("usagePanel.details")}
+          className={cn("no-drag inline-flex h-5 shrink-0 items-center gap-3 rounded-sm px-1 transition-colors hover:bg-raised", detailsOpen && "bg-raised")}
+        >
+          {body}
+        </button>
+      ) : <>{body}</>;
+    if (!usage) return details(<span className="text-faint">{loadFailed ? t("usagePanel.loadFailed") : t("usagePanel.loading")}</span>);
     const showTabs = !!cdx; // only worth a tab switch once there's a second provider's data to switch to
     return (
       <span className="inline-flex shrink-0 items-center gap-3 text-meta">
@@ -133,7 +149,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
             ))}
           </span>
         )}
-        {tab === "claude" ? (
+        {details(tab === "claude" ? (
           <>
             {p?.fiveHour != null && <MeterInline label={t("usagePanel.session5h")} pct={p.fiveHour} />}
             {p?.sevenDay != null && <MeterInline label={t("usagePanel.weekly")} pct={p.sevenDay} />}
@@ -149,7 +165,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
           </>
         ) : (
           <span className="text-faint">{t("usagePanel.codexUnavailable")}</span>
-        )}
+        ))}
       </span>
     );
   }

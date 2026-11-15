@@ -24,4 +24,9 @@ export default {
   "repoTree.onlyActiveTitle": "Show only running / idle / unread workers",
   "repoTree.noMatches": "No matching workers.",
   "repoTree.loadFailed": "Couldn't load the list",
+  "repoTree.repoMenu": "{repo} menu",
+  "repoTree.menuRemoveRepo": "Unregister repo…",
+  "repoTree.menuRemoveRepoHint": "Removes the registration only · files stay on disk",
+  "repoTree.menuBranchDiff": "View branch diff",
+  "repoTree.menuBranchDiffHint": "Everything this worker changed since its base (read-only)",
 } satisfies Catalog;

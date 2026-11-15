@@ -26,4 +26,6 @@ export default {
   "sessions.unpin": "Unpin",
   "sessions.pinnedSection": "Pinned",
   "sessions.loadFailed": "Couldn't load the list",
+  "sessions.filterPlaceholder": "Filter sessions…",
+  "sessions.noMatches": "No matching sessions.",
 } satisfies Catalog;

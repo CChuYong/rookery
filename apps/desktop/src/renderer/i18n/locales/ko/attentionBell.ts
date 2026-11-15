@@ -14,4 +14,8 @@ export default {
   "attentionBell.dismiss": "묵살",
   "attentionBell.notifyTitle": "응답 대기 중",
   "attentionBell.notifyBody": "{label} 세션이 당신의 답을 기다리고 있어요.",
+  "attentionBell.titleMuted": "지금 필요한 것 — OS 알림 꺼짐",
+  "attentionBell.notifyToggle": "OS 알림",
+  "attentionBell.notifyOnState": "켜짐",
+  "attentionBell.notifyOffState": "꺼짐",
 } satisfies Catalog;

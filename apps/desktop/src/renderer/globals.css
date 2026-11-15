@@ -266,9 +266,20 @@ select:not([multiple]):disabled { background-image: none; padding-inline-end: 8p
   flex: 1 1 160px;
   max-width: 38%;
 }
+/* "…" overflow: only at the narrow widths where items below drop out of the header (audit #21). */
+.workspace-header-overflow {
+  display: none;
+}
 @container (max-width: 720px) {
+  .workspace-header-overflow {
+    display: flex;
+  }
+  /* metrics keep a short ctx% (the context pressure); tokens/turns/cost move to the overflow menu */
+  .workspace-header-metrics .metrics-secondary,
+  /* Open in keeps its icon + chevron, drops the app-name label */
+  .workspace-header-openin-label,
+  .workspace-header-reset,
   .workspace-header-eyebrow,
-  .workspace-header-metrics,
   .workspace-header-checkpoint,
   .workspace-header-ticket,
   /* the background/workflow reason chip is supplementary — the status badge already conveys the state */
@@ -279,6 +290,7 @@ select:not([multiple]):disabled { background-image: none; padding-inline-end: 8p
   }
 }
 @container (max-width: 520px) {
+  .workspace-header-metrics,
   .workspace-header-provider,
   .workspace-header-branch,
   .workspace-header-session-id,
