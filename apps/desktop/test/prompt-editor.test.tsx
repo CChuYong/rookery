@@ -266,3 +266,21 @@ describe("PromptEditor", () => {
     expect(ref.current!.getText()).not.toContain("sent draft");
   });
 });
+
+// Audit #35: "/" with no command catalogue says so instead of doing nothing.
+describe("PromptEditor empty slash catalogue", () => {
+  it("shows a one-line empty state when '/' has no commands at all", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { findByText } = render(<PromptEditor ref={ref} commands={[]} />);
+    insert(ref, "/");
+    expect(await findByText("사용할 수 있는 명령이 없어요")).toBeInTheDocument();
+  });
+
+  it("stays quiet for a path-like token that matches nothing", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { queryByText } = render(<PromptEditor ref={ref} commands={CMDS} />);
+    insert(ref, "/usr/zzz");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(queryByText("사용할 수 있는 명령이 없어요")).toBeNull();
+  });
+});

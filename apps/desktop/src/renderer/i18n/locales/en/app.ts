@@ -32,7 +32,7 @@ export default {
   "app.agentEndedReadonly": "Worker ended — view only",
   "app.emptyRepoHint": "Pick a worker from the repos on the left, use the + button on a repo header to spawn a new one, or ask the master to spawn one from Sessions.",
   "app.slackReadOnly": "Slack session — chat from Slack",
-  "app.composerPlaceholder": "Type a message…  (/ commands, Shift+Enter for newline, @ to attach files)",
+  "app.composerPlaceholder": "Ask anything — @ files, / commands",
   "app.resizeSidebar": "Resize sidebar (double-click for the default width)",
   "app.newWorker": "New worker",
   "app.reposHomeHint": "Pick a worker on the left, or start a new one.",

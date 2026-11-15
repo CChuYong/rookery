@@ -13,4 +13,6 @@ export default {
   "newSessionPage.authBlockedTitle": "아직 Claude 인증이 안 됐어요",
   "newSessionPage.authBlockedBody": "Claude 구독으로 로그인하거나 API 키를 설정해야 마스터·워커가 실행돼요. 설정 후 다시 시도하세요.",
   "newSessionPage.authBlockedCta": "설정 → Claude 열기",
+  "newSessionPage.folderMenu": "작업 폴더",
+  "newSessionPage.chooseFolder": "폴더 선택…",
 } satisfies Catalog;

@@ -2,8 +2,10 @@ import type { ImageRef } from "@daemon/core/image-input.js";
 import type { SpeedPreference } from "@daemon/core/speed.js";
 import { SpeedControl } from "./SpeedControl.js";
 import { defaultSpeed } from "../lib/speed.js";
+import { ChromeMenu, MenuField } from "./ComposerChrome.js";
+import { ROW_IDLE, ROW_SELECTED } from "../lib/ui-tokens.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Folder, X, AlertTriangle, FolderGit2 } from "lucide-react";
+import { Folder, FolderOpen, X, AlertTriangle, FolderGit2 } from "lucide-react";
 import type { AuthStatus } from "@daemon/core/auth-status.js";
 import { Composer } from "./Composer.js";
 import type { SlashCommand } from "./Composer.js";
@@ -23,9 +25,6 @@ import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLa
 // Exported so App's startSession can restore/clear it around session.create (audit #5).
 export const NEW_SESSION_DRAFT_KEY = "newSession";
 
-// Overrides the shared Select/Input's bordered field chrome down to a borderless ghost text button — the same
-// look as the Composer's own model/effort/permission chips, so the whole control row reads as one language.
-const CHIP_FIELD = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
 
 export function NewSessionPage(p: {
   repos: Array<{ name: string; path: string }>;
@@ -88,25 +87,57 @@ export function NewSessionPage(p: {
   const browseDir = p.browseDir ? (dir: string) => p.browseDir!(dir, cwd || undefined) : undefined;
   const folderName = cwd ? baseName(cwd) : (p.defaultFolder ? baseName(p.defaultFolder) : t("newSessionPage.defaultFolder"));
 
-  // Working-folder picker inserted at the left of the composer's control row — a borderless ghost text button,
-  // matching the model/effort/provider selects in the same row (no bordered chips everywhere).
+  // One working-folder control (audit #87): the registered repos are the menu's first group, the OS folder dialog the
+  // last item. It replaces the folder chip + the second "pick a repo" row that used to sit under the box.
   const folderPicker = (
-    <button onClick={() => void pick()} title={cwd || p.defaultFolder || t("newSessionPage.daemonDefaultFolder")} className="flex h-6 max-w-[200px] items-center gap-1.5 rounded px-1.5 text-ui text-fg-dim transition-colors hover:bg-raised hover:text-fg">
-      <Folder size={12} className="shrink-0" /> <span className="truncate">{folderName}</span>
-    </button>
+    <ChromeMenu
+      summary={folderName}
+      ariaLabel={`${t("newSessionPage.folderMenu")}: ${folderName}`}
+      side="bottom"
+      align="start"
+      icon={<Folder size={12} className="shrink-0" />}
+      triggerClassName="max-w-[200px]"
+    >
+      {(close) => (
+        <div className="flex flex-col">
+          {p.repos.length > 0 && (
+            <>
+              <p className="px-2 pb-1 pt-1.5 text-meta text-muted">{t("newSessionPage.pickRepoFolder")}</p>
+              {p.repos.map((r) => (
+                <button
+                  key={r.name}
+                  type="button"
+                  title={r.path}
+                  onClick={() => { setCwd(r.path); close(); }}
+                  className={cn("flex h-7 items-center gap-1.5 rounded-md px-2 text-left text-ui transition-colors", cwd === r.path ? ROW_SELECTED : ROW_IDLE)}
+                >
+                  <Folder size={12} className="shrink-0" aria-hidden /> <span className="truncate">{r.name}</span>
+                </button>
+              ))}
+              <div className="my-1 h-px bg-line" aria-hidden />
+            </>
+          )}
+          <button
+            type="button"
+            title={cwd || p.defaultFolder || t("newSessionPage.daemonDefaultFolder")}
+            onClick={() => { close(); void pick(); }}
+            className={cn("flex h-7 items-center gap-1.5 rounded-md px-2 text-left text-ui transition-colors", ROW_IDLE)}
+          >
+            <FolderOpen size={12} className="shrink-0" aria-hidden /> {t("newSessionPage.chooseFolder")}
+          </button>
+        </div>
+      )}
+    </ChromeMenu>
   );
 
-  // Agent-backend selector (WorkerSpawnPage idiom, reused i18n keys). Rendered in the same leftSlot row as the
-  // folder picker — the Composer's own model/effort controls live inside a shared component (not a standalone
-  // <Select> like the modal), so rather than changing Composer's API, codex's free-text model field + its own
-  // effort <Select> render here too and the Composer's `controls` prop is omitted entirely when codex (see below).
-  // CHIP_FIELD overrides the shared Select/Input's bordered chrome to the same borderless text-button look as the
-  // Composer's own model/effort/permission selects (one visual language across the whole control row).
-  const providerSelector = (
-    <Select size="xs" className={CHIP_FIELD} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
-      <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
-      <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
-    </Select>
+  // Agent backend, model, effort and speed all live in the composer's model menu (one place on all three composers).
+  const providerField = (
+    <MenuField label={t("workerSpawnModal.provider")}>
+      <Select size="sm" className="w-full" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
+        <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+        <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+      </Select>
+    </MenuField>
   );
   // Codex effort options come from the selected model's catalog entry when the catalog was fetched; unknown model
   // or no catalog (null) falls back to the generic EFFORTS vocabulary so the selector is never empty.
@@ -117,45 +148,59 @@ export function NewSessionPage(p: {
   // (e.g. the 'max' default) on a codex model re-derives to the model's catalog default, so the <select> never
   // renders blank and onStart never submits a level the model lacks (finding [23]). Claude passes through.
   const currentEffort = effectiveEffort(isCodex ? "codex" : "claude", effortModel, effort, codexModels);
+  const sessionDefaultSpeed = defaultSpeed(settings, provider, "master");
   // codex model field: a catalog-driven dropdown when codex.models.list succeeded, else today's free text
   // (daemon default, settings.codexMasterModel, when empty).
-  const codexControls = isCodex && (
+  const codexFields = isCodex && (
     <>
-      {codexModels != null ? (
-        <Select
-          size="xs"
-          className={cn(CHIP_FIELD, "w-28")}
-          value={codexModel}
-          onChange={(e) => {
-            const nm = e.target.value;
-            setCodexModel(nm);
-            const de = codexDefaultEffort(nm, codexModels);
-            if (de) setEffort(de);
-          }}
-          title={t("composer.modelTitle")}
-        >
-          {/* Task 4 fold-in (Task 3 review Minor #1): a fresh open with the catalog present used to render this
-              <Select value=""> blank. This leading "" option shows a "use default" label instead — the daemon
-              applies the codexMasterModel settings default when the session's model is empty, so we deliberately
-              do NOT auto-pick a catalog model here (that would silently override the default). */}
-          <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
-          {codexModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.displayName}</option>
-          ))}
-          {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
-        </Select>
-      ) : (
-        <Input size="xs" className={cn(CHIP_FIELD, "w-28 focus:bg-raised")} value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
-      )}
+      <MenuField label={t("composer.fieldModel")}>
+        {codexModels != null ? (
+          <Select
+            size="sm"
+            className="w-full"
+            value={codexModel}
+            onChange={(e) => {
+              const nm = e.target.value;
+              setCodexModel(nm);
+              const de = codexDefaultEffort(nm, codexModels);
+              if (de) setEffort(de);
+            }}
+            title={t("composer.modelTitle")}
+          >
+            {/* Task 4 fold-in (Task 3 review Minor #1): a fresh open with the catalog present used to render this
+                <Select value=""> blank. This leading "" option shows a "use default" label instead — the daemon
+                applies the codexMasterModel settings default when the session's model is empty, so we deliberately
+                do NOT auto-pick a catalog model here (that would silently override the default). */}
+            <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
+            {codexModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.displayName}</option>
+            ))}
+            {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
+          </Select>
+        ) : (
+          <Input size="sm" className="w-full" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("composer.modelTitle")} />
+        )}
+      </MenuField>
       {effortSupported(effortModel) && (
-        <Select size="xs" className={CHIP_FIELD} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
-          {codexEffortOptions.map((ef) => (
-            <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
-          ))}
-        </Select>
+        <MenuField label={t("composer.fieldEffort")}>
+          <Select size="sm" className="w-full" value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("composer.effortTitle")}>
+            {codexEffortOptions.map((ef) => (
+              <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+            ))}
+          </Select>
+        </MenuField>
       )}
+      <MenuField label={t("speed.label")} hint={t("speed.hint")}>
+        <SpeedControl variant="field" hideLabel speed={speed} defaultSpeed={sessionDefaultSpeed} provider={provider} model={effortModel} onChange={setSpeed} />
+      </MenuField>
     </>
   );
+  // Codex owns its fields here, so it also owns the trigger text (Claude's comes from the Composer's controls).
+  const codexSummary = isCodex
+    ? [codexModels?.find((m) => m.id === effortModel)?.displayName ?? (effortModel || t("settings.codexModelDefaultOption")),
+       effortSupported(effortModel) ? t(effortLabelKey(currentEffort)) : null,
+       (speed ?? sessionDefaultSpeed) === "fast" ? t("speed.fast") : null].filter(Boolean).join(" · ")
+    : undefined;
 
   return (
     <>
@@ -167,10 +212,10 @@ export function NewSessionPage(p: {
           </button>
         )}
       </div>
-      {/* No centred hero — the composer sits in the lower-middle of an otherwise empty thread (T3's empty state),
-          not a big headline floating mid-screen. justify-end anchors the whole column toward the bottom. */}
+      {/* No centred hero: one quiet line and the box, a third of the way down — not a card floating mid-screen with
+          an empty band above it (audit #87). Same column and offset as the New worker page. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
-        <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col justify-center gap-4 pb-[12vh] pt-10">
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-10 pt-[14vh]">
           {/* First-run / auth-blocked guard: with no API key and no Claude login, every turn would fail — guide the user before they send. */}
           {p.authStatus?.method === "none" && (
             <div className="flex items-start gap-3 rounded-lg border border-warn/30 bg-warn/10 px-4 py-3 text-left">
@@ -200,41 +245,24 @@ export function NewSessionPage(p: {
             allowEmpty // start with it empty for an empty session
             sendLabel={t("newSessionPage.sendLabel")}
             placeholder={t("newSessionPage.placeholder")}
-            // Speed sits after model/effort on every surface (same order as the conversation composer): for Claude the
-            // composer renders it from controls; Codex brings its own model/effort selects in leftSlot, so it follows them.
-            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort, speed, defaultSpeed: defaultSpeed(settings, provider, "master"), provider, onSpeed: setSpeed }}
+            // The model menu holds backend, model, effort and speed: for Claude the composer builds model/effort/speed from
+            // controls; Codex brings its own model/effort/speed fields (its "" default option), so it also passes the summary.
+            controls={isCodex ? undefined : { model, effort, editable: true, onModel: setModel, onEffort: setEffort, speed, defaultSpeed: sessionDefaultSpeed, provider, onSpeed: setSpeed }}
+            menuRows={<>{providerField}{codexFields}</>}
+            menuSummary={codexSummary}
+            menuSide="bottom"
             commands={commands}
             browseDir={browseDir}
             onAttachFile={p.onAttachFile}
             onDropFiles={p.onDropFiles}
             onEscape={p.onClose}
-            leftSlot={<>{folderPicker}{providerSelector}{codexControls}{isCodex && <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "master")} provider={provider} model={effortModel} onChange={setSpeed} />}</>}
-            className="px-3 py-3"
+            leftSlot={folderPicker}
             initialText={initialDraft.text}
             initialImages={initialDraft.images}
             onDraftChange={onDraftChange}
           />
 
-          {p.repos.length > 0 ? (
-            // "Working folder" row — plain text label + the registered repos as 24px ghost text buttons
-            // (current selection = a neutral bg-raised lift, never an accent-filled chip).
-            <div className="flex flex-col items-start gap-1.5">
-              <p className="text-ui text-muted">{t("newSessionPage.pickRepoFolder")}</p>
-              <div className="flex flex-wrap gap-1">
-                {p.repos.map((r) => (
-                  <button
-                    key={r.name}
-                    title={r.path}
-                    onClick={() => setCwd(r.path)}
-                    className={cn("flex h-6 items-center gap-1.5 rounded px-2 text-ui transition-colors",
-                      cwd === r.path ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised hover:text-fg")}
-                  >
-                    <Folder size={12} /> {r.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
+          {p.repos.length === 0 && (
             // Empty-repo CTA (audit #58) — the repo picker used to just vanish here, leaving a blank space below
             // the composer with no hint that registering a repo is the prerequisite for spawning workers.
             p.onRegisterRepo && (

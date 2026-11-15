@@ -175,6 +175,12 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
     && slashMatches.length > 0
     && !slashDismissed
     && !disabled;
+  // A bare "/" with no command catalogue at all says so instead of doing nothing (audit #35). A longer token that
+  // matches nothing (a path like /usr/local) stays quiet.
+  const slashEmpty = slashQuery === ""
+    && slashMatches.length === 0
+    && !slashDismissed
+    && !disabled;
 
   useEffect(() => editor.registerUpdateListener(({
     dirtyElements,
@@ -297,7 +303,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
           fileMention.dismiss();
           return true;
         }
-        if (slashOpen) {
+        if (slashOpen || slashEmpty) {
           event.preventDefault();
           setSlashDismissed(true);
           return true;
@@ -311,7 +317,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
       }, COMMAND_PRIORITY_HIGH),
     ];
     return () => unregister.forEach((dispose) => dispose());
-  }, [editor, fileMention, onEscape, onSubmit, pickCommand, slashMatches, slashOpen, slashSel]);
+  }, [editor, fileMention, onEscape, onSubmit, pickCommand, slashMatches, slashOpen, slashEmpty, slashSel]);
 
   useImperativeHandle(ref, () => ({
     insertFiles: (files) => {
@@ -383,6 +389,11 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
               {command.description && <span className="line-clamp-1 w-full text-meta text-muted">{command.description}</span>}
             </button>
           ))}
+        </div>
+      )}
+      {slashEmpty && (
+        <div role="status" className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 w-[min(420px,100%)] origin-bottom-left px-2.5 py-1.5 text-ui text-muted", MENU_SURFACE)}>
+          {t("composer.noCommands")}
         </div>
       )}
       {fileMention.open && (

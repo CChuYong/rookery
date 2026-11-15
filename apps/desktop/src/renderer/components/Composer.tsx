@@ -5,17 +5,19 @@ import { ImageAttachments } from "./ImageAttachments.js";
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent, ReactNode } from "react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
-import { Send, Paperclip, Square, Loader2, MessageCircleQuestion, LifeBuoy } from "lucide-react";
+import { Paperclip, Square, Loader2, MessageCircleQuestion, LifeBuoy } from "lucide-react";
 import { baseName as basename } from "../lib/path.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { Button } from "../ui/button.js";
-import { Input } from "../ui/input.js";
+import { Input, Select } from "../ui/input.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import type { SpeedObservation, SpeedPreference } from "@daemon/core/speed.js";
-import { SpeedControl } from "./SpeedControl.js";
+import { SpeedControl, SpeedMismatchDot, speedState } from "./SpeedControl.js";
+import { ChromeMenu, ComposerFooter, COMPOSER_BOX, MenuField, SendButton } from "./ComposerChrome.js";
+import { Tooltip } from "./Tooltip.js";
 import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
 
@@ -23,9 +25,8 @@ import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
 // interrupt normally lands in ~1-2s; past this, the turn is almost certainly wedged in a long tool call/workflow.
 const STUCK_STOP_MS = 6000;
 
-// Model/effort/permission selects live in the composer's quiet bottom toolbar — borderless text buttons
-// (T3's "Opus 4.8 · High" convention), not a bordered form field (that look is reserved for the textarea well itself).
-const CHIP_SELECT = "[field-sizing:content] h-6 min-w-0 cursor-pointer appearance-none rounded border-0 bg-transparent px-1.5 text-ui text-fg-dim transition-colors hover:bg-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-40";
+// The trigger reads "Opus 4.8 · High" (T3's convention); the live model list labels some models "Claude …".
+export const shortModelLabel = (label: string): string => label.replace(/^Claude\s+/, "");
 
 // Model/effort controls at the bottom of the input box. editable=true means selectable (master session, before spawn),
 // false means a read-only badge (running worker — model is fixed at spawn time).
@@ -90,8 +91,11 @@ export interface ComposerProps {
   onCommandAction?: (action: CommandAction, argument?: string) => void;
   busy?: boolean; // turn in progress → the send button becomes a stop button
   onStop?: () => void;
-  onRecover?: () => void; // worker only: a soft interrupt (onStop) can't stop a turn wedged in a long tool call / Dynamic Workflow. When provided, a "Recover" affordance appears if Stop doesn't settle in time (worker.recover — hard-kill + resume in place).
+  onRecover?: () => void | Promise<void>; // worker only: a soft interrupt (onStop) can't stop a turn wedged in a long tool call / Dynamic Workflow. When provided, a "Recover" affordance appears if Stop doesn't settle in time (worker.recover — hard-kill + resume in place).
   leftSlot?: ReactNode; // per-page widget to insert at the left of the controls row (e.g. the new session's folder picker)
+  menuRows?: ReactNode; // extra rows at the top of the model menu (e.g. the new session's agent backend, codex model/effort)
+  menuSummary?: string; // trigger text when the caller owns the model fields (no `controls`)
+  menuSide?: "top" | "bottom"; // where the model menu opens (default above — the conversation composer sits at the bottom)
   onEscape?: () => void; // Esc when no popup is open (e.g. close the new session). Esc with a popup open only closes the popup.
   allowEmpty?: boolean; // allow sending empty input (new session: empty means start a blank session)
   autoFocus?: boolean;
@@ -117,6 +121,9 @@ export function Composer({
   onStop,
   onRecover,
   leftSlot,
+  menuRows,
+  menuSummary,
+  menuSide = "top",
   onEscape,
   allowEmpty = false,
   autoFocus = false,
@@ -184,6 +191,13 @@ export function Composer({
   // reveal a "Recover" affordance (onRecover → worker.recover: hard-kill + resume in place). Master has no
   // onRecover, so this never fires for it (its interrupt lands normally anyway).
   const [stuck, setStuck] = useState(false);
+  // Recover is a request with a result: show it in flight and swallow repeat clicks until it settles (audit #34).
+  const [recovering, setRecovering] = useState(false);
+  const recover = async (): Promise<void> => {
+    if (!onRecover || recovering) return;
+    setRecovering(true);
+    try { await onRecover(); } catch { /* the caller reports the failure */ } finally { if (alive.current) setRecovering(false); }
+  };
   useEffect(() => {
     if (!busy) { setStuck(false); return; } // turn ended → clear the escalation for the next turn
     if (!stopping || !onRecover) return; // only after Stop was clicked, and only where recover is available (workers)
@@ -221,7 +235,10 @@ export function Composer({
       if (result) await result;
       // Acceptance may navigate/unmount. The owning draft is cleared by the send path in that case.
       if (alive.current) { promptRef.current?.clear(); setImages([]); }
-    } catch { if (alive.current) setError(t("images.sendFailed")); }
+    } catch (err) {
+      // The one place a failed send is reported: inline, next to the kept draft (callers don't toast it too, audit #32).
+      if (alive.current) setError(t("composer.sendFailed", { reason: err instanceof Error ? err.message : String(err) }));
+    }
     finally { sendingRef.current = false; if (alive.current) setSending(false); }
   };
   const submit = () => { void submitTo(); };
@@ -267,11 +284,104 @@ export function Composer({
     if (paths.length && onDropFiles) addAttachments(onDropFiles(paths));
   };
 
+  const hasText = !!text.trim() || images.length > 0;
+  const editable = !!controls?.editable;
+  const modelLabel = controls ? shortModelLabel(modelList.find((m) => m.id === controls.model)?.label ?? controls.model) : "";
+  const showEffort = controls?.effort !== undefined && effortSupported(controls.model);
+  const speed = controls?.speed !== undefined && controls ? speedState(t, { speed: controls.speed, defaultSpeed: controls.defaultSpeed, provider: controls.provider, model: controls.model, pendingNextTurn: controls.speedPending, observation: controls.speedObservation, lastObservation: controls.speedLastObservation }, codexModels) : null;
+  // The trigger names model · effort, and only the choices that differ from the default (audit #85): a permission mode
+  // other than Bypass, and Fast.
+  const summary = controls
+    ? [modelLabel, showEffort ? t(effortLabelKey(controls.effort!)) : null,
+       controls.permissionMode && controls.permissionMode !== "bypassPermissions" ? permLabel(controls.permissionMode, t) : null,
+       speed?.requested === "fast" ? t("speed.fast") : null].filter(Boolean).join(" · ")
+    : menuSummary ?? "";
+
+  // Model, effort, permission mode and speed in one menu (IDE skill: "permission mode lives in the model menu").
+  const menuFields = controls && editable ? (
+    <>
+      <MenuField label={t("composer.fieldModel")}>
+        {codexFreeText ? (
+          <Input size="sm" className="w-full" title={t("composer.modelTitle")} value={controls.model} disabled={disabled} onChange={(e) => controls.onModel?.(e.target.value)} />
+        ) : (
+          <Select
+            size="sm"
+            className="w-full"
+            title={t("composer.modelTitle")}
+            value={controls.model}
+            disabled={disabled}
+            onChange={(e) => {
+              const m = e.target.value;
+              controls.onModel?.(m);
+              // codex: picking a model pre-selects that model's default reasoning effort (parity with the spawn pickers).
+              if (codexActive) { const de = codexDefaultEffort(m, codexModels); if (de) controls.onEffort?.(de); }
+            }}
+          >
+            {modelList.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+            {!modelList.some((m) => m.id === controls.model) && controls.model && <option value={controls.model}>{controls.model}</option>}
+          </Select>
+        )}
+      </MenuField>
+      {showEffort && (
+        <MenuField label={t("composer.fieldEffort")}>
+          <Select size="sm" className="w-full" title={t("composer.effortTitle")} value={controls.effort} disabled={disabled} onChange={(e) => controls.onEffort?.(e.target.value)}>
+            {effortOptions.map((ef) => (
+              <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+            ))}
+          </Select>
+        </MenuField>
+      )}
+      {controls.permissionMode !== undefined && (
+        <MenuField label={t("composer.fieldPermission")}>
+          <Select size="sm" className="w-full" title={t("composer.permTitle")} value={controls.permissionMode} disabled={disabled} onChange={(e) => controls.onPermissionMode?.(e.target.value)}>
+            {(controls.permissionModes ?? PERMISSION_MODES).map((pm) => (
+              <option key={pm} value={pm}>{permLabel(pm, t)}</option>
+            ))}
+          </Select>
+        </MenuField>
+      )}
+      {controls.speed !== undefined && (
+        <MenuField label={t("speed.label")} hint={t("speed.hint")}>
+          <SpeedControl variant="field" hideLabel speed={controls.speed} defaultSpeed={controls.defaultSpeed} provider={controls.provider} model={controls.model} pendingNextTurn={controls.speedPending} observation={controls.speedObservation} lastObservation={controls.speedLastObservation} onChange={controls.onSpeed} disabled={disabled} />
+        </MenuField>
+      )}
+    </>
+  ) : null;
+  const modelMenu = (menuFields || menuRows) ? (
+    <span className="flex min-w-0 items-center">
+      <ChromeMenu summary={summary} ariaLabel={`${t("composer.modelMenu")}: ${summary}`} side={menuSide} disabled={disabled}>
+        {menuRows}
+        {menuFields}
+      </ChromeMenu>
+      {speed?.degraded && <SpeedMismatchDot title={speed.explanation ?? t("speed.mismatch")} className="ml-0" />}
+    </span>
+  ) : controls ? (
+    // Read-only badge (a fixed model, e.g. a stopped worker): plain text, no menu.
+    <span className="inline-flex min-w-0 items-center gap-1.5 truncate px-1.5 text-meta text-muted" title={t("composer.fixedModelTitle")}>
+      <span className="truncate text-fg-dim">{modelList.find((m) => m.id === controls.model)?.label ?? controls.model}</span>
+      {showEffort && (
+        <>
+          <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
+          <span>{t(effortLabelKey(controls.effort!))}</span>
+        </>
+      )}
+    </span>
+  ) : null;
+
+  const sendReason = disabled ? undefined : importing ? t("images.importing") : !hasText && !allowEmpty ? t("composer.sendEmpty") : undefined;
+  const showStop = busy && onStop && !disabled;
+  // A read-only composer at rest (an ended worker, a Slack session) drops its dead input buttons so it doesn't look
+  // writable; the placeholder says why (audit #117).
+  const inert = disabled && !busy;
+
   return (
     <div
       className={cn(
         // T3's composer well — a quiet surface box, a neutral focus edge (no orange glow/ring).
-        "relative flex flex-col gap-2 rounded-lg border bg-surface px-3 py-2 transition-colors focus-within:border-fg/20",
+        COMPOSER_BOX,
+        "gap-2 px-3 py-2",
         dragOver ? "border-accent/70 bg-accent/5" : "border-line",
         className,
       )}
@@ -301,122 +411,60 @@ export function Composer({
         onEscape={onEscape}
         onCommandAction={(action) => { if (images.length) setError(t("images.command")); else onCommandAction?.(action); }}
       />
-      {/* flex-wrap so the controls reflow onto a second line in a very narrow pane instead of overflowing (the outer <main>
-          now clips, so without wrap the send button could be cut off). */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {leftSlot}
-        {controls &&
-          (controls.editable ? (
-            <>
-              {codexFreeText ? (
-                <Input
-                  size="xs"
-                  className="min-w-0 text-fg-dim"
-                  title={t("composer.modelTitle")}
-                  value={controls.model}
-                  disabled={disabled}
-                  onChange={(e) => controls.onModel?.(e.target.value)}
-                />
+      {/* One row: context and attach on the left, the model menu and the send actions pinned right — the send button
+          never wraps onto a line of its own (audit #85). */}
+      <ComposerFooter
+        left={
+          <>
+            {leftSlot}
+            {!inert && (onAttachFile || window.rookery?.pickAttachment) && (
+              <Tooltip label={t("composer.attachFile")} align="start">
+                <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled || sending || importing || picking} onClick={() => void attach()}>
+                  <Paperclip size={14} />
+                </Button>
+              </Tooltip>
+            )}
+          </>
+        }
+        right={
+          <>
+            {modelMenu}
+            {onSideSend && !disabled && (
+              <Tooltip label={hasText ? t("composer.sideQuestionHint") : t("composer.sideQuestionEmpty")} align="end">
+                <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.sideQuestion")} disabled={sending || importing || !hasText} onClick={submitSide}>
+                  <MessageCircleQuestion size={14} />
+                </Button>
+              </Tooltip>
+            )}
+            {/* Stop stays visible for the whole turn so an in-progress turn can always be aborted (audit #23). Once you type/attach
+                something, Send appears alongside Stop (Stop first) so you can either abort the turn or queue the next message. When
+                disabled (e.g. Slack readonly), the stop button is hidden. */}
+            {showStop && (
+              stuck && onRecover ? (
+                // Interrupt didn't land — the turn is wedged. Turn the dead spinner into an actionable Recover
+                // (worker.recover: hard-kill the stuck subprocess and resume the session in place → back to idle).
+                <Button variant="danger" size="icon" className="h-[26px] w-[26px] rounded-md bg-raised" aria-label={t("composer.recover")} title={t("composer.recoverHint")} loading={recovering} onClick={() => void recover()}>
+                  <LifeBuoy size={14} />
+                </Button>
               ) : (
-                <select
-                  className={CHIP_SELECT}
-                  title={t("composer.modelTitle")}
-                  value={controls.model}
-                  disabled={disabled}
-                  onChange={(e) => {
-                    const m = e.target.value;
-                    controls.onModel?.(m);
-                    // codex: picking a model pre-selects that model's default reasoning effort (parity with the spawn pickers).
-                    if (codexActive) { const de = codexDefaultEffort(m, codexModels); if (de) controls.onEffort?.(de); }
-                  }}
-                >
-                  {modelList.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
-                  ))}
-                  {!modelList.some((m) => m.id === controls.model) && controls.model && <option value={controls.model}>{controls.model}</option>}
-                </select>
-              )}
-              {controls.effort !== undefined && effortSupported(controls.model) && (
-                <select
-                  className={CHIP_SELECT}
-                  title={t("composer.effortTitle")}
-                  value={controls.effort}
-                  disabled={disabled}
-                  onChange={(e) => controls.onEffort?.(e.target.value)}
-                >
-                  {effortOptions.map((ef) => (
-                    <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
-                  ))}
-                </select>
-              )}
-              {controls.permissionMode !== undefined && (
-                <select
-                  className={CHIP_SELECT}
-                  title={t("composer.permTitle")}
-                  value={controls.permissionMode}
-                  disabled={disabled}
-                  onChange={(e) => controls.onPermissionMode?.(e.target.value)}
-                >
-                  {(controls.permissionModes ?? PERMISSION_MODES).map((pm) => (
-                    <option key={pm} value={pm}>{permLabel(pm, t)}</option>
-                  ))}
-                </select>
-              )}
-            </>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-meta text-muted" title={t("composer.fixedModelTitle")}>
-              <span className="text-fg-dim">{modelList.find((m) => m.id === controls.model)?.label ?? controls.model}</span>
-              {controls.effort !== undefined && effortSupported(controls.model) && (
-                <>
-                  <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
-                  <span>{t(effortLabelKey(controls.effort))}</span>
-                </>
-              )}
-            </span>
-          ))}
-        {controls?.speed !== undefined && <SpeedControl speed={controls.speed} defaultSpeed={controls.defaultSpeed} provider={controls.provider} model={controls.model} pendingNextTurn={controls.speedPending} observation={controls.speedObservation} lastObservation={controls.speedLastObservation} onChange={controls.onSpeed} disabled={disabled || !controls.editable} />}
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          {onSideSend && !disabled && (
-            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.sideQuestion")} disabled={sending || importing || (!text.trim() && !images.length)} onClick={submitSide}>
-              <MessageCircleQuestion size={14} />
-            </Button>
-          )}
-          {(onAttachFile || window.rookery?.pickAttachment) && (
-            <Button variant="ghost" size="iconSm" className="h-6 w-6" aria-label={t("composer.attachFile")} disabled={disabled || sending || importing || picking} onClick={() => void attach()}>
-              <Paperclip size={14} />
-            </Button>
-          )}
-          {/* Stop stays visible for the whole turn so an in-progress turn can always be aborted (audit #23). Once you type/attach
-              something, Send appears alongside Stop (Stop first) so you can either abort the turn or queue the next message. When
-              disabled (e.g. Slack readonly), the stop button is hidden. */}
-          {busy && onStop && !disabled && (
-            stuck && onRecover ? (
-              // Interrupt didn't land — the turn is wedged. Turn the dead spinner into an actionable Recover
-              // (worker.recover: hard-kill the stuck subprocess and resume the session in place → back to idle).
-              <Button variant="danger" size="icon" className="h-[26px] w-[26px] rounded-md bg-raised" aria-label={t("composer.recover")} title={t("composer.recoverHint")} onClick={onRecover}>
-                <LifeBuoy size={14} />
-              </Button>
-            ) : (
-              <Button variant="danger" size="icon" className="h-[26px] w-[26px] rounded-md bg-raised" disabled={stopping} aria-label={t("composer.stop")} title={t("composer.stopHint")} onClick={() => { setStopping(true); onStop(); }}>
-                {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
-              </Button>
-            )
-          )}
-          {!(busy && onStop && !disabled && !text.trim() && !images.length) && (
-            // White-on-black send, like T3 — the accent stays off the send action entirely.
-            <Button
-              variant="primary"
-              size="icon"
-              className="h-[26px] w-[26px] rounded-full bg-fg text-ink hover:bg-fg/90 disabled:bg-raised disabled:text-faint"
-              aria-label={sendLabelText}
-              disabled={disabled || sending || importing || (!text.trim() && !images.length && !allowEmpty)}
-              onClick={submit}
-            >
-              <Send size={14} />
-            </Button>
-          )}
-        </div>
-      </div>
+                <Button variant="danger" size="icon" className="h-[26px] w-[26px] rounded-md bg-raised" disabled={stopping} aria-label={t("composer.stop")} title={t("composer.stopHint")} onClick={() => { setStopping(true); onStop(); }}>
+                  {stopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
+                </Button>
+              )
+            )}
+            {!inert && !(showStop && !hasText) && (
+              // White-on-black send, like T3 — the accent stays off the send action entirely.
+              <SendButton
+                label={sendLabelText}
+                hint={sendReason}
+                loading={sending}
+                disabled={disabled || importing || (!hasText && !allowEmpty)}
+                onClick={submit}
+              />
+            )}
+          </>
+        }
+      />
     </div>
   );
 }

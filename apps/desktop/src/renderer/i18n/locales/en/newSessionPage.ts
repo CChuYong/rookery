@@ -13,4 +13,6 @@ export default {
   "newSessionPage.authBlockedTitle": "Claude isn't authenticated yet",
   "newSessionPage.authBlockedBody": "The master and workers can't run until you log in with a Claude subscription or set an API key. Then retry.",
   "newSessionPage.authBlockedCta": "Open Settings → Claude",
+  "newSessionPage.folderMenu": "Working folder",
+  "newSessionPage.chooseFolder": "Choose folder…",
 } satisfies Catalog;

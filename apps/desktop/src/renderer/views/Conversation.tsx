@@ -2,6 +2,7 @@ import type { ImageRef } from "@daemon/core/image-input.js";
 import { memo } from "react";
 import type { LogItem } from "../store/reduce.js";
 import { MessageList } from "../components/MessageList.js";
+import type { PendingMessage } from "../components/MessageList.js";
 import type { InteractionAnswer } from "../components/InteractionCard.js";
 import { Composer } from "../components/Composer.js";
 import type { ComposerProps } from "../components/Composer.js";
@@ -21,13 +22,15 @@ export interface ConversationProps extends ComposerProps {
   onOpenFile?: (path: string) => void; // click a tool-card filename chip → open the file tab
   onSelectWorker?: (id: string) => void; // click a spawned worker marker/card → navigate to that worker's view (repo tab) (master conversation only)
   onRespond?: (requestId: string, res: InteractionAnswer) => void; // respond to an approval/question card (master conversation only)
+  pending?: PendingMessage[]; // optimistic messages, rendered as the transcript's last rows
+  pendingQueued?: boolean; // a turn is running → pending messages read "Queued", otherwise "Sending…"
 }
 
 // Message list + input composer. The composer body (editor/popup/attachments/controls) is owned by Composer.
-function ConversationImpl({ items, kind, loaded, loadFailed, onRetryHistory, onRestoreInput, onRecoverInput, onOpenFile, onSelectWorker, onRespond, ...composer }: ConversationProps): JSX.Element {
+function ConversationImpl({ items, kind, loaded, loadFailed, onRetryHistory, onRestoreInput, onRecoverInput, onOpenFile, onSelectWorker, onRespond, pending, pendingQueued, ...composer }: ConversationProps): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MessageList items={items} kind={kind} loaded={loaded} loadFailed={loadFailed} onRetryHistory={onRetryHistory} onRetryInput={composer.disabled ? undefined : composer.onSend} onRestoreInput={onRestoreInput} onRecoverInput={onRecoverInput} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} onRespond={onRespond} />
+      <MessageList items={items} kind={kind} loaded={loaded} loadFailed={loadFailed} onRetryHistory={onRetryHistory} onRetryInput={composer.disabled ? undefined : composer.onSend} onRestoreInput={onRestoreInput} onRecoverInput={onRecoverInput} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} onRespond={onRespond} pending={pending} pendingQueued={pendingQueued} />
       {/* same centered column as the message list, so the composer lines up under the prose above it. */}
       <div className="bg-ink py-3">
         <div className="mx-auto w-full max-w-[720px] px-6">

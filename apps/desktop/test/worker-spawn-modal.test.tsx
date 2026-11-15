@@ -255,13 +255,14 @@ describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
     expect(onSpawn.mock.calls[0]![8]).toBe(5);
   });
 
-  it.each(["abc", "0", "-3"])("invalid cost budget %s → onSpawn's trailing arg is undefined", (value) => {
+  // audit #37: an invalid budget used to be dropped silently (spawning with no limit); now it blocks the spawn.
+  it.each(["abc", "0", "-3"])("invalid cost budget %s → the spawn is blocked (no silent drop)", (value) => {
     const { onSpawn } = renderModal();
     const input = screen.getByTitle("비용 예산 (USD, 이 워커)");
 
     fireEvent.change(input, { target: { value } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "t1" } });
     fireEvent.click(screen.getByRole("button", { name: "spawn" }));
-    expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
+    expect(onSpawn).not.toHaveBeenCalled();
   });
 });

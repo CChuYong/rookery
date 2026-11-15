@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/cn.js";
@@ -22,9 +23,10 @@ const field = cva(
 );
 
 export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "size">, VariantProps<typeof field> {}
-export function Input({ className, size, ...props }: InputProps): JSX.Element {
-  return <input className={cn(field({ size }), className)} {...props} />;
-}
+// forwardRef so a form can move focus to a field (the spawn page focuses an invalid budget).
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ className, size, ...props }, ref) {
+  return <input ref={ref} className={cn(field({ size }), className)} {...props} />;
+});
 
 export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "size">, VariantProps<typeof field> {}
 export function Select({ className, size, ...props }: SelectProps): JSX.Element {

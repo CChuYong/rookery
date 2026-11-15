@@ -313,6 +313,7 @@ export function App(): JSX.Element {
   const spawnRepoRow = s.overlay === "spawnWorker" ? s.repos.find((repo) => repo.id === s.repoSettingsId) ?? null : null;
   const spawnRepo = spawnRepoRow?.name ?? null;
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
+  const [spawnBranchesState, setSpawnBranchesState] = useState<"loading" | "ready" | "failed">("loading");
   // Cross-provider fork dialog target (master session or worker) — the right-click "Fork" opens this instead of an instant fork.
   const [forkTarget, setForkTarget] = useState<{ kind: "master" | "worker"; id: string; sourceProvider: string } | null>(null);
   // Bump to remount the master ConversationPane — the composer reads its draft only on mount, so a
@@ -338,13 +339,17 @@ export function App(): JSX.Element {
   // When the spawn modal opens, load the base-branch candidates for that repo.
   useEffect(() => {
     setSpawnBranches([]); // never offer the previous repo's branches while the new repo's list loads
+    setSpawnBranchesState("loading"); // the picker holds its place (disabled) instead of popping in later (audit #36)
     if (!spawnRepo || !client) return;
     let live = true; // prevent a late response from the previous repo from overwriting when spawnRepo changes
-    void client.request({ type: "repo.branches", repo: spawnRepo }).then((r) => { if (live) setSpawnBranches(r.branches ?? []); }).catch(() => { if (live) setSpawnBranches([]); });
+    void client.request({ type: "repo.branches", repo: spawnRepo })
+      .then((r) => { if (live) { setSpawnBranches(r.branches ?? []); setSpawnBranchesState("ready"); } })
+      .catch(() => { if (live) { setSpawnBranches([]); setSpawnBranchesState("failed"); } });
     return () => { live = false; };
   }, [spawnRepo]);
+  // Failures propagate: the spawn page shows "search failed" instead of an empty "no results" (audit #36).
   const searchSource = (provider: "github" | "linear", query: string): Promise<SourceItem[]> =>
-    client ? client.request({ type: "source.search", provider, query, repo: spawnRepo ?? undefined }).then((r) => r.items ?? []).catch(() => []) : Promise.resolve([]);
+    client ? client.request({ type: "source.search", provider, query, repo: spawnRepo ?? undefined }).then((r) => r.items ?? []) : Promise.reject(new Error("not connected"));
   // The terminal is tied to "the agent page you're currently viewing" — it must also factor in showRepos so sessions↔repos stay independent.
   // Page key: the worker id if viewing a worker in repos, otherwise (= sessions view) the active session id. None → null (no panel/toggle).
   const termPageKey = showRepos
@@ -488,6 +493,7 @@ export function App(): JSX.Element {
   }, [s.daemon, s.sessionsLoaded, s.fleetLoaded, loadWorkerHistory]);
 
   // When the active conversation pane changes, prefetch and cache that context's slash command/skill candidates (for / autocomplete).
+  const commandsTarget = useRef<string | null>(null);
   useEffect(() => {
     const c = client;
     if (s.daemon !== "up" || !c) return;
@@ -499,8 +505,12 @@ export function App(): JSX.Element {
     }
     if (!msg) { useStore.getState().setCommands([]); return; }
     let live = true; // prevent a late commands response from the previous context from overwriting when switching conversation panes
+    // Clear on a target switch and on failure: the previous target's commands (another provider's /name vs $name) must
+    // never linger (audit #35). A refetch for the same target (capability change) keeps the list until the reply lands.
+    const target = s.activeWorkerId ?? s.activeSessionId;
+    if (commandsTarget.current !== target) { commandsTarget.current = target; useStore.getState().setCommands([]); }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    void c.request(msg).then((r) => { if (live) useStore.getState().setCommands(r.commands ?? []); }).catch(() => {});
+    void c.request(msg).then((r) => { if (live) useStore.getState().setCommands(r.commands ?? []); }).catch(() => { if (live) useStore.getState().setCommands([]); });
     return () => { live = false; };
   }, [s.activeSessionId, s.activeWorkerId, s.capabilityGeneration, s.daemon]);
 
@@ -764,26 +774,22 @@ export function App(): JSX.Element {
     const c = client;
     if (!c) throw new Error("not connected");
     const acceptedDraft = useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY];
-    try {
-      const result = await c.request({type:"session.create",speed: opts.speed,...(opts.cwd ? {cwd:opts.cwd}:{}),...(opts.provider ? {provider:opts.provider as "claude"|"codex"}:{})});
-      const list = await c.request({type:"session.list"});
-      useStore.getState().setSessions(list.sessions ?? []);
-      const sid = result.sessionId;
-      useStore.getState().setOverride(sid,{model:opts.model,effort:opts.effort});
-      useStore.getState().setHistoryLoaded(sid,true);
-      const prompt=opts.prompt?.trim() ?? "";
-      if(prompt || opts.images?.length) {
-        const clientMsgId=crypto.randomUUID();
-        useStore.getState().pushPending(sid,{clientMsgId,text:prompt,...(opts.images?.length ? {images:opts.images}:{})});
-        try { await c.request({type:"session.send",sessionId:sid,text:prompt,images:opts.images,model:opts.model,effort:opts.effort,speed: opts.speed,clientMsgId}); }
-        catch(error) { useStore.getState().dropPending(sid,clientMsgId); throw error; }
-      }
-      clearAcceptedDraft(NEW_SESSION_DRAFT_KEY,prompt,opts.images,acceptedDraft);
-      navigate({overlay:null}); select(sid);
-    } catch(error) {
-      toast.error(tRef.current("toast.sendFailed"),String(error));
-      throw error;
+    // A failure is thrown to the composer, which reports it inline next to the kept draft (one surface, audit #32).
+    const result = await c.request({type:"session.create",speed: opts.speed,...(opts.cwd ? {cwd:opts.cwd}:{}),...(opts.provider ? {provider:opts.provider as "claude"|"codex"}:{})});
+    const list = await c.request({type:"session.list"});
+    useStore.getState().setSessions(list.sessions ?? []);
+    const sid = result.sessionId;
+    useStore.getState().setOverride(sid,{model:opts.model,effort:opts.effort});
+    useStore.getState().setHistoryLoaded(sid,true);
+    const prompt=opts.prompt?.trim() ?? "";
+    if(prompt || opts.images?.length) {
+      const clientMsgId=crypto.randomUUID();
+      useStore.getState().pushPending(sid,{clientMsgId,text:prompt,...(opts.images?.length ? {images:opts.images}:{})});
+      try { await c.request({type:"session.send",sessionId:sid,text:prompt,images:opts.images,model:opts.model,effort:opts.effort,speed: opts.speed,clientMsgId}); }
+      catch(error) { useStore.getState().dropPending(sid,clientMsgId); throw error; }
     }
+    clearAcceptedDraft(NEW_SESSION_DRAFT_KEY,prompt,opts.images,acceptedDraft);
+    navigate({overlay:null}); select(sid);
   };
   const send = useCallback(async (text: string, images?: ImageRef[]) => {
     const st = useStore.getState();
@@ -806,9 +812,9 @@ export function App(): JSX.Element {
     // request(): a rejected send (unknown session, runTurn throw, disconnected) rolls the pending bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished while the composer stayed stuck busy.
     if (!client) { st.dropPending(sid,clientMsgId); throw new Error("not connected"); }
+    // The rejection reaches the composer (or the failed bubble's Retry), which reports it inline — no toast too (audit #32).
     await client.request({ type: "session.send", sessionId: sid, text, images, speed: st.sessions.find((x) => x.id === sid)?.speed, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
       useStore.getState().dropPending(sid, clientMsgId);
-      toast.error(tRef.current("toast.sendFailed"), String(e));
       throw e;
     });
     clearAcceptedDraft(sid,text,images,acceptedDraft);
@@ -848,8 +854,7 @@ export function App(): JSX.Element {
     if (!client) { useStore.getState().dropWorkerPending(id,clientMsgId); throw new Error("not connected"); }
     await client.request({ type: "worker.send", id, text, images, speed: useStore.getState().fleet[id]?.speed, clientMsgId }).catch((e) => {
       useStore.getState().dropWorkerPending(id, clientMsgId);
-      toast.error(tRef.current("toast.sendFailed"), String(e));
-      throw e;
+      throw e; // reported inline by the composer / failed bubble (audit #32)
     });
     clearAcceptedDraft(id,text,images,acceptedDraft);
   }, []);
@@ -880,21 +885,23 @@ export function App(): JSX.Element {
   const subStopTask = useCallback((id: string, taskId: string) => { void client?.request({ type: "worker.task.stop", id, taskId }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
   // Recover a wedged worker whose soft interrupt won't land (stuck in a long tool call / Dynamic Workflow): hard-kill
   // and resume the session in place → idle, still usable. Surfaced by the composer's Stop escalation (onRecover).
-  const subRecover = useCallback((id: string) => { void client?.request({ type: "worker.recover", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
+  // Returns the request so the composer can show Recover in flight (audit #34); success is confirmed with an info toast.
+  const subRecover = useCallback(async (id: string): Promise<void> => {
+    if (!client) return;
+    await client.request({ type: "worker.recover", id })
+      .then(() => { toast.info(tRef.current("composer.recovered")); })
+      .catch((e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); });
+  }, []);
   const startSide = useCallback(async (sourceKind: "master" | "worker", sourceId: string, text: string, model?: string, effort?: string, images?: ImageRef[]): Promise<string> => {
     const c = client;
     if (!c) throw new Error("not connected");
-    try {
-      const result = await c.request({ type: "side.start", sourceKind, sourceId, text, images, model, effort });
-      return result.sideId;
-    } catch (error) {
-      toast.error(tRef.current("toast.sendFailed"), String(error));
-      throw error;
-    }
+    // Failures surface where the question was asked: inline in the composer, or a toast for a /side command.
+    const result = await c.request({ type: "side.start", sourceKind, sourceId, text, images, model, effort });
+    return result.sideId;
   }, []);
   const sendSide = useCallback(async (sideId: string, text: string, images?: ImageRef[]) => {
     if (!client) throw new Error("not connected");
-    await client.request({ type: "side.send", sideId, text, images }).catch((error) => {toast.error(tRef.current("toast.sendFailed"), String(error)); throw error;});
+    await client.request({ type: "side.send", sideId, text, images }); // a failure is reported inline by the drawer's composer
   }, []);
   const stopSide = useCallback((sideId: string) => {
     void client?.request({ type: "side.stop", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
@@ -1328,6 +1335,7 @@ export function App(): JSX.Element {
             defaultEffort={s.settings?.workerEffort ?? "high"}
             codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}
             branches={spawnBranches}
+            branchesState={spawnBranchesState}
             integrations={s.integrations ?? undefined}
             searchSource={searchSource}
             onSpawn={spawnSub}

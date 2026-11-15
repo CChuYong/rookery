@@ -267,11 +267,11 @@ it.each(["master", "worker"] as const)(
         onSideStart={start}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(useDraftStore.getState().byPage.target.images).toEqual([image]);
     expect(screen.getByText("diagram.png")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
     expect(start.mock.calls[1]).toEqual(["", [image]]);
   },
@@ -417,7 +417,7 @@ it("closing Side while it prepares preserves the source image draft and closes t
       onSideClose={close}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+  fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
   fireEvent.click(screen.getByRole("button", { name: "닫기" }));
   await act(async () => opened("late-side"));
   expect(close).toHaveBeenCalledWith("late-side");

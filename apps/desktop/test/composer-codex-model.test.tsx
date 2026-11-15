@@ -12,6 +12,8 @@ const CODEX = [
   { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high", "xhigh"], isDefault: false },
 ];
 const MODEL_TITLE = /모델|Model/;
+// The model/effort selectors live in the composer's model menu (audit #85) — open it before querying options by role.
+const openModelMenu = (): void => { fireEvent.click(screen.getByRole("button", { name: /모델 설정|Model settings/ })); };
 
 describe("Composer codex model/effort (codex-aware controls)", () => {
   beforeEach(() => useStore.getState().setCodexModels(null));
@@ -19,6 +21,7 @@ describe("Composer codex model/effort (codex-aware controls)", () => {
   it("provider=codex + codexModels set → model dropdown lists the codex catalog (displayName), not Claude", () => {
     useStore.getState().setCodexModels(CODEX);
     render(<Composer onSend={() => {}} controls={{ provider: "codex", model: "gpt-5.5", effort: "xhigh", editable: true, onModel: () => {}, onEffort: () => {} }} />);
+    openModelMenu();
     const model = screen.getByTitle(MODEL_TITLE) as HTMLSelectElement;
     expect(model.value).toBe("gpt-5.5");
     expect(screen.getByRole("option", { name: "GPT-5.5" })).toBeInTheDocument();
@@ -52,6 +55,7 @@ describe("Composer codex model/effort (codex-aware controls)", () => {
   it("provider=claude → Claude models even when a codex catalog is loaded", () => {
     useStore.getState().setCodexModels(CODEX);
     render(<Composer onSend={() => {}} controls={{ provider: "claude", model: "claude-opus-4-8", effort: "high", editable: true, onModel: () => {}, onEffort: () => {} }} />);
+    openModelMenu();
     expect(screen.getByRole("option", { name: /Opus/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "GPT-5.5" })).toBeNull();
   });

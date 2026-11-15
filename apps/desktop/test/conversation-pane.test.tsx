@@ -24,7 +24,7 @@ describe("ConversationPane Side drawer", () => {
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
     const editor = screen.getByRole("textbox");
     setPromptEditorText(editor, "why this approach?");
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
     expect(onSideStart).toHaveBeenCalledWith("why this approach?");
     expect(await screen.findByText("메인 세션의 문맥 · 읽기 전용")).toBeInTheDocument();
     expect(screen.getByText("why this approach?")).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe("ConversationPane Side drawer", () => {
     expect(drawer.closest(".conversation-pane")?.className).toContain("@container");
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
-    expect(screen.queryByLabelText("Side 질문")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Side 질문" })).toBeNull(); // the drawer (the composer button now shares the name, audit #29)
   });
 
   it("shows live-worktree copy and routes worker Side follow-ups independently", async () => {
@@ -45,7 +45,7 @@ describe("ConversationPane Side drawer", () => {
     render(<ConversationPane kind="worker" id="w1" onSend={() => {}} onSideStart={onSideStart} onSideSend={onSideSend} />);
     const mainEditor = screen.getByRole("textbox");
     setPromptEditorText(mainEditor, "what changed?");
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
     expect(await screen.findByText("이 워커의 문맥 · live worktree · 읽기 전용")).toBeInTheDocument();
     await act(async () => {
       useStore.setState({ sideConversations: { "side-w": { sourceKind: "worker", sourceId: "w1", status: "idle", items: [{ kind: "message", role: "user", content: "what changed?" }] } } } as never);
@@ -76,7 +76,7 @@ describe("ConversationPane Side drawer", () => {
     ]} />);
     const editor = screen.getByRole("textbox");
     setPromptEditorText(editor, "open side");
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "Side 질문" }));
     await screen.findByLabelText("Side 질문");
     setPromptEditorText(editor, "/");
     expect(screen.getByText("/review")).toBeInTheDocument();

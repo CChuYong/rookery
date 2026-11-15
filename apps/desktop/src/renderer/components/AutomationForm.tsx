@@ -493,7 +493,8 @@ export function AutomationForm(p: {
               </div>
             )}
 
-            <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, actionKind)} provider={provider} model={effectiveModel || (provider === "codex" ? (actionKind === "master" ? settings?.codexMasterModel : settings?.codexWorkerModel) : (actionKind === "master" ? settings?.masterModel : settings?.workerModel)) || ""} onChange={setSpeed} />
+            {/* A labelled form field like its neighbours, not the composer's ghost chip (audit #92). */}
+            <SpeedControl variant="field" speed={speed} defaultSpeed={defaultSpeed(settings, provider, actionKind)} provider={provider} model={effectiveModel || (provider === "codex" ? (actionKind === "master" ? settings?.codexMasterModel : settings?.codexWorkerModel) : (actionKind === "master" ? settings?.masterModel : settings?.workerModel)) || ""} onChange={setSpeed} />
             {provider === "codex" && <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>}
             {/* costBudgetUsd — shown for BOTH action kinds (KEY DIVERGENCE from maxTurns, which is worker-only):
                 the daemon checks this at runTurn (master, WARN-only) and at fleet.spawn (worker, STOP). */}

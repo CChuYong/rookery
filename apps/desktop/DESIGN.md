@@ -40,6 +40,12 @@ Shared patterns (use them, don't restyle per call site):
   In-form choices use `Segment` `pill`; tab strips use `Segment` `underline` or the tokens above.
 - `ui/dialog.tsx` — `dialogPanelClass({ size: "sm" | "md" })` (360 / 480px, 8px radius, `p-5`, `shadow-pop`) and
   `dialogOverlayClass()`; every modal panel uses them.
+- `components/ComposerChrome.tsx` — the three prompt surfaces (conversation, New session, New worker) share
+  `COMPOSER_BOX` (6px radius), `ComposerFooter` (context left, actions pinned right — send never wraps alone),
+  `SendButton` (26px neutral circle, arrow-up, tooltip names the action or why it is disabled) and `ChromeMenu` +
+  `MenuField` (the model menu: backend, model, effort, permission mode, speed; the trigger reads `Opus 4.8 · High`
+  plus only non-default choices). Enter submits on all three; Shift+Enter is a newline.
+- A failed send is reported once, inline in the composer next to the kept draft; App send paths don't toast it too.
 - Confirm rule — anything irreversible (delete, revert, discard, secret removal, token rotation) goes through
   `ui/confirm-dialog.tsx` (`secondary` adds a middle action); a light, undoable action runs at once and offers Undo in
   `toast.info(text, { label, onClick })`. No same-button double-click confirms.

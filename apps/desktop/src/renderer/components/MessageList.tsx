@@ -1,7 +1,7 @@
 import type { ImageRef } from "@daemon/core/image-input.js";
 import { MessageImages } from "./MessageImages.js";
 import { memo, useEffect, useRef, useState, cloneElement, type ReactElement } from "react";
-import { MessageSquareDashed, ArrowDown } from "lucide-react";
+import { MessageSquareDashed, ArrowDown, Clock } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { ToolGroup } from "./ToolGroup.js";
 import { InteractionCard } from "./InteractionCard.js";
@@ -16,6 +16,12 @@ import { useT } from "../i18n/provider.js";
 import { SkeletonRows } from "./Skeleton.js";
 
 type ToolItem = Extract<LogItem, { kind: "tool" }>;
+export interface PendingMessage { clientMsgId: string; text: string; images?: ImageRef[] }
+const NO_PENDING: PendingMessage[] = [];
+
+// The user bubble — confirmed, pending and failed messages share it so nothing jumps when an echo lands (audit #30);
+// only the edge, opacity and a small badge tell them apart.
+const USER_BUBBLE = "max-w-[80%] self-end [overflow-wrap:anywhere] rounded-md bg-raised px-3 py-2 text-prose leading-[1.6] text-fg";
 
 function MessageListImpl({
   items,
@@ -29,8 +35,12 @@ function MessageListImpl({
   onOpenFile,
   onSelectWorker,
   onRespond,
+  pending = NO_PENDING,
+  pendingQueued = false,
 }: {
   items: LogItem[];
+  pending?: PendingMessage[]; // optimistic messages not yet echoed — the last rows of the transcript (audit #31)
+  pendingQueued?: boolean; // a turn is running, so pending messages wait for it ("Queued"); otherwise they are "Sending…"
   kind?: "master" | "worker"; // which empty hint to show once loaded-and-empty (audit #43 — the worker copy must not say "master")
   loaded?: boolean; // the session.history/worker.history fetch for this id has succeeded at least once (default true — keeps direct/test callers on the old immediate-empty behavior)
   loadFailed?: boolean; // that fetch was rejected and hasn't succeeded since → error+retry instead of a permanently blank pane
@@ -62,8 +72,13 @@ function MessageListImpl({
     if (userJustSent) scrollToBottom(el);
     else if (stick.current) el.scrollTop = el.scrollHeight;
   }, [items]);
+  // A just-sent (pending) message is a discrete action — follow it to the bottom.
+  useEffect(() => {
+    const el = ref.current;
+    if (el && pending.length > 0) { scrollToBottom(el); stick.current = true; }
+  }, [pending.length]);
 
-  if (items.length === 0) {
+  if (items.length === 0 && pending.length === 0) {
     // No committed transcript yet — three distinct states (audit #43): still fetching, fetch failed, or genuinely
     // empty. Mirrors the loaded/loadFailed idiom already used by RepoTree/Sessions/AutomationPage: once loaded is
     // true, a later background-refresh failure (e.g. on reconnect) doesn't hide what's already showing.
@@ -110,10 +125,7 @@ function MessageListImpl({
       if (it.role === "user") {
         // user message: a quiet raised bubble, right-aligned, narrower than the full column (T3's chat bubble).
         rows.push(
-          <div
-            key={i}
-            className="max-w-[80%] self-end [overflow-wrap:anywhere] rounded-md bg-raised px-3 py-2 text-prose leading-[1.6] text-fg"
-          >
+          <div key={i} className={USER_BUBBLE}>
             {/* markdown on the bubble (remarkBreaks keeps casual newlines; rehypeMentions keeps @file chips) */}
             <MessageImages images={it.images} />
             {it.content && <UserMarkdown content={it.content} />}
@@ -167,6 +179,18 @@ function MessageListImpl({
     // (the metrics log item itself is kept as-is, since the header reads it from logsBySession.)
     i++;
   }
+  for (const p of pending) {
+    rows.push(
+      <div key={`p:${p.clientMsgId}`} className={cn(USER_BUBBLE, "border border-dashed border-line opacity-70")}>
+        <span className="mb-1 flex items-center gap-1 text-meta text-muted">
+          {pendingQueued && <Clock size={12} aria-hidden />}
+          {t(pendingQueued ? "conversation.pendingBadge" : "conversation.sendingBadge")}
+        </span>
+        <MessageImages images={p.images} />
+        {p.text && <UserMarkdown content={p.text} />}
+      </div>,
+    );
+  }
 
   // rise-in only on the latest (last) row. with index keys, a new row mounts as a new DOM node → appears once (CSS runs only on mount).
   // while streaming, the same last row keeps its class so it doesn't re-run; when a new row is appended, only that new row animates in.
@@ -179,7 +203,7 @@ function MessageListImpl({
 
   // typing indicator right after sending (last item is my message) until the assistant responds.
   const last = items[items.length - 1];
-  const waiting = last?.kind === "message" && last.role === "user";
+  const waiting = pending.length === 0 && last?.kind === "message" && last.role === "user";
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -243,11 +267,12 @@ function FailedInput({
   const t = useT();
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [retryFailed, setRetryFailed] = useState<string>();
   return (
-    <div className="max-w-[80%] self-end rounded-md border border-line bg-raised px-3 py-2 text-ui">
+    <div className={cn(USER_BUBBLE, "border border-fail/40")}>
       <MessageImages images={item.images} />
       {item.text && <UserMarkdown content={item.text} />}
-      <div className="text-meta text-fail">{t("images.sendFailed")}</div>
+      <div className="text-meta text-fail">{retryFailed ?? t(item.images?.length ? "images.sendFailed" : "composer.sendFailedPlain")}</div>
       {onRestore && (
         <div className="flex gap-3">
           <button
@@ -275,10 +300,12 @@ function FailedInput({
           disabled={sending || sent}
           onClick={() => {
             setSending(true);
+            setRetryFailed(undefined);
             Promise.resolve()
               .then(() => onRetry(item.text, item.images))
               .then(() => setSent(true))
-              .catch(() => {})
+              // The retry is a send like any other: its failure is reported here, on the bubble (no toast).
+              .catch((err: unknown) => setRetryFailed(t("composer.sendFailed", { reason: err instanceof Error ? err.message : String(err) })))
               .finally(() => setSending(false));
           }}
         >
