@@ -573,6 +573,12 @@ export class Connection {
         if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "interrupt", id: msg.id });
         return;
       }
+      case "worker.task.stop": {
+        // Stop one listed background task. Throws for an unknown/terminal worker or task → the global catch responds with error+reqId.
+        await this.fleet.stopTask(msg.id, msg.taskId);
+        if (msg.reqId) this.reply({ type: "fleet.ack", reqId: msg.reqId, action: "task.stop", id: msg.id });
+        return;
+      }
       case "worker.recover": {
         // Hard-recover a wedged worker: kill the stuck subprocess and re-arm a lazy resume of the same session (→ idle).
         try { await this.fleet.recover(msg.id); } catch (err) { this.reply({ type: "error", message: String(err), reqId: msg.reqId }); return; }

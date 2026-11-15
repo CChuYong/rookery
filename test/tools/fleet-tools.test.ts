@@ -30,6 +30,13 @@ describe("fleet tools", () => {
     expect(FLEET_TOOL_NAMES).toContain("mcp__fleet__interrupt_worker");
   });
 
+  it("send_worker describes running-turn delivery", () => {
+    const { repos, fo } = fleet();
+    const send = fleetToolDefs(fo, repos, "s1").find((d) => d.name === "send_worker")!;
+    expect(send.description).toContain("delivered into the running turn");
+    expect(send.description).not.toContain("queued and runs at the next turn boundary");
+  });
+
   it("spawn_worker's provider param reaches fleet.spawn and persists on the worker row", async () => {
     const { repos, fo } = fleet();
     repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
@@ -75,6 +82,30 @@ describe("fleet tools", () => {
     const status = defs.find((d) => d.name === "get_worker_status")!;
     const out = ((await status.handler({ id: wid } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
     expect(out).toContain("codex");
+  });
+
+  it("get_worker_status appends the worker's listed background tasks", async () => {
+    const repos = new Repositories(openDb(":memory:"));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    const factory = (): WorkerLike => ({
+      start: () => {}, send: () => {}, stop: async () => {}, status: () => "background", waitUntilSettled: async () => {},
+      backgroundTasks: () => [{ id: "b1", type: "local_bash", description: "npm run dev" }],
+    });
+    const fo = new FleetOrchestrator({ repos, bus: new EventBus(), git: new FakeGitOps(), factory, worktreesDir: "/wt" });
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const { id } = await fo.spawn({ homeSessionId: "s1", repoPath: "/code/app", label: "app", task: "x" });
+    const status = fleetToolDefs(fo, repos, "s1").find((d) => d.name === "get_worker_status")!;
+    const out = ((await status.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out.endsWith("background tasks:\n- local_bash: npm run dev")).toBe(true);
+  });
+
+  it("get_worker_status output is unchanged when the worker has no background tasks", async () => {
+    const { repos, fo } = fleet();
+    repos.createRepo({ id: "r1", name: "app", path: "/code/app", description: "" });
+    const { id } = await fo.spawn({ homeSessionId: "s1", repoPath: "/code/app", label: "app", task: "x" });
+    const status = fleetToolDefs(fo, repos, "s1").find((d) => d.name === "get_worker_status")!;
+    const out = ((await status.handler({ id } as never, undefined)) as { content: Array<{ text: string }> }).content[0]!.text;
+    expect(out).toBe(`${id}: running (claude)`);
   });
 
   it("spawn_worker's costBudgetUsd param reaches fleet.spawn and persists on the worker row", async () => {

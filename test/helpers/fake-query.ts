@@ -1,6 +1,6 @@
 import type { QueryFn } from "../../src/core/claude-backend.js";
 import { ClaudeBackend } from "../../src/core/claude-backend.js";
-import type { AgentBackend } from "../../src/core/agent-backend.js";
+import type { AgentBackend, AgentStream } from "../../src/core/agent-backend.js";
 
 // Minimal step that mimics the shape of an SDK message. Handles only assistant text/result.
 export type FakeStep =
@@ -22,7 +22,7 @@ export type FakeStep =
   | { type: "task_notification"; id: string; status?: string; summary?: string; outputFile?: string; usage?: { total_tokens: number; tool_uses: number; duration_ms: number } }
   | { type: "task_progress"; id: string; description?: string; summary?: string; lastToolName?: string; workflowProgress?: unknown; usage?: { total_tokens: number; tool_uses: number; duration_ms: number } }
   // background_tasks_changed level frame (SDK ≥0.3.203): the full live set, REPLACE semantics.
-  | { type: "bg_tasks"; ids: Array<{ id: string; taskType?: string }> }
+  | { type: "bg_tasks"; ids: Array<{ id: string; taskType?: string; description?: string; ambient?: boolean }> }
   | {
       type: "result";
       subtype: string;
@@ -76,7 +76,7 @@ function stepToMessage(step: FakeStep): unknown {
   } else if (step.type === "task_progress") {
     return { type: "system", subtype: "task_progress", task_id: step.id, description: step.description ?? "", ...(step.summary ? { summary: step.summary } : {}), ...(step.lastToolName ? { last_tool_name: step.lastToolName } : {}), ...(step.workflowProgress !== undefined ? { workflow_progress: step.workflowProgress } : {}), usage: step.usage ?? { total_tokens: 0, tool_uses: 0, duration_ms: 0 } };
   } else if (step.type === "bg_tasks") {
-    return { type: "system", subtype: "background_tasks_changed", tasks: step.ids.map((t) => ({ task_id: t.id, task_type: t.taskType ?? "task", description: "" })) };
+    return { type: "system", subtype: "background_tasks_changed", tasks: step.ids.map((t) => ({ task_id: t.id, task_type: t.taskType ?? "task", description: t.description ?? "", ...(t.ambient !== undefined ? { ambient: t.ambient } : {}) })) };
   }
   return {
     type: "result",
@@ -99,6 +99,7 @@ export function fakeQuery(
     onSetModel?: (model: string) => void;
     onSetPermissionMode?: (mode: string) => void;
     stillQueued?: string[]; // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
+    onStopTask?: (taskId: string) => void; // when set, the query exposes stopTask (SDK Query.stopTask)
   },
 ): QueryFn {
   const fn = ((_input: unknown) => {
@@ -112,6 +113,7 @@ export function fakeQuery(
       supportedCommands: async () => opts?.commands ?? [],
       setModel: async (model: string) => opts?.onSetModel?.(model),
       setPermissionMode: async (mode: string) => opts?.onSetPermissionMode?.(mode),
+      ...(opts?.onStopTask ? { stopTask: async (taskId: string) => opts.onStopTask!(taskId) } : {}),
     });
   }) as unknown as QueryFn;
   return fn;
@@ -122,7 +124,9 @@ export function fakeQuery(
 // lifecycle that the finite fakeQuery hides (for worker tests; for the master's string prompt it terminates empty immediately).
 export function fakeStreamingQuery(
   responder: (userText: string, turn: number, content?: unknown) => FakeStep[],
-  opts?: { stillQueued?: string[] }, // when set, interrupt() resolves the SDK's typed receipt shape { still_queued }
+  // stillQueued: when set, interrupt() resolves the SDK's typed receipt shape { still_queued }.
+  // onStopTask: when set, the query exposes stopTask (SDK Query.stopTask).
+  opts?: { stillQueued?: string[]; onStopTask?: (taskId: string) => void },
 ): QueryFn {
   const fn = ((input: { prompt?: unknown; options?: { abortController?: AbortController } }) => {
     const prompt = input?.prompt as AsyncIterable<{ message?: { content?: unknown } }> | undefined;
@@ -144,6 +148,7 @@ export function fakeStreamingQuery(
       interrupt: async () => (opts?.stillQueued ? { still_queued: opts.stillQueued } : undefined),
       close: () => {},
       supportedCommands: async () => [],
+      ...(opts?.onStopTask ? { stopTask: async (taskId: string) => opts.onStopTask!(taskId) } : {}),
     });
   }) as unknown as QueryFn;
   return fn;
@@ -154,6 +159,33 @@ export function fakeStreamingQuery(
 export function fakeBackend(script: FakeStep[], opts?: Parameters<typeof fakeQuery>[1]): AgentBackend {
   return new ClaudeBackend(fakeQuery(script, opts));
 }
-export function fakeStreamingBackend(responder: (userText: string, turn: number, content?: unknown) => FakeStep[], opts?: { stillQueued?: string[] }): AgentBackend {
+export function fakeStreamingBackend(responder: (userText: string, turn: number, content?: unknown) => FakeStep[], opts?: Parameters<typeof fakeStreamingQuery>[1]): AgentBackend {
   return new ClaudeBackend(fakeStreamingQuery(responder, opts));
+}
+
+// The deferred-FIFO fallback path: hide the stream's steer() (as on a provider that can't steer) so a mid-turn
+// send is held for the next turn boundary. Tests of that fallback wrap their backend with this.
+export function withoutSteer(backend: AgentBackend): AgentBackend {
+  return withoutStreamMethods(backend, "steer");
+}
+
+// Pass-through wrapper whose session streams hide only the named optional methods (as on a provider that
+// lacks them, e.g. Codex has no stopTask). Everything else — including optional controls — still reaches
+// the real stream, with `this` bound to it.
+export function withoutStreamMethods(backend: AgentBackend, ...hidden: Array<"steer" | "stopTask">): AgentBackend {
+  const hide = new Set<PropertyKey>(hidden);
+  return {
+    openSession: (input, opts) => {
+      const s = backend.openSession(input, opts);
+      return new Proxy(s, {
+        get: (target, key) => {
+          if (hide.has(key)) return undefined;
+          const v = Reflect.get(target, key, target);
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+        has: (target, key) => !hide.has(key) && Reflect.has(target, key),
+      }) as AgentStream;
+    },
+    startTurn: (prompt, opts) => backend.startTurn(prompt, opts),
+  };
 }
