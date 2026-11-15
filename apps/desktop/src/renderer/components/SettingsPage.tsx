@@ -19,6 +19,7 @@ import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { CapabilityScopeBindings } from "./capabilities/CapabilityScopeBindings.js";
 import type { CapabilityCenterApi } from "./capabilities/types.js";
 import { changedSettingKeys, dirtyTabs, msParts, type SettingsTab } from "../lib/settings-draft.js";
+import { setLeaveGuard } from "../lib/leave-guard.js";
 
 // VS Code settings composition (rookery-ide-ui skill): a scrolling list of settings, each = title (13px medium),
 // description (12px muted), control beneath — no wells, no right-aligned control column (that squeezed the
@@ -190,32 +191,61 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const [saving, setSaving] = useState(false);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
+  const budgetRef = useRef<HTMLInputElement>(null);
+  const inflight = useRef<Promise<boolean> | null>(null);
   // Resolves true once the daemon accepted the settings; false on failure (the App path toasts it) — the draft stays.
-  const save = async (): Promise<boolean> => {
-    if (saving || budgetInvalid) return false;
-    setSaving(true);
-    try {
-      await p.onSave(f);
-      return true;
-    } catch {
-      return false;
-    } finally {
-      if (alive.current) setSaving(false);
+  // A save already running is joined rather than refused, so "Save and close" during it closes when it lands. An
+  // invalid budget refuses with its reason in view: the General category opens and the field takes focus.
+  const save = (): Promise<boolean> => {
+    if (inflight.current) return inflight.current;
+    if (budgetInvalid) {
+      setTab("general");
+      requestAnimationFrame(() => budgetRef.current?.focus());
+      return Promise.resolve(false);
     }
+    setSaving(true);
+    const run = (async () => {
+      try {
+        await p.onSave(f);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        inflight.current = null;
+        if (alive.current) setSaving(false);
+      }
+    })();
+    inflight.current = run;
+    return run;
   };
 
-  // Closing while dirty asks first (audit #18); "Save and close" closes only once the save succeeded (audit #93).
-  // Out of scope: intercepting sidebar navigation away from the page — only this in-page close action.
-  const [confirmClose, setConfirmClose] = useState(false);
+  // Leaving with unsaved edits asks first (audit #18) — the header X, the in-page Capability Center links, and App
+  // navigation (sidebar, settings gear, back/forward) through the store's leave guard. "Save and close" leaves only
+  // once the save succeeded (audit #93). `pendingLeave` is the move the dialog will make; `leaving` lets that move
+  // pass the guard once the user chose.
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const leaving = useRef(false);
+  const leave = (action: () => void): void => {
+    leaving.current = true;
+    try { action(); } finally { leaving.current = false; }
+  };
+  const requestLeave = (action: () => void): void => {
+    if (dirtyRef.current) setPendingLeave(() => action);
+    else action();
+  };
+  useEffect(() => setLeaveGuard((proceed) => {
+    if (leaving.current || !dirtyRef.current) return false;
+    setPendingLeave(() => proceed);
+    return true;
+  }), []);
   const [confirmRegen, setConfirmRegen] = useState(false); // rotating the MCP token cuts off every registered client (audit #103)
   const [mcpCopied, setMcpCopied] = useState(false);
   const copyMcpUrl = (url: string): void => {
     void navigator.clipboard.writeText(url).then(() => { setMcpCopied(true); window.setTimeout(() => setMcpCopied(false), 1500); }).catch(() => {});
   };
-  const requestClose = (): void => {
-    if (dirty) setConfirmClose(true);
-    else p.onClose();
-  };
+  const requestClose = (): void => requestLeave(p.onClose);
 
   // Native folder-picker dialog (preload bridge), same as for worktree/session cwd.
   const pickCwd = async (): Promise<void> => {
@@ -313,7 +343,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     (applies to Claude AND Codex workers), so it stays here in General. */}
                 <div className="flex flex-col gap-1.5">
                   <Row label={t("settings.workerBudget")} hint={<>{t("settings.workerCostBudgetUsdHint")} {t("speed.budgetEstimated")}</>}>
-                    <Input type="number" className={cn("w-[120px] tabular-nums", budgetInvalid && "border-fail")} value={f.workerCostBudgetUsd ?? ""} placeholder="off" aria-invalid={budgetInvalid || undefined} aria-describedby={budgetInvalid ? "settings-budget-error" : undefined} onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
+                    <Input ref={budgetRef} type="number" className={cn("w-[120px] tabular-nums", budgetInvalid && "border-fail")} value={f.workerCostBudgetUsd ?? ""} placeholder="off" aria-invalid={budgetInvalid || undefined} aria-describedby={budgetInvalid ? "settings-budget-error" : undefined} onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
                     <span className="text-ui text-muted">USD</span>
                   </Row>
                   {budgetInvalid && <p id="settings-budget-error" className="text-ui text-fail">{t("workerSpawnModal.budgetInvalid")}</p>}
@@ -517,9 +547,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 scopeRef=""
                 api={p.capabilityApi}
                 generation={p.capabilityGeneration ?? 0}
-                onOpenCatalog={p.onOpenCapabilityCatalog ?? (() => {})}
-                onOpenAdvancedAssignments={p.onOpenCapabilityAssignments ?? (() => {})}
-                onPreviewEffective={p.onPreviewCapabilities ?? (() => {})}
+                onOpenCatalog={() => requestLeave(p.onOpenCapabilityCatalog ?? (() => {}))}
+                onOpenAdvancedAssignments={() => requestLeave(p.onOpenCapabilityAssignments ?? (() => {}))}
+                onPreviewEffective={() => requestLeave(p.onPreviewCapabilities ?? (() => {}))}
               />
             )}
 
@@ -722,11 +752,11 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
           onCancel={() => setConfirmRegen(false)}
         />
       )}
-      {confirmClose && (
+      {pendingLeave && (
         <UnsavedChangesConfirm
-          onCancel={() => setConfirmClose(false)}
-          onDiscard={p.onClose}
-          onSave={() => { void save().then((ok) => { if (ok) p.onClose(); }); }}
+          onCancel={() => setPendingLeave(null)}
+          onDiscard={() => leave(pendingLeave)}
+          onSave={() => { const action = pendingLeave; void save().then((ok) => { if (ok) leave(action); }); }}
         />
       )}
     </>

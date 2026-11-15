@@ -428,3 +428,16 @@ it("a confirmed delete removes the row at once and brings it back if the delete 
   fail(new Error("nope"));
   await waitFor(() => expect(screen.getByText("nightly")).toBeInTheDocument());
 });
+
+// Review fix 5: the next run is shown in the viewer's time; when the cron runs in another timezone the time says so.
+it("labels the next run with the viewer's zone only when the trigger's timezone differs", () => {
+  const viewer = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const other = viewer === "Pacific/Honolulu" ? "Asia/Seoul" : "Pacific/Honolulu";
+  const iso = "2030-06-01T03:00:00.000Z";
+  const same: Automation = { ...cronJob, id: "same", name: "same-tz", enabled: true, nextRunAt: iso, trigger: { kind: "cron", cron: "0 3 * * *", timezone: viewer } };
+  const diff: Automation = { ...cronJob, id: "diff", name: "other-tz", enabled: true, nextRunAt: iso, trigger: { kind: "cron", cron: "0 3 * * *", timezone: other } };
+  const { container } = render(<AutomationPage automations={[same, diff]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  const [a, b] = Array.from(container.querySelectorAll(`time[datetime="${iso}"]`));
+  expect(b!.textContent!.length).toBeGreaterThan(a!.textContent!.length);
+  expect(b!.textContent!.startsWith(a!.textContent!)).toBe(true);
+});

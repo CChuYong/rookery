@@ -1551,7 +1551,8 @@ export function App(): JSX.Element {
               onDelete={(id) => {
                 // Returned so the page can bring back its optimistically removed row if the delete fails.
                 const req = client?.request({ type: "automation.delete", id });
-                return req ? req.then(() => {}, (e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); throw e; }) : Promise.reject(new Error("not connected"));
+                if (!req) { toast.error(tRef.current("toast.deleteFailed")); return Promise.reject(new Error("not connected")); }
+                return req.then(() => {}, (e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); throw e; });
               }}
               onEdit={(job) => setEditJob(job)}
               onNew={() => setEditJob("new")}

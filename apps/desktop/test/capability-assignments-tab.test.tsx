@@ -135,3 +135,10 @@ describe("CapabilityAssignmentsTab", () => {
     expect(within(targetSelect).queryByRole("option", { name: "Other Repo" })).toBeNull();
   });
 });
+
+// Review fix 3: a disabled row's status reads as a state, not as the form's command ("이 범위에서 끄기").
+it("labels a disabled assignment 'off at this scope'", async () => {
+  render(<CapabilityAssignmentsTab api={api({ loadLibrary: async () => snapshot([{ ...binding, enabled: false }]) })} generation={0} targets={targets} />);
+  const card = await screen.findByTestId("capability-binding-binding-1");
+  expect(within(card).getByText("이 범위에서 꺼짐")).toBeInTheDocument();
+});

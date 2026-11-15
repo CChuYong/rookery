@@ -13,6 +13,7 @@ import { emptyState, reduceEvent, applySubEvent, seedSessionLog, seedWorkflowRun
 import type { AppState, FleetRow, LogItem } from "./reduce.js";
 import { navigate as navGo, replace as navReplace, back as navBackFn, forward as navFwdFn, reset as navReset } from "./navigation.js";
 import type { Location, Overlay, NavState } from "./navigation.js";
+import { runGuarded } from "../lib/leave-guard.js";
 import { MODELS } from "../lib/models.js";
 import type { ModelOption } from "../lib/models.js";
 
@@ -192,6 +193,14 @@ function applyWorkerDeletionState(
   return { ...base, attention };
 }
 
+// Runs a navigation, but when it would change the overlay (leave the current full page) the leave guard decides first.
+function guardedMove(get: () => Store, compute: (nav: NavState) => NavState, apply: () => void): void {
+  const s = get();
+  const next = compute({ loc: locOf(s), back: s.navBack, forward: s.navFwd });
+  if (next.loc.overlay === s.overlay) { apply(); return; }
+  runGuarded(apply);
+}
+
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
   setSpeedIntent: (kind, id, speed) => {
@@ -205,10 +214,11 @@ export const useStore = create<Store>((set, get) => ({
   sessions: [], activeSessionId: null, activeWorkerId: null, repoSettingsId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
   historyLoaded: {}, historyLoadFailed: {},
   overlay: null, showRepos: false, navBack: [], navFwd: [],
-  navigate: (patch) => set((s) => ({ ...spreadNav(navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) })),
-  navigateReplace: (patch) => set((s) => ({ ...spreadNav(navReplace({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) })),
-  goBack: () => set((s) => spreadNav(navBackFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd }))),
-  goForward: () => set((s) => spreadNav(navFwdFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd }))),
+  // A move that changes the overlay first asks the page's leave guard (Settings with unsaved edits, lib/leave-guard).
+  navigate: (patch) => guardedMove(get, (nav) => navGo(nav, patch), () => set((s) => ({ ...spreadNav(navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) }))),
+  navigateReplace: (patch) => guardedMove(get, (nav) => navReplace(nav, patch), () => set((s) => ({ ...spreadNav(navReplace({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) }))),
+  goBack: () => guardedMove(get, navBackFn, () => set((s) => spreadNav(navBackFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd })))),
+  goForward: () => guardedMove(get, navFwdFn, () => set((s) => spreadNav(navFwdFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd })))),
   restoreLocation: (loc) => set(() => spreadNav(navReset(loc))),
   daemonNote: null,
   slack: "connecting",

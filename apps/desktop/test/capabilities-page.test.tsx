@@ -328,3 +328,11 @@ describe("CapabilitiesPage Effective density", () => {
   });
 });
 
+
+// Review fix 6: an entry kind the renderer doesn't know (newer daemon) still shows, in its own group after the rest.
+it("keeps entries of an unknown kind", async () => {
+  const future = { ...snapshot, entries: [...snapshot.entries, { id: "widget-1", kind: "widget" as never, name: "future-thing", provider: "codex" as const, source: "Codex widgets/list", scope: "repo" as const, state: "applied" as const, evidence: "runtime" as const }] };
+  render(<CapabilitiesPage {...pageProps(makeApi(async () => future))} target={target} />);
+  expect(await screen.findByText("future-thing")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "widget" })).toBeInTheDocument();
+});

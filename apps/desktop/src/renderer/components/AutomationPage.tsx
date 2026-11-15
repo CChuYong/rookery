@@ -121,6 +121,9 @@ export function AutomationPage(p: {
   };
   const visible = p.automations.filter((a) => !removed.has(a.id));
   const now = Date.now();
+  // The next run is shown in the viewer's time; a cron that runs in another timezone gets the zone name appended so
+  // "03:00" next to "0 3 * * * UTC" isn't read as the trigger's own time.
+  const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
     <>
       <div className="drag flex h-10 shrink-0 items-center gap-2 px-4">
@@ -167,7 +170,7 @@ export function AutomationPage(p: {
                             <span className="shrink-0">
                               {t("automationPage.nextRun")}{" "}
                               {a.nextRunAt
-                                ? <time dateTime={a.nextRunAt} title={new Date(a.nextRunAt).toLocaleString(locale)}>{formatNextRun(a.nextRunAt, now, locale)}</time>
+                                ? <time dateTime={a.nextRunAt} title={new Date(a.nextRunAt).toLocaleString(locale)}>{formatNextRun(a.nextRunAt, now, locale, undefined, a.trigger.kind === "cron" && a.trigger.timezone !== viewerZone)}</time>
                                 : t("automationPage.never")}
                             </span>
                           </>

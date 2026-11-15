@@ -147,4 +147,5 @@ export default {
   "capabilities.meta.evidence": "확인 방식",
   "capabilities.meta.provider": "제공",
   "capabilities.meta.pack": "Pack",
+  "capabilities.bindingOffHere": "이 범위에서 꺼짐",
 } satisfies Catalog;

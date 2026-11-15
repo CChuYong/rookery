@@ -126,7 +126,9 @@ function stateDotTone(state: CapabilityState): string {
 // plain; only paths stay mono (#113).
 type MetaKey = "source" | "scope" | "evidence";
 const META_KEYS: MetaKey[] = ["source", "scope", "evidence"];
-const KIND_ORDER: CapabilityKind[] = ["instruction", "skill", "command", "tool", "mcp", "hook", "plugin", "app"];
+// Group order follows KIND_KEYS (a Record over every CapabilityKind, so the compiler lists a new kind there); a kind
+// the renderer doesn't know yet (newer daemon) is appended after them instead of silently disappearing.
+const KIND_ORDER = Object.keys(KIND_KEYS) as CapabilityKind[];
 
 function metaValue(entry: CapabilityEntry, key: MetaKey, t: (k: string) => string): string {
   if (key === "source") return entry.source;
@@ -173,7 +175,8 @@ function EntryRow({ entry, shared, targetProvider }: { entry: CapabilityEntry; s
 
 function EntryGroups({ entries, targetProvider }: { entries: CapabilityEntry[]; targetProvider: CapabilityEntry["provider"] }): JSX.Element {
   const t = useT();
-  const groups = KIND_ORDER.map((kind) => ({ kind, items: entries.filter((entry) => entry.kind === kind) })).filter((group) => group.items.length > 0);
+  const kinds = [...KIND_ORDER, ...new Set(entries.map((entry) => entry.kind).filter((kind) => !KIND_ORDER.includes(kind)))];
+  const groups = kinds.map((kind) => ({ kind, items: entries.filter((entry) => entry.kind === kind) })).filter((group) => group.items.length > 0);
   return (
     <div className="flex flex-col gap-4">
       {groups.map(({ kind, items }) => {
@@ -183,9 +186,9 @@ function EntryGroups({ entries, targetProvider }: { entries: CapabilityEntry[]; 
           if (items.every((entry) => metaValue(entry, key, t) === first)) shared[key] = first;
         }
         return (
-          <section key={kind} aria-label={t(KIND_KEYS[kind])}>
+          <section key={kind} aria-label={KIND_KEYS[kind] ? t(KIND_KEYS[kind]) : kind}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-line px-3 pb-1.5 text-meta text-muted">
-              <span className="inline-flex items-center gap-1.5 text-ui font-medium text-fg-dim"><span className="text-faint"><KindIcon kind={kind} /></span>{t(KIND_KEYS[kind])}</span>
+              <span className="inline-flex items-center gap-1.5 text-ui font-medium text-fg-dim"><span className="text-faint"><KindIcon kind={kind} /></span>{KIND_KEYS[kind] ? t(KIND_KEYS[kind]) : kind}</span>
               <span className="tabular-nums">{items.length}</span>
               {META_KEYS.filter((key) => shared[key] !== undefined).map((key) => <MetaItem key={key} label={t(`capabilities.meta.${key}`)} value={shared[key]!} />)}
             </div>
@@ -416,12 +419,14 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               {/* Only the states that occur (most of the eight are usually 0), on an even grid that doesn't break into
                   rows of different widths when the window narrows (audit #98). */}
               {(Object.keys(counts) as CapabilityState[]).some((state) => counts[state] > 0) && (
-                <section data-testid="capability-summary" className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-px overflow-hidden border-y border-line bg-line-soft">
+                <section data-testid="capability-summary" className="grid grid-cols-[repeat(auto-fit,minmax(112px,1fr))] overflow-hidden border-y border-line">
                   {(Object.keys(counts) as CapabilityState[]).filter((state) => counts[state] > 0).map((state) => {
                     const value = counts[state];
                     const isProblem = state === "blocked" || state === "error" || state === "unavailable";
                     return (
-                      <div key={state} className="flex flex-col gap-0.5 bg-ink px-3 py-2">
+                      // Each cell draws its divider outside its own left/top edge; the section clips the ones on
+                      // the outer edge, so no row starts with a stray line and no empty track shows a grey band.
+                      <div key={state} className="flex flex-col gap-0.5 px-3 py-2 shadow-[-1px_0_0_0_var(--color-line-soft),0_-1px_0_0_var(--color-line-soft)]">
                         <span className={cn("text-title tabular-nums", isProblem ? "text-fail" : "text-fg")}>{value}</span>
                         <span className="truncate text-meta text-muted" title={t(STATE_KEYS[state])}>{t(STATE_KEYS[state])}</span>
                       </div>

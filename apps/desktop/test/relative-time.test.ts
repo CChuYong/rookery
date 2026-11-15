@@ -67,6 +67,9 @@ describe("formatNextRun", () => {
   it("adds the year when it differs", () => {
     expect(ws(formatNextRun("2027-01-02T00:00:00.000Z", now, "en-US", "Asia/Seoul"))).toBe("Jan 2, 2027, 9:00 AM");
   });
+  it("adds the viewer's short zone name on request (the trigger runs in another timezone)", () => {
+    expect(ws(formatNextRun("2026-11-15T18:00:00.000Z", now, "en-US", "Asia/Seoul", true))).toBe("Nov 16, 3:00 AM GMT+9");
+  });
   it("returns the input unchanged when it isn't a date", () => {
     expect(formatNextRun("soon", now, "en-US")).toBe("soon");
   });

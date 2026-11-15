@@ -165,7 +165,7 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
                 <div key={binding.id} data-testid={`capability-binding-${binding.id}`} className="px-3 py-2.5">
                   <div className="flex flex-wrap items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2"><h3 className="text-body font-medium text-fg">{pack?.manifest.displayName ?? binding.packInstanceId}</h3><span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className={cn("h-1.5 w-1.5 rounded-full", binding.enabled ? "bg-pr" : "bg-stop")} aria-hidden />{binding.enabled ? t("capabilities.bindingEnabled") : t("capabilities.bindingTombstone")}</span></div>
+                      <div className="flex flex-wrap items-center gap-2"><h3 className="text-body font-medium text-fg">{pack?.manifest.displayName ?? binding.packInstanceId}</h3><span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className={cn("h-1.5 w-1.5 rounded-full", binding.enabled ? "bg-pr" : "bg-stop")} aria-hidden />{binding.enabled ? t("capabilities.bindingEnabled") : t("capabilities.bindingOffHere")}</span></div>
                       <p className="mt-1 text-meta text-fg-dim">{scopeLabel(t, binding.scopeKind)}{binding.scopeRef ? ` · ${[...targets.repos, ...targets.sessions, ...targets.workers].find((item) => item.id === binding.scopeRef)?.label ?? binding.scopeRef}` : ""}</p>
                       <p className="mt-1 text-meta text-faint">{audienceLabel(t, binding)}</p>
                       <p className="mt-1 text-meta text-faint">{t("capabilities.bindingInheritance")}</p>

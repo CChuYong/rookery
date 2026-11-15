@@ -153,3 +153,109 @@ describe("SettingsPage millisecond fields", () => {
     expect(screen.getByText("= 2분")).toBeInTheDocument();
   });
 });
+
+// Review fix 1: every way out of Settings asks before dropping unsaved edits — in-page links to the Capability
+// Center and App-level navigation (sidebar, settings gear, back/forward) alike.
+const emptyLibrary = { generation: 1, packs: [], bindings: [], diagnostics: [] };
+function capApi(): import("../src/renderer/components/capabilities/types.js").CapabilityCenterApi {
+  const unused = async (): Promise<never> => { throw new Error("unused"); };
+  return {
+    loadSnapshot: unused, loadLibrary: async () => emptyLibrary, createMcp: unused, createSkill: unused, createMcpPack: unused,
+    addPack: unused, removePack: async () => {}, setTrust: unused, setSecret: unused, deleteSecret: unused,
+    refresh: async () => emptyLibrary, reloadWorker: unused, setBinding: unused, quickSetBinding: async () => null, deleteBinding: async () => {},
+  };
+}
+
+describe("SettingsPage leave guard", () => {
+  it("an in-page Capability Center link with unsaved edits asks first; Cancel keeps the page and the edits", async () => {
+    const onPreview = vi.fn();
+    render(<SettingsPage {...base} capabilityApi={capApi()} onPreviewCapabilities={onPreview} />);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "changed" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Capabilities" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유효 상태 미리보기" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(onPreview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("취소"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onPreview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "일반" }));
+    expect(screen.getByDisplayValue("changed")).toBeInTheDocument();
+  });
+
+  it("Discard goes on to the link once; Save goes on only after the save", async () => {
+    const onPreview = vi.fn();
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} capabilityApi={capApi()} onPreviewCapabilities={onPreview} />);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "changed" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Capabilities" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유효 상태 미리보기" }));
+    fireEvent.click(screen.getByText("버리고 닫기"));
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(onSave).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "유효 상태 미리보기" }));
+    fireEvent.click(screen.getByText("저장하고 닫기"));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(2));
+  });
+
+  it("App navigation away (sidebar, gear) asks first; Cancel stays, Discard leaves", async () => {
+    useStore.getState().restoreLocation({ overlay: "settings", showRepos: false, sessionId: null, subId: null, repoId: null });
+    const close = () => useStore.getState().navigate({ overlay: null });
+    render(<SettingsPage {...base} onClose={close} />);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "changed" } });
+
+    // sidebar "Repos"
+    act(() => useStore.getState().navigate({ overlay: null, showRepos: true }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(useStore.getState().overlay).toBe("settings");
+    fireEvent.click(screen.getByText("취소"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useStore.getState().overlay).toBe("settings");
+    expect(screen.getByDisplayValue("changed")).toBeInTheDocument();
+
+    // settings gear toggle
+    act(() => useStore.getState().navigate({ overlay: null }));
+    fireEvent.click(screen.getByText("버리고 닫기"));
+    expect(useStore.getState().overlay).toBeNull();
+  });
+
+  it("a clean page leaves without asking", () => {
+    useStore.getState().restoreLocation({ overlay: "settings", showRepos: false, sessionId: null, subId: null, repoId: null });
+    render(<SettingsPage {...base} />);
+    act(() => useStore.getState().navigate({ overlay: null, showRepos: true }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useStore.getState().overlay).toBeNull();
+  });
+
+  it("Save and close with an invalid budget keeps the page and shows why", async () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    render(<SettingsPage {...base} onSave={onSave} onClose={onClose} />);
+    fireEvent.change(screen.getByPlaceholderText("off"), { target: { value: "-3" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Slack" }));
+    fireEvent.click(screen.getByLabelText("설정 닫기"));
+    fireEvent.click(screen.getByText("저장하고 닫기"));
+    await act(async () => {});
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: "일반" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("0보다 큰 금액을 입력하거나 비워 두세요")).toBeInTheDocument();
+  });
+
+  it("Save and close while a save is running closes once that save succeeds", async () => {
+    const d = deferred();
+    const onClose = vi.fn();
+    const onSave = vi.fn(() => d.promise);
+    render(<SettingsPage {...base} onSave={onSave} onClose={onClose} />);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "changed" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+    fireEvent.click(screen.getByLabelText("설정 닫기"));
+    fireEvent.click(screen.getByText("저장하고 닫기"));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { d.resolve(); await d.promise; });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+});

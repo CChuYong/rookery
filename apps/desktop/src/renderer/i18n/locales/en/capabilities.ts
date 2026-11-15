@@ -147,4 +147,5 @@ export default {
   "capabilities.meta.evidence": "Evidence",
   "capabilities.meta.provider": "Provider",
   "capabilities.meta.pack": "Pack",
+  "capabilities.bindingOffHere": "Off at this scope",
 } satisfies Catalog;
