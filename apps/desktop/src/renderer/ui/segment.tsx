@@ -101,7 +101,7 @@ export function Segment<V extends string = string>({
               onClick={() => !item.disabled && onChange(item.value)}
               className={cn(
                 // no disabled:pointer-events-none — a disabled item can still carry a hint tooltip (title) that
-                // should show on hover (e.g. WorkerSpawnModal's "connect GitHub first"); disabled:cursor-not-allowed
+                // should show on hover (e.g. WorkerSpawnPage's "connect GitHub first"); disabled:cursor-not-allowed
                 // + no hover:* class in stateCls (below) is enough to suppress any color change on hover.
                 "relative z-10 flex items-center justify-center gap-1 whitespace-nowrap transition-colors active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi disabled:cursor-not-allowed disabled:opacity-40",
                 secondary

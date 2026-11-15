@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import { WorkerSpawnModal } from "../src/renderer/components/WorkerSpawnModal.js";
+import { WorkerSpawnPage } from "../src/renderer/components/WorkerSpawnPage.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
@@ -15,7 +15,7 @@ function renderModal(searchSource = vi.fn().mockResolvedValue(items), extra: { c
   const onClose = vi.fn();
   const { defaultEffort = "high", ...rest } = extra;
   render(
-    <WorkerSpawnModal
+    <WorkerSpawnPage
       repo="app"
       defaultModel="claude-opus-4-8"
       defaultEffort={defaultEffort}
@@ -40,7 +40,7 @@ async function openGithubResults() {
   return input;
 }
 
-describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
+describe("WorkerSpawnPage source search keyboard nav (audit #27)", () => {
   it("Escape closes only the source-results popup and leaves the spawn dialog mounted", async () => {
     const { onClose } = renderModal();
     const input = await openGithubResults();
@@ -48,7 +48,7 @@ describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
     fireEvent.keyDown(input, { key: "Escape" });
 
     expect(screen.queryByRole("listbox")).toBeNull();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "새 워커" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -102,7 +102,7 @@ describe("WorkerSpawnModal source search keyboard nav (audit #27)", () => {
   });
 });
 
-describe("WorkerSpawnModal provider selector (P1.5 task 4)", () => {
+describe("WorkerSpawnPage provider selector (P1.5 task 4)", () => {
   it("defaults to claude — onSpawn's trailing provider arg is undefined (wire-minimal)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
@@ -137,7 +137,7 @@ const CODEX_MODELS: CodexModelInfo[] = [
   { id: "gpt-5.4", displayName: "GPT-5.4", defaultEffort: "medium", supportedEfforts: ["low", "medium", "high"], isDefault: false },
 ];
 
-describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task 3)", () => {
+describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 3)", () => {
   beforeEach(() => {
     useStore.setState({ codexModels: null }); // reset the singleton store before each test
   });
@@ -234,7 +234,7 @@ describe("WorkerSpawnModal codex model+effort dropdowns (Codex Model Picker Task
   });
 });
 
-describe("WorkerSpawnModal cost budget (cost budget guard Task 3)", () => {
+describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
   it("empty cost budget → onSpawn's trailing costBudgetUsd arg is undefined", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });

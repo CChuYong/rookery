@@ -51,10 +51,10 @@ export function NewSessionPage(p: {
   const [effort, setEffort] = useState(p.defaultEffort);
   const [commands, setCommands] = useState<SlashCommand[]>([]);
   // Agent backend for this new session. Default "claude" (wire-minimal: onStart sends `undefined` for claude and
-  // only an explicit value for "codex" — same idiom as WorkerSpawnModal's provider selector).
+  // only an explicit value for "codex" — same idiom as WorkerSpawnPage's provider selector).
   const [provider, setProvider] = useState<"claude" | "codex">("claude");
   // Free-text codex model — kept separate from `model` so switching provider back and forth doesn't clobber
-  // either field's last value (same idiom as WorkerSpawnModal's codexModel state).
+  // either field's last value (same idiom as WorkerSpawnPage's codexModel state).
   const [codexModel, setCodexModel] = useState("");
   const isCodex = provider === "codex";
   const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text fallback
@@ -96,7 +96,7 @@ export function NewSessionPage(p: {
     </button>
   );
 
-  // Agent-backend selector (WorkerSpawnModal idiom, reused i18n keys). Rendered in the same leftSlot row as the
+  // Agent-backend selector (WorkerSpawnPage idiom, reused i18n keys). Rendered in the same leftSlot row as the
   // folder picker — the Composer's own model/effort controls live inside a shared component (not a standalone
   // <Select> like the modal), so rather than changing Composer's API, codex's free-text model field + its own
   // effort <Select> render here too and the Composer's `controls` prop is omitted entirely when codex (see below).

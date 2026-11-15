@@ -1,6 +1,12 @@
 import type { Catalog } from "../../types.js";
 export default {
   "workerSpawnModal.title": "New worker",
+  "workerSpawnModal.heading": "What should the worker do?",
+  "workerSpawnModal.repoLabel": "Repository",
+  "workerSpawnModal.optionsTitle": "Options",
+  "workerSpawnModal.labelLabel": "Label",
+  "workerSpawnModal.baseLabel": "Base branch",
+  "workerSpawnModal.permLabel": "Permission mode",
   "workerSpawnModal.modeDirect": "Write directly",
   "workerSpawnModal.githubHint": "gh auth required in Settings › Integrations",
   "workerSpawnModal.linearHint": "Enter your Linear key in Settings › Integrations",

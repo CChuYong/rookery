@@ -2,15 +2,13 @@ import type { SpeedPreference } from "@daemon/core/speed.js";
 import { SpeedControl } from "./SpeedControl.js";
 import { defaultSpeed } from "../lib/speed.js";
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Folder, X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
@@ -19,8 +17,13 @@ import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
 
 type Mode = "direct" | SourceProviderId; // "direct" | "github" | "linear"
 
-export function WorkerSpawnModal(p: {
+// Full-page worker spawn (replaces the old 520px dialog — docs/superpowers/specs/2026-11-15-worker-spawn-page-design.md).
+// Same form logic as before; the layout mirrors NewSessionPage: a title bar, then a centred column with the task box
+// (composer surface + model controls) and a labeled options grid instead of placeholder-only fields.
+export function WorkerSpawnPage(p: {
   repo: string;
+  repos?: Array<{ name: string; path: string }>; // registered repos — the row above the task box re-targets the spawn
+  onRepoChange?: (repo: string) => void;
   defaultModel: string;
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, e.g. settings.codexWorkerModel)
@@ -95,7 +98,9 @@ export function WorkerSpawnModal(p: {
   };
   const clearSelected = () => { setSelected(null); setQ(""); };
 
-  const { closing, dismiss } = useDismissTransition(p.onClose);
+  // The page closes on its own when a successful spawn selects the new worker (navigation leaves the overlay);
+  // onClose is still called so callers without that navigation (tests, no result id) return to where they were.
+  const dismiss = p.onClose;
   // The model text actually in play for this spawn — the Claude catalog selection, or the codex field (select or free-text).
   const effectiveModel = provider === "codex" ? codexModel : model;
   // Codex effort options come from the selected model's catalog entry when the catalog was fetched; unknown model
@@ -145,132 +150,64 @@ export function WorkerSpawnModal(p: {
       setSpawning(false);
     }
   };
+  // ⌘/Ctrl+Enter spawns from anywhere on the page; Escape is deliberately ignored so a typed task is never lost
+  // (the source search's own Escape still closes just its results list).
   useModalKeys({ escape: "ignore", onSubmit: spawn });
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
+
+  const fieldLabel = "text-meta font-medium text-muted";
+  const controlField = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
 
   return (
-    <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("workerSpawnModal.title")}
-        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
-      >
-        <div className="shrink-0 px-5 pb-3 pt-5">
-          <div className="mb-1 text-title font-medium text-fg">{t("workerSpawnModal.title")}</div>
-          <div className="mb-3 flex items-center gap-1.5 text-ui text-muted">
-            <span>repo</span>
-            <span className="h-3 w-px shrink-0 bg-line" aria-hidden />
-            <span className="min-w-0 truncate font-mono text-fg-dim">{p.repo}</span>
-          </div>
+    <>
+      <div className="drag flex h-10 shrink-0 items-center gap-2 px-4 text-body">
+        <span className="font-medium text-fg">{t("workerSpawnModal.title")}</span>
+        <span className="text-faint" aria-hidden>/</span>
+        <span className="min-w-0 truncate font-mono text-ui text-fg-dim">{p.repo}</span>
+        <button onClick={dismiss} disabled={spawning} aria-label={t("common.close")} className="no-drag ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg-dim disabled:opacity-40">
+          <X size={14} />
+        </button>
+      </div>
 
-          {/* Source mode — write directly / GitHub issues·PRs / Linear tickets */}
+      <div role="region" aria-label={t("workerSpawnModal.title")} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 pb-10 pt-10">
+          <div className="text-title font-medium text-fg-dim">{t("workerSpawnModal.heading")}</div>
+
+          {/* Repository — registered repos as ghost buttons (same idiom as NewSessionPage's working-folder row). */}
+          {p.repos && p.repos.length > 1 && p.onRepoChange && (
+            <div className="flex flex-col items-start gap-1.5">
+              <p className={fieldLabel}>{t("workerSpawnModal.repoLabel")}</p>
+              <div className="flex flex-wrap gap-1">
+                {p.repos.map((r) => (
+                  <button
+                    key={r.name}
+                    title={r.path}
+                    aria-pressed={r.name === p.repo}
+                    onClick={() => p.onRepoChange!(r.name)}
+                    className={cn("flex h-6 items-center gap-1.5 rounded px-2 text-ui transition-colors",
+                      r.name === p.repo ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised hover:text-fg")}
+                  >
+                    <Folder size={12} /> {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Source — write directly / GitHub issues·PRs / Linear tickets */}
           <Segment
             items={MODES}
             value={mode}
             onChange={switchMode}
-            variant="pill"
-            className="gap-1 rounded-[var(--radius)] border border-line bg-sunk p-1"
-            itemClassName="flex-1 justify-center py-1.5 text-ui font-medium"
+            variant="underline"
+            className="gap-1 self-start border-b border-line-soft"
+            itemClassName="px-2 py-1 text-ui"
           />
-        </div>
-
-        <div data-dialog-scroll-body className="min-h-0 overflow-y-auto px-5 pb-4">
-          <div className="flex flex-col gap-2">
-          {/* Agent backend for this worker — copies the permissionMode hardcoded-<option> idiom below. */}
-          <Select size="sm" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
-            <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
-            <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
-          </Select>
-          <div className="flex gap-2">
-            {provider === "codex" ? (
-              codexModels != null ? (
-                // codex catalog fetched — dropdown, selecting a model also pre-selects its default effort.
-                <Select
-                  size="sm"
-                  className="flex-1"
-                  value={codexModel}
-                  onChange={(e) => {
-                    const nm = e.target.value;
-                    setCodexModel(nm);
-                    const de = codexDefaultEffort(nm, codexModels);
-                    if (de) setEffort(de);
-                  }}
-                  title={t("workerSpawnModal.modelTitle")}
-                >
-                  {/* Task 4 fold-in (Task 3 review Minor #1): a fresh open with the catalog present used to render
-                      this <Select value=""> blank. This leading "" option shows a "use default" label instead — the
-                      daemon applies the codexWorkerModel settings default when the spawn's model is empty, so we
-                      deliberately do NOT auto-pick a catalog model here (that would silently override the default). */}
-                  <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
-                  {codexModels.map((m) => (
-                    <option key={m.id} value={m.id}>{m.displayName}</option>
-                  ))}
-                  {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
-                </Select>
-              ) : (
-                // codex catalog unavailable (couldn't fetch) — free text, daemon default when empty.
-                <Input
-                  size="sm"
-                  className="flex-1"
-                  value={codexModel}
-                  onChange={(e) => setCodexModel(e.target.value)}
-                  placeholder={p.codexDefaultModel}
-                  title={t("workerSpawnModal.modelTitle")}
-                />
-              )
-            ) : (
-              <Select size="sm" className="flex-1" value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")}>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-                {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
-              </Select>
-            )}
-            {effortSupported(effectiveModel) && (
-              <Select size="sm" className="w-28" value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
-                {effortOptions.map((ef) => (
-                  <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
-                ))}
-              </Select>
-            )}
-            {/* Optional lifetime USD cost ceiling for this worker (cost budget guard) — empty = the workerCostBudgetUsd
-                settings default applies (via the server's subFactory override ?? default ?? unlimited chain), not
-                unconditionally "no limit". */}
-            <Input
-              size="sm"
-              className="w-28"
-              value={costBudget}
-              onChange={(e) => setCostBudget(e.target.value)}
-              placeholder={t("workerSpawnModal.costBudgetPlaceholder")}
-              title={t("workerSpawnModal.costBudget")}
-            />
-          </div>
-          <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "worker")} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
-          {provider === "codex" && <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>}
-          {/* SDK permission mode for this worker — only bypassPermissions / plan (no default/acceptEdits). Changeable later in the composer. */}
-          <Select size="sm" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")}>
-            <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>
-            <option value="plan">{t("workerSpawnModal.permPlan")}</option>
-          </Select>
-          {p.branches && p.branches.length > 0 && (
-            <Select size="sm" value={base} onChange={(e) => setBase(e.target.value)} title={t("workerSpawnModal.baseTitle")}>
-              <option value="">{t("workerSpawnModal.baseDefault")}</option>
-              {p.branches.map((b) => (
-                <option key={b} value={b}>{t("workerSpawnModal.baseOption", { branch: b })}</option>
-              ))}
-            </Select>
-          )}
 
           {/* GitHub/Linear mode: search → select → the task below is auto-filled (editable) */}
           {sourceMode && p.searchSource && (
             <div className="flex flex-col gap-1.5">
               {selected ? (
-                <div className="flex items-center gap-2 rounded-[var(--radius)] border border-accent/40 bg-accent/10 px-2.5 py-1.5 text-ui">
+                <div className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-ui">
                   <span className="shrink-0 font-mono text-meta text-accent">{selected.identifier}</span>
                   <span className="truncate text-fg">{selected.title}</span>
                   <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={14} /></button>
@@ -289,7 +226,7 @@ export function WorkerSpawnModal(p: {
                       if (e.key === "ArrowDown" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.min(results.length - 1, h + 1)); }
                       else if (e.key === "ArrowUp" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
                       else if (e.key === "Enter" && highlight >= 0 && highlight < results.length) { e.preventDefault(); pickSource(results[highlight]!); }
-                      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } // close only the results list, not the whole modal
+                      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } // close only the results list, not the page
                     }}
                     role="combobox"
                     aria-expanded={dropdownOpen}
@@ -297,10 +234,10 @@ export function WorkerSpawnModal(p: {
                     aria-activedescendant={highlight >= 0 && highlight < results.length ? `worker-spawn-source-result-${highlight}` : undefined}
                   />
                   {dropdownOpen && (
-                    // onMouseDown preventDefault: prevents the dropdown from closing first on input blur when a result is clicked, which would swallow the click.
-                    <div id="worker-spawn-source-results" role="listbox" className="max-h-44 overflow-y-auto rounded-[var(--radius)] border border-line bg-sunk" onMouseDown={(e) => e.preventDefault()}>
-                      {searching && results.length === 0 && <div className="px-2.5 py-1.5 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
-                      {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-2.5 py-1.5 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
+                    // onMouseDown preventDefault: keeps the input focused so a click on a result isn't swallowed by blur.
+                    <div id="worker-spawn-source-results" role="listbox" className="max-h-80 overflow-y-auto rounded-md border border-line bg-surface" onMouseDown={(e) => e.preventDefault()}>
+                      {searching && results.length === 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
+                      {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
                       {results.map((it, i) => (
                         <button
                           key={`${it.provider}:${it.id}`}
@@ -308,7 +245,7 @@ export function WorkerSpawnModal(p: {
                           role="option"
                           aria-selected={i === highlight}
                           onClick={() => pickSource(it)}
-                          className={cn("flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
+                          className={cn("flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
                         >
                           <span className="shrink-0 font-mono text-meta text-accent">{it.identifier}</span>
                           <span className="truncate text-fg">{it.title}</span>
@@ -322,22 +259,123 @@ export function WorkerSpawnModal(p: {
             </div>
           )}
 
-          <Input placeholder={t("workerSpawnModal.labelPlaceholder")} value={label} onChange={(e) => setLabel(e.target.value)} />
-          <Textarea
-            autoFocus={mode === "direct"}
-            className="min-h-[120px] resize-y"
-            placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
-          />
+          {/* Task box — the composer surface: a roomy textarea, then provider · model · effort · speed. */}
+          <div className="flex flex-col rounded-lg border border-line bg-surface transition-colors focus-within:border-fg-dim/40">
+            <Textarea
+              autoFocus={mode === "direct"}
+              className="min-h-[160px] resize-y border-0 bg-transparent px-3 py-3 text-prose focus:ring-0"
+              placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
+              {/* Agent backend for this worker. */}
+              <Select size="xs" className={controlField} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")}>
+                <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+                <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+              </Select>
+              {provider === "codex" ? (
+                codexModels != null ? (
+                  // codex catalog fetched — dropdown; picking a model also pre-selects its default effort.
+                  <Select
+                    size="xs"
+                    className={controlField}
+                    value={codexModel}
+                    onChange={(e) => {
+                      const nm = e.target.value;
+                      setCodexModel(nm);
+                      const de = codexDefaultEffort(nm, codexModels);
+                      if (de) setEffort(de);
+                    }}
+                    title={t("workerSpawnModal.modelTitle")}
+                  >
+                    {/* "" = use the codexWorkerModel settings default (never auto-pick a catalog model). */}
+                    <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
+                    {codexModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.displayName}</option>
+                    ))}
+                    {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
+                  </Select>
+                ) : (
+                  // codex catalog unavailable — free text, daemon default when empty.
+                  <Input
+                    size="xs"
+                    className="h-6 w-40"
+                    value={codexModel}
+                    onChange={(e) => setCodexModel(e.target.value)}
+                    placeholder={p.codexDefaultModel}
+                    title={t("workerSpawnModal.modelTitle")}
+                  />
+                )
+              ) : (
+                <Select size="xs" className={controlField} value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")}>
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                  {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
+                </Select>
+              )}
+              {effortSupported(effectiveModel) && (
+                <Select size="xs" className={controlField} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")}>
+                  {effortOptions.map((ef) => (
+                    <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+                  ))}
+                </Select>
+              )}
+              <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "worker")} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
+            </div>
           </div>
-          <p className="mt-2 text-meta text-muted">{t("workerSpawnModal.footerNote")}</p>
-        </div>
-        <div data-dialog-footer className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-4">
-          <Button variant="outline" disabled={spawning} onClick={dismiss}>{t("common.cancel")}</Button>
-          <Button variant="primary" loading={spawning} onClick={() => void spawn()}>{t("workerSpawnModal.spawn")}</Button>
+          {provider === "codex" && <p className="-mt-2 text-meta text-muted">{t("speed.budgetEstimated")}</p>}
+
+          {/* Options — every control carries a visible label (the dialog relied on placeholders alone). */}
+          <section className="flex flex-col gap-3 border-t border-line-soft pt-4">
+            <h2 className="text-ui font-medium text-fg-dim">{t("workerSpawnModal.optionsTitle")}</h2>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              <label className="flex min-w-0 flex-col gap-1">
+                <span className={fieldLabel}>{t("workerSpawnModal.labelLabel")}</span>
+                <Input size="sm" placeholder={t("workerSpawnModal.labelPlaceholder")} value={label} onChange={(e) => setLabel(e.target.value)} />
+              </label>
+              {p.branches && p.branches.length > 0 && (
+                <label className="flex min-w-0 flex-col gap-1">
+                  <span className={fieldLabel}>{t("workerSpawnModal.baseLabel")}</span>
+                  <Select size="sm" value={base} onChange={(e) => setBase(e.target.value)} title={t("workerSpawnModal.baseTitle")}>
+                    <option value="">{t("workerSpawnModal.baseDefault")}</option>
+                    {p.branches.map((b) => (
+                      <option key={b} value={b}>{t("workerSpawnModal.baseOption", { branch: b })}</option>
+                    ))}
+                  </Select>
+                </label>
+              )}
+              <label className="flex min-w-0 flex-col gap-1">
+                <span className={fieldLabel}>{t("workerSpawnModal.permLabel")}</span>
+                {/* Only bypassPermissions / plan for workers; changeable later in the composer. */}
+                <Select size="sm" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")}>
+                  <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>
+                  <option value="plan">{t("workerSpawnModal.permPlan")}</option>
+                </Select>
+              </label>
+              <label className="flex min-w-0 flex-col gap-1">
+                <span className={fieldLabel}>{t("workerSpawnModal.costBudget")}</span>
+                {/* Empty = the workerCostBudgetUsd settings default applies (not unconditionally "no limit"). */}
+                <Input
+                  size="sm"
+                  inputMode="decimal"
+                  value={costBudget}
+                  onChange={(e) => setCostBudget(e.target.value)}
+                  placeholder={t("workerSpawnModal.costBudgetPlaceholder")}
+                  title={t("workerSpawnModal.costBudget")}
+                />
+              </label>
+            </div>
+            <p className="text-meta text-muted">{t("workerSpawnModal.footerNote")}</p>
+          </section>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={spawning} onClick={dismiss}>{t("common.cancel")}</Button>
+            <Button variant="primary" loading={spawning} onClick={() => void spawn()}>{t("workerSpawnModal.spawn")}</Button>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

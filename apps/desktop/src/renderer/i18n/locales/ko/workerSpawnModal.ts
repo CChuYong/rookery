@@ -1,6 +1,12 @@
 import type { Catalog } from "../../types.js";
 export default {
   "workerSpawnModal.title": "새 워커",
+  "workerSpawnModal.heading": "워커에게 무엇을 맡길까요?",
+  "workerSpawnModal.repoLabel": "레포",
+  "workerSpawnModal.optionsTitle": "옵션",
+  "workerSpawnModal.labelLabel": "라벨",
+  "workerSpawnModal.baseLabel": "기준 브랜치",
+  "workerSpawnModal.permLabel": "권한 모드",
   "workerSpawnModal.modeDirect": "직접 작성",
   "workerSpawnModal.githubHint": "설정 › 연동에서 gh 인증이 필요해요",
   "workerSpawnModal.linearHint": "설정 › 연동에서 Linear 키를 입력하세요",

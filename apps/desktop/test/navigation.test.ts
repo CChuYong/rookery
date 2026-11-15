@@ -70,6 +70,17 @@ describe("navigation model", () => {
     expect(st.loc).toEqual(L({ overlay: "repoSettings", showRepos: true, repoId: "repo-1" }));
   });
 
+  it("the worker spawn page keeps its repository through history and drops it when leaving", () => {
+    let st = navigate(initialNav, { overlay: "spawnWorker", showRepos: true, repoId: "repo-1" });
+    expect(st.loc).toEqual(L({ overlay: "spawnWorker", showRepos: true, repoId: "repo-1" }));
+    st = navigate(st, { overlay: "spawnWorker", repoId: "repo-2" }); // switching repo on the page is its own history entry
+    expect(st.loc.repoId).toBe("repo-2");
+    st = navigate(st, { overlay: null, subId: "w-new" }); // a successful spawn selects the new worker
+    expect(st.loc).toEqual(L({ showRepos: true, subId: "w-new", repoId: null }));
+    st = back(st);
+    expect(st.loc).toEqual(L({ overlay: "spawnWorker", showRepos: true, repoId: "repo-2" }));
+  });
+
   it("Capability Center preserves its selected session or worker through back/forward", () => {
     let st = navigate(initialNav, { showRepos: true, subId: "w1" });
     st = navigate(st, { overlay: "capabilities" });

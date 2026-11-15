@@ -4,7 +4,7 @@ import { NewSessionPage } from "../src/renderer/components/NewSessionPage.js";
 import { useStore } from "../src/renderer/store/store.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
 
-// Codex Model Picker Task 3 — direct template is WorkerSpawnModal's equivalent describe block
+// Codex Model Picker Task 3 — direct template is WorkerSpawnPage's equivalent describe block
 // (test/worker-spawn-modal.test.tsx). useT falls back to ko when no I18nProvider is mounted, so
 // labels below are the ko strings (see composer.ts / workerSpawnModal.ts locale files).
 const CODEX_MODELS: CodexModelInfo[] = [
