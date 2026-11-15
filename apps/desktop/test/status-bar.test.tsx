@@ -54,6 +54,17 @@ describe("StatusBar", () => {
     expect(screen.queryByText("Claude 사용량 (계정 전체)")).toBeNull();
   });
 
+  // review m3: the popover is named, takes focus, and shares the provider tab with the strip.
+  it("names the usage popover, moves focus into it, and keeps its provider tab in sync with the strip", () => {
+    const withCodex = { ...usage, codex: { fiveHour: { usedPercent: 37, resetsAt: null }, sevenDay: null, planType: "pro", todayTokens: 1000, weeklyTokens: null } } as unknown as UsageSnapshot;
+    render(<StatusBar {...props} usage={withCodex} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Codex" })[0]!); // the strip's switch
+    fireEvent.click(screen.getByRole("button", { name: "사용량 자세히" }));
+    const dialog = screen.getByRole("dialog", { name: "사용량 자세히" });
+    expect(dialog).toHaveFocus();
+    expect(dialog).toHaveTextContent("Codex 사용량");
+  });
+
   it("closes the usage detail panel when the route changes", () => {
     const { rerender } = render(<StatusBar {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "사용량 자세히" }));

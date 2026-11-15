@@ -143,7 +143,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
       <button
         ref={btnRef}
         onClick={toggle}
-        aria-label={t("attentionBell.aria", { count: items.length })}
+        aria-label={muted ? t("attentionBell.ariaMuted", { count: items.length }) : t("attentionBell.aria", { count: items.length })}
         aria-expanded={open}
         title={muted ? t("attentionBell.titleMuted") : t("attentionBell.title")}
         className={cn(

@@ -28,6 +28,12 @@ export interface GitOps {
   fetch(repoPath: string, branch: string): Promise<void>;
 }
 
+// git < 2.30 rejects `git diff --merge-base` as an unknown option (the C locale keeps the message in English).
+export function isUnknownMergeBaseOption(err: unknown): boolean {
+  const msg = String((err as { stderr?: unknown })?.stderr ?? (err as Error)?.message ?? err);
+  return /--merge-base/.test(msg) && /(unknown option|invalid option|unrecognized argument)/i.test(msg);
+}
+
 export class RealGitOps implements GitOps {
   private async git(cwd: string, args: string[]): Promise<string> {
     return this.gitEnv(cwd, args, {});
@@ -75,7 +81,17 @@ export class RealGitOps implements GitOps {
 
   async diff(worktreePath: string, base: string): Promise<string> {
     // `--end-of-options`: treat base only as a revision, not an option (SEC-1, e.g. blocks arbitrary file writes via `--output=`).
-    return this.git(worktreePath, ["diff", "--end-of-options", base]);
+    // `--merge-base` (git ≥ 2.30): diff the worktree against merge-base(base, HEAD), i.e. only what this branch changed
+    // since it forked — commits that land on the base ref later (a fetch moving origin/main) don't show up as reverse edits.
+    try {
+      return await this.git(worktreePath, ["diff", "--merge-base", "--end-of-options", base]);
+    } catch (err) {
+      if (!isUnknownMergeBaseOption(err)) throw err;
+      // Older git: resolve the merge base explicitly. base is never allowed to look like an option here (SEC-1).
+      if (base.startsWith("-")) throw err;
+      const mb = (await this.git(worktreePath, ["merge-base", "HEAD", base])).trim();
+      return this.git(worktreePath, ["diff", "--end-of-options", mb]);
+    }
   }
 
   async checkpoint(worktreePath: string, ref: string): Promise<string | null> {

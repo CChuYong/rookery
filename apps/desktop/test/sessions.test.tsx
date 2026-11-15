@@ -258,6 +258,19 @@ describe("Sessions text filter (audit #118)", () => {
     fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "nothing-like-this" } });
     expect(screen.getByText("일치하는 세션이 없어요.")).toBeInTheDocument();
   });
+  // review m5
+  it("doesn't claim 'no matches' while the open session is still listed, and filters the archive too", () => {
+    const withArchived = [...many, mk({ id: "a1", label: "old cadence notes", archived: true }), mk({ id: "a2", label: "old chat", archived: true })];
+    render(<Sessions sessions={withArchived as never} activeId="s1" onSelect={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "nothing-like-this" } });
+    expect(screen.getByText("chat 1")).toBeInTheDocument(); // the open session stays visible
+    expect(screen.queryByText("일치하는 세션이 없어요.")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "cadence" } });
+    fireEvent.click(screen.getByText(/보관함/));
+    expect(screen.getByText("old cadence notes")).toBeInTheDocument();
+    expect(screen.queryByText("old chat")).toBeNull();
+  });
+
   it("stays hidden for a short list", () => {
     render(<Sessions sessions={many.slice(0, 3) as never} activeId={null} onSelect={() => {}} />);
     expect(screen.queryByPlaceholderText("세션 필터…")).toBeNull();

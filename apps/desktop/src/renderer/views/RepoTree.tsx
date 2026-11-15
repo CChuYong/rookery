@@ -9,7 +9,7 @@ import { Input } from "../ui/input.js";
 import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
 import { baseName } from "../lib/path.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
-import { ContextMenu, type MenuItem } from "../components/ContextMenu.js";
+import { ContextMenu, type AnchorRect, type MenuItem } from "../components/ContextMenu.js";
 import { Collapse } from "../components/Collapse.js";
 import { shortBranch } from "../lib/branch.js";
 import { WorkerCost } from "../components/WorkerCost.js";
@@ -97,8 +97,8 @@ function RepoTreeImpl(p: {
   const setCollapsed = useRepoTreeStore((s) => s.setCollapsed);
   const archOpen = useRepoTreeStore((s) => s.archOpen); // archive collapsed by default
   const setArchOpen = useRepoTreeStore((s) => s.setArchOpen);
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  const [repoMenu, setRepoMenu] = useState<{ key: string; title: string; repoId?: string; removable: boolean; canAdd: boolean; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number; rect?: AnchorRect } | null>(null);
+  const [repoMenu, setRepoMenu] = useState<{ key: string; title: string; repoId?: string; removable: boolean; canAdd: boolean; x: number; y: number; rect?: AnchorRect } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<{ name: string } | null>(null);
@@ -204,7 +204,7 @@ function RepoTreeImpl(p: {
         <button
           title={t("common.moreActions")}
           aria-label={t("common.moreActions")}
-          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: sub.id, x: r.left, y: r.bottom + 4 }); }}
+          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: sub.id, x: r.left, y: r.bottom + 4, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }); }}
           className="absolute bottom-0.5 right-1.5 rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
         >
           <MoreHorizontal size={14} />
@@ -228,7 +228,7 @@ function RepoTreeImpl(p: {
     // row. Unregister lives in the ⋯ menu (also on right-click) instead of one slip away from +.
     const reveal = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100";
     const hasMenu = opts.canAdd || opts.removable || (!!opts.repoId && !!p.onRepoSettings);
-    const openRepoMenu = (x: number, y: number): void => setRepoMenu({ key, title, repoId: opts.repoId, removable: opts.removable, canAdd: opts.canAdd, x, y });
+    const openRepoMenu = (x: number, y: number, rect?: AnchorRect): void => setRepoMenu({ key, title, repoId: opts.repoId, removable: opts.removable, canAdd: opts.canAdd, x, y, rect });
     return (
       <div key={key}>
         <div
@@ -264,7 +264,7 @@ function RepoTreeImpl(p: {
           )}
           {hasMenu && (
             <button
-              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openRepoMenu(r.left, r.bottom + 4); }}
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openRepoMenu(r.left, r.bottom + 4, { top: r.top, bottom: r.bottom, left: r.left, right: r.right }); }}
               aria-label={t("repoTree.repoMenu", { repo: title })}
               title={t("repoTree.repoMenu", { repo: title })}
               aria-haspopup="menu"
@@ -329,6 +329,7 @@ function RepoTreeImpl(p: {
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          anchorRect={menu.rect}
           onClose={() => setMenu(null)}
           items={[
             { label: t("repoTree.menuRename"), onClick: () => setRenaming({ id: menu.id, value: menuSub.label }) },
@@ -351,6 +352,7 @@ function RepoTreeImpl(p: {
         <ContextMenu
           x={repoMenu.x}
           y={repoMenu.y}
+          anchorRect={repoMenu.rect}
           onClose={() => setRepoMenu(null)}
           items={[
             ...(repoMenu.canAdd ? [{ label: t("repoTree.spawnWorker"), onClick: () => p.onNewSub(repoMenu.key) }] : []),

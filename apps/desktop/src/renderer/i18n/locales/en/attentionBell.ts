@@ -18,4 +18,5 @@ export default {
   "attentionBell.notifyToggle": "OS notifications",
   "attentionBell.notifyOnState": "On",
   "attentionBell.notifyOffState": "Off",
+  "attentionBell.ariaMuted": "Attention queue ({count} items) — OS notifications off",
 } satisfies Catalog;

@@ -3,4 +3,7 @@ export default {
   "branchDiff.empty": "베이스 이후 변경이 없어요",
   "branchDiff.loadFailed": "브랜치 변경을 불러오지 못했어요",
   "branchDiff.files": "변경된 파일 {count}개",
+  "branchDiff.vsForkPoint": "분기 시점 대비 변경",
+  "branchDiff.truncated": "변경이 너무 커서 앞부분(512 KB)만 보여요",
+  "branchDiff.binary": "바이너리 파일이라 내용 비교를 보여 줄 수 없어요",
 } satisfies Catalog;

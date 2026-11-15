@@ -7,6 +7,8 @@ import { useT } from "../i18n/provider.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { Tooltip } from "./Tooltip.js";
 
+export type UsageTab = "claude" | "codex";
+
 function fmtTok(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
@@ -104,10 +106,14 @@ function StatInline({ label, value }: { label: string; value: string }): JSX.Ele
 
 // `onOpenDetails` (statusbar only) turns the meter run into a button that opens the detail panel (audit #25); the
 // Claude/Codex switch stays a sibling so buttons never nest.
-function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar", onOpenDetails, detailsOpen }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar"; onOpenDetails?: () => void; detailsOpen?: boolean }): JSX.Element {
+// `tab`/`onTabChange` optionally control the provider tab, so the status strip and its detail popover stay on the same
+// provider (review m3).
+function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar", onOpenDetails, detailsOpen, tab: tabProp, onTabChange }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar"; onOpenDetails?: () => void; detailsOpen?: boolean; tab?: UsageTab; onTabChange?: (tab: UsageTab) => void }): JSX.Element {
   const t = useT();
   // Provider tab: Claude is the default (user direction); not persisted (YAGNI).
-  const [tab, setTab] = useState<"claude" | "codex">("claude");
+  const [ownTab, setOwnTab] = useState<UsageTab>("claude");
+  const tab = tabProp ?? ownTab;
+  const setTab = (next: UsageTab): void => { setOwnTab(next); onTabChange?.(next); };
   const [expanded, setExpanded] = useState(false);
   const p = usage?.pct;
   const wk = usage?.weekly;

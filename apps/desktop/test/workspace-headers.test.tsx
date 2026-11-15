@@ -322,6 +322,13 @@ describe("header overflow menu (audit #21)", () => {
     expect(useLayoutStore.getState().byPage.p1).toBeUndefined();
   });
 
+  // review m1: in the legacy (non-dock) layout a session has no Reset layout; with no metrics yet the menu would be empty.
+  it("shows no '…' when there is nothing to put in it", () => {
+    useStore.setState({ logsBySession: {}, sessions: [] } as never);
+    render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" />);
+    expect(screen.queryByRole("button", { name: "더보기" })).toBeNull();
+  });
+
   it("keeps a short ctx% in the header itself: tokens/turns/cost carry the droppable class, ctx does not", () => {
     useStore.setState({ logsBySession: { s1: [{ kind: "metrics", contextPct: 42, tokens: 1000, turns: 3, cost: 0.5 }] }, sessions: [] } as never);
     const { container } = render(<SessionHeader {...baseProps} name="s" sessionId="s1" cwd="/r" readOnly={false} running={false} termPageKey="p1" dock />);

@@ -102,12 +102,13 @@ describe("AttentionBell", () => {
     const onToggleNotify = vi.fn();
     const { rerender } = render(<AttentionBell onNavigate={vi.fn()} notifyOn onToggleNotify={onToggleNotify} />);
     fireEvent.click(screen.getByLabelText(/어텐션 큐/));
-    const toggle = screen.getByRole("button", { name: /OS 알림/ });
+    const toggle = screen.getByRole("button", { name: /^OS 알림/ });
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(toggle);
     expect(onToggleNotify).toHaveBeenCalledTimes(1);
     rerender(<AttentionBell onNavigate={vi.fn()} notifyOn={false} onToggleNotify={onToggleNotify} />);
-    expect(screen.getByRole("button", { name: /OS 알림/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /^OS 알림/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByLabelText(/어텐션 큐/)).toHaveAttribute("title", "지금 필요한 것 — OS 알림 꺼짐");
+    expect(screen.getByLabelText(/어텐션 큐/)).toHaveAttribute("aria-label", "어텐션 큐 (0건) — OS 알림 꺼짐"); // review m4
   });
 });

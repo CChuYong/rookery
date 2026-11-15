@@ -18,4 +18,5 @@ export default {
   "attentionBell.notifyToggle": "OS 알림",
   "attentionBell.notifyOnState": "켜짐",
   "attentionBell.notifyOffState": "꺼짐",
+  "attentionBell.ariaMuted": "어텐션 큐 ({count}건) — OS 알림 꺼짐",
 } satisfies Catalog;

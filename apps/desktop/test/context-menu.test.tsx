@@ -15,6 +15,11 @@ describe("clampMenuPosition", () => {
   it("flips left of the anchor when it would run past the right edge", () => {
     expect(clampMenuPosition({ x: 850, y: 100 }, { width: 160, height: 100 }, vp)).toEqual({ left: 690, top: 100 });
   });
+  // review m2: a menu opened under a button must flip to ABOVE the button (and to its left edge), not over it.
+  it("with an anchor rect, flips above the trigger and right-aligns to it", () => {
+    const anchor = { top: 560, bottom: 584, left: 840, right: 864 };
+    expect(clampMenuPosition({ x: 840, y: 586 }, { width: 160, height: 200 }, vp, anchor)).toEqual({ left: 704, top: 360 });
+  });
   it("never goes past the top/left gutter when the menu is taller/wider than the space on either side", () => {
     expect(clampMenuPosition({ x: 100, y: 300 }, { width: 160, height: 590 }, vp)).toEqual({ left: 100, top: 8 });
     expect(clampMenuPosition({ x: 100, y: 100 }, { width: 960, height: 100 }, vp).left).toBe(8);
@@ -30,6 +35,12 @@ describe("ContextMenu viewport clamp (audit #26)", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 160, bottom: 200, width: 160, height: 200, toJSON: () => ({}) });
     render(<ContextMenu x={100} y={550} onClose={() => {}} items={[{ label: "Rename", onClick: () => {} }, { label: "Delete…", onClick: () => {}, danger: true }]} />);
     expect(screen.getByRole("menu")).toHaveStyle({ left: "100px", top: "350px" });
+  });
+
+  it("caps its height to the viewport and scrolls when taller", () => {
+    render(<ContextMenu x={10} y={10} onClose={() => {}} items={[{ label: "a", onClick: () => {} }]} />);
+    expect(screen.getByRole("menu").className).toMatch(/max-h-\[calc\(100vh-16px\)\]/);
+    expect(screen.getByRole("menu").className).toMatch(/overflow-y-auto/);
   });
 
   it("renders an optional header above the items (used by the narrow-header overflow menu for metrics)", () => {

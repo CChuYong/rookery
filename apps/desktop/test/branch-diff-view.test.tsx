@@ -34,6 +34,24 @@ describe("BranchDiffView", () => {
     expect(await screen.findByRole("button", { name: /a\.ts/ })).toBeInTheDocument();
   });
 
+  it("says the diff is against the fork point and offers a refresh that reloads it", async () => {
+    const loadDiff = vi.fn(async () => DIFF);
+    render(<BranchDiffView workerId="w1" loadDiff={loadDiff} />);
+    expect(await screen.findByText("분기 시점 대비 변경")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await waitFor(() => expect(loadDiff).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a notice when the daemon truncated the diff", async () => {
+    render(<BranchDiffView workerId="w1" loadDiff={async () => `${DIFF}\n…(truncated)`} />);
+    expect(await screen.findByText("변경이 너무 커서 앞부분(512 KB)만 보여요")).toBeInTheDocument();
+  });
+
+  it("notes a binary file instead of showing an empty pane", async () => {
+    render(<BranchDiffView workerId="w1" loadDiff={async () => "diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ"} />);
+    expect(await screen.findByText("바이너리 파일이라 내용 비교를 보여 줄 수 없어요")).toBeInTheDocument();
+  });
+
   it("is what a branch: workspace tab renders", async () => {
     render(<WorkspaceTab activeTab="branch:w1" pageKey="w1" root="/r" loadBranchDiff={async () => DIFF} />);
     expect(await screen.findByRole("button", { name: /a\.ts/ })).toBeInTheDocument();

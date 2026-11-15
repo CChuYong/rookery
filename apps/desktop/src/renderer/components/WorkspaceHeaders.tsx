@@ -9,7 +9,7 @@ import type { Checkpoint } from "./CheckpointMenu.js";
 import { SessionMetrics } from "./SessionMetrics.js";
 import { MetricsView } from "./MetricsView.js";
 import { OpenInAppMenu } from "./OpenInAppMenu.js";
-import { ContextMenu, type MenuItem } from "./ContextMenu.js";
+import { ContextMenu, type AnchorRect, type MenuItem } from "./ContextMenu.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
 import { useT } from "../i18n/provider.js";
@@ -42,7 +42,7 @@ function taskMenuLabel(task: { type: string; description: string }): string {
 function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStopTask?: (taskId: string) => void }): JSX.Element | null {
   const t = useT();
   const activeWorkflows = useStore((state) => Object.values(state.workflows[worker.id] ?? {}).filter((run) => run.status === "running").length);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; rect: AnchorRect } | null>(null);
   // Listed background tasks (Claude only — codex workers never carry tasks) arrive in any status, running included.
   // Ambient/subagent/workflow bg tasks are deliberately NOT listed, so `bg.count` never drives this indicator.
   const tasks = worker.tasks ?? [];
@@ -66,7 +66,7 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
           onClick={(e) => {
             if (menu) { setMenu(null); return; }
             const r = e.currentTarget.getBoundingClientRect();
-            setMenu({ x: r.left, y: r.bottom + 2 });
+            setMenu({ x: r.left, y: r.bottom + 2, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
           }}
           className="workspace-header-activity no-drag inline-flex shrink-0 items-center gap-0.5 rounded px-1 font-mono text-meta text-muted transition-colors hover:text-fg-dim"
         >
@@ -77,6 +77,7 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
           <ContextMenu
             x={menu.x}
             y={menu.y}
+            anchorRect={menu.rect}
             onClose={() => setMenu(null)}
             items={tasks.map((task) => ({
               label: t("workspaceHeaders.stopTask", { description: taskMenuLabel(task) }),
@@ -94,9 +95,10 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
 // "…" overflow (audit #21): the narrow header (≤720px, globals.css) drops metrics, checkpoint, ticket, the task menu
 // and Reset layout — this menu, shown only at that width, keeps every one of them reachable. The metrics ride along
 // as a read-only header block.
+// The button only renders when there's something to show (review m1): items, or a header the caller says is non-empty.
 function HeaderOverflow({ items, header }: { items: MenuItem[]; header?: ReactNode }): JSX.Element | null {
   const t = useT();
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; rect: AnchorRect } | null>(null);
   if (items.length === 0 && !header) return null;
   return (
     <>
@@ -109,15 +111,23 @@ function HeaderOverflow({ items, header }: { items: MenuItem[]; header?: ReactNo
         onClick={(e) => {
           if (menu) { setMenu(null); return; }
           const r = e.currentTarget.getBoundingClientRect();
-          setMenu({ x: r.left, y: r.bottom + 2 });
+          setMenu({ x: r.left, y: r.bottom + 2, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
         }}
         className={cn("workspace-header-overflow no-drag h-6 w-6 items-center justify-center rounded-md transition-colors", menu ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
       >
         <MoreHorizontal size={14} />
       </button>
-      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} header={header} items={items} />}
+      {menu && <ContextMenu x={menu.x} y={menu.y} anchorRect={menu.rect} onClose={() => setMenu(null)} header={header} items={items} />}
     </>
   );
+}
+
+// Whether a transcript has a metrics row yet (scans from the end, where they land) — decides if the overflow's metrics
+// block would have anything in it.
+function hasMetricsItem(items: LogItem[] | undefined): boolean {
+  if (!items) return false;
+  for (let i = items.length - 1; i >= 0; i--) if (items[i]!.kind === "metrics") return true;
+  return false;
 }
 
 // Read-only metrics block at the top of the overflow menu (hidden when there are no metrics yet).
@@ -259,6 +269,7 @@ export function SessionHeader({ name, sessionId, cwd, provider, readOnly, runnin
 }): JSX.Element {
   const t = useT();
   const repoName = cwd ? baseName(cwd) : null;
+  const hasMetrics = useStore((st) => (sessionId ? hasMetricsItem(st.logsBySession[sessionId]) : false));
   return (
     <div className="workspace-header drag flex h-10 shrink-0 items-center gap-2 px-4 text-body">
       <span className="workspace-header-eyebrow sr-only">{t("workspaceHeaders.sessionEyebrow")}</span>
@@ -286,7 +297,7 @@ export function SessionHeader({ name, sessionId, cwd, provider, readOnly, runnin
       {/* Same order and gap as the worker header (audit #22): metrics → Open in → overflow → reset → terminal → panel. */}
       <div className="workspace-header-controls no-drag ml-auto flex shrink-0 items-center gap-1">
         {sessionId && <div className="workspace-header-metrics mr-1"><SessionMetrics sessionId={sessionId} /></div>}
-        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} agentKind="master" overflowHeader={sessionId ? <OverflowMetrics><SessionMetrics sessionId={sessionId} /></OverflowMetrics> : undefined} />
+        <HeaderControls termPageKey={termPageKey} termPageOpen={termPageOpen} rightOpen={rightOpen} onToggleTerm={onToggleTerm} onToggleRight={onToggleRight} cwd={cwd} dock={dock} agentKind="master" overflowHeader={sessionId && hasMetrics ? <OverflowMetrics><SessionMetrics sessionId={sessionId} /></OverflowMetrics> : undefined} />
       </div>
     </div>
   );

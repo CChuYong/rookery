@@ -7,7 +7,7 @@ import type { AttentionNav } from "../lib/attention-queue.js";
 import { cn } from "../lib/cn.js";
 import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
-import { UsagePanel } from "./UsagePanel.js";
+import { UsagePanel, type UsageTab } from "./UsagePanel.js";
 import { ResourceMonitor } from "./ResourceMonitor.js";
 import { AttentionBell } from "./AttentionBell.js";
 import { Tooltip } from "./Tooltip.js";
@@ -15,7 +15,10 @@ import { Tooltip } from "./Tooltip.js";
 // Usage strip + its detail popover (audit #25): the strip is a button, the popover is the full UsagePanel (titles,
 // reset times, provider tabs, hints). It opens upward and closes on Escape, an outside click or a route change.
 function UsageItem({ usage, loadFailed, routeKey }: { usage: UsageSnapshot | null; loadFailed?: boolean; routeKey?: string }): JSX.Element {
+  const t = useT();
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<UsageTab>("claude"); // shared by the strip and the popover (review m3)
+  const panelRef = useRef<HTMLDivElement>(null);
   const lastRoute = useRef(routeKey);
   useEffect(() => {
     if (lastRoute.current === routeKey) return;
@@ -30,17 +33,19 @@ function UsageItem({ usage, loadFailed, routeKey }: { usage: UsageSnapshot | nul
     window.addEventListener("resize", resize);
     return () => { window.removeEventListener("keydown", esc); window.removeEventListener("resize", resize); };
   }, [open]);
+  // Move focus into the popover on open, like the Resources popover (review m3).
+  useEffect(() => { if (open) panelRef.current?.focus(); }, [open]);
   return (
     <span className="relative flex min-w-0 shrink items-center">
       {/* the strip is the one item that gives way in a narrow window, so the right-hand entry points never clip */}
       <span className="flex min-w-0 shrink items-center overflow-hidden">
-        <UsagePanel usage={usage} loadFailed={loadFailed} variant="statusbar" onOpenDetails={() => setOpen((v) => !v)} detailsOpen={open} />
+        <UsagePanel usage={usage} loadFailed={loadFailed} variant="statusbar" onOpenDetails={() => setOpen((v) => !v)} detailsOpen={open} tab={tab} onTabChange={setTab} />
       </span>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div role="dialog" className={cn("absolute bottom-full left-0 z-50 mb-1 w-[300px] whitespace-normal", MENU_SURFACE)}>
-            <UsagePanel usage={usage} loadFailed={loadFailed} />
+          <div ref={panelRef} role="dialog" aria-label={t("usagePanel.details")} tabIndex={-1} className={cn("absolute bottom-full left-0 z-50 mb-1 w-[300px] whitespace-normal focus:outline-none", MENU_SURFACE)}>
+            <UsagePanel usage={usage} loadFailed={loadFailed} tab={tab} onTabChange={setTab} />
           </div>
         </>
       )}

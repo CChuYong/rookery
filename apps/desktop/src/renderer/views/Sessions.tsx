@@ -2,7 +2,7 @@ import { memo, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder, Search } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
-import { ContextMenu } from "../components/ContextMenu.js";
+import { ContextMenu, type AnchorRect } from "../components/ContextMenu.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
 import { Collapse } from "../components/Collapse.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
@@ -149,7 +149,7 @@ function SessionsImpl(p: {
 }): JSX.Element {
   const t = useT();
   const locale = useLocale();
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number; rect?: AnchorRect } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
   const [q, setQ] = useState(""); // text filter by session name (audit #118), shown past SEARCH_MIN sessions
@@ -229,7 +229,8 @@ function SessionsImpl(p: {
   const pinnedItems = [...visible.filter((s) => s.pinned)].sort(byActivityDesc);
   const rest = visible.filter((s) => !s.pinned);
 
-  const archived = p.sessions.filter((s) => s.archived && (effectiveSource === "all" || srcOf(s.origin) === effectiveSource));
+  // The text filter applies to the archive too (review m5).
+  const archived = p.sessions.filter((s) => s.archived && (effectiveSource === "all" || srcOf(s.origin) === effectiveSource) && (!query || sessName(s).toLowerCase().includes(query)));
 
   const Row = (s: Session): JSX.Element => {
     const name = sessName(s);
@@ -319,7 +320,7 @@ function SessionsImpl(p: {
           <button
             title={t("common.moreActions")}
             aria-label={t("common.moreActions")}
-            onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4 }); }}
+            onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }); }}
             className="rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           >
             <MoreHorizontal size={14} />
@@ -371,7 +372,8 @@ function SessionsImpl(p: {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("sessions.filterPlaceholder")} aria-label={t("sessions.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
         </div>
       )}
-      {query && filtered.length === 0 && <div className="px-2 py-3 text-ui text-muted">{t("sessions.noMatches")}</div>}
+      {/* not while the open session is still listed (it's kept visible on purpose) — review m5 */}
+      {query && visible.length === 0 && <div className="px-2 py-3 text-ui text-muted">{t("sessions.noMatches")}</div>}
 
       {pinnedItems.length > 0 && (
         <div>
@@ -415,6 +417,7 @@ function SessionsImpl(p: {
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          anchorRect={menu.rect}
           onClose={() => setMenu(null)}
           items={[
             { label: t("sessions.rename"), onClick: () => setRenaming({ id: menu.id, value: sessName(menuSession) }) },
