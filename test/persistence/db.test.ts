@@ -56,6 +56,35 @@ describe("openDb", () => {
     }
   });
 
+  it("adds nullable image content hash/last-use columns and the dedupe index to an existing DB", () => {
+    const file = path.join(os.tmpdir(), `rk-image-hash-migrate-${process.pid}-${Date.now()}.db`);
+    try {
+      const legacy = new Database(file);
+      legacy.pragma("foreign_keys = ON");
+      legacy.exec("CREATE TABLE schema_version (version INTEGER NOT NULL)");
+      legacy.transaction(() => {
+        for (const migration of MIGRATIONS.slice(0, -1)) migration(legacy);
+        legacy.prepare("INSERT INTO schema_version(version) VALUES (?)").run(MIGRATIONS.length - 1);
+        legacy
+          .prepare("INSERT INTO images(id,name,media_type,byte_length,width,height,created_at) VALUES (?,?,?,?,?,?,?)")
+          .run("11111111-1111-4111-8111-111111111111", "a.png", "image/png", 10, 1, 1, "2026-01-01T00:00:00.000Z");
+      })();
+      legacy.close();
+
+      const migrated = openDb(file);
+      expect(currentVersion(migrated)).toBe(MIGRATIONS.length);
+      expect(migrated.prepare("SELECT sha256, last_used_at FROM images").get()).toEqual({ sha256: null, last_used_at: null });
+      const indexes = migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'images'").all() as Array<{ name: string }>;
+      expect(indexes.map((index) => index.name)).toContain("idx_images_content");
+      expect(() =>
+        migrated.prepare("UPDATE images SET sha256 = 'short'").run(),
+      ).toThrow();
+      migrated.close();
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
   it("is idempotent when reopened (no double-apply)", () => {
     const db = openDb(":memory:");
     const v = currentVersion(db);

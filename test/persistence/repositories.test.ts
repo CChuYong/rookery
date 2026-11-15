@@ -827,3 +827,62 @@ describe("workerActivityAndCost", () => {
     expect(m.has("w4")).toBe(false); // events but no message/result → both metrics NULL → omitted by the guard
   });
 });
+
+describe("image GC/dedupe metadata", () => {
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+  const C = "33333333-3333-4333-8333-333333333333";
+  const D = "44444444-4444-4444-8444-444444444444";
+  const E = "55555555-5555-4555-9555-555555555555";
+  const ref = (id: string, name = "a.png") => ({ id, name, mediaType: "image/png" as const, byteLength: 10, width: 1, height: 1 });
+  let t: string;
+  let repos: Repositories;
+  beforeEach(() => {
+    t = "2026-01-01T00:00:00.000Z";
+    repos = new Repositories(openDb(":memory:"), () => t);
+  });
+
+  it("finds rows by content hash + media type + name only", () => {
+    const hash = "a".repeat(64);
+    repos.addImage(ref(A), hash);
+    repos.addImage(ref(B, "other.png"), hash);
+    repos.addImage(ref(C)); // legacy row: no hash, never dedupes
+    expect(repos.findImagesByContent(hash, "image/png", "a.png").map((r) => r.id)).toEqual([A]);
+    expect(repos.findImagesByContent(hash, "image/png", "other.png").map((r) => r.id)).toEqual([B]);
+    expect(repos.findImagesByContent(hash, "image/jpeg", "a.png")).toEqual([]);
+    expect(repos.findImagesByContent("b".repeat(64), "image/png", "a.png")).toEqual([]);
+    expect(repos.findImagesByContent(hash, "image/png", "a.png")[0]).toEqual(ref(A));
+  });
+
+  it("lists GC candidates by last use (falling back to creation) and touch refreshes them", () => {
+    repos.addImage(ref(A));
+    repos.addImage(ref(B));
+    t = "2026-01-05T00:00:00.000Z";
+    repos.addImage(ref(C));
+    repos.touchImage(A);
+    const cutoff = "2026-01-02T00:00:00.000Z";
+    expect(repos.imageGcCandidates(cutoff)).toEqual([{ id: B, byteLength: 10 }]);
+  });
+
+  it("collects referenced candidate ids from session events, worker events (retry inputs) and messages", () => {
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/x", label: "w" });
+    repos.addSessionEvent({ sessionId: "s1", seq: 1, type: "master.message", payloadJson: JSON.stringify({ role: "user", images: [ref(A)] }) });
+    repos.addWorkerEvent({ workerId: "w1", seq: 1, type: "error", payloadJson: JSON.stringify({ kind: "error", retryInput: { text: "", images: [ref(B)] } }) });
+    repos.addMessage({ sessionId: "s1", role: "user", content: `see ${C.toUpperCase()}` });
+    const found = repos.referencedImageIds(new Set([A, B, C, D]));
+    expect([...found].sort()).toEqual([A, B, C]);
+    // Only candidates are reported; unrelated UUID-shaped text is ignored.
+    expect([...repos.referencedImageIds(new Set([E]))]).toEqual([]);
+    expect([...repos.referencedImageIds(new Set())]).toEqual([]);
+  });
+
+  it("deletes image metadata and the quota aggregate drops", () => {
+    repos.addImage(ref(A));
+    repos.addImage(ref(B));
+    expect(repos.imageBytes()).toBe(20);
+    repos.deleteImage(A);
+    expect(repos.getImage(A)).toBeUndefined();
+    expect(repos.imageBytes()).toBe(10);
+  });
+});

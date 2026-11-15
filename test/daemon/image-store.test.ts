@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ImageStore } from "../../src/daemon/image-store.js";
+import { ImageStore, ImageGcScheduler, IMAGE_GC_GRACE_MS } from "../../src/daemon/image-store.js";
 import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { SessionManager } from "../../src/core/session-manager.js";
@@ -79,10 +79,10 @@ describe("immutable image store", () => {
   });
   it("enforces quota across uploads without deleting assets; rejects tampered refs/symlinks", async () => {
     const { store, db, home } = setup(Buffer.from(png, "base64").length);
-    const input = { name: "a", mediaType: "image/png", base64: png };
+    // Distinct names: identical name+bytes would dedupe to one asset instead of testing the quota.
     const results = await Promise.allSettled([
-      Promise.resolve().then(() => store.upload(input)),
-      Promise.resolve().then(() => store.upload(input)),
+      Promise.resolve().then(() => store.upload({ name: "a", mediaType: "image/png", base64: png })),
+      Promise.resolve().then(() => store.upload({ name: "b", mediaType: "image/png", base64: png })),
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const ref = (
@@ -298,4 +298,187 @@ it("checks quota from an aggregate after one leftover scan, keeping rollback lef
   expect(readdir.mock.calls.filter((c) => String(c[0]).endsWith("images"))).toHaveLength(1);
   readdir.mockRestore();
   db.close();
+});
+
+describe("image dedupe and garbage collection", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const bytes = Buffer.from(png, "base64").length;
+  function clocked(quotaBytes?: number) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "rookery-image-gc-"));
+    homes.push(home);
+    const db = openDb(path.join(home, "db"));
+    const clock = { ms: Date.parse("2026-01-01T00:00:00.000Z") };
+    const repos = new Repositories(db, () => new Date(clock.ms).toISOString());
+    const store = new ImageStore(home, repos, { quotaBytes });
+    const dir = path.join(home, "images");
+    return { home, db, repos, store, clock, dir };
+  }
+
+  it("dedupes an identical upload (same bytes, MIME, name) to the same validated ref without growing quota", () => {
+    const { store, repos, db, dir } = clocked(bytes);
+    const first = store.upload({ name: "shot.png", mediaType: "image/png", base64: png });
+    // The quota is exactly one asset: a second copy would be refused, a dedupe hit is not.
+    const again = store.upload({ name: "shot.png", mediaType: "image/png", base64: png });
+    expect(again).toEqual(first);
+    expect(store.validate([again])).toEqual([first]);
+    expect(repos.imageBytes()).toBe(bytes);
+    expect(fs.readdirSync(dir)).toEqual([first.id]);
+    db.close();
+  });
+
+  it("stores a different name separately (own row and own file)", () => {
+    const { store, repos, db, dir } = clocked();
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    const b = store.upload({ name: "b.png", mediaType: "image/png", base64: png });
+    expect(b.id).not.toBe(a.id);
+    expect(b.name).toBe("b.png");
+    expect(store.validate([b])).toEqual([b]);
+    expect(repos.imageBytes()).toBe(2 * bytes);
+    expect(fs.readdirSync(dir).sort()).toEqual([a.id, b.id].sort());
+    db.close();
+  });
+
+  it("does not dedupe to a row whose asset is gone or replaced by a symlink", () => {
+    const { store, db, dir, home } = clocked();
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    fs.unlinkSync(path.join(dir, a.id));
+    const b = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    expect(b.id).not.toBe(a.id);
+    fs.renameSync(path.join(dir, b.id), path.join(home, "outside"));
+    fs.symlinkSync(path.join(home, "outside"), path.join(dir, b.id));
+    const c = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    expect([a.id, b.id]).not.toContain(c.id);
+    expect(store.get(c.id).base64).toBe(png);
+    db.close();
+  });
+
+  it("deletes an unreferenced image older than the grace window (row + file) and the quota drops", () => {
+    const { store, repos, db, dir, clock } = clocked();
+    const old = store.upload({ name: "old.png", mediaType: "image/png", base64: png });
+    clock.ms += IMAGE_GC_GRACE_MS + 1;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 1, bytes });
+    expect(repos.getImage(old.id)).toBeUndefined();
+    expect(fs.existsSync(path.join(dir, old.id))).toBe(false);
+    expect(repos.imageBytes()).toBe(0);
+    expect(() => store.get(old.id)).toThrow("missing");
+    db.close();
+  });
+
+  it("keeps an unreferenced image younger than the grace window (unsent drafts)", () => {
+    const { store, repos, db, dir, clock } = clocked();
+    const young = store.upload({ name: "draft.png", mediaType: "image/png", base64: png });
+    clock.ms += 6 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 0, bytes: 0 });
+    expect(store.collectGarbage({ now: clock.ms, graceMs: 7 * DAY })).toEqual({ deleted: 0, bytes: 0 });
+    expect(repos.getImage(young.id)).toEqual(young);
+    expect(fs.existsSync(path.join(dir, young.id))).toBe(true);
+    db.close();
+  });
+
+  it("keeps old images referenced by any persisted transcript or retry input", () => {
+    const { store, repos, db, dir, clock } = clocked();
+    const up = (name: string) => store.upload({ name, mediaType: "image/png", base64: png });
+    const [master, worker, retry, workerRetry, message, orphan] = ["m", "w", "r", "wr", "msg", "x"].map((n) => up(`${n}.png`));
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.createWorker({ id: "w1", sessionId: "s1", repoPath: "/x", label: "w" });
+    repos.addSessionEvent({ sessionId: "s1", seq: 1, type: "master.message", payloadJson: JSON.stringify({ type: "master.message", role: "user", images: [master] }) });
+    repos.addSessionEvent({ sessionId: "s1", seq: 2, type: "error", payloadJson: JSON.stringify({ type: "error", retryInput: { text: "", images: [retry] } }) });
+    repos.addWorkerEvent({ workerId: "w1", seq: 1, type: "message", payloadJson: JSON.stringify({ kind: "message", role: "user", images: [worker] }) });
+    repos.addWorkerEvent({ workerId: "w1", seq: 2, type: "error", payloadJson: JSON.stringify({ kind: "error", retryInput: { text: "", images: [workerRetry] } }) });
+    repos.addMessage({ sessionId: "s1", role: "user", content: `image ${message.id}` });
+    clock.ms += 30 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 1, bytes });
+    for (const kept of [master, worker, retry, workerRetry, message]) {
+      expect(store.get(kept.id).base64).toBe(png);
+    }
+    expect(repos.getImage(orphan!.id)).toBeUndefined();
+    expect(fs.readdirSync(dir)).toHaveLength(5);
+    // Deleting the session (cascades the worker) releases every reference.
+    repos.deleteSession("s1");
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 5, bytes: 5 * bytes });
+    expect(fs.readdirSync(dir)).toEqual([]);
+    db.close();
+  });
+
+  it("a dedupe hit or a validated send restarts the grace window", () => {
+    const { store, db, clock } = clocked();
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    const b = store.upload({ name: "b.png", mediaType: "image/png", base64: png });
+    clock.ms += 6 * DAY;
+    expect(store.upload({ name: "a.png", mediaType: "image/png", base64: png }).id).toBe(a.id);
+    store.validate([b]); // accepted send whose ref is still only queued in memory
+    clock.ms += 2 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 0, bytes: 0 });
+    clock.ms += 6 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 2, bytes: 2 * bytes });
+    db.close();
+  });
+
+  it("never follows a symlinked asset and only deletes inside the images dir", () => {
+    const { store, repos, db, dir, home, clock } = clocked();
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    const outside = path.join(home, "precious");
+    fs.writeFileSync(outside, "keep");
+    fs.unlinkSync(path.join(dir, a.id));
+    fs.symlinkSync(outside, path.join(dir, a.id));
+    clock.ms += 8 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 0, bytes: 0 });
+    expect(fs.readFileSync(outside, "utf8")).toBe("keep");
+    expect(fs.lstatSync(path.join(dir, a.id)).isSymbolicLink()).toBe(true);
+    expect(repos.getImage(a.id)).toBeDefined();
+    db.close();
+  });
+
+  it("drops metadata whose asset is already missing and keeps quota accounting consistent", () => {
+    const { store, repos, db, dir, clock } = clocked(bytes * 2);
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    const b = store.upload({ name: "b.png", mediaType: "image/png", base64: png });
+    expect(() => store.upload({ name: "c.png", mediaType: "image/png", base64: png })).toThrow("quota");
+    fs.unlinkSync(path.join(dir, a.id));
+    clock.ms += 8 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 2, bytes: 2 * bytes });
+    expect(repos.getImage(b.id)).toBeUndefined();
+    // Reclaimed bytes are usable again; a failed unlink would have stayed reserved.
+    store.upload({ name: "c.png", mediaType: "image/png", base64: png });
+    const d = store.upload({ name: "d.png", mediaType: "image/png", base64: png });
+    clock.ms += 8 * DAY;
+    const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation(() => { throw Object.assign(new Error("busy"), { code: "EBUSY" }); });
+    expect(store.collectGarbage({ now: clock.ms }).deleted).toBe(2);
+    unlink.mockRestore();
+    expect(repos.imageBytes()).toBe(0);
+    expect(fs.existsSync(path.join(dir, d.id))).toBe(true);
+    expect(() => store.upload({ name: "e.png", mediaType: "image/png", base64: png })).toThrow("quota");
+    db.close();
+  });
+});
+
+describe("ImageGcScheduler", () => {
+  it("coalesces triggers into one deferred run, logs a one-line summary and swallows failures", () => {
+    vi.useFakeTimers();
+    try {
+      const lines: string[] = [];
+      const run = vi.fn(() => ({ deleted: 2, bytes: 140 }));
+      const scheduler = new ImageGcScheduler({ collectGarbage: run }, { delayMs: 50, log: (l) => lines.push(l) });
+      scheduler.schedule();
+      scheduler.schedule();
+      scheduler.schedule();
+      expect(run).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(50);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(lines).toEqual(["[rookery] image gc: removed 2 unreferenced image(s), 140 bytes\n"]);
+      run.mockImplementationOnce(() => { throw new Error("db closed"); });
+      scheduler.schedule();
+      vi.advanceTimersByTime(50);
+      expect(lines[1]).toMatch(/^\[rookery\] image gc failed: .*db closed/);
+      scheduler.schedule();
+      scheduler.stop();
+      vi.advanceTimersByTime(50);
+      expect(run).toHaveBeenCalledTimes(2);
+      scheduler.schedule(); // stopped: no further runs
+      vi.advanceTimersByTime(50);
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

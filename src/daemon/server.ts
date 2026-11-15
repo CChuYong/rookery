@@ -1,4 +1,4 @@
-import { ImageStore } from "./image-store.js";
+import { ImageStore, ImageGcScheduler } from "./image-store.js";
 import { IMAGE_LIMITS } from "../core/image-input.js";
 import type { SpeedPreference } from "../core/speed.js";
 import http from "node:http";
@@ -144,6 +144,13 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     process.stderr.write(`[rookery] image store unavailable: ${String(err)}\n`);
   }
   const bus = new EventBus();
+  // Image GC (docs/reference/images.md): one coalesced pass shortly after boot, and again after every
+  // permanent session/worker deletion. Runs off the request path; failures are logged, never thrown.
+  const imageGc = images ? new ImageGcScheduler(images) : undefined;
+  imageGc?.schedule();
+  const stopImageGcOnWorkerDelete = bus.subscribe(ALL_CHANNEL, (event) => {
+    if (event.type === "worker.deletion" && event.phase === "completed") imageGc?.schedule();
+  });
   const git = new RealGitOps();
   const settings = new Settings(repos, config);
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
@@ -276,6 +283,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // dies with the directory (docs/superpowers/specs/2026-07-30-codex-usage-mirror-design.md).
     syncCodexUsageMirrorForTarget(config.home, realCodexHome, id, "master");
     removeCodexHome(config.home, id);
+    imageGc?.schedule(); // the session's transcript refs are gone; reclaim what nothing else references
   };
   const workerBackends: Record<string, import("../core/agent-backend.js").AgentBackend> = { claude: backend, codex: codexBackend };
   const workflows = new ClaudeWorkflowRegistry({ files: realClaudeWorkflowFiles, bus });
@@ -760,6 +768,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     // live worker. Parked, the arms stay notify_armed=1 in the DB and the next boot's sweepSettled() delivers them.
     stopNotifier();
     stopWorkerTrigger(); // same rationale: fleet.close's synchronous 'stopped' emits must not fire automations mid-shutdown
+    stopImageGcOnWorkerDelete();
+    imageGc?.stop(); // a pending GC pass must not race db.close()
     usageCollector.stop();
     clearInterval(usageMirrorTimer);
     scheduler.stop();

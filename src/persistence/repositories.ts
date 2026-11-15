@@ -204,8 +204,51 @@ export class Repositories {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
-  addImage(image: ImageRef): void {
-    this.db.prepare('INSERT INTO images(id,name,media_type,byte_length,width,height,created_at) VALUES (?,?,?,?,?,?,?)').run(image.id, image.name, image.mediaType, image.byteLength, image.width, image.height, this.now());
+  addImage(image: ImageRef, sha256?: string): void {
+    this.db.prepare('INSERT INTO images(id,name,media_type,byte_length,width,height,created_at,sha256) VALUES (?,?,?,?,?,?,?,?)').run(image.id, image.name, image.mediaType, image.byteLength, image.width, image.height, this.now(), sha256 ?? null);
+  }
+
+  // Dedupe lookup: rows with identical decoded bytes, MIME and (sanitized) name, newest first. The caller still
+  // checks the asset file, since a row can outlive an asset that was removed out of band.
+  findImagesByContent(sha256: string, mediaType: string, name: string): ImageRef[] {
+    return this.db.prepare('SELECT id,name,media_type AS mediaType,byte_length AS byteLength,width,height FROM images WHERE sha256 = ? AND media_type = ? AND name = ? ORDER BY created_at DESC, rowid DESC').all(sha256, mediaType, name) as ImageRef[];
+  }
+
+  touchImage(id: string): void {
+    this.db.prepare('UPDATE images SET last_used_at = ? WHERE id = ?').run(this.now(), id);
+  }
+
+  // Images whose last use (or creation, if never re-used) is strictly before `cutoff` (ISO-8601, same format as now()).
+  imageGcCandidates(cutoff: string): Array<{ id: string; byteLength: number }> {
+    return this.db.prepare('SELECT id, byte_length AS byteLength FROM images WHERE COALESCE(last_used_at, created_at) < ? ORDER BY created_at, rowid').all(cutoff) as Array<{ id: string; byteLength: number }>;
+  }
+
+  // Which of `candidates` appear anywhere in persisted transcripts: master events (user messages, retryInput),
+  // worker events (user messages, retryInput) and textual messages. One streaming pass per table that extracts
+  // every UUID-shaped token, so any future field that carries a ref keeps the asset alive (conservative).
+  referencedImageIds(candidates: ReadonlySet<string>): Set<string> {
+    const found = new Set<string>();
+    if (!candidates.size) return found;
+    const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
+    const sources = [
+      "SELECT payload_json FROM session_events",
+      "SELECT payload_json FROM worker_events",
+      "SELECT content FROM messages",
+    ];
+    for (const sql of sources) {
+      for (const [text] of this.db.prepare(sql).raw().iterate() as Iterable<[string]>) {
+        for (const match of text.matchAll(uuid)) {
+          const id = match[0].toLowerCase();
+          if (candidates.has(id)) found.add(id);
+        }
+        if (found.size === candidates.size) return found;
+      }
+    }
+    return found;
+  }
+
+  deleteImage(id: string): void {
+    this.db.prepare('DELETE FROM images WHERE id = ?').run(id);
   }
 
   getImage(id: string): ImageRef | undefined {
