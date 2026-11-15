@@ -900,6 +900,12 @@ describe("image GC/dedupe metadata", () => {
     }
   });
 
+  it("does not scan messages.content (a plain-text index that never carries refs), even JSON-shaped", () => {
+    repos.createSession({ id: "s1", cwd: "/x" });
+    repos.addMessage({ sessionId: "s1", role: "user", content: JSON.stringify({ images: [ref(A)] }) });
+    expect([...repos.referencedImageIds(new Set([A]))]).toEqual([]);
+  });
+
   it("tripwire: every event shape with an images field is a scanned event type", () => {
     const source = fs.readFileSync(new URL("../../src/core/events.ts", import.meta.url), "utf8");
     const lines = source.split("\n").filter((line) => /\bimages\??:/.test(line));

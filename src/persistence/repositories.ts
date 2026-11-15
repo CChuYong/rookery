@@ -202,7 +202,6 @@ const sqlList = (values: readonly string[]): string => values.map((v) => `'${v}'
 const IMAGE_REF_SCAN_SQL = [
   `SELECT payload_json FROM session_events WHERE type IN (${sqlList(IMAGE_REF_SESSION_EVENT_TYPES)}) AND instr(payload_json, '"images"') > 0`,
   `SELECT payload_json FROM worker_events WHERE type IN (${sqlList(IMAGE_REF_WORKER_EVENT_TYPES)}) AND instr(payload_json, '"images"') > 0`,
-  `SELECT content FROM messages WHERE instr(content, '"images"') > 0`,
 ];
 
 export class Repositories {
@@ -239,7 +238,7 @@ export class Repositories {
   // fork copies keep type and payload. SQLite narrows to those event types containing the literal `"images"`
   // key BEFORE any row reaches JS (type is checked first so large tool payloads are never read), then every
   // UUID-shaped token in the surviving rows counts. `messages.content` is a plain-text index that never holds
-  // refs; it is kept in the scan under the same `"images"` prefilter for any future JSON-shaped content.
+  // refs, so it is not scanned.
   // Tripwire: test/persistence/repositories.test.ts fails if events.ts gains an `images` field on another type.
   referencedImageIds(candidates: ReadonlySet<string>): Set<string> {
     const found = new Set<string>();

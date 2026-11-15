@@ -395,8 +395,10 @@ describe("image dedupe and garbage collection", () => {
     expect(repos.getImage(orphan!.id)).toBeUndefined();
     expect(repos.getImage(message!.id)).toBeUndefined();
     expect(fs.readdirSync(dir)).toHaveLength(4);
-    // Deleting the session (cascades the worker) releases every reference.
+    // Deleting the session (cascades the worker) releases every reference. The get() reads above count as
+    // displays (they restart the window), so age the images past the grace again.
     repos.deleteSession("s1");
+    clock.ms += 30 * DAY;
     expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 4, bytes: 4 * bytes });
     expect(fs.readdirSync(dir)).toEqual([]);
     db.close();
@@ -413,6 +415,72 @@ describe("image dedupe and garbage collection", () => {
     expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 0, bytes: 0 });
     clock.ms += 6 * DAY;
     expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 2, bytes: 2 * bytes });
+    db.close();
+  });
+
+  it("a displayed image (get) restarts the grace window: viewing a draft daily keeps its image", () => {
+    const { store, repos, db, clock } = clocked();
+    const draft = store.upload({ name: "draft.png", mediaType: "image/png", base64: png });
+    // The draft thumbnail loads through image.get every day; nothing references it in a transcript yet.
+    for (let day = 0; day < 10; day++) {
+      clock.ms += DAY;
+      expect(store.get(draft.id).base64).toBe(png);
+    }
+    // The upload is now 10 days old (past the 7-day grace) but it was displayed within the window.
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 0, bytes: 0 });
+    expect(repos.getImage(draft.id)).toEqual(draft);
+    // Not displayed for longer than the window: reclaimed.
+    clock.ms += IMAGE_GC_GRACE_MS + 1;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 1, bytes });
+    db.close();
+  });
+
+  it("unlinks the asset before deleting its row; a failed unlink keeps the row (no orphaned quota)", () => {
+    const { store, repos, db, dir, clock } = clocked(bytes);
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    clock.ms += 8 * DAY;
+    const del = vi.spyOn(repos, "deleteImage");
+    const failing = vi.spyOn(fs, "unlinkSync").mockImplementation(() => {
+      throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    });
+    try {
+      // A failed unlink (or a crash right after it) must leave the row, so the next pass can retry.
+      expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 0, bytes: 0 });
+      expect(failing).toHaveBeenCalledTimes(1);
+      expect(del).not.toHaveBeenCalled();
+    } finally {
+      failing.mockRestore();
+    }
+    expect(repos.getImage(a.id)).toEqual(a);
+    expect(repos.imageBytes()).toBe(bytes);
+    expect(fs.existsSync(path.join(dir, a.id))).toBe(true);
+    // The quota still counts the committed asset exactly once (no leftover double count, no release).
+    expect(() => store.upload({ name: "b.png", mediaType: "image/png", base64: png })).toThrow("quota");
+    const unlink = vi.spyOn(fs, "unlinkSync");
+    try {
+      expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 1, bytes });
+      expect(unlink).toHaveBeenCalledWith(path.join(fs.realpathSync(dir), a.id));
+      expect(del).toHaveBeenCalledWith(a.id);
+      expect(unlink.mock.invocationCallOrder[0]!).toBeLessThan(del.mock.invocationCallOrder[0]!);
+    } finally {
+      unlink.mockRestore();
+      del.mockRestore();
+    }
+    expect(repos.getImage(a.id)).toBeUndefined();
+    expect(fs.existsSync(path.join(dir, a.id))).toBe(false);
+    // Reclaimed bytes are usable again.
+    store.upload({ name: "b.png", mediaType: "image/png", base64: png });
+    db.close();
+  });
+
+  it("a row left behind by a crash between unlink and row delete is dropped on the next pass", () => {
+    const { store, repos, db, dir, clock } = clocked(bytes);
+    const a = store.upload({ name: "a.png", mediaType: "image/png", base64: png });
+    fs.unlinkSync(path.join(dir, a.id)); // the unlink happened, the row delete did not
+    clock.ms += 8 * DAY;
+    expect(store.collectGarbage({ now: clock.ms })).toEqual({ deleted: 1, bytes });
+    expect(repos.getImage(a.id)).toBeUndefined();
+    store.upload({ name: "b.png", mediaType: "image/png", base64: png });
     db.close();
   });
 
@@ -445,11 +513,14 @@ describe("image dedupe and garbage collection", () => {
     const d = store.upload({ name: "d.png", mediaType: "image/png", base64: png });
     clock.ms += 8 * DAY;
     const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation(() => { throw Object.assign(new Error("busy"), { code: "EBUSY" }); });
-    expect(store.collectGarbage({ now: clock.ms }).deleted).toBe(2);
+    // A failed unlink keeps the row (retried next pass), so nothing is released and the quota stays exact.
+    expect(store.collectGarbage({ now: clock.ms }).deleted).toBe(0);
     unlink.mockRestore();
-    expect(repos.imageBytes()).toBe(0);
+    expect(repos.imageBytes()).toBe(2 * bytes);
     expect(fs.existsSync(path.join(dir, d.id))).toBe(true);
     expect(() => store.upload({ name: "e.png", mediaType: "image/png", base64: png })).toThrow("quota");
+    expect(store.collectGarbage({ now: clock.ms }).deleted).toBe(2);
+    store.upload({ name: "e.png", mediaType: "image/png", base64: png });
     db.close();
   });
 });

@@ -39,7 +39,7 @@ function matchesSignature(bytes: Buffer, mime: string): boolean {
   return false;
 }
 // Unreferenced images younger than this survive GC: they may sit in an unsent (persisted) desktop draft,
-// which no transcript references yet. A dedupe hit or a validated send restarts the window.
+// which no transcript references yet. A dedupe hit, a read (get) or a validated send restarts the window.
 export const IMAGE_GC_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export interface ImageGcResult {
   deleted: number;
@@ -202,11 +202,11 @@ export class ImageStore implements ImageResolver {
     }
   }
   // Reclaim images that are older than the grace window (by last use, else creation) AND not referenced by
-  // any persisted transcript (session/worker events incl. retry inputs, messages). Synchronous on the event
-  // loop, like upload, so it can never interleave with a quota reservation; the cost is bounded by the
-  // reference scan, which SQLite narrows to ref-carrying event types containing an `"images"` key. Only regular files directly inside the images dir
-  // are unlinked; a symlinked or non-file entry keeps both its row and its entry. Crash leftovers (files
-  // without a row, temporaries) are outside this policy and stay counted against the quota.
+  // any persisted transcript (session/worker events incl. retry inputs). Synchronous on the event loop, like
+  // upload, so it can never interleave with a quota reservation; the cost is bounded by the reference scan,
+  // which SQLite narrows to ref-carrying event types containing an `"images"` key. Only regular files directly
+  // inside the images dir are unlinked; a symlinked or non-file entry keeps both its row and its entry. Crash
+  // leftovers (files without a row, temporaries) are outside this policy and stay counted against the quota.
   collectGarbage(options: { graceMs?: number; now?: number } = {}): ImageGcResult {
     this.checkDirectory();
     const cutoff = new Date(
@@ -233,20 +233,22 @@ export class ImageStore implements ImageResolver {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
       }
       if (stat && !stat.isFile()) continue;
+      // Unlink first, then delete the row: a failed unlink (or a crash in between) leaves the row, so the asset
+      // stays committed metadata and the next pass retries it, instead of a rowless file that permanently eats
+      // quota. A row whose file is already gone (ENOENT, incl. a crash after the unlink) is just dropped.
+      if (stat) {
+        try {
+          fs.unlinkSync(file); // unlink removes the entry itself; it never follows a symlink
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
+        }
+        // Keep the cached leftover count exact: the file's excess over its committed size is gone with it.
+        if (this.leftoverBytes !== null)
+          this.leftoverBytes -= Math.max(0, stat.size - candidate.byteLength);
+      }
       this.repos.deleteImage(candidate.id);
       result.deleted += 1;
       result.bytes += candidate.byteLength;
-      if (!stat) continue;
-      // Keep the cached leftover count exact: this file contributed max(0, size - committed) before; now it
-      // contributes nothing if unlinked, or its whole size if the unlink failed (it is uncommitted bytes now).
-      const before = Math.max(0, stat.size - candidate.byteLength);
-      let after = 0;
-      try {
-        fs.unlinkSync(file); // unlink removes the entry itself; it never follows a symlink
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") after = stat.size;
-      }
-      if (this.leftoverBytes !== null) this.leftoverBytes += after - before;
     }
     return result;
   }
@@ -285,6 +287,9 @@ export class ImageStore implements ImageResolver {
         if (!n) throw new Error("Image is unreadable; upload again and retry");
         offset += n;
       }
+      // A displayed image (e.g. an unsent draft's thumbnail) restarts the GC grace window, so the window means
+      // "since last displayed or sent", not "since upload".
+      this.repos.touchImage(id);
       return { image, base64: bytes.toString("base64") };
     } finally {
       fs.closeSync(fd);
