@@ -17,12 +17,12 @@ full main-area page; spawning a worker should feel the same.
 - **Layout (revised after owner feedback: "as minimal as the reference — merge into the text box, hide what's rarely
   touched behind small buttons"):**
   - Title bar: `New worker` and a close ×.
-  - Centred column: one heading that names the repo ("What should the worker do in orbitkit?"), then a single rounded
-    box — the task textarea; in source mode the issue/ticket search (with an inline results list) or the picked item sits
-    at the top of the box; the box footer holds the source switch (Write directly / GitHub / Linear) on the left and
-    agent backend · model · effort plus a round send button on the right.
-  - A quiet meta row under the box: repo (a select when more than one repo is registered), base branch, permission
-    mode, and "More".
+  - Column (720px, vertically centred like New Session): a quiet left-aligned one-liner in New Session's style
+    ("What should the worker do in `orbitkit`?") — the repo is part of the sentence and becomes an inline select when
+    several repos are registered; then a single rounded box — the task textarea; in source mode the issue/ticket search
+    (with an inline results list) or the picked item sits at the top of the box; the box footer holds the source switch
+    (Write directly / GitHub / Linear) on the left and agent backend · model · effort plus a round send button on the right.
+  - A quiet meta row under the box: base branch, permission mode, and "More".
   - "More" reveals label, cost budget and speed (kept mounted while hidden, so values survive collapsing).
 - **Keys:** the page is not a modal (sidebar and status bar stay live), so it captures no window-level keys — menus keep
   their own Escape. Escape does not close the page (keeps the typed task safe); Escape inside the source search only

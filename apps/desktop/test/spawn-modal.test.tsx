@@ -10,7 +10,8 @@ describe("WorkerSpawnPage", () => {
     render(<WorkerSpawnPage repo="app" defaultModel="claude-opus-4-8" defaultEffort="high" branches={["main"]} onSpawn={() => {}} onClose={() => {}} />);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("region", { name: "새 워커" })).toHaveClass("overflow-y-auto");
-    expect(screen.getByRole("heading", { name: "app에서 워커에게 무엇을 맡길까요?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /app\s?에서 워커에게 무엇을 맡길까요\?/ })).toBeInTheDocument();
+    expect(screen.queryByText("app", { selector: ".text-muted *" })).toBeNull(); // no separate repo label under the box
     // where/how controls sit under the box with accessible names
     expect(screen.getByRole("combobox", { name: "기준 브랜치" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "권한 모드" })).toBeInTheDocument();

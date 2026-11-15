@@ -3,7 +3,7 @@ import { SpeedControl } from "./SpeedControl.js";
 import { defaultSpeed } from "../lib/speed.js";
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
-import { ArrowUp, Folder, GitBranch, Loader2, ShieldOff, SlidersHorizontal, X } from "lucide-react";
+import { ArrowUp, GitBranch, Loader2, ShieldOff, SlidersHorizontal, X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
@@ -186,8 +186,26 @@ export function WorkerSpawnPage(p: {
           rarely touched lives behind small controls under the box or the "More" toggle. */}
       <div role="region" aria-label={t("workerSpawnModal.title")} onKeyDown={onFormKeyDown} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col justify-center gap-3 pb-[12vh] pt-10">
-          <h1 id="worker-spawn-heading" className="mb-2 text-center text-[22px] font-medium tracking-tight text-fg">
-            {t("workerSpawnModal.headingIn", { repo: p.repo })}
+          {/* Same quiet one-liner as NewSessionPage (no display type). The repo is part of the sentence; with several
+              registered repos it is an inline select, so switching repo needs no separate control. */}
+          <h1 id="worker-spawn-heading" className="text-title font-medium text-fg-dim">
+            <span>{t("workerSpawnModal.headingBefore")}</span>
+            {p.repos && p.repos.length > 1 && p.onRepoChange ? (
+              <Select
+                size="xs"
+                className="h-auto min-w-0 border-0 bg-transparent px-0.5 font-mono text-title font-medium text-fg underline decoration-line underline-offset-4 hover:decoration-fg-dim focus:ring-0"
+                value={p.repo}
+                disabled={spawning}
+                onChange={(e) => p.onRepoChange!(e.target.value)}
+                aria-label={t("workerSpawnModal.repoLabel")}
+                title={t("workerSpawnModal.repoLabel")}
+              >
+                {p.repos.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+              </Select>
+            ) : (
+              <span className="font-mono text-fg">{p.repo}</span>
+            )}
+            <span>{t("workerSpawnModal.headingAfter")}</span>
           </h1>
 
           <div className="relative">
@@ -330,18 +348,8 @@ export function WorkerSpawnPage(p: {
             </div>
           </div>
 
-          {/* Meta row under the box: where it runs (repo, base branch) and how (permission), plus "More". */}
+          {/* Meta row under the box: base branch and permission mode, plus "More". */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2">
-            {p.repos && p.repos.length > 1 && p.onRepoChange ? (
-              <span className="flex items-center gap-0.5 text-muted">
-                <Folder size={12} className="shrink-0" aria-hidden />
-                <Select size="xs" className={metaGhost} value={p.repo} disabled={spawning} onChange={(e) => p.onRepoChange!(e.target.value)} aria-label={t("workerSpawnModal.repoLabel")} title={t("workerSpawnModal.repoLabel")}>
-                  {p.repos.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
-                </Select>
-              </span>
-            ) : (
-              <span className="flex h-6 items-center gap-1 px-1 text-meta text-muted"><Folder size={12} aria-hidden /> {p.repo}</span>
-            )}
             <span className="ml-auto" />
             {p.branches && p.branches.length > 0 && (
               <span className="flex items-center gap-0.5 text-muted">
