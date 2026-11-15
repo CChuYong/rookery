@@ -173,8 +173,8 @@ export function NewSessionPage(p: {
         <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col justify-center gap-4 pb-[12vh] pt-10">
           {/* First-run / auth-blocked guard: with no API key and no Claude login, every turn would fail — guide the user before they send. */}
           {p.authStatus?.method === "none" && (
-            <div className="flex items-start gap-3 rounded-lg border border-run/30 bg-run/10 px-4 py-3 text-left">
-              <AlertTriangle size={18} className="mt-0.5 shrink-0 text-run" />
+            <div className="flex items-start gap-3 rounded-lg border border-warn/30 bg-warn/10 px-4 py-3 text-left">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0 text-warn" />
               <div className="min-w-0 flex-1">
                 <div className="text-body font-medium text-fg">{t("newSessionPage.authBlockedTitle")}</div>
                 <p className="mt-0.5 text-ui leading-relaxed text-fg-dim">{t("newSessionPage.authBlockedBody")}</p>

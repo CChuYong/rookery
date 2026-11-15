@@ -1,13 +1,14 @@
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder } from "lucide-react";
 import { cn } from "../lib/cn.js";
+import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
 import { Collapse } from "../components/Collapse.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { baseName } from "../lib/path.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
-import { Select } from "../ui/input.js";
+import { Input, Select } from "../ui/input.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -233,7 +234,8 @@ function SessionsImpl(p: {
     if (renaming?.id === s.id) {
       return (
         <div key={s.id} className="px-1 py-1">
-          <input
+          <Input
+            size="sm"
             autoFocus
             value={renaming.value}
             onChange={(e) => setRenaming({ id: s.id, value: e.target.value })}
@@ -242,7 +244,7 @@ function SessionsImpl(p: {
               else if (e.key === "Escape") setRenaming(null);
             }}
             onBlur={() => { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }}
-            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-ui text-fg outline-none"
+            className="w-full"
           />
         </div>
       );
@@ -253,14 +255,14 @@ function SessionsImpl(p: {
           onClick={() => p.onSelect(s.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: s.id, x: e.clientX, y: e.clientY }); }}
           className={cn(
-            // Row scale shared with RepoTree.tsx (audit #76) — one sidebar-list token set for both tabs.
-            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-2.5 text-left text-body transition-colors",
+            // Row geometry + selection come from lib/ui-tokens.ts, shared with RepoTree.tsx (audit #76 #109).
+            SIDEBAR_ROW,
+            "items-center gap-1.5 text-body",
             // The hover actions are absolutely positioned over the row's right edge: reserve their width while they show,
             // so the title truncates under them instead of being painted over.
             "group-hover:pr-[4.75rem] group-focus-within:pr-[4.75rem]",
-            // Selected = lifted background + a 2px accent inset rule on the left (the ledger's own selection mark,
-            // not a per-row status rail — a running/attention state already has its own dot further along the row).
-            isActive ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised/60 hover:text-fg",
+            // Selected = the shared neutral lift (no accent; a running/attention state has its own dot along the row).
+            rowState(isActive),
           )}
         >
           {/* master turn in progress = live pulse (same signature as the worker tree) */}
@@ -283,7 +285,8 @@ function SessionsImpl(p: {
               view (codex-only; a mixed claude/codex list must be scannable at a glance); the origin badge only in 'All'. */}
           {s.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><ProviderBadge provider={s.provider} /></span>}
           {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><OriginBadge origin={s.origin} /></span>}
-          {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0 group-focus-within:opacity-0" />}
+          {/* unread = a neutral dot (its own channel, audit #100) — the blue dot means "working", on the left */}
+          {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-fg-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0" />}
         </button>
         {/* hover actions (Pin / More / delete) — a 'sibling' of the main button (no nested buttons), absolutely positioned on the right. Shown only on group-hover/focus.
             The '⋯' opens the SAME right-click menu, but reachable by left-click/Enter (audit #45: the menu was previously right-click-only, and macOS has no

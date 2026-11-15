@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.js";
+import { MENU_SURFACE } from "../lib/ui-tokens.js";
 
 // hint: an optional one-line consequence shown under the label (e.g. what a teardown action reclaims / whether
 // it's reversible) — makes the action self-describing at the point of use instead of relying on learned meaning.
@@ -36,7 +37,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
       role="menu"
       onKeyDown={onKeyDown}
       style={{ left: x, top: y, transformOrigin: "top left" }}
-      className="menu-pop fixed z-[100] min-w-[150px] rounded-lg border border-line bg-surface p-1 shadow-pop"
+      className={cn("menu-pop fixed z-[100] min-w-[150px]", MENU_SURFACE)}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {items.map((it, i) => (
@@ -44,7 +45,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
           key={i}
           role="menuitem"
           onClick={() => { onClose(); it.onClick(); }}
-          className={cn("flex min-h-6 w-full flex-col justify-center rounded-sm px-2.5 py-1 text-left text-ui transition-colors focus:outline-none focus-visible:outline-none", it.danger ? "text-fail hover:bg-fail/15 focus:bg-fail/15" : "text-fg-dim hover:bg-raised hover:text-fg focus:bg-raised focus:text-fg")}
+          className={cn("flex min-h-6 w-full flex-col justify-center rounded-md px-2.5 py-1 text-left text-ui transition-colors focus:outline-none focus-visible:outline-none", it.danger ? "text-fail hover:bg-fail/15 focus:bg-fail/15" : "text-fg-dim hover:bg-raised hover:text-fg focus:bg-raised focus:text-fg")}
         >
           {it.label}
           {it.hint && <span className="mt-0.5 block text-meta font-normal text-muted">{it.hint}</span>}

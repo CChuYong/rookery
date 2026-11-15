@@ -15,9 +15,7 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { usePrefsStore } from "../store/prefs.js";
 import type { LocalePref } from "../i18n/types.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { CapabilityScopeBindings } from "./capabilities/CapabilityScopeBindings.js";
 import type { CapabilityCenterApi } from "./capabilities/types.js";
 
@@ -118,6 +116,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   // close affordance (the header X) behind a confirm when dirty; not dirty closes exactly as before. Out of scope:
   // intercepting sidebar navigation away from the page — only this in-page close action.
   const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmRegen, setConfirmRegen] = useState(false); // rotating the MCP token cuts off every registered client (audit #103)
   const [mcpCopied, setMcpCopied] = useState(false);
   const copyMcpUrl = (url: string): void => {
     void navigator.clipboard.writeText(url).then(() => { setMcpCopied(true); window.setTimeout(() => setMcpCopied(false), 1500); }).catch(() => {});
@@ -228,7 +227,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                             <Button variant="outline" size="sm" onClick={() => copyMcpUrl(p.mcpStatus!.url!)}>{mcpCopied ? t("settings.mcpCopied") : t("settings.mcpCopy")}</Button>
                           </div>
                           <div className="flex justify-end">
-                            <Button variant="outline" size="sm" onClick={() => p.onRegenerateMcpToken?.()}>{t("settings.mcpRegenerate")}</Button>
+                            <Button variant="outline" size="sm" onClick={() => setConfirmRegen(true)}>{t("settings.mcpRegenerate")}</Button>
                           </div>
                         </WideRow>
                       ) : (
@@ -605,6 +604,16 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
         </div>
         </div>
       </div>
+      {confirmRegen && (
+        <ConfirmDialog
+          title={t("settings.mcpRegenerateConfirmTitle")}
+          body={t("settings.mcpRegenerateConfirmBody")}
+          confirmLabel={t("settings.mcpRegenerate")}
+          variant="danger"
+          onConfirm={() => p.onRegenerateMcpToken?.()}
+          onCancel={() => setConfirmRegen(false)}
+        />
+      )}
       {confirmClose && (
         <UnsavedChangesConfirm
           onCancel={() => setConfirmClose(false)}
@@ -616,27 +625,19 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   );
 }
 
-// Unsaved-changes guard shown when the header X is clicked while dirty (audit #18) — same overlay/panel idiom as the
-// app's other confirm dialogs (AutomationPage's AutomationDeleteConfirm / Sessions' DeleteConfirm). Discard/Save both
-// close the whole page, so they fire directly rather than routing through the local exit-transition; Cancel (stay on
-// the page) uses `dismiss()` for the dialog's own animated exit.
+// Unsaved-changes guard shown when the header X is clicked while dirty (audit #18) — the shared ConfirmDialog with its
+// middle action (audit #102: this used to be a hand-rolled modal with a raw Cancel button). Discard/Save both close the
+// whole page; Cancel (stay on the page) just dismisses the dialog.
 function UnsavedChangesConfirm({ onCancel, onDiscard, onSave }: { onCancel: () => void; onDiscard: () => void; onSave: () => void }): JSX.Element {
   const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: onSave });
-  useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-scrim", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("settings.unsavedTitle")} className={cn("w-[380px] rounded-xl border border-line bg-surface p-5 shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1.5 text-title font-medium">{t("settings.unsavedTitle")}</div>
-        <p className="text-ui leading-relaxed text-muted">{t("settings.unsavedBody")}</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-ui text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <Button variant="outline" size="sm" onClick={onDiscard}>{t("settings.confirmDiscard")}</Button>
-          <Button variant="primary" size="sm" onClick={onSave}>{t("settings.confirmSave")}</Button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title={t("settings.unsavedTitle")}
+      body={t("settings.unsavedBody")}
+      confirmLabel={t("settings.confirmSave")}
+      secondary={{ label: t("settings.confirmDiscard"), onClick: onDiscard }}
+      onConfirm={onSave}
+      onCancel={onCancel}
+    />
   );
 }

@@ -287,11 +287,14 @@ describe("SettingsPage External MCP section", () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mcpExposure: "full" }));
   });
 
-  it("when active with a URL, shows the URL and a regenerate button that fires the callback", () => {
+  it("when active with a URL, shows the URL and a regenerate button that fires the callback after a confirm (audit #103)", () => {
     const onRegenerateMcpToken = vi.fn();
     render(<SettingsPage {...base} settings={{ ...base.settings, mcpExposure: "readonly" }} mcpStatus={{ scope: "readonly", url: "http://127.0.0.1:8787/mcp-ext/tok" }} onRegenerateMcpToken={onRegenerateMcpToken} />);
     expect(screen.getByDisplayValue("http://127.0.0.1:8787/mcp-ext/tok")).toBeInTheDocument();
     fireEvent.click(screen.getByText("토큰 재발급"));
+    // rotating the token disconnects every registered client, so it asks first
+    expect(onRegenerateMcpToken).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "토큰 재발급" }));
     expect(onRegenerateMcpToken).toHaveBeenCalled();
   });
 

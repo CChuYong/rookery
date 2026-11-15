@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { Input, Select } from "../ui/input.js";
 import { Button } from "../ui/button.js";
-import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
@@ -9,6 +8,7 @@ import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { useT } from "../i18n/provider.js";
+import { dialogOverlayClass, dialogPanelClass } from "../ui/dialog.js";
 
 type Provider = "claude" | "codex";
 
@@ -86,14 +86,14 @@ export function ForkDialog(p: {
 
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={dialogOverlayClass({ closing })}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t(isMaster ? "forkDialog.titleMaster" : "forkDialog.titleWorker")}
-        className={cn("w-[420px] rounded-xl border border-line bg-surface p-5 shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={dialogPanelClass({ size: "md", closing })}
       >
         <div className="mb-1 text-title font-medium text-fg">{t(isMaster ? "forkDialog.titleMaster" : "forkDialog.titleWorker")}</div>
         <div className="mb-3 text-body text-muted">{t(isMaster ? "forkDialog.subtitleMaster" : "forkDialog.subtitleWorker")}</div>

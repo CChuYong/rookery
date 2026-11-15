@@ -55,7 +55,9 @@ describe("Segment (audit #52 shared control)", () => {
 
   it("renders both variants without crashing and applies variant-specific active styling", () => {
     const { rerender } = render(<Controlled variant="underline" />);
-    expect(screen.getByRole("tab", { name: "A" }).className).toContain("bg-accent/15"); // underline: active gets a soft accent wash
+    // underline (tab strips): the active tab is marked by text colour + the 1px line alone — no accent wash (audit #99)
+    expect(screen.getByRole("tab", { name: "A" }).className).toContain("text-fg");
+    expect(screen.getByRole("tab", { name: "A" }).className).not.toContain("bg-accent");
     rerender(<Controlled variant="pill" />);
     expect(screen.getByRole("tab", { name: "A" }).className).not.toContain("bg-accent/15"); // pill: color-only, the sliding bg indicates selection
   });
@@ -70,6 +72,14 @@ describe("Segment (audit #52 shared control)", () => {
     // Still a normal tab (selectable, in the same tablist) — just visually de-emphasized.
     const all = screen.getByRole("tab", { name: "All" });
     expect(all).toHaveAttribute("aria-selected", "true");
-    expect(all.className).not.toContain("bg-accent/15"); // secondary tier skips the primary active wash
+    expect(all.className).not.toContain("bg-accent"); // secondary tier never carries an accent fill
+  });
+
+  it("the underline indicator is the shared neutral tab line, not the accent (audit #99)", () => {
+    const { container } = render(<Controlled variant="underline" />);
+    const line = container.querySelector('[role="tablist"] > div.pointer-events-none');
+    expect(line).not.toBeNull();
+    expect(line!.className).toContain("bg-fg-dim");
+    expect(line!.className).not.toContain("bg-accent");
   });
 });

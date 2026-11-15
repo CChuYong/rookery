@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { WorkflowAgentSummary, WorkflowPhaseSummary, WorkflowRunSnapshot } from "@daemon/core/workflow-activity.js";
 import { MessageList } from "../components/MessageList.js";
 import { cn } from "../lib/cn.js";
+import { ROW_SELECTED } from "../lib/ui-tokens.js";
 import { absoluteDate, relativeTime } from "../lib/relative-time.js";
 import { workflowAgentKey } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
@@ -76,7 +77,7 @@ function AgentRoster({
               onClick={() => onSelect(agent)}
               className={cn(
                 "absolute left-0 top-0 flex w-full items-center gap-2 rounded px-2 text-left text-body transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi",
-                selectedKey?.endsWith(`/${key}`) && "bg-accent/10",
+                selectedKey?.endsWith(`/${key}`) && ROW_SELECTED,
               )}
               style={{ height: row.size, transform: `translateY(${row.start}px)` }}
             >

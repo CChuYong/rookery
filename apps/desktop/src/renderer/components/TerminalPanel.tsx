@@ -5,6 +5,7 @@ import { TerminalView } from "./TerminalView.js";
 import { useResizableHeight } from "../lib/useResizableHeight.js";
 import { toast } from "../store/toasts.js";
 import { cn } from "../lib/cn.js";
+import { TAB_IDLE, TAB_LINE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
 
@@ -74,16 +75,16 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
       ) : (
         <>
           {/* Terminal tabs: a slim strip on the canvas colour (the dockview group header above already carries the
-              panel's chrome), flat tabs separated by hairlines, the active one in fg with a 1px accent underline. */}
+              panel's chrome), flat tabs, the active one marked by the shared tab-strip line (audit #99). */}
           <div role="tablist" className="flex h-7 shrink-0 items-center px-1">
             {group.tabs.map((tab) => {
               const active = tab.id === group.activeTabId;
               return (
-                <div key={tab.id} className={cn("group relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-ui", active ? "text-fg" : "text-muted hover:text-fg-dim")}>
+                <div key={tab.id} className={cn("group relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-ui", active ? "text-fg" : TAB_IDLE)}>
                   <SquareTerminal size={12} className="shrink-0 text-faint" aria-hidden />
                   <button role="tab" aria-selected={active} onClick={() => setActive_(sessionId, tab.id)} className={cn("max-w-[140px] truncate", tab.exited && "text-stop line-through")}>{tab.title}</button>
                   <button onClick={() => close(tab.id)} aria-label={t("terminalPanel.closeTerminal")} className="rounded-sm text-muted opacity-0 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={12} /></button>
-                  {active && <span className="pointer-events-none absolute inset-x-2 bottom-0 h-px bg-accent" aria-hidden />}
+                  {active && <span className={cn("pointer-events-none absolute inset-x-2 bottom-0", TAB_LINE)} aria-hidden />}
                 </div>
               );
             })}

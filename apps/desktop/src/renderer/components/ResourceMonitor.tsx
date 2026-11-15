@@ -4,6 +4,7 @@ import type { ResourceSnapshot, ResourceBucket } from "../types/rookery.js";
 import { fmtBytes } from "../format.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { cn } from "../lib/cn.js";
+import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 
 function pct(n: number): string {
@@ -79,7 +80,7 @@ export function ResourceMonitor({
   const label = snapshot ? fmtBytes(snapshot.memBytes) : "—";
   // Hotness = the worse of CPU / RAM-share. ≥70 amber, ≥90 red + led-live so a saturated host pulses coral right in the chrome.
   const hot = snapshot ? Math.max(snapshot.cpuPct, snapshot.ramSharePct) : 0;
-  const hotTone = hot >= 90 ? "text-fail" : hot >= 70 ? "text-run" : null;
+  const hotTone = hot >= 90 ? "text-fail" : hot >= 70 ? "text-warn" : null; // a threshold is a warning, not "running" (audit #100)
 
   return (
     <div className="relative">
@@ -109,7 +110,7 @@ export function ResourceMonitor({
             ref={panelRef}
             tabIndex={-1}
             className={cn(
-              "absolute z-50 w-[300px] rounded-lg border border-line bg-surface p-1.5 shadow-pop focus:outline-none",
+              "absolute z-50 w-[300px] focus:outline-none", MENU_SURFACE,
               // The status bar sits at the bottom of the viewport, so its popover opens upward; the collapsed
               // sidebar rail opens to the right (no room below); the full sidebar footer opens downward.
               variant === "statusbar" ? "bottom-full left-0 mb-1" : collapsed ? "left-full top-0 ml-2" : "left-0 top-full mt-1",

@@ -4,6 +4,7 @@ import { useT } from "../i18n/provider.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { Button } from "../ui/button.js";
+import { dialogOverlayClass, dialogPanelClass } from "../ui/dialog.js";
 
 // First-run onboarding (shown after the data-consent gate, before the app proper): a short welcome + a
 // concept screen explaining rookery's master / worker-fleet / memory model. onFinish persists onboardingDone
@@ -41,8 +42,8 @@ export function OnboardingModal({ onFinish }: { onFinish: () => Promise<unknown>
     // the dialog-in entrance, replacing the one-off rise-in). No exit animation is wired here (no
     // useDismissTransition) — Escape/Skip/Get-started all resolve through onFinish, which unmounts this at the
     // App.tsx mount site once onboardingDone is persisted.
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim">
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="mx-4 w-full max-w-md rounded-xl border border-line bg-surface p-7 shadow-pop motion-safe:animate-[dialog-in_160ms_ease-out]">
+    <div className={dialogOverlayClass()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={dialogPanelClass({ size: "md" })}>
         {step === 0 ? (
           <div className="flex flex-col items-center text-center">
             <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full border border-line bg-raised text-fg-dim"><Sparkles size={18} /></div>

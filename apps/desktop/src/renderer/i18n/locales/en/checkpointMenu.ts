@@ -5,6 +5,7 @@ export default {
   "checkpointMenu.hint": "Only tracked files are restored. Files created afterward stay, and the conversation is kept.",
   "checkpointMenu.empty": "No checkpoints",
   "checkpointMenu.turn": "Turn {turn}",
-  "checkpointMenu.confirmRestore": "Really revert?",
+  "checkpointMenu.confirmTitle": "Revert to turn {turn}?",
+  "checkpointMenu.confirmBody": "Tracked files go back to how they were at the end of this turn. Later changes to them are lost and can't be recovered. The conversation is kept.",
   "checkpointMenu.loadFailed": "Couldn't load checkpoints — retry",
 } satisfies Catalog;

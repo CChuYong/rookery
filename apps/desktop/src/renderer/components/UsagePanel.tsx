@@ -19,11 +19,17 @@ function fmtReset(unixSec: number): string {
   return new Date(unixSec * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// One fill rule for every usage gauge (audit #55): neutral at rest, the warn token from 80%, fail from 90%. The accent
+// and the "running" blue never fill a gauge (an orange bar read as the alarm, the blue as calm).
+function meterTone(w: number): string {
+  return w >= 90 ? "bg-fail" : w >= 80 ? "bg-warn" : "bg-fg-dim";
+}
+
 // Single-line % gauge (server-side OAuth utilization).
 function Meter({ label, pct, sub }: { label: string; pct: number; sub?: ReactNode }): JSX.Element {
   const w = Math.max(0, Math.min(100, pct));
   const near = w >= 90; // approaching limit → red pulse + text marker (for color-blind accessibility)
-  const tone = near ? "bg-fail" : w >= 70 ? "bg-run" : "bg-accent";
+  const tone = meterTone(w);
   return (
     <div className="px-2 py-1.5">
       <div className="flex items-baseline justify-between gap-1.5 text-meta">
@@ -68,17 +74,16 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   );
 }
 
-// Status-bar meter: `label 31%` + a fixed 40x3px bar (neutral fill, warn colour only past the near-limit threshold).
+// Status-bar meter: `label 31%` + a fixed 40x3px bar (neutral fill, warn from 80%, fail from 90% — meterTone).
 // No width/height transition — the fill is a fixed-width bar scaled from the left (Floor: never animate width/height).
 function MeterInline({ label, pct }: { label: string; pct: number }): JSX.Element {
   const w = Math.max(0, Math.min(100, pct));
-  const near = w >= 90;
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
       <span className="truncate text-muted">{label}</span>
       <span className="h-[3px] w-10 shrink-0 overflow-hidden rounded-full bg-line">
         <span
-          className={cn("block h-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", near ? "bg-fail" : "bg-fg-dim")}
+          className={cn("block h-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", meterTone(w))}
           style={{ transform: `scaleX(${w / 100})` }}
         />
       </span>

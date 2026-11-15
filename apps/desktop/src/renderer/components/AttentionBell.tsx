@@ -5,6 +5,7 @@ import { useStore } from "../store/store.js";
 import { useAcksStore } from "../store/acks.js";
 import { buildAttentionItems, type AttentionItem, type AttentionNav } from "../lib/attention-queue.js";
 import { cn } from "../lib/cn.js";
+import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 
 interface TriggerRect {
@@ -158,7 +159,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
           role="dialog"
           aria-label={t("attentionBell.title")}
           style={{ top: pos.top, left: pos.left }}
-          className="fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden rounded-md border border-line bg-surface p-1.5 shadow-pop"
+          className={cn("fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden", MENU_SURFACE)}
         >
           <div className="px-2.5 pb-1 pt-1.5 text-meta font-medium text-faint">{t("attentionBell.title")}</div>
           {items.length === 0 ? (

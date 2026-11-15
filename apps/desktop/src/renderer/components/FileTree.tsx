@@ -5,6 +5,7 @@ import { Icon } from "@iconify/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useWsStore } from "../store/workspace.js";
 import { cn } from "../lib/cn.js";
+import { ROW_CURRENT_MARK, ROW_IDLE, ROW_SELECTED } from "../lib/ui-tokens.js";
 import { fileIcon, FOLDER_ICON, FOLDER_OPEN_ICON } from "../lib/fileIcon.js";
 import { GIT_TONE } from "../lib/gitTone.js";
 import { ContextMenu, type MenuItem } from "./ContextMenu.js";
@@ -18,6 +19,7 @@ import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { useT } from "../i18n/provider.js";
+import { dialogOverlayClass, dialogPanelClass } from "../ui/dialog.js";
 
 const EMPTY: string[] = [];
 
@@ -293,8 +295,8 @@ function NameDialog({ title, initial, onSubmit, onCancel }: { title: string; ini
   useModalKeys({ escape: "ignore", onSubmit: submit });
   useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex w-[340px] flex-col gap-3 rounded-xl border border-line bg-surface p-5", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
+    <div className={dialogOverlayClass({ closing, z: "z-[110]" })}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} className={dialogPanelClass({ size: "sm", closing, className: "flex flex-col gap-3" })}>
         <div className="text-title font-medium">{title}</div>
         <Input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <div className="flex justify-end gap-2">
@@ -322,7 +324,7 @@ function FileRow({ row, active, selected, open, git, onClick, onContextMenu }: {
       onClick={onClick}
       onContextMenu={onContextMenu}
       style={{ paddingLeft: 8 + row.depth * 12 }}
-      className={cn("relative flex h-6 w-full items-center gap-1 rounded pr-2 text-left text-ui hover:bg-raised", active ? "bg-accent/15 text-fg" : selected ? "bg-raised text-fg" : "text-fg-dim")}
+      className={cn("relative flex h-6 w-full items-center gap-1 rounded pr-2 text-left text-ui", active || selected ? ROW_SELECTED : ROW_IDLE, active && ROW_CURRENT_MARK)}
     >
       {/* 1px indent guides — one per ancestor depth, aligned to the middle of that level's reserved column */}
       {Array.from({ length: row.depth }, (_, i) => (

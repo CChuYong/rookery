@@ -28,6 +28,8 @@ import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, sidebarMaxForView
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
+import { optimistic, patchSession, patchWorker } from "./lib/optimistic.js";
+import { ROW_SELECTED } from "./lib/ui-tokens.js";
 import { workerComposerState } from "./lib/worker-composer.js";
 import { capabilityCenterRoute, localizeCommandCandidates } from "./lib/command-actions.js";
 import type { CapabilityCenterRoute } from "./lib/command-actions.js";
@@ -680,8 +682,17 @@ export function App(): JSX.Element {
   // Rename session — refetch not needed since it updates live via the session.label event.
   // Inject reqId via request() (schema requires reqId) — the daemon replies with fleet.ack (the label reflects live via session.label; the ack is ignored).
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
-  const archiveSession = useCallback((id: string, archived: boolean) => { void client?.request({ type: "session.archive", sessionId: id, archived }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
-  const pinSession = useCallback((id: string, pinned: boolean) => { void client?.request({ type: "session.pin", sessionId: id, pinned }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
+  // Pin/Archive move the row at once and roll back (with a toast) if the daemon rejects it (audit #56).
+  const archiveSession = useCallback((id: string, archived: boolean) => {
+    const c = client;
+    if (!c) return;
+    void optimistic(() => patchSession(id, { archived }), () => c.request({ type: "session.archive", sessionId: id, archived }), { onSuccess: refetchSessions, onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)) });
+  }, [refetchSessions]);
+  const pinSession = useCallback((id: string, pinned: boolean) => {
+    const c = client;
+    if (!c) return;
+    void optimistic(() => patchSession(id, { pinned }), () => c.request({ type: "session.pin", sessionId: id, pinned }), { onSuccess: refetchSessions, onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)) });
+  }, [refetchSessions]);
   // Right-click "Fork" → open the Fork dialog (target provider/model/effort pick + codex-auth gate), not an instant fork.
   const forkSession = useCallback((id: string) => {
     const provider = useStore.getState().sessions.find((x) => x.id === id)?.provider ?? "claude";
@@ -714,7 +725,11 @@ export function App(): JSX.Element {
   const refetchAutomations = useCallback(() => { void client?.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true)); }, []);
   // Rename worker — updates live via the worker.label event. Archive/delete refetch fleet.list.
   const renameSub = useCallback((id: string, label: string) => { void client?.request({ type: "worker.rename", id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
-  const archiveSub = useCallback((id: string, archived: boolean) => { void client?.request({ type: "worker.archive", id, archived }).then(refetchFleet).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchFleet]);
+  const archiveSub = useCallback((id: string, archived: boolean) => {
+    const c = client;
+    if (!c) return;
+    void optimistic(() => patchWorker(id, { archived }), () => c.request({ type: "worker.archive", id, archived }), { onSuccess: refetchFleet, onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)) });
+  }, [refetchFleet]);
   const deleteSub = useCallback((id: string) => {
     const store = useStore.getState();
     if (store.activeWorkerId === id) store.navigate({ subId: null });
@@ -1139,13 +1154,13 @@ export function App(): JSX.Element {
       onClick={onClick}
       className={cn(
         "no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors",
-        active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg-dim",
+        active ? ROW_SELECTED : "text-muted hover:bg-raised/60 hover:text-fg-dim", // the shared neutral selection (audit #101)
       )}
     >
       <Icon size={14} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {/* dot on the Repos row when there's an unread worker — so even in the Sessions view you notice "something finished". */}
-      {badge && <span className="badge-pop h-1.5 w-1.5 shrink-0 rounded-full bg-run" />}
+      {badge && <span className="badge-pop h-1.5 w-1.5 shrink-0 rounded-full bg-fg-dim" />}
     </button>
   );
 
@@ -1266,7 +1281,7 @@ export function App(): JSX.Element {
             {!showRepos && (
               <button
                 onClick={create}
-                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "newSession" ? "text-accent" : "text-fg-dim hover:bg-raised hover:text-fg")}
+                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "newSession" ? ROW_SELECTED : "text-fg-dim hover:bg-raised/60 hover:text-fg")}
               >
                 <Plus size={14} className="shrink-0" /> {t("app.newSession")}
               </button>

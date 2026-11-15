@@ -377,7 +377,7 @@ export function AutomationForm(p: {
                   plan → a read-only sandbox and run fine (codex-vocab.ts, automation-action.ts), so a worker
                   action must never trigger this warning even when its permissionMode is non-bypass. */}
               {actionKind === "master" && provider === "codex" && permissionMode !== "bypassPermissions" && (
-                <p className="text-meta text-run/90" data-testid="codex-bypass-warning">
+                <p className="text-meta text-warn/90" data-testid="codex-bypass-warning">
                   {t("automationForm.codexBypassWarning")}
                 </p>
               )}
@@ -470,7 +470,7 @@ export function AutomationForm(p: {
               </label>
               {/* inline bypassPermissions warning — theme run token, not raw Tailwind yellow (audit #79) */}
               {permissionMode === "bypassPermissions" && (
-                <p className="text-meta text-run/90" data-testid="bypass-warning">
+                <p className="text-meta text-warn/90" data-testid="bypass-warning">
                   {t("automationForm.bypassWarning")}
                 </p>
               )}
@@ -604,7 +604,7 @@ export function AutomationForm(p: {
             )}
 
             {triggerKind === "slack" && actionKind === "master" && (
-              <p className="text-meta text-run/90">{t("automationModal.slackMasterCaution")}</p>
+              <p className="text-meta text-warn/90">{t("automationModal.slackMasterCaution")}</p>
             )}
             <p className="text-meta text-muted">{t("automationModal.templateHint")}</p>
           </section>

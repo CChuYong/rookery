@@ -122,9 +122,9 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       )}
       <Collapse open={banner !== null}>
         {banner === "changed" ? (
-          <div className="flex items-center justify-between gap-2 border-b border-run/30 bg-run/12 px-3 py-1.5 text-ui text-run">
+          <div className="flex items-center justify-between gap-2 border-b border-warn/30 bg-warn/12 px-3 py-1.5 text-ui text-warn">
             <span>{t("monacoEditor.changedOnDisk")}</span>
-            <button onClick={reload} className="rounded border border-run/40 px-2 py-0.5 transition-colors hover:bg-run/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.reloadFromDisk")}</button>
+            <button onClick={reload} className="rounded border border-warn/40 px-2 py-0.5 transition-colors hover:bg-warn/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.reloadFromDisk")}</button>
           </div>
         ) : banner === "toolarge" ? (
           <div className="border-b border-line bg-raised px-3 py-1.5 text-ui text-muted">{t("monacoEditor.tooLarge")}</div>

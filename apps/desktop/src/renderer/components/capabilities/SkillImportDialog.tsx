@@ -84,7 +84,7 @@ export function SkillImportDialog(props: SkillImportDialogProps): JSX.Element {
           </div>
           {error && <p role="alert" className="rounded-md border border-fail/30 bg-fail/5 p-3 text-meta text-fail">{error}</p>}
         </form>
-        <div className="flex shrink-0 items-center gap-3 border-t border-line px-5 py-3"><p className="min-w-0 flex-1 text-meta text-run">{t("capabilityCatalog.skillTrustNotice")}</p><Button variant="outline" disabled={busy} onClick={dismiss}>{t("common.cancel")}</Button><Button variant="primary" loading={busy} onClick={submit}>{t("capabilityCatalog.importSkill")}</Button></div>
+        <div className="flex shrink-0 items-center gap-3 border-t border-line px-5 py-3"><p className="min-w-0 flex-1 text-meta text-warn">{t("capabilityCatalog.skillTrustNotice")}</p><Button variant="outline" disabled={busy} onClick={dismiss}>{t("common.cancel")}</Button><Button variant="primary" loading={busy} onClick={submit}>{t("capabilityCatalog.importSkill")}</Button></div>
       </div>
     </div>
   );

@@ -4,9 +4,9 @@ import { Button } from "../ui/button.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
-import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
+import { dialogOverlayClass, dialogPanelClass } from "../ui/dialog.js";
 
 export function RepoModal(p: {
   repos: { name: string; path: string }[];
@@ -27,14 +27,14 @@ export function RepoModal(p: {
   useFocusTrap(panelRef);
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={dialogOverlayClass({ closing })}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("repoModal.title")}
-        className={cn("w-[480px] rounded-xl border border-line bg-surface p-5 shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={dialogPanelClass({ size: "md", closing })}
       >
         <div className="mb-4 text-title font-medium text-fg">{t("repoModal.title")}</div>
         <div className="flex flex-col gap-2.5">

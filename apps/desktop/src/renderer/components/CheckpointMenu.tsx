@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { History, Loader2 } from "lucide-react";
 import { Button } from "../ui/button.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { cn } from "../lib/cn.js";
+import { MENU_ITEM, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -26,7 +29,8 @@ function checkpointTimeLabel(iso: string, now: number, t: TFunc, locale: Locale)
   return t("relativeTime.daysAgo", { n: rel.value });
 }
 
-// Per-worker-turn checkpoint restore menu. Fetches on open; on item click, confirms then restores.
+// Per-worker-turn checkpoint restore menu. Fetches on open; on item click, asks in the shared ConfirmDialog (reverting
+// discards later changes to tracked files — irreversible, audit #103) then restores.
 export function CheckpointMenu({
   fetchCheckpoints,
   onRestore,
@@ -39,7 +43,7 @@ export function CheckpointMenu({
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Checkpoint[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [armed, setArmed] = useState<number | null>(null);
+  const [asking, setAsking] = useState<number | null>(null); // the seq whose revert the ConfirmDialog is asking about
   const [restoring, setRestoring] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -53,16 +57,25 @@ export function CheckpointMenu({
   const toggle = () => {
     if (open) { setOpen(false); return; }
     setOpen(true);
-    setArmed(null);
+    setAsking(null);
     load();
   };
-  // Escape closes the open menu.
+  // Escape closes the open menu — unless the confirm dialog is up, whose own Escape only cancels the dialog.
   useEffect(() => {
-    if (!open) return;
+    if (!open || asking !== null) return;
     const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [open]);
+  }, [open, asking]);
+  const restore = (seq: number): void => {
+    setRestoring(seq);
+    // Close only after settle: both paths reset restoring so a reopened menu is clickable again (the failure toast is
+    // fired by onRestore itself).
+    void onRestore(seq).then(
+      () => { setOpen(false); setRestoring(null); },
+      () => { setRestoring(null); },
+    );
+  };
   // Focus the first turn on open (audit #60 — reuses ContextMenu's precedent). Items load async (fetchCheckpoints
   // fires on toggle), so this re-runs once `items` actually arrives, not just on the `open` transition.
   useEffect(() => {
@@ -88,7 +101,7 @@ export function CheckpointMenu({
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop">
+          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className={cn("menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto", MENU_SURFACE)}>
             <div className="px-2 py-1 text-meta leading-relaxed text-muted">
               {t("checkpointMenu.hint")}
             </div>
@@ -105,28 +118,27 @@ export function CheckpointMenu({
                 key={c.seq}
                 role="menuitem"
                 disabled={restoring !== null}
-                onClick={() => {
-                  if (restoring !== null) return;
-                  if (armed === c.seq) {
-                    setRestoring(c.seq);
-                    // Close only after settle: both paths reset restoring/armed so a reopened menu is
-                    // clickable again (the failure toast is fired by onRestore itself).
-                    void onRestore(c.seq).then(
-                      () => { setOpen(false); setRestoring(null); setArmed(null); },
-                      () => { setRestoring(null); setArmed(null); },
-                    );
-                  } else setArmed(c.seq);
-                }}
-                className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-ui disabled:opacity-60 ${armed === c.seq ? "bg-fail/15 text-fail" : "text-fg-dim hover:bg-line/40"}`}
+                onClick={() => { if (restoring === null) setAsking(c.seq); }}
+                className={cn("flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-ui text-fg-dim disabled:opacity-60", MENU_ITEM)}
               >
                 <span className="font-mono">{t("checkpointMenu.turn", { turn: c.seq + 1 })}</span>
                 <span className="flex shrink-0 items-center gap-1 text-meta text-muted">
-                  {restoring === c.seq ? <Loader2 size={12} className="animate-spin" aria-hidden /> : armed === c.seq ? t("checkpointMenu.confirmRestore") : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
+                  {restoring === c.seq ? <Loader2 size={12} className="animate-spin" aria-hidden /> : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
                 </span>
               </button>
             ))}
           </div>
         </>
+      )}
+      {asking !== null && (
+        <ConfirmDialog
+          title={t("checkpointMenu.confirmTitle", { turn: asking + 1 })}
+          body={t("checkpointMenu.confirmBody")}
+          confirmLabel={t("checkpointMenu.restore")}
+          variant="danger"
+          onConfirm={() => restore(asking)}
+          onCancel={() => setAsking(null)}
+        />
       )}
     </div>
   );

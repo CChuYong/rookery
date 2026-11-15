@@ -4,6 +4,7 @@ import { useStore } from "../store/store.js";
 import { useRepoTreeStore } from "../store/repotree.js";
 import type { FleetRow, LogItem } from "../store/reduce.js";
 import { cn } from "../lib/cn.js";
+import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
 import { railClass, statusTag, statusLabelKey, isLive, isProvisioning } from "../lib/status.js";
 import { baseName } from "../lib/path.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
@@ -155,12 +156,13 @@ function RepoTreeImpl(p: {
           onClick={() => p.onSelectSub(sub.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: sub.id, x: e.clientX, y: e.clientY }); }}
           className={cn(
-            // Row scale shared with Sessions.tsx (audit #76) — one sidebar-list token set for both tabs. Two-line
+            // Row geometry + selection come from lib/ui-tokens.ts, shared with Sessions.tsx (audit #76 #109). Two-line
             // (title+cost / branch+state) so the branch is visible without opening the worker (DESIGN shell anatomy).
-            "relative flex w-full flex-col gap-0.5 rounded-md py-1.5 pl-2.5 pr-2.5 text-left transition-colors",
-            // Selected = lifted background + a 2px accent inset rule on the left (the ledger's signature selection
-            // mark). Status is carried by the dot (live) and the colored state tag further along the row, not a rail.
-            active ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised hover:text-fg",
+            SIDEBAR_ROW,
+            "flex-col gap-0.5",
+            // Selected = the shared neutral lift. Status is carried by the dot (live) and the colored state tag further
+            // along the row, not a rail.
+            rowState(active),
           )}
         >
           {/* line 1: status dot + title + cost (right) */}
@@ -186,9 +188,10 @@ function RepoTreeImpl(p: {
                 same label source as the header StatusBadge, so tree and header never disagree (audit #50: tree used
                 to say 'ORPH' while the header said 'orphaned'). */}
             <span title={t(statusLabelKey(sub.status))} className={cn("shrink-0 text-meta font-medium transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", railClass(sub.status).replace("bg-", "text-"))}>{statusTag(sub.status)}</span>
-            {/* unread: worker that finished without being viewed — dot on the right (ready=green / error=red). Disappears once viewed (select). */}
+            {/* unread: worker that finished without being viewed — dot on the right (neutral = ready, red = error; the blue dot
+                means "working", so unread doesn't borrow it — audit #100). Disappears once viewed (select). */}
             {p.attention?.[sub.id] && !active && (
-              <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-run")} />
+              <span title={t("repoTree.unreadTitle")} className={cn("dot-pop h-2 w-2 shrink-0 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0", sub.status === "error" || sub.status === "failed" ? "bg-fail" : "bg-fg-dim")} />
             )}
           </span>
         </button>
@@ -245,7 +248,7 @@ function RepoTreeImpl(p: {
               title={t("repoTree.repoSettings", { repo: title })}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fg"
             >
-              <Settings2 size={12} />
+              <Settings2 size={14} />
             </button>
           )}
           {opts.removable && (
@@ -255,7 +258,7 @@ function RepoTreeImpl(p: {
               title={t("repoTree.removeRepo")}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-raised hover:text-fail"
             >
-              <Trash2 size={12} />
+              <Trash2 size={14} />
             </button>
           )}
         </div>
@@ -276,7 +279,7 @@ function RepoTreeImpl(p: {
         <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 transition-colors focus-within:border-accent/50">
           <Search size={12} className="shrink-0 text-muted" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("repoTree.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
-          <button onClick={() => setOnlyActive((v) => !v)} title={t("repoTree.onlyActiveTitle")} aria-pressed={onlyActive} className={cn("shrink-0 rounded px-1.5 py-0.5 text-meta font-medium transition-colors", onlyActive ? "bg-run/15 text-run" : "text-muted hover:text-fg-dim")}>
+          <button onClick={() => setOnlyActive((v) => !v)} title={t("repoTree.onlyActiveTitle")} aria-pressed={onlyActive} className={cn("shrink-0 rounded px-1.5 py-0.5 text-meta font-medium transition-colors", onlyActive ? "bg-raised text-fg" : "text-muted hover:text-fg-dim")}>
             {t("repoTree.onlyActive")}
           </button>
         </div>

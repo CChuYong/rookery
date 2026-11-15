@@ -27,6 +27,7 @@ import type {
 } from "@daemon/core/capabilities/types.js";
 import { useT } from "../i18n/provider.js";
 import { cn } from "../lib/cn.js";
+import { TAB_ACTIVE, TAB_IDLE } from "../lib/ui-tokens.js";
 import { Button } from "../ui/button.js";
 import { Select } from "../ui/input.js";
 import { CapabilityAssignmentsTab } from "./capabilities/CapabilityAssignmentsTab.js";
@@ -247,7 +248,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
         <span className="text-body font-medium text-fg">{t("capabilities.title")}</span>
         <nav className="no-drag ml-2 flex h-full items-center gap-3" aria-label={t("capabilities.title")}>
           {(["effective", "library", "assignments"] as CenterTab[]).map((item) => (
-            <button key={item} aria-pressed={tab === item} onClick={() => setTab(item)} className={cn("relative flex h-full items-center text-ui transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi", tab === item ? "text-fg after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-accent" : "text-muted hover:text-fg-dim")}>{t(`capabilities.${item}`)}</button>
+            <button key={item} aria-pressed={tab === item} onClick={() => setTab(item)} className={cn("relative flex h-full items-center text-ui transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi", tab === item ? TAB_ACTIVE : TAB_IDLE)}>{t(`capabilities.${item}`)}</button>
           ))}
         </nav>
         <div className="no-drag ml-auto flex items-center gap-1">
@@ -364,10 +365,10 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               </section>
 
               {workerNeedsReload && (
-                <section data-testid="capability-worker-reload" className="rounded-[var(--radius)] border border-run/30 bg-run/5 px-3.5 py-3">
+                <section data-testid="capability-worker-reload" className="rounded-[var(--radius)] border border-warn/30 bg-warn/5 px-3.5 py-3">
                   <div className="flex flex-wrap items-start gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-ui font-medium text-run"><RefreshCw size={14} /> {t("capabilities.reloadTitle")}</div>
+                      <div className="flex items-center gap-2 text-ui font-medium text-warn"><RefreshCw size={14} /> {t("capabilities.reloadTitle")}</div>
                       <p className="mt-1 text-meta leading-relaxed text-fg-dim">{t("capabilities.reloadDescription")}</p>
                       {reloadMessage && <p role="status" className="mt-2 text-meta text-pr">{reloadMessage}</p>}
                       {reloadError && <p role="alert" className="mt-2 break-words text-meta text-fail">{reloadError}</p>}
@@ -385,8 +386,8 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               )}
 
               {snapshot.diagnostics.length > 0 && (
-                <section className="rounded-[var(--radius)] border border-run/30 bg-run/5 px-3.5 py-3">
-                  <div className="flex items-center gap-2 text-ui font-medium text-run"><CircleAlert size={14} /> {t("capabilities.partialTitle")}</div>
+                <section className="rounded-[var(--radius)] border border-warn/30 bg-warn/5 px-3.5 py-3">
+                  <div className="flex items-center gap-2 text-ui font-medium text-warn"><CircleAlert size={14} /> {t("capabilities.partialTitle")}</div>
                   <div className="mt-2 flex flex-col gap-1.5">
                     {snapshot.diagnostics.map((item) => (
                       <div key={item.id} className="flex flex-wrap gap-x-2 text-meta leading-relaxed text-fg-dim">
@@ -404,7 +405,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
                     key={item.id}
                     onClick={() => { setExactKind(undefined); setCategory(item.id); }}
                     aria-pressed={selectedCategory === item.id}
-                    className={cn("relative pb-2 text-ui transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi", selectedCategory === item.id ? "text-fg after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-accent" : "text-muted hover:text-fg-dim")}
+                    className={cn("relative pb-2 text-ui transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-hi", selectedCategory === item.id ? TAB_ACTIVE : TAB_IDLE)}
                   >
                     {t(item.labelKey)}
                   </button>

@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, AppWindow, Folder, SquareTerminal, Code, Check } from "lucide-react";
 import { cn } from "../lib/cn.js";
+import { MENU_ITEM, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { toast } from "../store/toasts.js";
 import type { DetectedApp } from "../types/rookery.js";
@@ -142,7 +143,7 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
             onKeyDown={onMenuKeyDown}
             role="menu"
             style={menuPosition}
-            className="menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop"
+            className={cn("menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto", MENU_SURFACE)}
           >
             {apps === null && <div className="px-2 py-1.5 text-ui text-muted">{t("openInAppMenu.detectingApps")}</div>}
             {apps?.map((a) => (
@@ -151,7 +152,7 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
                 role="menuitemradio"
                 aria-checked={selected?.id === a.id}
                 onClick={() => choose(a.id, true)}
-                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-ui text-fg-dim hover:bg-line/40"
+                className={cn("flex w-full items-center gap-2.5 px-2 py-1.5 text-left text-ui text-fg-dim", MENU_ITEM)}
               >
                 <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center"><AppGlyph app={a} size={18} /></span>
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>

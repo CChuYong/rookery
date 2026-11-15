@@ -2,6 +2,7 @@ import { Fragment, type KeyboardEvent, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
+import { TAB_IDLE, TAB_LINE } from "../lib/ui-tokens.js";
 
 export type SegmentItem<V extends string = string> = {
   value: V;
@@ -20,7 +21,8 @@ export interface SegmentProps<V extends string = string> {
   items: Array<SegmentItem<V>>;
   value: V;
   onChange: (value: V) => void;
-  // underline = navigation-tier (an orange line marks the active tab, placed instantly; text/bg wash otherwise unchanged).
+  // underline = a tab strip: the shared 1px neutral line + full-strength text mark the active tab (no fill, no wash —
+  //   the same marker as the dock tabs, audit #99).
   // pill = in-form selection (a sliding raised background block marks the active choice).
   // icon = Orca-style ghost icon tabs (no sliding indicator, no visible label — the label becomes the a11y name + title tooltip).
   variant: "underline" | "pill" | "icon";
@@ -70,7 +72,7 @@ export function Segment<V extends string = string>({
           className={cn(
             // placed instantly (no left/width animation): the selection moves, it does not slide
             "pointer-events-none absolute",
-            variant === "underline" ? "bottom-0 h-px bg-accent" : "inset-y-0.5 rounded-sm bg-raised",
+            variant === "underline" ? cn("bottom-0", TAB_LINE) : "inset-y-0.5 rounded-sm bg-raised",
             indicatorClassName,
           )}
           style={{ left: rect.left, width: rect.width }}
@@ -85,8 +87,8 @@ export function Segment<V extends string = string>({
           : item.disabled
             ? "text-muted"
             : active
-              ? (variant === "underline" ? "bg-accent/15 text-fg" : variant === "icon" ? "bg-raised text-fg" : "text-fg")
-              : (variant === "underline" ? "text-muted hover:bg-raised hover:text-fg-dim" : variant === "icon" ? "text-muted hover:bg-raised hover:text-fg-dim" : "text-muted hover:text-fg-dim");
+              ? (variant === "icon" ? "bg-raised text-fg" : "text-fg")
+              : (variant === "icon" ? "text-muted hover:bg-raised hover:text-fg-dim" : TAB_IDLE);
         return (
           <Fragment key={item.value}>
             {idx === firstSecondaryIdx && <span className="mx-1 h-3 w-px shrink-0 bg-line" aria-hidden />}

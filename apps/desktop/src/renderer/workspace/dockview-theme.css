@@ -27,10 +27,13 @@
   --dv-active-sash-color: var(--color-thumb-hi);
   --dv-drag-over-background-color: color-mix(in oklab, var(--color-accent) 14%, transparent);
   --dv-drag-over-border-color: var(--color-accent);
+  /* The one tab-strip marker (audit #99): active = full-strength text + this 1px neutral line. Segment `underline`,
+     TabBar, the terminal strip and Capability Center tabs draw the same line (lib/ui-tokens.ts TAB_LINE). */
+  --tab-line: var(--color-fg-dim);
 }
 
 /* Quiet tabs on the canvas plane: no strip background, no bottom rule, no dividers, no accent line. The active
-   tab is simply full-white text on a faint lift; inactive tabs are muted. The custom RookeryTab paints
+   tab is full-white text over the shared 1px neutral line; inactive tabs are muted. The custom RookeryTab paints
    icon/title/close (data-kind identifies the panel kind for the rules below); these rules own the tab shell. */
 .dockview-theme-rookery .dv-tabs-and-actions-container {
   padding: 0 8px;
@@ -59,16 +62,19 @@
   border-radius: var(--radius-sm);
   transition: background-color var(--dur-micro) ease, color var(--dur-micro) ease;
 }
+/* One marker for every tab strip (audit #16 → #99): text colour + the neutral line, no fill — the editor tabs, the
+   inspector card tabs and the in-panel strips now read the same. */
 .dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
-  background-color: var(--color-raised);
+  background-color: transparent;
   color: var(--color-fg);
-  box-shadow: inset 0 -1px 0 var(--color-fg-dim); /* a neutral underline, so the active tab reads even on a dim lift (audit #16) */
+  box-shadow: inset 0 -1px 0 var(--tab-line);
 }
 /* The overflow list (dockview's chevron menu) marks the tab you are on (audit #2). */
+/* (it is a list, so it uses the row-selection lift rather than the tab line) */
 .dockview-theme-rookery .dv-tabs-overflow-container .dv-tab.dv-active-tab {
   background-color: var(--color-raised);
   color: var(--color-fg);
-  box-shadow: inset 2px 0 0 var(--color-fg-dim);
+  box-shadow: inset 2px 0 0 var(--tab-line);
 }
 /* The overflow chevron is a keyboard stop now (audit #71): show where focus is. */
 .dockview-theme-rookery .dv-tabs-overflow-dropdown-default:focus-visible {
@@ -120,7 +126,7 @@
 .dockview-theme-rookery .dv-groupview:has(.rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"])) .dv-tab.dv-active-tab {
   background-color: transparent !important;
   color: var(--color-fg);
-  box-shadow: inset 0 -1px 0 var(--color-fg-dim);
+  box-shadow: inset 0 -1px 0 var(--tab-line);
 }
 /* The inspector tabs' close × takes no width, so the three labels fit: on hover it replaces the tab's leading icon
    (it used to overlay the right edge, which painted over the label's last letters — "Files" read "Fil ×"). */

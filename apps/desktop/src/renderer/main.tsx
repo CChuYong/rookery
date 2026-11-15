@@ -5,6 +5,7 @@ import "@fontsource-variable/geist-mono";
 import "pretendard/dist/web/variable/pretendardvariable.css";
 import "./globals.css";
 import { createRoot } from "react-dom/client";
+import { LucideProvider } from "lucide-react";
 import { App } from "./App.js";
 import { I18nProvider } from "./i18n/provider.js";
 
@@ -13,7 +14,10 @@ async function bootstrap(): Promise<void> {
   try { systemLocale = await window.rookery.system.getLocale(); } catch { /* fall back to en */ }
   createRoot(document.getElementById("root")!).render(
     <I18nProvider systemLocale={systemLocale}>
-      <App />
+      {/* every lucide icon draws at the IDE stroke (1.5) unless a call site asks otherwise (audit #135) */}
+      <LucideProvider strokeWidth={1.5}>
+        <App />
+      </LucideProvider>
     </I18nProvider>,
   );
 }

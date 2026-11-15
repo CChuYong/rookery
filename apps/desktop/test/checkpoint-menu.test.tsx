@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { CheckpointMenu } from "../src/renderer/components/CheckpointMenu.js";
+
+// Reverting to a checkpoint discards later changes to tracked files — an irreversible action, so it goes through the
+// shared ConfirmDialog like every other irreversible action (audit #103), not a same-button double click.
+const confirmRevert = (): void => {
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "되돌리기" }));
+};
 
 describe("CheckpointMenu", () => {
   describe("cross-midnight timestamps (audit #80)", () => {
@@ -29,7 +35,7 @@ describe("CheckpointMenu", () => {
     });
   });
 
-  it("fetches on open, requires a 2nd click (arm) before restoring that seq", async () => {
+  it("fetches on open and asks for confirmation in a dialog before restoring that seq", async () => {
     const fetchCheckpoints = vi.fn().mockResolvedValue([
       { seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" },
       { seq: 1, sha: "b", createdAt: "2026-06-20T10:05:00Z" },
@@ -39,13 +45,26 @@ describe("CheckpointMenu", () => {
     fireEvent.click(screen.getByText("되돌리기"));
     expect(fetchCheckpoints).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("턴 1")); // 1st click: arm
+    fireEvent.click(screen.getByText("턴 1")); // opens the confirm dialog
     expect(onRestore).not.toHaveBeenCalled();
-    expect(screen.getByText("정말 복원?")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("턴 1")); // 2nd click: execute
+    expect(screen.getByRole("dialog", { name: "턴 1 시점으로 되돌릴까요?" })).toBeInTheDocument();
+    confirmRevert();
     expect(onRestore).toHaveBeenCalledWith(0);
     // Closes only after the restore promise settles (success here) — the menu should disappear.
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("cancelling the dialog restores nothing and keeps the menu open", async () => {
+    const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
+    const onRestore = vi.fn();
+    render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
+    fireEvent.click(screen.getByText("되돌리기"));
+    await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("턴 1"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "취소" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onRestore).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
   it("shows an error state with a retry button when the fetch rejects, not the empty copy", async () => {
@@ -68,35 +87,37 @@ describe("CheckpointMenu", () => {
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
     fireEvent.click(screen.getByText("되돌리기"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("턴 1")); // arm
-    fireEvent.click(screen.getByText("턴 1")); // confirm → rejects
+    fireEvent.click(screen.getByText("턴 1")); // ask
+    confirmRevert(); // confirm → rejects
     await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(1));
     // Failure keeps the menu open (not closed) so the user can retry.
     expect(screen.getByRole("menu")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("턴 1")); // re-arm
-    fireEvent.click(screen.getByText("턴 1")); // confirm → succeeds
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByText("턴 1")); // ask again
+    confirmRevert(); // confirm → succeeds
     await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   });
 
-  it("re-enables rows after a successful restore so a second restore can be armed/confirmed", async () => {
+  it("re-enables rows after a successful restore so a second restore can be confirmed", async () => {
     const fetchCheckpoints = vi.fn().mockResolvedValue([{ seq: 0, sha: "a", createdAt: "2026-06-20T10:00:00Z" }]);
     const onRestore = vi.fn().mockResolvedValue(undefined);
     render(<CheckpointMenu fetchCheckpoints={fetchCheckpoints} onRestore={onRestore} />);
     fireEvent.click(screen.getByText("되돌리기"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("턴 1")); // arm
-    fireEvent.click(screen.getByText("턴 1")); // confirm → succeeds, closes the menu
+    fireEvent.click(screen.getByText("턴 1")); // ask
+    confirmRevert(); // confirm → succeeds, closes the menu
     await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull()); // the confirm's exit animation has finished
     // Reopen: the row must not be stuck disabled from the previous restore.
     fireEvent.click(screen.getByText("되돌리기"));
     await waitFor(() => expect(screen.getByText("턴 1")).toBeInTheDocument());
     expect(screen.getByRole("menuitem")).not.toBeDisabled();
-    fireEvent.click(screen.getByText("턴 1")); // arm again
-    expect(screen.getByText("정말 복원?")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("턴 1")); // confirm again → executes a second restore
+    fireEvent.click(screen.getByText("턴 1")); // ask again
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    confirmRevert(); // confirm again → executes a second restore
     await waitFor(() => expect(onRestore).toHaveBeenCalledTimes(2));
   });
 });

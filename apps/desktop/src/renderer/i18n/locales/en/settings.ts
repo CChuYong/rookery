@@ -39,6 +39,8 @@ export default {
   "settings.mcpCopy": "Copy",
   "settings.mcpCopied": "Copied",
   "settings.mcpRegenerate": "Regenerate token",
+  "settings.mcpRegenerateConfirmTitle": "Regenerate the MCP token?",
+  "settings.mcpRegenerateConfirmBody": "The current URL stops working right away. External clients registered with it are disconnected and must be registered again with the new URL.",
   "settings.mcpAddHint": "Register this URL in your MCP client, e.g. claude mcp add rookery --transport http <URL>",
   "settings.mcpSaveToActivate": "Save to generate the server URL.",
   "settings.botName": "Agent name",

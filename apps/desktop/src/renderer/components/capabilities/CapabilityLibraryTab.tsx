@@ -4,6 +4,7 @@ import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot, McpServerSpec }
 import { useT } from "../../i18n/provider.js";
 import { cn } from "../../lib/cn.js";
 import { Button } from "../../ui/button.js";
+import { ConfirmDialog } from "../../ui/confirm-dialog.js";
 import { Input, Select } from "../../ui/input.js";
 import { catalogKind, catalogSearchText, type CapabilityCatalogKind } from "./catalog.js";
 import { McpCapabilityDialog } from "./McpCapabilityDialog.js";
@@ -49,6 +50,7 @@ function SecretControl({ pack, secretKey, api, onChanged }: {
   const [inputKey, setInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false); // a stored secret can't be recovered once deleted (audit #103)
 
   return (
     <form
@@ -81,13 +83,23 @@ function SecretControl({ pack, secretKey, api, onChanged }: {
           variant="ghost"
           size="sm"
           disabled={busy}
-          onClick={() => {
-            setBusy(true); setError(null);
-            void api.deleteSecret(pack.instanceId, secretKey).then(onChanged).catch((cause) => setError(message(cause))).finally(() => setBusy(false));
-          }}
+          onClick={() => setConfirmDelete(true)}
         >{t("common.delete")}</Button>
       )}
       {error && <span className="w-full text-meta text-fail">{error}</span>}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={t("capabilities.deleteSecretTitle", { key: secretKey })}
+          body={t("capabilities.deleteSecretBody")}
+          confirmLabel={t("capabilities.deleteSecret")}
+          variant="danger"
+          onConfirm={() => {
+            setBusy(true); setError(null);
+            void api.deleteSecret(pack.instanceId, secretKey).then(onChanged).catch((cause) => setError(message(cause))).finally(() => setBusy(false));
+          }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </form>
   );
 }
@@ -149,19 +161,25 @@ function PackCard({ pack, api, reload, highlighted = false }: {
               <ShieldCheck size={12} /> {t("capabilities.trustCurrent")}
             </Button>
           )}
-          {pack.sourceKind !== "repo-shared" && (!confirmRemove ? (
+          {pack.sourceKind !== "repo-shared" && (
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmRemove(true)}><Trash2 size={12} /> {t("common.delete")}</Button>
-          ) : (
-            <>
-              <Button variant="danger" size="sm" disabled={busy} onClick={() => mutate(() => api.removePack(pack.instanceId))}>{t("capabilities.confirmRemove")}</Button>
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmRemove(false)}>{t("common.cancel")}</Button>
-            </>
-          ))}
+          )}
         </div>
       </div>
+      {/* Removing a pack drops its bindings, trust and stored secrets — irreversible, so the shared confirm (audit #103). */}
+      {confirmRemove && (
+        <ConfirmDialog
+          title={t("capabilities.removePackTitle", { name: pack.manifest.displayName })}
+          body={t("capabilities.removePackBody")}
+          confirmLabel={t("capabilities.confirmRemove")}
+          variant="danger"
+          onConfirm={() => mutate(() => api.removePack(pack.instanceId))}
+          onCancel={() => setConfirmRemove(false)}
+        />
+      )}
 
       {!reviewed && pack.status !== "trusted" && (
-        <p className="border-t border-line-soft px-4 py-2 text-meta text-run">{t("capabilities.reviewBeforeTrust")}</p>
+        <p className="border-t border-line-soft px-4 py-2 text-meta text-warn">{t("capabilities.reviewBeforeTrust")}</p>
       )}
       {error && <p className="border-t border-line-soft px-4 py-2 text-meta text-fail">{error}</p>}
       {expanded && (
@@ -169,12 +187,12 @@ function PackCard({ pack, api, reload, highlighted = false }: {
           <section>
             <h4 className="text-meta font-medium text-fg">{t("capabilities.reviewFiles")}</h4>
             <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-md border border-line-soft bg-ink/20 p-2 font-mono text-meta text-faint">
-              {pack.files.map((file) => <div key={file.path} className="flex gap-2"><span className="min-w-0 flex-1 break-all">{file.path}</span>{file.executable && <span className="font-sans text-run">{t("capabilities.executable")}</span>}<span>{file.size} B</span></div>)}
+              {pack.files.map((file) => <div key={file.path} className="flex gap-2"><span className="min-w-0 flex-1 break-all">{file.path}</span>{file.executable && <span className="font-sans text-warn">{t("capabilities.executable")}</span>}<span>{file.size} B</span></div>)}
             </div>
             {pack.changes.length > 0 && (
               <div className="mt-3">
                 <h4 className="text-meta font-medium text-fg">{t("capabilities.reviewChanges")}</h4>
-                <ul className="mt-1 space-y-1 font-mono text-meta text-run">{pack.changes.map((change) => <li key={`${change.kind}:${change.path}`}>{change.kind} · {change.path}</li>)}</ul>
+                <ul className="mt-1 space-y-1 font-mono text-meta text-warn">{pack.changes.map((change) => <li key={`${change.kind}:${change.path}`}>{change.kind} · {change.path}</li>)}</ul>
               </div>
             )}
             {pack.errors.length > 0 && <ul className="mt-3 space-y-1 text-meta text-fail">{pack.errors.map((item, index) => <li key={index}>{item}</li>)}</ul>}
@@ -256,7 +274,7 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
         <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setError(message(cause))) : undefined); }}><FolderPlus size={14} /> {t("capabilityCatalog.importPack")}</Button>
         <Button variant="ghost" size="sm" onClick={() => { setLoading(true); void api.refresh().then((next) => { setLibrary(next); setLoading(false); }).catch((cause) => { setError(message(cause)); setLoading(false); }); }}><RefreshCw size={14} /> {t("common.refresh")}</Button>
       </div>
-      {repos.length === 0 && <p className="rounded-md border border-run/25 bg-run/5 px-3 py-2 text-meta text-run">{t("capabilities.createMcpPackNeedsRepo")}</p>}
+      {repos.length === 0 && <p className="rounded-md border border-warn/25 bg-warn/5 px-3 py-2 text-meta text-warn">{t("capabilities.createMcpPackNeedsRepo")}</p>}
       {created && (
         <section role="status" className="flex items-start gap-2 rounded-[var(--radius)] border border-pr/30 bg-pr/5 px-3.5 py-3">
           <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-pr" />

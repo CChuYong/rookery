@@ -39,6 +39,8 @@ export default {
   "settings.mcpCopy": "복사",
   "settings.mcpCopied": "복사됨",
   "settings.mcpRegenerate": "토큰 재발급",
+  "settings.mcpRegenerateConfirmTitle": "MCP 토큰을 재발급할까요?",
+  "settings.mcpRegenerateConfirmBody": "지금 URL은 바로 무효가 돼요. 이 URL로 등록한 외부 클라이언트는 연결이 끊기니 새 URL로 다시 등록해야 해요.",
   "settings.mcpAddHint": "MCP 클라이언트에 이 URL을 등록하세요. 예: claude mcp add rookery --transport http <URL>",
   "settings.mcpSaveToActivate": "저장하면 서버 URL이 생성돼요.",
   "settings.botName": "에이전트 이름",

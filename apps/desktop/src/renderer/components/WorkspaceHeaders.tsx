@@ -70,7 +70,7 @@ function WorkerActivityReason({ worker, onStopTask }: { worker: FleetRow; onStop
           className="workspace-header-activity no-drag inline-flex shrink-0 items-center gap-0.5 rounded px-1 font-mono text-meta text-muted transition-colors hover:text-fg-dim"
         >
           {t("workspaceHeaders.backgroundTasks", { count: tasks.length })}
-          <ChevronDown size={12} strokeWidth={1.5} />
+          <ChevronDown size={12} />
         </button>
         {menu && (
           <ContextMenu

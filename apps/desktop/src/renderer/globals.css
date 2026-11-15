@@ -11,7 +11,8 @@
 
 
 /* rookery as an IDE: chroma-zero greys, the system UI face at 13px, hairlines do the dividing, the orange
-   accent only as lines, focus and the current-item marker, sky-blue for a worker that is running.
+   accent only as lines, focus and the current-item marker, sky-blue for a worker that is running, amber (warn) for
+   anything that asks for caution.
    Token names are the project's (ink = the paper, fg = the ink) so every utility keeps its meaning. */
 @theme {
   --color-ink: oklch(17% 0 0);              /* the main canvas */
@@ -31,7 +32,8 @@
   --color-thumb: oklch(32% 0 0);
   --color-thumb-hi: oklch(40% 0 0);
 
-  --color-run: oklch(74% 0.12 250);         /* running: the sky-blue second */
+  --color-run: oklch(74% 0.12 250);         /* running: the sky-blue second — live state only, never a warning */
+  --color-warn: oklch(80% 0.13 80);         /* caution: amber for warnings, notices and near-limit thresholds (audit #100) */
   --color-pr: oklch(76% 0.13 150);          /* done / merged */
   --color-fail: oklch(70% 0.16 27);
   --color-stop: oklch(52% 0 0);

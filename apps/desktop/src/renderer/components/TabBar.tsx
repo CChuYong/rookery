@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { MessageSquare, FileText, GitCompare, GitCommitHorizontal, X } from "lucide-react";
 import { useWsStore, type Tab } from "../store/workspace.js";
 import { cn } from "../lib/cn.js";
+import { TAB_IDLE, TAB_LINE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { useSegmentIndicator } from "../lib/useSegmentIndicator.js";
 import { editorTooltip } from "../workspace/panel-ids.js";
@@ -48,14 +49,14 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
     setActive(pageKey, tab.id);
     setMenu({ x: e.clientX, y: e.clientY, tab });
   };
-  // Accent rule on the TOP edge of the active tab (flat VS Code chrome, matching the dockview tab strip), placed
-  // instantly at its measured position (no left/width slide).
+  // The shared tab-strip marker (audit #99): full-strength text and one 1px neutral line under the active tab —
+  // the same as the dock tabs — placed instantly at its measured position (no left/width slide).
   const { containerRef, rect } = useSegmentIndicator(active, [tabs.length]);
   return (
     <div ref={containerRef} className="relative flex h-[34px] shrink-0 items-stretch overflow-x-auto border-b border-line bg-sunk">
       {rect && (
         <div
-          className="pointer-events-none absolute top-0 h-px bg-accent"
+          className={cn("pointer-events-none absolute bottom-0", TAB_LINE)}
           style={{ left: rect.left, width: rect.width }}
         />
       )}
@@ -64,7 +65,7 @@ export function TabBar({ pageKey, agentLabel }: { pageKey: string; agentLabel: s
         const title = tab.kind === "agent" ? agentLabel : tab.title;
         const dirty = tab.kind === "file" && tab.dirty;
         return (
-          <div key={tab.id} data-seg={tab.id} onContextMenu={(e) => onContextMenu(e, tab)} className={cn("group flex shrink-0 items-center gap-1.5 border-r border-line-soft px-3 text-ui transition-colors duration-150", tab.id === active ? "bg-raised text-fg" : "text-muted hover:text-fg-dim")}>
+          <div key={tab.id} data-seg={tab.id} onContextMenu={(e) => onContextMenu(e, tab)} className={cn("group flex shrink-0 items-center gap-1.5 border-r border-line-soft px-3 text-ui transition-colors duration-150", tab.id === active ? "text-fg" : TAB_IDLE)}>
             <button onClick={() => setActive(pageKey, tab.id)} className="flex items-center gap-1.5">
               <Icon size={14} className="text-muted" />
               <span title={editorTooltip(tab.id)} className="max-w-[140px] truncate">{title}</span>

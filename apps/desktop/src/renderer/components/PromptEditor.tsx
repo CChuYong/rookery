@@ -43,6 +43,7 @@ import {
 import type { CommandAction, CommandCandidate } from "@daemon/core/capabilities/commands.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { cn } from "../lib/cn.js";
+import { MENU_ITEM, MENU_ITEM_ACTIVE, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { FileMentionPopup } from "./FileMentionPopup.js";
 import {
@@ -364,12 +365,12 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
   return (
     <div className="relative">
       {slashOpen && (
-        <div className="pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-raised p-1 shadow-pop">
+        <div className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden", MENU_SURFACE)}>
           {slashMatches.map((command, index) => (
             <button
               key={command.name}
               type="button"
-              className={`flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left ${index === slashSel ? "bg-accent/15" : "hover:bg-line/40"}`}
+              className={cn("flex w-full flex-col items-start gap-0.5 px-2.5 py-1.5 text-left", MENU_ITEM, index === slashSel && MENU_ITEM_ACTIVE)}
               onMouseEnter={() => setSlashSel(index)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => pickCommand(command)}

@@ -124,8 +124,25 @@ describe("CapabilityLibraryTab", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("pack-1"));
     fireEvent.click(within(card).getByRole("button", { name: "삭제" }));
     expect(removePack).not.toHaveBeenCalled();
-    fireEvent.click(within(card).getByRole("button", { name: "Pack 제거" }));
+    // The confirm is the shared dialog now (audit #103), not a second button inside the card.
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Pack 제거" }));
     await waitFor(() => expect(removePack).toHaveBeenCalledWith("pack-1"));
+  });
+
+  it("asks before deleting a stored secret, which can't be recovered (audit #103)", async () => {
+    const configured = { ...pack, secrets: [{ key: "issue-token", configured: true }] };
+    const deleteSecret = vi.fn(async (_id: string, key: string) => ({ key, configured: false }));
+    render(<CapabilityLibraryTab api={api({ loadLibrary: async () => ({ ...library, packs: [configured] }), deleteSecret })} generation={0} repos={[]} pickDirectory={async () => null} />);
+    const card = await screen.findByTestId("capability-pack-pack-1");
+    fireEvent.click(within(card).getByRole("button", { name: "검토 펼치기" }));
+    // the pack's own Delete is the first "삭제"; the secret's is inside the secrets form
+    const secretDelete = within(within(card).getByLabelText("issue-token 값").closest("form")!).getByRole("button", { name: "삭제" });
+    fireEvent.click(secretDelete);
+    expect(deleteSecret).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "secret 삭제" }));
+    await waitFor(() => expect(deleteSecret).toHaveBeenCalledWith("pack-1", "issue-token"));
   });
 
   it("labels repo-owned packs, renders discovery diagnostics, and leaves removal to the repo index", async () => {

@@ -3,6 +3,7 @@ import { MonacoDiff } from "./MonacoDiff.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
+import { rowState } from "../lib/ui-tokens.js";
 import { GIT_TONE } from "../lib/gitTone.js";
 import { useT } from "../i18n/provider.js";
 
@@ -57,7 +58,7 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
             key={f.path}
             onClick={() => setSel(f.path)}
             title={f.path}
-            className={cn("flex h-6 w-full items-center gap-2 px-2.5 text-left text-ui", sel === f.path ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised")}
+            className={cn("flex h-6 w-full items-center gap-2 px-2.5 text-left text-ui", rowState(sel === f.path))}
           >
             <span className={cn("w-3 shrink-0 text-center font-mono text-meta", GIT_TONE[f.status] ?? "text-muted")}>{f.status}</span>
             <span className="min-w-0 flex-1 truncate">{basename(f.path)}</span>
