@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Clock, X, Play, Pencil, Trash2, Plus, History, Loader2 } from "lucide-react";
+import { X, Play, Pencil, Trash2, Plus, History, Loader2 } from "lucide-react";
 import type { Automation, AutomationTrigger } from "@daemon/persistence/repositories.js";
 import type { ActionVars } from "@daemon/core/automation-action.js";
 import { useT } from "../i18n/provider.js";
@@ -7,6 +7,7 @@ import type { TFunc } from "../i18n/provider.js";
 import { Button } from "../ui/button.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed, EmptyState } from "../ui/load-state.js";
 import { ProviderBadge } from "./StatusBadge.js";
 import { cn } from "../lib/cn.js";
 import { referencedVars } from "../lib/automation-vars.js";
@@ -45,7 +46,7 @@ export function AutomationPage(p: {
   automations: Automation[];
   loaded?: boolean; // automation.list has arrived from the daemon → gates the empty copy the same way Sessions/RepoTree do (audit #14)
   loadFailed?: boolean; // the initial fetch was rejected and hasn't succeeded since → error+retry row instead of a false "no jobs" empty state
-  onRetry?: () => void; // re-fires automation.list (cleared by the store once it succeeds)
+  onRetry?: () => unknown; // re-fires automation.list (cleared by the store once it succeeds)
   onRun: (id: string, vars?: ActionVars) => Promise<void>;
   onToggle: (id: string, enabled: boolean) => Promise<void>;
   onDelete: (id: string) => void;
@@ -119,18 +120,12 @@ export function AutomationPage(p: {
         <div className="mx-auto max-w-3xl px-6 py-6">
           {!(p.loaded ?? true) ? (
             p.loadFailed ? (
-              <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
-                <p className="text-ui text-fail">{t("automationPage.loadFailed")}</p>
-                <button onClick={p.onRetry} className="rounded-md border border-line px-3 py-1 text-ui text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
-              </div>
+              <LoadFailed layout="stack" message={t("automationPage.loadFailed")} onRetry={() => p.onRetry?.()} />
             ) : (
               <SkeletonRows rows={5} />
             )
           ) : p.automations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-20 text-center text-muted">
-              <Clock size={30} className="opacity-40" />
-              <p className="text-ui">{t("automationPage.empty")}</p>
-            </div>
+            <EmptyState layout="stack" action={{ label: t("automationPage.newJob"), onClick: p.onNew }}>{t("automationPage.empty")}</EmptyState>
           ) : (
             <div className="flex flex-col divide-y divide-line-soft border-y border-line">
               {p.automations.map((a) => (

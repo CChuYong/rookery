@@ -110,3 +110,15 @@ describe("ResourceMonitor keyboard/focus (audit #61)", () => {
     expect(screen.queryByText("Desktop App")).toBeNull();
   });
 });
+
+// audit #137: repeated read failures end the skeleton with a message and a retry.
+describe("ResourceMonitor failure", () => {
+  it("failed + no snapshot → message and a retry that calls onRefresh", () => {
+    const onRefresh = vi.fn();
+    renderEn(<ResourceMonitor snapshot={null} failed onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Couldn't read resource usage")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRefresh).toHaveBeenCalled();
+  });
+});

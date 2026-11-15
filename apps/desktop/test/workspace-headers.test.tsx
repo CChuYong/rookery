@@ -228,7 +228,7 @@ describe("HeaderControls dock-mode toggle state (audit #4 #11)", () => {
     const btn = screen.getByLabelText("우측 패널");
     expect(btn).toHaveAttribute("aria-pressed", "false");
     expect(btn).toHaveAttribute("data-state", "auto");
-    expect(btn).toHaveAttribute("title", "창이 좁아서 파일·변경·활동을 숨겼어요 — 클릭하면 열려요");
+    expect(btn).toHaveAttribute("title", "창이 좁아서 파일·Git·활동을 숨겼어요 — 클릭하면 열려요");
     fireEvent.click(btn);
     expect(useDockPanelsStore.getState().autoHiddenByPage.p1).toEqual([]);
     expect(btn).toHaveAttribute("data-state", "open");

@@ -8,6 +8,7 @@ import { ROW_SELECTED } from "../lib/ui-tokens.js";
 import { absoluteDate, relativeTime } from "../lib/relative-time.js";
 import { workflowAgentKey } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { useLocale, useT } from "../i18n/provider.js";
 
 export interface WorkflowRunsProps {
@@ -296,7 +297,14 @@ function WorkflowRun({
         <div className="border-t border-line">
           <div className="px-3 py-1.5 text-meta font-medium text-muted">{t("workflowActivity.selectedAgent")}</div>
           {loading && <div className="px-3 pb-3 text-meta text-muted">{t("workflowActivity.historyLoading")}</div>}
-          {failed && <div className="px-3 pb-3 text-meta text-fail">{t("workflowActivity.historyFailed")}</div>}
+          {/* Retry right where the failure shows (audit #48); its progress is the loading line above. */}
+          {failed && !loading && selectedKey && (
+            <LoadFailed
+              className="px-3 pb-3 pt-0 text-meta"
+              message={t("workflowActivity.historyFailed")}
+              onRetry={() => loadAgentHistory(workerId, run.taskId, selectedKey.slice(`${workerId}/${run.taskId}/`.length))}
+            />
+          )}
           {selectedLog && !loading && !failed && <div className="flex h-72 min-h-0 flex-col"><MessageList kind="worker" items={selectedLog} /></div>}
         </div>
       )}

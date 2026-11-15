@@ -14,6 +14,7 @@ import { Input } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { toast } from "../store/toasts.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
@@ -43,6 +44,11 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   const [menu, setMenu] = useState<{ x: number; y: number; row: Row } | null>(null);
   const [filter, setFilter] = useState("");
   const [walkPaths, setWalkPaths] = useState<string[]>([]);
+  // Finder walk state (audit #114): "searching…" until the first walk returns, an error with retry, and truncation.
+  const [walkState, setWalkState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [walkErr, setWalkErr] = useState<string | null>(null);
+  const [walkTruncated, setWalkTruncated] = useState(false);
+  const [walkAttempt, setWalkAttempt] = useState(0);
   // In-app replacements for native window.prompt/confirm (which block the renderer thread + break the ink deck).
   const [nameDialog, setNameDialog] = useState<{ kind: "newFile" | "newFolder" | "rename"; dir?: string; target?: Row; initial: string } | null>(null);
   const [trashTarget, setTrashTarget] = useState<Row | null>(null);
@@ -112,9 +118,14 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
   useEffect(() => {
     if (!filtering) return;
     let live = true;
-    void window.rookery.ws.walk(root).then((r) => { if (live) setWalkPaths(r.paths); }).catch(() => {});
+    setWalkState((cur) => (cur === "ready" ? cur : "loading")); // a re-walk keeps the old paths on screen
+    void window.rookery.ws.walk(root).then(
+      (r) => { if (live) { setWalkPaths(r.paths); setWalkTruncated(r.truncated); setWalkErr(null); setWalkState("ready"); } },
+      (e: unknown) => { if (live) { setWalkErr(e instanceof Error ? e.message : String(e)); setWalkState("error"); } },
+    );
     return () => { live = false; };
-  }, [filtering, root, version, reloadKey]);
+  }, [filtering, root, version, reloadKey, walkAttempt]);
+  useEffect(() => { setWalkState("idle"); setWalkPaths([]); setWalkTruncated(false); }, [root]);
 
   const rows = useMemo(() => flatten(root, expanded, children), [root, expanded, children]);
   const matches = useMemo(() => (filtering ? fuzzyFilter(walkPaths, filter.trim()) : []), [filtering, walkPaths, filter]);
@@ -224,7 +235,11 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("fileTree.searchPlaceholder")} className="w-full bg-transparent text-ui text-fg-dim placeholder:text-muted focus:outline-none" />
       </div>
       <div ref={bodyRef} data-testid="filetree-body" role="tree" tabIndex={0} onKeyDown={onKeyDown} className="min-h-0 flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/40">
-        {filtering && matches.length === 0 ? (
+        {filtering && walkState === "error" ? (
+          <LoadFailed message={t("fileTree.walkFailed")} detail={walkErr} onRetry={() => setWalkAttempt((n) => n + 1)} />
+        ) : filtering && matches.length === 0 && walkState !== "ready" ? (
+          <div className="px-3 py-3 text-ui text-muted">{t("fileTree.searching")}</div>
+        ) : filtering && matches.length === 0 ? (
           <div className="px-3 py-3 text-ui text-muted">{t("fileTree.noMatches")}</div>
         ) : !filtering && rootStatus === "loading" ? (
           <SkeletonRows rows={8} />
@@ -267,6 +282,9 @@ export function FileTree({ root, pageKey, version = 0, activeTabPath }: { root: 
           </div>
         )}
       </div>
+      {filtering && walkState === "ready" && walkTruncated && matches.length > 0 && (
+        <div role="status" className="shrink-0 border-t border-line/60 px-3 py-1 text-meta text-muted">{t("fileTree.walkTruncated")}</div>
+      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.row)} onClose={() => setMenu(null)} />}
       {nameDialog && (
         <NameDialog title={nameDialogTitle(nameDialog.kind)} initial={nameDialog.initial} onSubmit={(name) => void submitName(name)} onCancel={() => setNameDialog(null)} />

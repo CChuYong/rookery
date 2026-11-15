@@ -4,4 +4,5 @@ export default {
   "commitView.filesOne": "{count} file",
   "commitView.filesMany": "{count} files",
   "commitView.changedFiles": "Changed files ({count})",
+  "commitView.loadFailed": "Couldn't load this commit",
 } satisfies Catalog;

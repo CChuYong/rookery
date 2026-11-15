@@ -11,4 +11,5 @@ export default {
   "resourceMonitor.renderer": "Renderer",
   "resourceMonitor.other": "Other",
   "resourceMonitor.daemon": "Daemon",
+  "resourceMonitor.loadFailed": "Couldn't read resource usage",
 } satisfies Catalog;

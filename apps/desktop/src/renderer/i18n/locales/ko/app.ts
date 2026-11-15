@@ -37,4 +37,5 @@ export default {
   "app.newWorker": "새 워커",
   "app.reposHomeHint": "왼쪽에서 워커를 고르거나 새로 만들어요.",
   "app.reposHomeEmpty": "등록된 레포가 없어요.",
+  "app.settingsLoadFailed": "설정을 불러오지 못했어요",
 } satisfies Catalog;

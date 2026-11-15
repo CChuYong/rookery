@@ -1,7 +1,7 @@
 import type { ImageRef } from "@daemon/core/image-input.js";
 import { MessageImages } from "./MessageImages.js";
 import { memo, useEffect, useRef, useState, cloneElement, type ReactElement } from "react";
-import { MessageSquareDashed, ArrowDown, Clock } from "lucide-react";
+import { ArrowDown, Clock } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { ToolGroup } from "./ToolGroup.js";
 import { InteractionCard } from "./InteractionCard.js";
@@ -86,8 +86,7 @@ function MessageListImpl({
       if (loadFailed) {
         return (
           <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center">
-            <button onClick={onRetryHistory} className="flex flex-col items-center gap-2.5 text-fail transition-colors hover:underline">
-              <MessageSquareDashed size={28} className="opacity-40" />
+            <button onClick={onRetryHistory} className="text-fail transition-colors hover:underline">
               <span className="text-body">{t("messageList.loadFailed")}</span>
             </button>
           </div>
@@ -100,8 +99,7 @@ function MessageListImpl({
       );
     }
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center text-muted">
-        <MessageSquareDashed size={28} className="opacity-40" />
+      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center text-muted">
         <p className="text-body">{t(kind === "worker" ? "messageList.emptyHintWorker" : "messageList.emptyHintMaster")}</p>
       </div>
     );

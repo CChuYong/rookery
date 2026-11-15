@@ -291,31 +291,47 @@ export class WorkspaceManager {
     return { head, work };
   }
 
-  // branch/upstream/ahead·behind — parses porcelain v2 --branch's `# branch.*` headers.
-  async gitInfo(cwd: string): Promise<{ branch: string; ahead: number; behind: number; upstream: string | null }> {
+  // A failed git read: "not a repository" when rev-parse can't find one (stderr is locale-dependent, so we ask git
+  // again instead of matching the message); otherwise a real failure, thrown so the renderer can tell it from an
+  // empty result (audit #88). A missing git binary (no stderr at all) counts as a failure, not as "no repository".
+  private async isRepo(cwd: string): Promise<boolean> {
+    const r = await this.d.exec!("git", ["rev-parse", "--git-dir"], cwd);
+    return r.code === 0;
+  }
+  private gitError(r: { stdout: string; stderr?: string }): Error {
+    return new Error((r.stderr ?? "").trim() || r.stdout.trim() || "git failed");
+  }
+
+  // branch/upstream/ahead·behind/HEAD — parses porcelain v2 --branch's `# branch.*` headers. `head` is the commit
+  // HEAD points at (null before the first commit) so the History list can reload when it moves (audit #40).
+  async gitInfo(cwd: string): Promise<{ isRepo: false } | { isRepo: true; branch: string; ahead: number; behind: number; upstream: string | null; head: string | null }> {
     this.guardCwd(cwd);
-    const empty = { branch: "", ahead: 0, behind: 0, upstream: null as string | null };
-    if (!this.d.exec) return empty;
-    const { stdout, code } = await this.d.exec("git", ["status", "--porcelain=v2", "--branch"], cwd);
-    if (code !== 0) return empty;
-    let branch = "", upstream: string | null = null, ahead = 0, behind = 0;
-    for (const line of stdout.split("\n")) {
+    if (!this.d.exec) return { isRepo: false };
+    const r = await this.d.exec("git", ["status", "--porcelain=v2", "--branch"], cwd);
+    if (r.code !== 0) {
+      if ((r.stderr ?? "").trim() && !(await this.isRepo(cwd))) return { isRepo: false };
+      throw this.gitError(r);
+    }
+    let branch = "", upstream: string | null = null, ahead = 0, behind = 0, head: string | null = null;
+    for (const line of r.stdout.split("\n")) {
       if (line.startsWith("# branch.head ")) branch = line.slice(14).trim();
+      else if (line.startsWith("# branch.oid ")) { const oid = line.slice(13).trim(); head = oid === "(initial)" ? null : oid; }
       else if (line.startsWith("# branch.upstream ")) upstream = line.slice(18).trim();
       else if (line.startsWith("# branch.ab ")) {
         const m = line.match(/\+(\d+)\s+-(\d+)/);
         if (m) { ahead = Number(m[1]); behind = Number(m[2]); }
       }
     }
-    return { branch, ahead, behind, upstream };
+    return { isRepo: true, branch, ahead, behind, upstream, head };
   }
 
   // Change list — preserves porcelain v1's X(index)/Y(worktree) separately + merges +/− line counts vs HEAD (numstat).
   async gitChanges(cwd: string): Promise<Array<{ path: string; x: string; y: string; added: number; deleted: number }>> {
     this.guardCwd(cwd);
     if (!this.d.exec) return [];
-    const { stdout, code } = await this.d.exec("git", ["status", "--porcelain=v1"], cwd);
-    if (code !== 0) return [];
+    const st = await this.d.exec("git", ["status", "--porcelain=v1"], cwd);
+    if (st.code !== 0) throw this.gitError(st);
+    const stdout = st.stdout;
     const numstat = new Map<string, { added: number; deleted: number }>();
     const ns = await this.d.exec("git", ["diff", "HEAD", "--numstat"], cwd);
     if (ns.code === 0) {
@@ -340,9 +356,13 @@ export class WorkspaceManager {
   async gitLog(cwd: string, limit = 50): Promise<Array<{ hash: string; shortHash: string; subject: string; author: string; date: number }>> {
     this.guardCwd(cwd);
     if (!this.d.exec) return [];
-    const { stdout, code } = await this.d.exec("git", ["log", "-n", String(limit), "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct"], cwd);
-    if (code !== 0) return [];
-    return stdout.split("\n").filter(Boolean).map((line) => {
+    const r = await this.d.exec("git", ["log", "-n", String(limit), "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct"], cwd);
+    if (r.code !== 0) {
+      // A repository before its first commit has no log — that is an empty history, not a failure.
+      if ((await this.isRepo(cwd)) && (await this.d.exec("git", ["rev-parse", "--verify", "-q", "HEAD"], cwd)).code !== 0) return [];
+      throw this.gitError(r);
+    }
+    return r.stdout.split("\n").filter(Boolean).map((line) => {
       const [hash, shortHash, subject, author, date] = line.split("\x1f");
       return { hash, shortHash, subject, author, date: Number(date) };
     });
@@ -353,7 +373,7 @@ export class WorkspaceManager {
     this.guardCwd(cwd);
     if (!this.d.exec) return [];
     const ns = await this.d.exec("git", ["show", hash, "--numstat", "--format="], cwd);
-    if (ns.code !== 0) return [];
+    if (ns.code !== 0) throw this.gitError(ns);
     const nameStatus = await this.d.exec("git", ["show", hash, "--name-status", "--format="], cwd);
     const statusMap = new Map<string, string>();
     if (nameStatus.code === 0) {

@@ -72,7 +72,24 @@ type Tab = "general" | "slack" | "models" | "capabilities" | "integration";
 type ModelsProvider = "claude" | "codex";
 
 // Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Claude | Codex | Integration tabs.
-export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void; capabilityApi?: CapabilityCenterApi; capabilityGeneration?: number; onOpenCapabilityCatalog?: () => void; onOpenCapabilityAssignments?: () => void; onPreviewCapabilities?: () => void }): JSX.Element {
+// A status probe that failed (instead of "checking…" forever, audit #47): says so and offers a re-check that shows
+// progress. The probe re-runs on its own each time Settings opens.
+function CheckFailed({ onRecheck }: { onRecheck?: () => Promise<void> }): JSX.Element {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-2 text-ui text-muted">
+      {t("settings.checkFailed")}
+      {onRecheck && (
+        <Button variant="outline" size="sm" loading={busy} aria-label={t("settings.recheck")} onClick={() => { setBusy(true); void onRecheck().catch(() => {}).finally(() => setBusy(false)); }}>
+          {t("settings.recheck")}
+        </Button>
+      )}
+    </span>
+  );
+}
+
+export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; integrationsFailed?: boolean; authStatusFailed?: boolean; onRecheckStatus?: () => Promise<void>; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void; capabilityApi?: CapabilityCenterApi; capabilityGeneration?: number; onOpenCapabilityCatalog?: () => void; onOpenCapabilityAssignments?: () => void; onPreviewCapabilities?: () => void }): JSX.Element {
   const t = useT();
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
@@ -371,7 +388,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       </>
                     )}
                   </span>
-                  {!p.integrations ? (
+                  {!p.integrations && p.integrationsFailed ? (
+                    <CheckFailed onRecheck={p.onRecheckStatus} />
+                  ) : !p.integrations ? (
                     <span className="ml-auto shrink-0 text-ui text-muted">{t("settings.checking")}</span>
                   ) : !p.integrations.github.available ? (
                     <span className="ml-auto shrink-0 text-ui text-muted">{t("settings.ghAuthNeeded")}</span>
@@ -385,7 +404,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       Linear
                       {(() => {
                         const status = !p.integrations
-                          ? t("settings.checking")
+                          ? t(p.integrationsFailed ? "settings.checkFailed" : "settings.checking")
                           : p.integrations.linear.valid
                             ? (p.integrations.linear.user ?? t("settings.linearConnected"))
                             : p.integrations.linear.configured
@@ -440,9 +459,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
               // While authStatus is still null (loading, or a silently-swallowed request failure), don't default to
               // method="none" — that renders a confident "No auth active" even when a key is actually working (audit #15).
               const checking = a == null;
+              const checkFailed = checking && !!p.authStatusFailed;
               const method = a?.method ?? "none";
               const dotCls = checking ? "bg-stop" : method === "api-key" ? "bg-accent" : method === "oauth" ? "bg-pr" : "bg-stop";
-              const label = checking ? t("settings.checking") : method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
+              const label = checkFailed ? "" : checking ? t("settings.checking") : method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
               const desc = method === "api-key" ? t("settings.claudeApiKeyActive") : method === "oauth" ? t("settings.claudeSubscriptionActive") : t("settings.claudeNoneActive");
               return (
                 <div className="flex flex-col gap-8">
@@ -455,6 +475,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                           {label}
                         </span>
                         {a?.method === "api-key" && a.apiKeyHint && <span className="shrink-0 font-mono text-ui text-muted">{a.apiKeyHint}</span>}
+                        {checkFailed && <CheckFailed onRecheck={p.onRecheckStatus} />}
                       </div>
                       {!checking && <p className="text-ui leading-relaxed text-muted">{desc}</p>}
                     </div>

@@ -19,4 +19,6 @@ export default {
   "usagePanel.expand": "Expand usage",
   "usagePanel.collapse": "Collapse usage",
   "usagePanel.details": "Usage details",
+  "usagePanel.empty": "No usage data — check that ccusage is installed and you're logged in",
+  "usagePanel.stale": "Refresh failed",
 } satisfies Catalog;

@@ -23,11 +23,12 @@ export default {
   "workflowActivity.partialData": "일부 활동 데이터를 읽지 못했어요.",
   "workflowActivity.historyLoading": "에이전트 기록을 불러오는 중…",
   "workflowActivity.historyFailed": "에이전트 기록을 불러오지 못했어요.",
-  "workflowActivity.empty": "아직 워크플로나 중첩 에이전트 활동이 없어요.",
+  "workflowActivity.empty": "아직 워크플로나 하위 에이전트 활동이 없어요.",
   "workflowActivity.taskFallbackName": "Dynamic Workflow",
   "workflowActivity.starting": "시작 중",
   "workflowActivity.thinking": "생각 중",
   "workflowActivity.responding": "응답 중",
   "workflowActivity.tool": "도구 사용 중",
   "workflowActivity.complete": "완료",
+  "workflowActivity.emptyEnded": "기록된 활동이 없어요 — 하위 에이전트 활동은 실행 중에만 보여요.",
 } satisfies Catalog;

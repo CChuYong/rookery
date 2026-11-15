@@ -125,6 +125,29 @@ describe("FileTree", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  // audit #114: the finder says "searching…" until the walk returns, offers a retry when it fails, and flags truncation.
+  it("filter: searching while the walk runs, retry on failure, truncation note", async () => {
+    let finish!: (r: { paths: string[]; truncated: boolean }) => void;
+    const walk = vi.fn()
+      .mockReturnValueOnce(new Promise((res) => { finish = res; }))
+      .mockRejectedValueOnce(new Error("EACCES"))
+      .mockResolvedValue({ paths: ["a.ts"], truncated: true });
+    mockWs({ walk });
+    render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+    await screen.findByText("src");
+    fireEvent.change(screen.getByPlaceholderText("파일 검색"), { target: { value: "zz" } });
+    expect(screen.getByText("검색하는 중…")).toBeInTheDocument();
+    expect(screen.queryByText("일치하는 파일이 없어요.")).toBeNull();
+    finish({ paths: ["a.ts"], truncated: false });
+    expect(await screen.findByText("일치하는 파일이 없어요.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" })); // reload → the walk fails this time
+    expect(await screen.findByText("파일 목록을 불러오지 못했어요")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    fireEvent.change(screen.getByPlaceholderText("파일 검색"), { target: { value: "a" } });
+    expect(await screen.findByText(/결과가 잘렸어요/)).toBeInTheDocument();
+  });
+
   it("filter input shows fuzzy walk results and opens on click", async () => {
     render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
     await screen.findByText("src");

@@ -112,6 +112,13 @@ describe("RepoTree", () => {
     expect(onNewRepo).toHaveBeenCalled();
   });
 
+  // audit #42: still loading → skeleton rows; audit #89: no "no repos" copy until the lists arrived.
+  it("still loading → a skeleton, not the 'no repos' empty copy", () => {
+    const { container } = render(<RepoTree repos={[]} fleet={[]} activeSubId={null} onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}} loaded={false} loadFailed={false} />);
+    expect(container.querySelector(".sheen")).not.toBeNull();
+    expect(screen.queryByText(/등록된 레포가 없어요/)).toBeNull();
+  });
+
   it("loadFailed && !loaded → shows an error row (not the empty copy) with a retry button that re-fires fleet.list (audit #14)", () => {
     const onRetry = vi.fn();
     render(<RepoTree repos={[]} fleet={[]} activeSubId={null} onSelectSub={() => {}} onNewRepo={() => {}} onRemoveRepo={() => {}} onNewSub={() => {}} loaded={false} loadFailed={true} onRetry={onRetry} />);

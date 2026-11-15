@@ -108,7 +108,9 @@ function StatInline({ label, value }: { label: string; value: string }): JSX.Ele
 // Claude/Codex switch stays a sibling so buttons never nest.
 // `tab`/`onTabChange` optionally control the provider tab, so the status strip and its detail popover stay on the same
 // provider (review m3).
-function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar", onOpenDetails, detailsOpen, tab: tabProp, onTabChange }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar"; onOpenDetails?: () => void; detailsOpen?: boolean; tab?: UsageTab; onTabChange?: (tab: UsageTab) => void }): JSX.Element {
+// `empty` = the poller has had several successful answers with no numbers → "no usage data" instead of "loading…"
+// forever; `loadFailed` with a snapshot on screen marks the numbers as stale (audit #46).
+function UsagePanelImpl({ usage, loadFailed, empty = false, compact = false, variant = "sidebar", onOpenDetails, detailsOpen, tab: tabProp, onTabChange }: { usage: UsageSnapshot | null; loadFailed?: boolean; empty?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar"; onOpenDetails?: () => void; detailsOpen?: boolean; tab?: UsageTab; onTabChange?: (tab: UsageTab) => void }): JSX.Element {
   const t = useT();
   // Provider tab: Claude is the default (user direction); not persisted (YAGNI).
   const [ownTab, setOwnTab] = useState<UsageTab>("claude");
@@ -137,6 +139,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
         </button>
       ) : <>{body}</>;
     if (!usage) return details(<span className="text-faint">{loadFailed ? t("usagePanel.loadFailed") : t("usagePanel.loading")}</span>);
+    if (!hasAny && !cdx) return details(<span className="text-faint">{empty ? t("usagePanel.empty") : t("usagePanel.loading")}</span>);
     const showTabs = !!cdx; // only worth a tab switch once there's a second provider's data to switch to
     return (
       <span className="inline-flex shrink-0 items-center gap-3 text-meta">
@@ -162,6 +165,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
             {!p && usage.session && <StatInline label={t("usagePanel.session5h")} value={usd(usage.session.costUSD)} />}
             {!p && wk && <StatInline label={t("usagePanel.weekly")} value={usd(wk.costUSD)} />}
             {usage.today && <StatInline label={t("usagePanel.today")} value={usd(usage.today.costUSD)} />}
+            {!hasAny && <span className="text-faint">{empty ? t("usagePanel.empty") : t("usagePanel.loading")}</span>}
           </>
         ) : cdx ? (
           <>
@@ -172,6 +176,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
         ) : (
           <span className="text-faint">{t("usagePanel.codexUnavailable")}</span>
         ))}
+        {loadFailed && <span className="shrink-0 text-faint">{t("usagePanel.stale")}</span>}
       </span>
     );
   }
@@ -214,10 +219,11 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
         {/* Shared pre-load states (gate on the snapshot itself, not per-tab). */}
         {!usage && !loadFailed && <SkeletonRows rows={2} className="px-2 py-1.5" />}
         {!usage && loadFailed && <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.loadFailed")}</div>}
+        {usage && loadFailed && <div role="status" className="px-2 pt-1 text-meta text-faint">{t("usagePanel.stale")}</div>}
 
         {usage && tab === "claude" && (
           <>
-            {!hasAny && <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.loading")}</div>}
+            {!hasAny && <div className="px-2 py-1.5 text-meta text-muted">{empty ? t("usagePanel.empty") : t("usagePanel.loading")}</div>}
             {hasAny && (
               <>
                 {/* Server-side % (official, same source as /usage) */}

@@ -6,6 +6,8 @@ import { ContextMenu, type AnchorRect } from "../components/ContextMenu.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
 import { Collapse } from "../components/Collapse.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { LoadFailed } from "../ui/load-state.js";
+import { SkeletonRows } from "../components/Skeleton.js";
 import { baseName } from "../lib/path.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { Input, Select } from "../ui/input.js";
@@ -133,7 +135,7 @@ function SessionsImpl(p: {
   activeId: string | null;
   loaded?: boolean; // session list has arrived from the daemon → only then is an empty list really "no sessions" (avoids the cold-connect false-empty flash)
   loadFailed?: boolean; // the initial fetch was rejected and hasn't succeeded since → show an error+retry row instead of staying blank forever (audit #14)
-  onRetry?: () => void; // re-fires session.list (cleared by the store once it succeeds)
+  onRetry?: () => unknown; // (may return a promise → the Retry button shows progress/failure) re-fires session.list (cleared by the store once it succeeds)
   onSelect: (id: string) => void;
   running?: Record<string, boolean>; // sessions with a master turn in progress → live pulse dot
   attention?: Record<string, boolean>; // sessions whose turn finished while unseen → right-side unread dot
@@ -358,10 +360,9 @@ function SessionsImpl(p: {
       )}
 
       {!(p.loaded ?? true) && p.loadFailed ? (
-        <div className="flex items-center justify-between gap-2 px-2 py-3 text-ui leading-relaxed">
-          <span className="text-fail">{t("sessions.loadFailed")}</span>
-          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-meta text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
-        </div>
+        <LoadFailed message={t("sessions.loadFailed")} onRetry={() => p.onRetry?.()} />
+      ) : !(p.loaded ?? true) ? (
+        <SkeletonRows rows={4} className="px-2" />
       ) : (
         (p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-ui leading-relaxed text-muted">{t("sessions.empty")}</div>
       )}

@@ -11,4 +11,5 @@ export default {
   "resourceMonitor.renderer": "렌더러",
   "resourceMonitor.other": "기타",
   "resourceMonitor.daemon": "데몬",
+  "resourceMonitor.loadFailed": "리소스 정보를 불러오지 못했어요",
 } satisfies Catalog;

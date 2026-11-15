@@ -138,4 +138,6 @@ export default {
   "capabilities.origin.slack": "Slack",
   "capabilities.origin.automation": "Automation",
   "capabilities.origin.external": "External",
+  "capabilities.refreshFailed": "Couldn't refresh — this may be out of date",
+  "capabilities.actionFailed": "That didn't work",
 } satisfies Catalog;

@@ -37,7 +37,7 @@ describe("AttentionBell", () => {
     const btn = screen.getByRole("button");
     expect(btn.textContent).toBe(""); // no badge count
     fireEvent.click(btn);
-    expect(screen.getByText("지금 필요한 것이 없어요. 전부 순항 중 ✨")).toBeInTheDocument();
+    expect(screen.getByText("지금 확인할 일이 없어요.")).toBeInTheDocument();
   });
 
   it("badge counts items; clicking a failure row navigates and closes", () => {
@@ -66,7 +66,7 @@ describe("AttentionBell", () => {
     fireEvent.click(screen.getByLabelText(/어텐션 큐/));
     fireEvent.click(screen.getByLabelText("묵살"));
     expect(useAcksStore.getState().acked).toContain("wfail:w1:failed");
-    expect(screen.getByText(/지금 필요한 것이 없어요/)).toBeInTheDocument(); // list emptied live
+    expect(screen.getByText(/지금 확인할 일이 없어요/)).toBeInTheDocument(); // list emptied live
   });
 
   it("dismissing a worker-review item flips the live unread map (no persisted ack)", () => {

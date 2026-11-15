@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MonacoDiff } from "./MonacoDiff.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
 import { rowState } from "../lib/ui-tokens.js";
@@ -16,18 +17,22 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
   const [files, setFiles] = useState<CFile[] | null>(null);
   const [info, setInfo] = useState<CInfo | null>(null);
   const [sel, setSel] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // the file list failed to load (git error, not "no files")
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!root) return;
     let live = true;
+    setError(null);
     void window.rookery.ws.gitCommitFiles(root, hash).then((fs) => {
       if (!live) return;
       setFiles(fs);
       setSel((cur) => cur ?? fs[0]?.path ?? null);
-    });
-    void window.rookery.ws.gitCommitInfo(root, hash).then((i) => { if (live) setInfo(i); });
+    }, (e: unknown) => { if (live) setError((e instanceof Error ? e.message : String(e)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "")); });
+    void window.rookery.ws.gitCommitInfo(root, hash).then((i) => { if (live) setInfo(i); }, () => {});
     return () => { live = false; };
-  }, [root, hash]);
+  }, [root, hash, attempt]);
 
+  if (!files && error) return <LoadFailed message={t("commitView.loadFailed")} detail={error} onRetry={() => setAttempt((a) => a + 1)} />;
   if (!files) return <SkeletonRows rows={8} />;
   if (files.length === 0) return <div className="flex flex-1 items-center justify-center text-ui text-muted">{t("commitView.noChangedFiles")}</div>;
   const totalAdded = files.reduce((s, f) => s + f.added, 0);

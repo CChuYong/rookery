@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Boxes, Cable, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FolderPlus, Loader2, RefreshCw, Search, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
 import type { CapabilityLibraryEntry, CapabilityLibrarySnapshot, McpServerSpec } from "@daemon/core/capabilities/types.js";
 import { useT } from "../../i18n/provider.js";
 import { cn } from "../../lib/cn.js";
 import { Button } from "../../ui/button.js";
 import { ConfirmDialog } from "../../ui/confirm-dialog.js";
+import { LoadFailed, EmptyState } from "../../ui/load-state.js";
 import { Input, Select } from "../../ui/input.js";
 import { catalogKind, catalogSearchText, type CapabilityCatalogKind } from "./catalog.js";
 import { McpCapabilityDialog } from "./McpCapabilityDialog.js";
@@ -229,8 +230,12 @@ function PackCard({ pack, api, reload, highlighted = false }: {
 export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: CapabilityLibraryTabProps): JSX.Element {
   const t = useT();
   const [library, setLibrary] = useState<CapabilityLibrarySnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true); // first load: nothing to show yet
+  const [refreshing, setRefreshing] = useState(false); // reload with the list kept on screen (audit #90)
+  const [error, setError] = useState<string | null>(null); // the library load failed
+  const [actionError, setActionError] = useState<string | null>(null); // import/refresh/create failed — inline, not the tab (audit #49)
+  const libraryRef = useRef(library);
+  libraryRef.current = library;
   const [reloadKey, setReloadKey] = useState(0);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillOpen, setSkillOpen] = useState(false);
@@ -247,16 +252,17 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
 
   useEffect(() => {
     let current = true;
-    setLoading(true); setError(null);
+    if (libraryRef.current) setRefreshing(true); else setLoading(true);
+    setError(null);
     void api.loadLibrary().then(
-      (next) => { if (current) { setLibrary(next); setLoading(false); } },
-      (cause) => { if (current) { setError(message(cause)); setLoading(false); } },
+      (next) => { if (current) { setLibrary(next); setLoading(false); setRefreshing(false); } },
+      (cause) => { if (current) { setError(message(cause)); setLoading(false); setRefreshing(false); } },
     );
     return () => { current = false; };
   }, [api, generation, reloadKey]);
 
-  if (loading) return <div className="flex justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
-  if (error) return <div className="flex flex-col items-center gap-3 py-20 text-center"><CircleAlert size={26} className="text-fail" /><p className="text-ui text-fail">{t("capabilities.libraryLoadFailed")}</p><p className="text-meta text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadKey((value) => value + 1)}>{t("common.retry")}</Button></div>;
+  if (loading && !library) return <div className="flex justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
+  if (error && !library) return <LoadFailed layout="stack" message={t("capabilities.libraryLoadFailed")} detail={error} onRetry={() => setReloadKey((value) => value + 1)} />;
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visiblePacks = (library?.packs ?? []).filter((pack) =>
@@ -271,9 +277,17 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
         <Button variant="primary" size="sm" onClick={() => setMcpOpen(true)}><Cable size={14} /> {t("capabilityCatalog.addMcp")}</Button>
         <Button variant="outline" size="sm" onClick={() => setSkillOpen(true)}><Sparkles size={14} /> {t("capabilityCatalog.importSkill")}</Button>
         <Button variant="outline" size="sm" disabled={repos.length === 0} onClick={() => setBuilderOpen(true)}><Boxes size={14} /> {t("capabilityCatalog.buildPack")}</Button>
-        <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setError(message(cause))) : undefined); }}><FolderPlus size={14} /> {t("capabilityCatalog.importPack")}</Button>
-        <Button variant="ghost" size="sm" onClick={() => { setLoading(true); void api.refresh().then((next) => { setLibrary(next); setLoading(false); }).catch((cause) => { setError(message(cause)); setLoading(false); }); }}><RefreshCw size={14} /> {t("common.refresh")}</Button>
+        <Button variant="outline" size="sm" onClick={() => { void pickDirectory().then((selected) => selected ? api.addPack(selected).then(reload).catch((cause) => setActionError(message(cause))) : undefined); }}><FolderPlus size={14} /> {t("capabilityCatalog.importPack")}</Button>
+        <Button variant="ghost" size="sm" disabled={refreshing} onClick={() => { setRefreshing(true); setActionError(null); void api.refresh().then((next) => setLibrary(next)).catch((cause) => setActionError(message(cause))).finally(() => setRefreshing(false)); }}><RefreshCw size={14} className={cn(refreshing && "animate-spin motion-reduce:animate-none")} /> {t("common.refresh")}</Button>
       </div>
+      {error && <LoadFailed className="rounded-[var(--radius)] border border-line px-3.5" message={t("capabilities.refreshFailed")} detail={error} onRetry={() => setReloadKey((value) => value + 1)} retrying={refreshing} />}
+      {actionError && (
+        <section role="alert" className="flex items-start gap-2 rounded-[var(--radius)] border border-fail/30 bg-fail/5 px-3.5 py-2.5">
+          <CircleAlert size={14} className="mt-0.5 shrink-0 text-fail" />
+          <div className="min-w-0 flex-1"><p className="text-ui font-medium text-fail">{t("capabilities.actionFailed")}</p><p className="mt-0.5 break-words text-meta text-fg-dim">{actionError}</p></div>
+          <Button variant="ghost" size="iconSm" aria-label={t("common.close")} onClick={() => setActionError(null)}><X size={14} /></Button>
+        </section>
+      )}
       {repos.length === 0 && <p className="rounded-md border border-warn/25 bg-warn/5 px-3 py-2 text-meta text-warn">{t("capabilities.createMcpPackNeedsRepo")}</p>}
       {created && (
         <section role="status" className="flex items-start gap-2 rounded-[var(--radius)] border border-pr/30 bg-pr/5 px-3.5 py-3">
@@ -296,10 +310,10 @@ export function CapabilityLibraryTab({ api, generation, repos, pickDirectory }: 
           </div>
         </section>
       )}
-      {library?.packs.length ? visiblePacks.length ? <div className="divide-y divide-line-soft border-y border-line">{visiblePacks.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} highlighted={created?.pack.instanceId === pack.instanceId} />)}</div> : <div className="py-16 text-center text-ui text-muted">{t("capabilityCatalog.noMatches")}</div> : <div className="flex flex-col items-center gap-2 py-20 text-center text-muted"><FolderPlus size={26} className="opacity-40" /><p className="text-ui">{t("capabilities.libraryEmpty")}</p></div>}
-      {mcpOpen && <McpCapabilityDialog create={(input) => api.createMcp(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setMcpOpen(false)} />}
-      {skillOpen && <SkillImportDialog pickDirectory={pickDirectory} create={(input) => api.createSkill(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setSkillOpen(false)} />}
-      {builderOpen && <McpPackBuilderDialog repos={repos} create={(input) => api.createMcpPack(input)} onCreated={(result) => { setCreated({ pack: result.pack, repoId: result.binding.scopeRef }); void reload().catch((cause) => setError(message(cause))); }} onClose={() => setBuilderOpen(false)} />}
+      {library?.packs.length ? visiblePacks.length ? <div className="divide-y divide-line-soft border-y border-line">{visiblePacks.map((pack) => <PackCard key={pack.instanceId} pack={pack} api={api} reload={reload} highlighted={created?.pack.instanceId === pack.instanceId} />)}</div> : <div className="py-16 text-center text-ui text-muted">{t("capabilityCatalog.noMatches")}</div> : <EmptyState layout="stack">{t("capabilities.libraryEmpty")}</EmptyState>}
+      {mcpOpen && <McpCapabilityDialog create={(input) => api.createMcp(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setActionError(message(cause))); }} onClose={() => setMcpOpen(false)} />}
+      {skillOpen && <SkillImportDialog pickDirectory={pickDirectory} create={(input) => api.createSkill(input)} onCreated={(result) => { setCreated(result); void reload().catch((cause) => setActionError(message(cause))); }} onClose={() => setSkillOpen(false)} />}
+      {builderOpen && <McpPackBuilderDialog repos={repos} create={(input) => api.createMcpPack(input)} onCreated={(result) => { setCreated({ pack: result.pack, repoId: result.binding.scopeRef }); void reload().catch((cause) => setActionError(message(cause))); }} onClose={() => setBuilderOpen(false)} />}
     </div>
   );
 }

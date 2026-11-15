@@ -77,7 +77,7 @@ contextBridge.exposeInMainWorld("rookery", {
     unwatchTree: (root: string) => ipcRenderer.send("ws:unwatchTree", root),
     gitStatus: (cwd: string) => ipcRenderer.invoke("git:status", cwd) as Promise<Array<{ path: string; status: string }>>,
     gitDiff: (cwd: string, path: string) => ipcRenderer.invoke("git:diff", cwd, path) as Promise<{ head: string; work: string }>,
-    gitInfo: (cwd: string) => ipcRenderer.invoke("git:info", cwd) as Promise<{ branch: string; ahead: number; behind: number; upstream: string | null }>,
+    gitInfo: (cwd: string) => ipcRenderer.invoke("git:info", cwd) as Promise<{ isRepo: false } | { isRepo: true; branch: string; ahead: number; behind: number; upstream: string | null; head: string | null }>,
     gitChanges: (cwd: string) => ipcRenderer.invoke("git:changes", cwd) as Promise<Array<{ path: string; x: string; y: string; added: number; deleted: number }>>,
     gitStage: (cwd: string, path: string) => ipcRenderer.invoke("git:stage", cwd, path) as Promise<{ ok: boolean; error?: string }>,
     gitUnstage: (cwd: string, path: string) => ipcRenderer.invoke("git:unstage", cwd, path) as Promise<{ ok: boolean; error?: string }>,

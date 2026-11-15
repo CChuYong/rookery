@@ -2,7 +2,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "attentionBell.title": "Needs you now",
   "attentionBell.aria": "Attention queue ({count} items)",
-  "attentionBell.empty": "Nothing needs you right now. Smooth sailing ✨",
+  "attentionBell.empty": "Nothing needs your attention.",
   "attentionBell.tier0": "Awaiting reply",
   "attentionBell.tier1": "Failures",
   "attentionBell.tier2": "Review pending",

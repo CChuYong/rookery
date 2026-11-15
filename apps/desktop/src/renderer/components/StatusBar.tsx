@@ -14,7 +14,7 @@ import { Tooltip } from "./Tooltip.js";
 
 // Usage strip + its detail popover (audit #25): the strip is a button, the popover is the full UsagePanel (titles,
 // reset times, provider tabs, hints). It opens upward and closes on Escape, an outside click or a route change.
-function UsageItem({ usage, loadFailed, routeKey }: { usage: UsageSnapshot | null; loadFailed?: boolean; routeKey?: string }): JSX.Element {
+function UsageItem({ usage, loadFailed, empty, routeKey }: { usage: UsageSnapshot | null; loadFailed?: boolean; empty?: boolean; routeKey?: string }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<UsageTab>("claude"); // shared by the strip and the popover (review m3)
@@ -39,13 +39,13 @@ function UsageItem({ usage, loadFailed, routeKey }: { usage: UsageSnapshot | nul
     <span className="relative flex min-w-0 shrink items-center">
       {/* the strip is the one item that gives way in a narrow window, so the right-hand entry points never clip */}
       <span className="flex min-w-0 shrink items-center overflow-hidden">
-        <UsagePanel usage={usage} loadFailed={loadFailed} variant="statusbar" onOpenDetails={() => setOpen((v) => !v)} detailsOpen={open} tab={tab} onTabChange={setTab} />
+        <UsagePanel usage={usage} loadFailed={loadFailed} empty={empty} variant="statusbar" onOpenDetails={() => setOpen((v) => !v)} detailsOpen={open} tab={tab} onTabChange={setTab} />
       </span>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div ref={panelRef} role="dialog" aria-label={t("usagePanel.details")} tabIndex={-1} className={cn("absolute bottom-full left-0 z-50 mb-1 w-[300px] whitespace-normal focus:outline-none", MENU_SURFACE)}>
-            <UsagePanel usage={usage} loadFailed={loadFailed} tab={tab} onTabChange={setTab} />
+            <UsagePanel usage={usage} loadFailed={loadFailed} empty={empty} tab={tab} onTabChange={setTab} />
           </div>
         </>
       )}
@@ -65,7 +65,9 @@ export function StatusBar(p: {
   slackJustUp: boolean;
   usage: UsageSnapshot | null;
   usageLoadFailed?: boolean;
+  usageEmpty?: boolean;
   resources: ResourceSnapshot | null;
+  resourcesFailed?: boolean;
   onResourceRefresh: () => void;
   onResourceOpenChange: (open: boolean) => void;
   notifyOn: boolean;
@@ -104,9 +106,9 @@ export function StatusBar(p: {
         {p.slack !== "up" && <span className="truncate text-muted">{p.slackStatusText}</span>}
       </span>
 
-      <UsageItem usage={p.usage} loadFailed={p.usageLoadFailed} routeKey={p.routeKey} />
+      <UsageItem usage={p.usage} loadFailed={p.usageLoadFailed} empty={p.usageEmpty} routeKey={p.routeKey} />
 
-      <ResourceMonitor snapshot={p.resources} onRefresh={p.onResourceRefresh} onOpenChange={p.onResourceOpenChange} variant="statusbar" closeKey={p.routeKey} />
+      <ResourceMonitor snapshot={p.resources} failed={p.resourcesFailed} onRefresh={p.onResourceRefresh} onOpenChange={p.onResourceOpenChange} variant="statusbar" closeKey={p.routeKey} />
 
       {/* The one bell (audit #19 #20): the attention queue, which also holds the OS-notification toggle. */}
       <AttentionBell onNavigate={p.onAttentionNav} notifyOn={p.notifyOn} onToggleNotify={p.onToggleNotify} variant="statusbar" />

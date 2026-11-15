@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { Sessions } from "../src/renderer/views/Sessions.js";
 
 const mk = (over: Record<string, unknown>) => ({ id: "s1", cwd: "/code/app", status: "active", lastActivity: new Date().toISOString(), origin: "ui", ...over });
@@ -224,6 +224,25 @@ describe("Sessions initial load failure (audit #14)", () => {
     expect(screen.queryByText("아직 대화가 없어요 — 위 ‘새 세션’으로 마스터에게 일을 맡겨보세요.")).toBeNull();
     fireEvent.click(screen.getByText("다시 시도"));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  // audit #42: still loading → skeleton rows, not a blank column.
+  it("still loading → a skeleton, neither the empty copy nor the error row", () => {
+    const { container } = render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={false} loadFailed={false} />);
+    expect(container.querySelector(".sheen")).not.toBeNull();
+    expect(screen.queryByText("목록을 불러오지 못했어요")).toBeNull();
+  });
+
+  // audit #44: retry shows progress and says so when it fails again.
+  it("retry is busy while the request runs and reports a second failure", async () => {
+    let fail!: (e: Error) => void;
+    const onRetry = vi.fn(() => new Promise<void>((_res, rej) => { fail = rej; }));
+    render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={false} loadFailed={true} onRetry={onRetry} />);
+    const btn = screen.getByRole("button", { name: "다시 시도" });
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    await act(async () => { fail(new Error("timeout")); });
+    expect(await screen.findByText(/다시 시도했지만 실패했어요/)).toBeInTheDocument();
   });
 
   it("loaded but empty → shows the normal empty copy, not the error row", () => {

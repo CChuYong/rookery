@@ -15,4 +15,7 @@ export default {
   "fileTree.emptyFolder": "This folder is empty.",
   "fileTree.opFailed": "File operation failed",
   "fileTree.loadFailed": "Couldn't read this folder — retry",
+  "fileTree.searching": "Searching…",
+  "fileTree.walkFailed": "Couldn't list the files",
+  "fileTree.walkTruncated": "Results are truncated — try a more specific search",
 } satisfies Catalog;

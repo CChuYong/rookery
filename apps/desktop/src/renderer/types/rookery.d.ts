@@ -18,7 +18,8 @@ export interface RookeryWs {
   onTree(cb: (root: string) => void): () => void;
   gitStatus(cwd: string): Promise<Array<{ path: string; status: string }>>;
   gitDiff(cwd: string, path: string): Promise<{ head: string; work: string }>;
-  gitInfo(cwd: string): Promise<{ branch: string; ahead: number; behind: number; upstream: string | null }>;
+  // isRepo:false = the folder is not a git repository; a git failure rejects (as gitChanges/gitLog/gitCommitFiles do).
+  gitInfo(cwd: string): Promise<{ isRepo: false } | { isRepo: true; branch: string; ahead: number; behind: number; upstream: string | null; head: string | null }>;
   gitChanges(cwd: string): Promise<Array<{ path: string; x: string; y: string; added: number; deleted: number }>>;
   gitStage(cwd: string, path: string): Promise<{ ok: boolean; error?: string }>;
   gitUnstage(cwd: string, path: string): Promise<{ ok: boolean; error?: string }>;

@@ -6,7 +6,7 @@ import type { SpeedPreference } from "@daemon/core/speed.js";
 import { persistSpeedPreference, type SpeedWriteState } from "./lib/speed-preference.js";
 import { defaultSpeed } from "./lib/speed.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, ChevronLeft, ChevronRight, Plus, Loader2, MessageSquare, FolderGit2 } from "lucide-react";
+import { PanelLeftClose, ChevronLeft, ChevronRight, Plus, Loader2, MessageSquare, FolderGit2, X } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
@@ -62,6 +62,7 @@ import { useHistoryShortcuts } from "./lib/useHistoryShortcuts.js";
 import { shortBranch } from "./lib/branch.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
 import { Button } from "./ui/button.js";
+import { LoadFailed } from "./ui/load-state.js";
 import { Toaster } from "./components/Toaster.js";
 import { toast } from "./store/toasts.js";
 import { cn } from "./lib/cn.js";
@@ -73,7 +74,7 @@ import { useWsStore, pruneWsPages } from "./store/workspace.js";
 import { useLayoutStore } from "./store/layout.js";
 import { useDraftStore, pruneDrafts, clearAcceptedDraft } from "./store/drafts.js";
 import { switchSpawnRepo, openSpawnedWorker } from "./lib/spawn-navigation.js";
-import { readViewState, writeViewState } from "./lib/view-state.js";
+import { readViewState, writeViewState, hasRestorableView } from "./lib/view-state.js";
 import { WorkspaceTab } from "./components/WorkspaceTab.js";
 import { TabBar } from "./components/TabBar.js";
 import { isDockableEnabled } from "./lib/flags.js";
@@ -103,6 +104,7 @@ let startTimer: ReturnType<typeof setTimeout> | null = null; // DSK-10: fallback
 // Poll the usage snapshot. Fast (4s) before data arrives, slow (45s) once it does — lightweight since it only reads the cache.
 function pollUsage(c: WsClient): void {
   let failCount = 0; // consecutive usage.get failures — used to gate the "couldn't load" hint below
+  let emptyCount = 0; // consecutive successful-but-empty answers
   const schedule = (ms: number) => {
     if (usageTimer) clearTimeout(usageTimer);
     usageTimer = setTimeout(tick, ms);
@@ -114,7 +116,11 @@ function pollUsage(c: WsClient): void {
         failCount = 0;
         useStore.getState().setUsage(r.usage);
         const ready = !!(r.usage && (r.usage.pct || r.usage.today));
-        schedule(ready ? 45000 : 4000);
+        // A successful answer with no numbers (ccusage missing, not logged in, still aggregating): after a few in a
+        // row, say "no usage data" and slow the poll down instead of asking every 4s forever (audit #46).
+        emptyCount = ready ? 0 : emptyCount + 1;
+        useStore.getState().setUsageEmpty(!ready && emptyCount >= 3);
+        schedule(ready ? 45000 : emptyCount >= 3 ? 30000 : 4000);
       })
       .catch(() => {
         failCount++;
@@ -125,6 +131,19 @@ function pollUsage(c: WsClient): void {
       });
   };
   tick();
+}
+
+// Auth + integrations status for Settings. A failure is recorded (instead of leaving "checking…" forever) and the
+// promise rejects, so Settings' "Check again" can show progress and a second failure (audit #47).
+function requestStatusChecks(c: WsClient): Promise<void> {
+  const st = useStore.getState;
+  return Promise.allSettled([
+    c.request({ type: "integrations.status" }).then((r) => st().setIntegrations({ github: r.github, linear: r.linear }), (e: unknown) => { st().setIntegrationsFailed(true); throw e; }),
+    c.request({ type: "auth.status" }).then((r) => st().setAuthStatus(r), (e: unknown) => { st().setAuthStatusFailed(true); throw e; }),
+  ]).then((results) => {
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed) throw failed.reason;
+  });
 }
 
 // Debounce-refresh the session list on activity/new-session events (re-sort by activity + surface sessions created via other paths).
@@ -163,6 +182,12 @@ type AppSelected = Pick<
   | "fleet"
   | "fleetLoaded"
   | "fleetLoadFailed"
+  | "reposLoaded"
+  | "reposLoadFailed"
+  | "settingsLoadFailed"
+  | "integrationsFailed"
+  | "authStatusFailed"
+  | "usageEmpty"
   | "repos"
   | "overrides"
   | "commands"
@@ -206,6 +231,12 @@ export function App(): JSX.Element {
         fleet: st.fleet,
         fleetLoaded: st.fleetLoaded,
         fleetLoadFailed: st.fleetLoadFailed,
+        reposLoaded: st.reposLoaded,
+        reposLoadFailed: st.reposLoadFailed,
+        settingsLoadFailed: st.settingsLoadFailed,
+        integrationsFailed: st.integrationsFailed,
+        authStatusFailed: st.authStatusFailed,
+        usageEmpty: st.usageEmpty,
         repos: st.repos,
         overrides: st.overrides,
         commands: st.commands,
@@ -397,8 +428,15 @@ export function App(): JSX.Element {
   // Resource monitor: polls via IPC (resources:get). Faster when the popover is open, paused when the window is hidden.
   const [resources, setResources] = useState<ResourceSnapshot | null>(null);
   const [resOpen, setResOpen] = useState(false);
+  // Consecutive resources.get failures: after a few, the popover shows a failure + refresh instead of a skeleton
+  // that never resolves (audit #137). Any success clears it.
+  const [resourcesFailed, setResourcesFailed] = useState(false);
+  const resourceFails = useRef(0);
   const pollResourcesOnce = useCallback(() => {
-    void window.rookery.resources.get().then(setResources).catch(() => {});
+    void window.rookery.resources.get().then(
+      (r) => { resourceFails.current = 0; setResourcesFailed(false); setResources(r); },
+      () => { resourceFails.current += 1; if (resourceFails.current >= 3) setResourcesFailed(true); },
+    );
   }, []);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -415,6 +453,9 @@ export function App(): JSX.Element {
   }, [resOpen, pollResourcesOnce]);
   const mounted = useRef(true);
   const restoredView = useRef(false);
+  // A saved location may still be restored once both lists arrive: until then the empty main area shows a
+  // conversation skeleton rather than flashing (and focusing) the New Session page (audit #43).
+  const [restorePending, setRestorePending] = useState(() => hasRestorableView(readViewState()));
   const restoredTermPages = useRef<Set<string>>(new Set());
   const loadWorkerHistory = useCallback((workerId: string, connection: WsClient | null = client): void => {
     if (!connection) return;
@@ -462,6 +503,12 @@ export function App(): JSX.Element {
     writeViewState({ showRepos, sessionId: s.activeSessionId, subId: s.activeWorkerId });
   }, [showRepos, s.activeSessionId, s.activeWorkerId]);
 
+  // Entering Settings re-asks auth/integrations once, so a status that failed (or went stale) at connect time
+  // gets another chance without a reconnect (audit #47).
+  useEffect(() => {
+    if (overlay === "settings" && client && s.daemon === "up") void requestStatusChecks(client).catch(() => {});
+  }, [overlay, s.daemon]);
+
   // Restore the viewing location + prune dead workspace tabs: apply once after **both** the session and fleet lists arrive.
   // (Acting on just one means that when fleet arrives late, known lacks the worker keys and the whole worker page gets pruned.)
   useEffect(() => {
@@ -469,6 +516,7 @@ export function App(): JSX.Element {
     if (s.daemon !== "up") return;
     if (!s.sessionsLoaded || !s.fleetLoaded) return; // wait until both lists have arrived
     restoredView.current = true;
+    setRestorePending(false); // batched with restoreLocation below, so the skeleton swaps straight to the restored page
     // NEW_SESSION_DRAFT_KEY is a fixed page key (not a session/worker id) — include it so pruneDrafts doesn't
     // treat it as a dead page and wipe the New Session draft on every boot (audit #5 review).
     const known = new Set<string>([...s.sessions.map((x) => x.id), ...Object.keys(s.fleet), NEW_SESSION_DRAFT_KEY]);
@@ -619,16 +667,15 @@ export function App(): JSX.Element {
       // show an error+retry row instead of staying blank forever when the initial fetch never arrives (audit #14).
       void c.request({ type: "session.list" }).then((r) => { useStore.getState().setSessions(r.sessions ?? []); useStore.getState().seedRunningFromSessions(r.sessions ?? []); }).catch(() => useStore.getState().setSessionsLoadFailed(true));
       void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => useStore.getState().setFleetLoadFailed(true));
-      void c.request({ type: "repos.list" }).then((r) => useStore.getState().setRepos(r.repos ?? [])).catch(() => {});
+      void c.request({ type: "repos.list" }).then((r) => useStore.getState().setRepos(r.repos ?? [])).catch(() => useStore.getState().setReposLoadFailed(true));
       c.send({ type: "events.subscribe" }); // global channel: receive all session/fleet events
       pollUsage(c);
-      void c.request({ type: "settings.get" }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => {});
+      void c.request({ type: "settings.get" }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => useStore.getState().setSettingsLoadFailed(true));
       void c.request({ type: "models.list" }).then((r) => useStore.getState().setModels((r.models ?? []).map((m) => ({ id: m.id, label: m.displayName })))).catch(() => {});
       void c.request({ type: "codex.models.list" }).then((r) => useStore.getState().setCodexModels(r.models ?? null)).catch(() => {});
       void c.request({ type: "codex.authStatus" }).then((r) => useStore.getState().setCodexAuthStatus(r.status ?? "unavailable")).catch(() => useStore.getState().setCodexAuthStatus("unavailable"));
       void c.request({ type: "mcp.status" }).then((r) => useStore.getState().setMcpStatus({ scope: r.scope, url: r.url })).catch(() => {});
-      void c.request({ type: "integrations.status" }).then((r) => useStore.getState().setIntegrations({ github: r.github, linear: r.linear })).catch(() => {});
-      void c.request({ type: "auth.status" }).then((r) => useStore.getState().setAuthStatus(r)).catch(() => {});
+      void requestStatusChecks(c).catch(() => {});
       void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true));
       // On reconnect, re-seed the open conversation — to prevent cards from being stuck in_progress forever due to a
       // tool-end/result lost while disconnected (the DB is the source of truth, so we re-fetch the full transcript and overwrite).
@@ -694,10 +741,18 @@ export function App(): JSX.Element {
     setComposerEpoch((e) => e + 1);
     useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: latest.id });
   };
-  const refetchSessions = useCallback(() => {
+  // List loaders return their promise (rejecting on failure) so a sidebar Retry can show progress and a second
+  // failure (audit #44); the fire-and-forget refetch* wrappers keep the old swallow-on-error behaviour.
+  const loadSessions = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
     const n = sessionListGate.next();
-    void client?.request({ type: "session.list" }).then((r) => { if (sessionListGate.isCurrent(n)) useStore.getState().setSessions(r.sessions ?? []); }).catch(() => {});
+    return c.request({ type: "session.list" }).then(
+      (r) => { if (sessionListGate.isCurrent(n)) useStore.getState().setSessions(r.sessions ?? []); },
+      (e: unknown) => { if (!useStore.getState().sessionsLoaded) useStore.getState().setSessionsLoadFailed(true); throw e; },
+    );
   }, []);
+  const refetchSessions = useCallback(() => { void loadSessions().catch(() => {}); }, [loadSessions]);
   // Rename session — refetch not needed since it updates live via the session.label event.
   // Inject reqId via request() (schema requires reqId) — the daemon replies with fleet.ack (the label reflects live via session.label; the ack is ignored).
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
@@ -742,12 +797,46 @@ export function App(): JSX.Element {
       refetchSessions();
     }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
   }, [refetchSessions]);
-  const refetchFleet = useCallback(() => {
+  const loadFleet = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
     const n = fleetListGate.next();
-    void client?.request({ type: "fleet.list" }).then((r) => { if (fleetListGate.isCurrent(n)) useStore.getState().setFleet(r.fleet ?? []); }).catch(() => {});
+    return c.request({ type: "fleet.list" }).then(
+      (r) => { if (fleetListGate.isCurrent(n)) useStore.getState().setFleet(r.fleet ?? []); },
+      (e: unknown) => { if (!useStore.getState().fleetLoaded) useStore.getState().setFleetLoadFailed(true); throw e; },
+    );
+  }, []);
+  const refetchFleet = useCallback(() => { void loadFleet().catch(() => {}); }, [loadFleet]);
+  const loadRepos = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    return c.request({ type: "repos.list" }).then(
+      (r) => useStore.getState().setRepos(r.repos ?? []),
+      (e: unknown) => { if (!useStore.getState().reposLoaded) useStore.getState().setReposLoadFailed(true); throw e; },
+    );
+  }, []);
+  // The repo tree needs both lists; its Retry re-fires whichever has not arrived yet.
+  const retryRepoTree = useCallback((): Promise<void> => {
+    const st = useStore.getState();
+    return Promise.all([st.fleetLoaded ? null : loadFleet(), st.reposLoaded ? null : loadRepos()]).then(() => {});
+  }, [loadFleet, loadRepos]);
+  const loadSettings = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    return c.request({ type: "settings.get" }).then(
+      (r) => useStore.getState().setSettings(r.settings),
+      (e: unknown) => { useStore.getState().setSettingsLoadFailed(true); throw e; },
+    );
   }, []);
   // Retry hook for AutomationPage's load-failed row (audit #14) — no other refetch path existed for automation.list.
-  const refetchAutomations = useCallback(() => { void client?.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true)); }, []);
+  const refetchAutomations = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    return c.request({ type: "automation.list" }).then(
+      (r) => useStore.getState().setAutomations(r.automations ?? []),
+      (e: unknown) => { useStore.getState().setAutomationsLoadFailed(true); throw e; },
+    );
+  }, []);
   // Rename worker — updates live via the worker.label event. Archive/delete refetch fleet.list.
   const renameSub = useCallback((id: string, label: string) => { void client?.request({ type: "worker.rename", id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
   const archiveSub = useCallback((id: string, archived: boolean) => {
@@ -1294,9 +1383,9 @@ export function App(): JSX.Element {
               </button>
             )}
             {showRepos ? (
-              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} onViewBranchDiff={openBranchDiff} />
+              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded && s.reposLoaded} loadFailed={(!s.fleetLoaded && s.fleetLoadFailed) || (!s.reposLoaded && s.reposLoadFailed)} onRetry={retryRepoTree} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} onViewBranchDiff={openBranchDiff} />
             ) : (
-              <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
+              <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={loadSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
           </div>
         )}
@@ -1355,6 +1444,18 @@ export function App(): JSX.Element {
             pickDirectory={() => window.rookery.pickDirectory()}
             onClose={closeOverlay}
           />
+        ) : overlay === "settings" && !s.settings ? (
+          // settings.get hasn't answered (or failed): the page still opens — skeleton, or the failure with a retry —
+          // instead of leaving the old screen up under an active settings button (audit #45).
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="drag flex h-10 shrink-0 items-center gap-2 px-5">
+              <h1 className="text-body font-medium text-fg">{t("settings.title")}</h1>
+              <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={closeOverlay} aria-label={t("common.close")}><X size={14} /></Button>
+            </div>
+            {s.settingsLoadFailed
+              ? <LoadFailed layout="stack" message={t("app.settingsLoadFailed")} onRetry={loadSettings} />
+              : <SkeletonRows rows={8} className="mx-auto w-full max-w-3xl px-6 py-6" />}
+          </div>
         ) : overlay === "settings" && s.settings ? (
           <SettingsPage
             settings={s.settings}
@@ -1369,6 +1470,9 @@ export function App(): JSX.Element {
             onPreviewCapabilities={openRookeryCapabilityPreview}
             integrations={s.integrations}
             authStatus={s.authStatus}
+            integrationsFailed={s.integrationsFailed}
+            authStatusFailed={s.authStatusFailed}
+            onRecheckStatus={() => (client ? requestStatusChecks(client) : Promise.reject(new Error("not connected")))}
             onSaveLinearKey={(key) => {
               // Reuse toast.keySaved (already used by the sibling Slack-tokens/Anthropic-key saves below) — the
               // Linear key card doesn't otherwise change on screen until integrations.status round-trips (audit #54).
@@ -1405,7 +1509,7 @@ export function App(): JSX.Element {
             }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -1526,11 +1630,15 @@ export function App(): JSX.Element {
             </>
             )
           ) : (
-            <ReposHome hasRepos={s.repos.length > 0} onNewWorker={newWorker} onNewRepo={onNewRepo} />
+            <ReposHome hasRepos={s.repos.length > 0} loaded={s.reposLoaded} onNewWorker={newWorker} onNewRepo={onNewRepo} />
           )
+        ) : !s.activeSessionId && restorePending && !s.sessionsLoadFailed && !s.fleetLoadFailed ? (
+          <div className="flex min-h-0 flex-1 flex-col justify-center px-6" aria-busy="true">
+            <SkeletonRows rows={5} />
+          </div>
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : dockable && masterRender ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <SessionHeader
@@ -1618,7 +1726,9 @@ export function App(): JSX.Element {
         slackJustUp={slackJustUp}
         usage={s.usage}
         usageLoadFailed={s.usageLoadFailed}
+        usageEmpty={s.usageEmpty}
         resources={resources}
+        resourcesFailed={resourcesFailed}
         onResourceRefresh={pollResourcesOnce}
         onResourceOpenChange={setResOpen}
         notifyOn={notifyOn}

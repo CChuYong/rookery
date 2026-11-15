@@ -17,14 +17,15 @@ const ALIGN = {
   end: "left-auto right-0 translate-x-0",
 } as const;
 
-export function Tooltip({ label, side = "top", align = "center", children }: { label: string; side?: keyof typeof SIDE; align?: keyof typeof ALIGN; children: ReactNode }): JSX.Element {
+// `className` styles the wrapper (e.g. `w-full` so a full-width trigger keeps its width).
+export function Tooltip({ label, side = "top", align = "center", className, children }: { label: string; side?: keyof typeof SIDE; align?: keyof typeof ALIGN; className?: string; children: ReactNode }): JSX.Element {
   const id = useId();
   // Associate the tip with its trigger for screen readers (aria-describedby) when children is a single element.
   const trigger = isValidElement(children)
     ? cloneElement(children as ReactElement, { "aria-describedby": id } as Record<string, unknown>)
     : children;
   return (
-    <span className="group relative inline-flex">
+    <span className={cn("group relative inline-flex", className)}>
       {trigger}
       {/* wraps + caps width so long (e.g. Korean) labels don't run off-screen */}
       <span

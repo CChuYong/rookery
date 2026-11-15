@@ -15,6 +15,8 @@ import { shortBranch } from "../lib/branch.js";
 import { WorkerCost } from "../components/WorkerCost.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { LoadFailed } from "../ui/load-state.js";
+import { SkeletonRows } from "../components/Skeleton.js";
 import { useT, useLocale } from "../i18n/provider.js";
 
 type Repo = { id?: string; name: string; path: string; description: string; base: string | null };
@@ -74,7 +76,7 @@ function RepoTreeImpl(p: {
   fleet: FleetRow[];
   loaded?: boolean; // fleet/repos have arrived → only then is "no repos" real (avoids the cold-connect false-empty flash)
   loadFailed?: boolean; // the initial fleet.list fetch was rejected and hasn't succeeded since → error+retry row instead of staying blank forever (audit #14)
-  onRetry?: () => void; // re-fires fleet.list (cleared by the store once it succeeds)
+  onRetry?: () => unknown; // (may return a promise → the Retry button shows progress/failure) re-fires fleet.list (cleared by the store once it succeeds)
   activeSubId: string | null;
   onSelectSub: (id: string) => void;
   onNewRepo: () => void;
@@ -297,10 +299,9 @@ function RepoTreeImpl(p: {
         </div>
       )}
       {!(p.loaded ?? true) && p.loadFailed ? (
-        <div className="flex items-center justify-between gap-2 px-2 py-3 text-ui leading-relaxed">
-          <span className="text-fail">{t("repoTree.loadFailed")}</span>
-          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-meta text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
-        </div>
+        <LoadFailed message={t("repoTree.loadFailed")} onRetry={() => p.onRetry?.()} />
+      ) : !(p.loaded ?? true) ? (
+        <SkeletonRows rows={4} className="px-2" />
       ) : (
         (p.loaded ?? true) && p.repos.length === 0 && orphans.length === 0 && <div className="px-2 py-3 text-ui leading-relaxed text-muted">{t("repoTree.emptyState")}</div>
       )}

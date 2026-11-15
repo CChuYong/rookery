@@ -35,6 +35,18 @@ function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi 
 }
 
 describe("CapabilityAssignmentsTab", () => {
+  // audit #90: a capabilities.changed refetch keeps the assignment list (and any half-filled form) on screen.
+  it("a generation refetch keeps the list visible while it loads", async () => {
+    const loadLibrary = vi.fn().mockResolvedValueOnce(snapshot([binding])).mockReturnValueOnce(new Promise(() => {}));
+    const subject = api({ loadLibrary });
+    const { rerender } = render(<CapabilityAssignmentsTab api={subject} generation={0} targets={targets} />);
+    await screen.findByTestId("capability-binding-binding-1");
+    rerender(<CapabilityAssignmentsTab api={subject} generation={1} targets={targets} />);
+    await waitFor(() => expect(loadLibrary).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("capability-binding-binding-1")).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).toBeNull();
+  });
+
   it("starts with the canonical master/worker/UI audience and saves authoritative repo ids", async () => {
     const setBinding = vi.fn(async (id, input) => ({ id, ...input, createdAt: "t", updatedAt: "t" }));
     render(<CapabilityAssignmentsTab api={api({ setBinding })} generation={0} targets={targets} />);

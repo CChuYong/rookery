@@ -2,7 +2,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "attentionBell.title": "지금 필요한 것",
   "attentionBell.aria": "어텐션 큐 ({count}건)",
-  "attentionBell.empty": "지금 필요한 것이 없어요. 전부 순항 중 ✨",
+  "attentionBell.empty": "지금 확인할 일이 없어요.",
   "attentionBell.tier0": "응답 대기",
   "attentionBell.tier1": "실패",
   "attentionBell.tier2": "리뷰 대기",

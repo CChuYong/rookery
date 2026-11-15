@@ -102,3 +102,22 @@ describe("UsagePanel", () => {
     expect(fills[1]).toContain("bg-fg-dim");
   });
 });
+
+// audit #46: an answer with no numbers ends in an explicit empty state; a failure after data marks it stale.
+describe("UsagePanel empty and stale", () => {
+  it("empty snapshot + empty flag → 'no usage data', not 'loading…'", () => {
+    render(<UsagePanel usage={{} as never} empty />);
+    expect(screen.getByText(/사용량 정보가 없어요/)).toBeInTheDocument();
+    expect(screen.queryByText("사용량 불러오는 중…")).toBeNull();
+  });
+
+  it("status bar: empty snapshot + empty flag shows the empty copy instead of nothing", () => {
+    render(<UsagePanel usage={{} as never} empty variant="statusbar" />);
+    expect(screen.getByText(/사용량 정보가 없어요/)).toBeInTheDocument();
+  });
+
+  it("a failure after data arrived keeps the numbers and marks them stale", () => {
+    render(<UsagePanel usage={{ today: { costUSD: 1.5, totalTokens: 10 } } as never} loadFailed />);
+    expect(screen.getByText("갱신 실패")).toBeInTheDocument();
+  });
+});

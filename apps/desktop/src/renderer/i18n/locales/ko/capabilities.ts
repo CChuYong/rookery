@@ -138,4 +138,6 @@ export default {
   "capabilities.origin.slack": "Slack",
   "capabilities.origin.automation": "자동화",
   "capabilities.origin.external": "외부",
+  "capabilities.refreshFailed": "최신 상태를 불러오지 못했어요 — 표시된 내용이 오래됐을 수 있어요",
+  "capabilities.actionFailed": "작업을 완료하지 못했어요",
 } satisfies Catalog;

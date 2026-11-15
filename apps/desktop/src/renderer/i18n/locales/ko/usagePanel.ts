@@ -19,4 +19,6 @@ export default {
   "usagePanel.expand": "사용량 펼치기",
   "usagePanel.collapse": "사용량 접기",
   "usagePanel.details": "사용량 자세히",
+  "usagePanel.empty": "사용량 정보가 없어요 — ccusage 설치와 로그인을 확인해 주세요",
+  "usagePanel.stale": "갱신 실패",
 } satisfies Catalog;

@@ -21,3 +21,9 @@ export function readViewState(): ViewState | null {
 export function writeViewState(v: ViewState): void {
   try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* ignore — only persistence failed */ }
 }
+
+// A saved location worth waiting for at cold start: while it may still be restored, App shows a conversation skeleton
+// instead of flashing the New Session page (audit #43).
+export function hasRestorableView(v: ViewState | null): boolean {
+  return !!v && (v.sessionId !== null || v.subId !== null);
+}

@@ -215,6 +215,31 @@ describe("CapabilitiesPage", () => {
     await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
   });
 
+  // audit #90: a capabilities.changed refetch keeps the list on screen (no full-page spinner).
+  it("a generation refetch keeps the current list visible while it loads", async () => {
+    const next = deferred<CapabilitySnapshot>();
+    const loadSnapshot = vi.fn().mockResolvedValueOnce(snapshot).mockReturnValueOnce(next.promise);
+    const api = makeApi(loadSnapshot);
+    const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api, 1)} />);
+    await screen.findByText("release");
+    rerender(<CapabilitiesPage target={target} {...pageProps(api, 2)} />);
+    await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("release")).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).toBeNull();
+    next.resolve(snapshot);
+    await waitFor(() => expect(screen.getByText("release")).toBeInTheDocument());
+  });
+
+  it("a failed refetch keeps the list and reports the failure inline", async () => {
+    const loadSnapshot = vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error("socket closed"));
+    const api = makeApi(loadSnapshot);
+    const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api, 1)} />);
+    await screen.findByText("release");
+    rerender(<CapabilitiesPage target={target} {...pageProps(api, 2)} />);
+    expect(await screen.findByText(/socket closed/)).toBeInTheDocument();
+    expect(screen.getByText("release")).toBeInTheDocument();
+  });
+
   it("renders desired/applied drift and the pending lifecycle labels", async () => {
     const runtimeSnapshot: CapabilitySnapshot = {
       ...snapshot,

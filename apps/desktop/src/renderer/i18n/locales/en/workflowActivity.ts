@@ -23,11 +23,12 @@ export default {
   "workflowActivity.partialData": "Some activity data could not be read.",
   "workflowActivity.historyLoading": "Loading agent history…",
   "workflowActivity.historyFailed": "Agent history could not be loaded.",
-  "workflowActivity.empty": "No workflow or nested-agent activity yet.",
+  "workflowActivity.empty": "No workflow or sub-agent activity yet.",
   "workflowActivity.taskFallbackName": "Dynamic Workflow",
   "workflowActivity.starting": "Starting",
   "workflowActivity.thinking": "Thinking",
   "workflowActivity.responding": "Responding",
   "workflowActivity.tool": "Using tool",
   "workflowActivity.complete": "Complete",
+  "workflowActivity.emptyEnded": "No recorded activity — sub-agent activity only shows while the worker runs.",
 } satisfies Catalog;

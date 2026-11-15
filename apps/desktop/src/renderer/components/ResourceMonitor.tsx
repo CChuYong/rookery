@@ -3,6 +3,7 @@ import { Cpu, RefreshCw } from "lucide-react";
 import type { ResourceSnapshot, ResourceBucket } from "../types/rookery.js";
 import { fmtBytes } from "../format.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { cn } from "../lib/cn.js";
 import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
@@ -36,6 +37,7 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
 
 export function ResourceMonitor({
   snapshot,
+  failed,
   collapsed,
   onRefresh,
   onOpenChange,
@@ -43,6 +45,7 @@ export function ResourceMonitor({
   closeKey,
 }: {
   snapshot: ResourceSnapshot | null;
+  failed?: boolean; // several reads in a row failed → say so (with a refresh) instead of a skeleton forever (audit #137)
   collapsed?: boolean;
   onRefresh?: () => void;
   onOpenChange?: (open: boolean) => void;
@@ -172,6 +175,8 @@ export function ResourceMonitor({
                   </div>
                 )}
               </>
+            ) : failed ? (
+              <LoadFailed message={t("resourceMonitor.loadFailed")} onRetry={() => onRefresh?.()} />
             ) : (
               <SkeletonRows rows={5} className="px-2 py-2" />
             )}

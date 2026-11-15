@@ -149,4 +149,6 @@ export default {
   "settings.codexHandshakeTimeoutMsHint": "0 disables the handshake/startup timeout.",
   "settings.slackProvider": "Slack agent backend",
   "settings.slackProviderHint": "Codex Slack sessions require bypassPermissions.",
+  "settings.checkFailed": "Couldn't check",
+  "settings.recheck": "Check again",
 } satisfies Catalog;

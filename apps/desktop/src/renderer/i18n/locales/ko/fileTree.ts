@@ -15,4 +15,7 @@ export default {
   "fileTree.emptyFolder": "빈 폴더예요.",
   "fileTree.opFailed": "파일 작업에 실패했어요",
   "fileTree.loadFailed": "목록을 불러오지 못했어요 — 다시 시도",
+  "fileTree.searching": "검색하는 중…",
+  "fileTree.walkFailed": "파일 목록을 불러오지 못했어요",
+  "fileTree.walkTruncated": "결과가 잘렸어요 — 검색어를 더 구체적으로 입력해 보세요",
 } satisfies Catalog;

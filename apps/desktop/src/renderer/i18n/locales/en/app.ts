@@ -37,4 +37,5 @@ export default {
   "app.newWorker": "New worker",
   "app.reposHomeHint": "Pick a worker on the left, or start a new one.",
   "app.reposHomeEmpty": "No repos registered yet.",
+  "app.settingsLoadFailed": "Couldn't load settings",
 } satisfies Catalog;

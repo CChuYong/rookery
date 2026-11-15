@@ -19,4 +19,13 @@ export default {
   "gitChanges.revertDescTracked": "{name}의 변경을 HEAD로 되돌려요. 되돌릴 수 없어요.",
   "gitChanges.tabChanges": "변경",
   "gitChanges.tabHistory": "기록",
+  "gitChanges.notRepo": "이 폴더는 git 저장소가 아니에요.",
+  "gitChanges.loadFailed": "Git 상태를 불러오지 못했어요",
+  "gitChanges.refreshFailed": "최신 상태를 불러오지 못했어요 — 표시된 내용이 오래됐을 수 있어요",
+  "gitChanges.pushed": "{upstream}에 푸시했어요",
+  "gitChanges.pushTo": "{upstream}에 푸시",
+  "gitChanges.pushNothing": "푸시할 커밋이 없어요",
+  "gitChanges.commitNeedsMessage": "커밋 메시지를 입력해 주세요",
+  "gitChanges.commitNothingStaged": "스테이지된 변경이 없어요",
+  "gitChanges.commitShortcut": "커밋 (⌘↵)",
 } satisfies Catalog;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Blocks,
   Box,
@@ -10,7 +10,6 @@ import {
   Loader2,
   Plug,
   RefreshCw,
-  ShieldCheck,
   Sparkles,
   Wrench,
   X,
@@ -30,6 +29,7 @@ import { cn } from "../lib/cn.js";
 import { TAB_ACTIVE, TAB_IDLE } from "../lib/ui-tokens.js";
 import { Button } from "../ui/button.js";
 import { Select } from "../ui/input.js";
+import { LoadFailed, EmptyState } from "../ui/load-state.js";
 import { CapabilityAssignmentsTab } from "./capabilities/CapabilityAssignmentsTab.js";
 import { CapabilityLibraryTab } from "./capabilities/CapabilityLibraryTab.js";
 import type { CapabilityCenterApi, CapabilityTargetOptions } from "./capabilities/types.js";
@@ -152,8 +152,14 @@ function EntryRow({ entry }: { entry: CapabilityEntry }): JSX.Element {
 export function CapabilitiesPage({ target, api, targets, generation, initialTab = "effective", initialKind, pickDirectory, onClose }: CapabilitiesPageProps): JSX.Element {
   const t = useT();
   const [snapshot, setSnapshot] = useState<CapabilitySnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // first load for this target: nothing to show yet
+  const [refreshing, setRefreshing] = useState(false); // reload with the current list kept on screen (audit #90)
   const [error, setError] = useState<string | null>(null);
+  // Which target the snapshot on screen belongs to: a reload for the same target keeps it (stale-while-revalidate);
+  // a different target starts blank so one target's entries never show under another's header.
+  const snapshotKey = useRef<string | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const [category, setCategory] = useState<Category>("all");
   const [exactKind, setExactKind] = useState<CapabilityKind | undefined>(initialKind);
   const [refresh, setRefresh] = useState(0);
@@ -186,12 +192,18 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
   useEffect(() => {
     if (tab !== "effective") return;
     let current = true;
-    setLoading(true);
+    const keep = snapshotRef.current !== null && snapshotKey.current === targetKey;
     setError(null);
-    setSnapshot(null);
+    if (keep) {
+      setRefreshing(true);
+    } else {
+      setSnapshot(null);
+      setLoading(true);
+      setRefreshing(false);
+    }
     void api.loadSnapshot(selectedTarget).then(
-      (next) => { if (current) { setSnapshot(next); setLoading(false); } },
-      (cause) => { if (current) { setError(errorMessage(cause)); setLoading(false); } },
+      (next) => { if (current) { snapshotKey.current = targetKey; setSnapshot(next); setLoading(false); setRefreshing(false); } },
+      (cause) => { if (current) { setError(errorMessage(cause)); setLoading(false); setRefreshing(false); } },
     );
     return () => { current = false; };
   }, [targetKey, refresh, generation, api, tab]);
@@ -253,8 +265,8 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
         </nav>
         <div className="no-drag ml-auto flex items-center gap-1">
           {tab === "effective" && (
-              <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={loading} onClick={() => setRefresh((value) => value + 1)}>
-              <RefreshCw size={14} className={cn(loading && "animate-spin motion-reduce:animate-none")} />
+              <Button variant="ghost" size="iconSm" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={loading || refreshing} onClick={() => setRefresh((value) => value + 1)}>
+              <RefreshCw size={14} className={cn((loading || refreshing) && "animate-spin motion-reduce:animate-none")} />
             </Button>
           )}
           <Button variant="ghost" size="iconSm" aria-label={t("common.close")} onClick={onClose}><X size={14} /></Button>
@@ -336,15 +348,12 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
             <CapabilityAssignmentsTab api={api} generation={generation} targets={targets} />
           ) : loading ? (
             <div className="flex items-center justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> {t("common.loading")}</div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-              <CircleAlert size={28} className="text-fail" />
-              <p className="text-ui text-fail">{t("capabilities.loadFailed")}</p>
-              <p className="max-w-xl break-words text-meta text-muted">{error}</p>
-              <Button variant="outline" size="sm" onClick={() => setRefresh((value) => value + 1)}>{t("common.retry")}</Button>
-            </div>
+          ) : error && !snapshot ? (
+            <LoadFailed layout="stack" message={t("capabilities.loadFailed")} detail={error} onRetry={() => setRefresh((value) => value + 1)} />
           ) : snapshot ? (
             <>
+              {/* A reload failed with the previous list still on screen: keep it, say it may be stale. */}
+              {error && <LoadFailed className="rounded-[var(--radius)] border border-line px-3.5" message={t("capabilities.refreshFailed")} detail={error} onRetry={() => setRefresh((value) => value + 1)} retrying={refreshing} />}
               {snapshot.target.kind === "rookery" && (
                 <p className="text-meta leading-relaxed text-fg-dim">
                   {t("capabilities.rookeryScopeOnly")}
@@ -413,7 +422,7 @@ export function CapabilitiesPage({ target, api, targets, generation, initialTab 
               </nav>
 
               {visibleEntries.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted"><ShieldCheck size={26} className="opacity-40" /><p className="text-ui">{t("capabilities.empty")}</p></div>
+                <EmptyState layout="stack">{t("capabilities.empty")}</EmptyState>
               ) : (
                 <section className="divide-y divide-line-soft border-y border-line">
                   {visibleEntries.map((entry) => <EntryRow key={entry.id} entry={entry} />)}

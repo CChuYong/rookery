@@ -28,6 +28,7 @@ export const NEW_SESSION_DRAFT_KEY = "newSession";
 
 export function NewSessionPage(p: {
   repos: Array<{ name: string; path: string }>;
+  reposLoaded?: boolean; // repos.list has answered → only then is an empty list "no repositories" (audit #89)
   defaultModel: string;
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, settings.codexMasterModel)
@@ -262,7 +263,7 @@ export function NewSessionPage(p: {
             onDraftChange={onDraftChange}
           />
 
-          {p.repos.length === 0 && (
+          {(p.reposLoaded ?? true) && p.repos.length === 0 && (
             // Empty-repo CTA (audit #58) — the repo picker used to just vanish here, leaving a blank space below
             // the composer with no hint that registering a repo is the prerequisite for spawning workers.
             p.onRegisterRepo && (

@@ -107,7 +107,29 @@ describe("Dynamic Workflow Activity", () => {
     expect(screen.getByText("nested transcript")).toBeInTheDocument();
     act(() => useStore.setState({ workflows: {} }));
     rerender(panel());
-    expect(screen.getByText("아직 워크플로나 중첩 에이전트 활동이 없어요.")).toBeInTheDocument();
+    expect(screen.getByText("아직 워크플로나 하위 에이전트 활동이 없어요.")).toBeInTheDocument();
+  });
+
+  // audit #48: a failed agent history load is retryable from where the failure shows.
+  it("a failed agent history offers a retry that re-requests it", () => {
+    useStore.setState({ workflows: { w1: { task: run({ counts: { started: 1, active: 1, completed: 0, stopped: 0 }, agents: [agent("a1")] }) } } });
+    const load = vi.fn();
+    render(panel(load));
+    fireEvent.click(screen.getByRole("button", { name: /a1/ }));
+    act(() => useStore.setState({ workflowAgentHistoryFailed: { [workflowAgentKey("w1", "task-1", "a1")]: true } }));
+    expect(screen.getByText("에이전트 기록을 불러오지 못했어요.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(load).toHaveBeenLastCalledWith("w1", "task-1", "a1");
+  });
+
+  // audit #115: an ended worker's empty Activity doesn't promise activity "yet", and drops the SDK term.
+  it("an ended worker's empty Activity explains that sub-agent activity is live-only", () => {
+    useStore.setState({ fleet: { w1: { id: "w1", status: "stopped" } as never } });
+    render(panel());
+    expect(screen.getByText("기록된 활동이 없어요 — 하위 에이전트 활동은 실행 중에만 보여요.")).toBeInTheDocument();
+    expect(screen.queryByText(/중첩 에이전트/)).toBeNull();
+    useStore.setState({ fleet: {} });
   });
 
   it("virtualizes a 500-agent roster", () => {

@@ -48,3 +48,25 @@ describe("CommitView", () => {
     expect(screen.queryByText("불러오는 중…")).toBeNull();
   });
 });
+
+// audit #88: a failed commit read is an error with a retry, not "no changed files".
+describe("CommitView failure", () => {
+  it("shows the git error with a retry that re-reads the commit", async () => {
+    const gitCommitFiles = vi.fn()
+      .mockRejectedValueOnce(new Error("fatal: bad object abc123"))
+      .mockResolvedValue([{ path: "src/app.ts", status: "M", added: 1, deleted: 0 }]);
+    (window as unknown as { rookery: unknown }).rookery = {
+      ws: {
+        gitCommitFiles,
+        gitCommitInfo: vi.fn(async () => ({ hash: "abc123", shortHash: "abc123", author: "a", email: "a@x", date: "", subject: "s", body: "" })),
+        gitShowFileDiff: vi.fn(async () => ({ before: "", after: "" })),
+      },
+    };
+    render(<CommitView root="/r" hash="abc123" />);
+    expect(await screen.findByText("커밋을 불러오지 못했어요")).toBeInTheDocument();
+    expect(screen.getByText(/bad object/)).toBeInTheDocument();
+    expect(screen.queryByText("변경 파일이 없어요.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(gitCommitFiles).toHaveBeenCalledTimes(2));
+  });
+});

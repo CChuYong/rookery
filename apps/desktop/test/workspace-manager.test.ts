@@ -328,7 +328,51 @@ describe("WorkspaceManager git", () => {
     const exec = vi.fn(async () => ({ stdout: "# branch.head feature-x\n# branch.upstream origin/feature-x\n# branch.ab +3 -1\n", code: 0 }));
     const mgr = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec });
     mgr.root({});
-    expect(await mgr.gitInfo("/r")).toEqual({ branch: "feature-x", upstream: "origin/feature-x", ahead: 3, behind: 1 });
+    expect(await mgr.gitInfo("/r")).toEqual({ isRepo: true, branch: "feature-x", upstream: "origin/feature-x", ahead: 3, behind: 1, head: null });
+  });
+
+  it("gitInfo reports the HEAD commit so the History list can refresh when it moves", async () => {
+    const exec = vi.fn(async () => ({ stdout: "# branch.oid 0123abc\n# branch.head main\n", code: 0 }));
+    const mgr = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec });
+    mgr.root({});
+    expect(await mgr.gitInfo("/r")).toMatchObject({ isRepo: true, branch: "main", head: "0123abc" });
+  });
+
+  // audit #88: a folder that isn't a git repository (or a git that fails) must not read as "no changes".
+  it("gitInfo tells a non-repository apart from a git failure", async () => {
+    const notRepo = vi.fn(async () => ({ stdout: "", stderr: "fatal: not a git repository (or any of the parent directories): .git", code: 128 }));
+    const a = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec: notRepo });
+    a.root({});
+    expect(await a.gitInfo("/r")).toEqual({ isRepo: false });
+
+    // status fails but rev-parse confirms a repository → a real failure, surfaced as a rejection
+    const broken = vi.fn(async (_c: string, args: string[]) => args[0] === "rev-parse"
+      ? { stdout: ".git\n", code: 0 }
+      : { stdout: "", stderr: "fatal: index file corrupt", code: 128 });
+    const b = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec: broken });
+    b.root({});
+    await expect(b.gitInfo("/r")).rejects.toThrow(/index file corrupt/);
+  });
+
+  it("gitChanges / gitLog / gitCommitFiles reject on git failure instead of returning an empty list", async () => {
+    const exec = vi.fn(async () => ({ stdout: "", stderr: "fatal: bad object", code: 128 }));
+    const mgr = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec });
+    mgr.root({});
+    await expect(mgr.gitChanges("/r")).rejects.toThrow(/bad object/);
+    await expect(mgr.gitLog("/r")).rejects.toThrow(/bad object/);
+    await expect(mgr.gitCommitFiles("/r", "abc")).rejects.toThrow(/bad object/);
+  });
+
+  it("gitLog on a repository without commits is an empty list, not a failure", async () => {
+    const exec = vi.fn(async (_c: string, args: string[]) => {
+      if (args[0] === "log") return { stdout: "", stderr: "fatal: your current branch 'main' does not have any commits yet", code: 128 };
+      if (args[0] === "rev-parse" && args.includes("--git-dir")) return { stdout: ".git\n", code: 0 };
+      if (args[0] === "rev-parse") return { stdout: "", code: 1 }; // --verify HEAD: no commit yet
+      return { stdout: "", code: 0 };
+    });
+    const mgr = new WorkspaceManager({ fs: {} as never, resolveRoot: () => "/r", send: () => {}, watch: () => ({ close: () => {} }), exec });
+    mgr.root({});
+    expect(await mgr.gitLog("/r")).toEqual([]);
   });
 
   it("gitChanges splits X/Y and merges numstat +/-", async () => {

@@ -149,4 +149,6 @@ export default {
   "settings.codexHandshakeTimeoutMsHint": "0으로 설정하면 핸드셰이크/시작 타임아웃을 비활성화합니다.",
   "settings.slackProvider": "Slack 에이전트 백엔드",
   "settings.slackProviderHint": "Codex Slack 세션은 bypassPermissions가 필요합니다.",
+  "settings.checkFailed": "확인하지 못했어요",
+  "settings.recheck": "다시 확인",
 } satisfies Catalog;

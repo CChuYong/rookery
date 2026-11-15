@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { GitChanges } from "../src/renderer/components/GitChanges.js";
 import { useWsStore } from "../src/renderer/store/workspace.js";
+import { useToastStore } from "../src/renderer/store/toasts.js";
 
 function stubWs(over: Record<string, unknown> = {}) {
   const ws = {
@@ -83,5 +84,92 @@ describe("GitChanges", () => {
     render(<GitChanges root="/r" pageKey="p1" />);
     await waitFor(() => expect(screen.getByText("변경 사항이 없어요.")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "브랜치 전체 변경 보기" })).toBeNull();
+  });
+  // audit #88: not a repository / git failure must not read as "no changes".
+  it("a folder that isn't a git repository says so — no change list, commit box or History", async () => {
+    stubWs({ gitInfo: vi.fn(async () => ({ isRepo: false })), gitChanges: vi.fn(async () => { throw new Error("fatal: not a git repository"); }) });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    expect(await screen.findByText("이 폴더는 git 저장소가 아니에요.")).toBeInTheDocument();
+    expect(screen.queryByText("변경 사항이 없어요.")).toBeNull();
+    expect(screen.queryByPlaceholderText(/커밋/)).toBeNull();
+    expect(screen.queryByText("기록")).toBeNull();
+  });
+
+  it("a git failure shows the error with a retry, not an empty list", async () => {
+    const gitChanges = vi.fn().mockRejectedValueOnce(new Error("index file corrupt")).mockResolvedValue([{ path: "src/app.ts", x: "M", y: " ", added: 1, deleted: 0 }]);
+    stubWs({ gitChanges });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    expect(await screen.findByText("Git 상태를 불러오지 못했어요")).toBeInTheDocument();
+    expect(screen.getByText(/index file corrupt/)).toBeInTheDocument();
+    expect(screen.queryByText("변경 사항이 없어요.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByText("app.ts")).toBeInTheDocument();
+  });
+
+  // audit #39: the chevron really collapses its section.
+  it("section heads are real collapse toggles", async () => {
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await waitFor(() => screen.getByText("app.ts"));
+    const head = screen.getByRole("button", { name: /스테이지됨/ });
+    expect(head).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(head);
+    expect(head).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("app.ts")).toBeNull();
+    expect(screen.getByText("new.ts")).toBeInTheDocument(); // the other section is untouched
+  });
+
+  // audit #38: an untracked directory ("dir/") shows its name once, not "dir  dir".
+  it("an untracked directory at the root shows its name once", async () => {
+    stubWs({ gitChanges: vi.fn(async () => [{ path: ".omc/", x: "?", y: "?", added: 0, deleted: 0 }]) });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await waitFor(() => screen.getByText(".omc"));
+    expect(screen.getAllByText(".omc")).toHaveLength(1);
+  });
+
+  // audit #41: Push shows progress, blocks row actions while busy, and confirms success.
+  it("push shows progress, disables row actions meanwhile, and toasts where it pushed", async () => {
+    let finish!: (v: { ok: boolean }) => void;
+    const gitPush = vi.fn(() => new Promise<{ ok: boolean }>((res) => { finish = res; }));
+    stubWs({ gitPush });
+    useToastStore.setState({ toasts: [] });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await waitFor(() => screen.getByText("app.ts"));
+    const push = screen.getByRole("button", { name: "푸시" });
+    fireEvent.click(push);
+    expect(push).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "언스테이지" })).toBeDisabled();
+    finish({ ok: true });
+    await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.text === "origin/feature-x에 푸시했어요")).toBe(true));
+  });
+
+  // #33 carry-over: disabled Commit / Push explain why.
+  it("disabled Commit and Push say why in a tooltip", async () => {
+    stubWs({ gitInfo: vi.fn(async () => ({ isRepo: true, branch: "feature-x", ahead: 0, behind: 0, upstream: "origin/feature-x", head: "a1" })) });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await waitFor(() => screen.getByText("app.ts"));
+    const tips = screen.getAllByRole("tooltip").map((el) => el.textContent);
+    expect(tips).toContain("커밋 메시지를 입력해 주세요");
+    expect(tips).toContain("푸시할 커밋이 없어요");
+  });
+
+  // audit #40: History follows HEAD and the refresh button.
+  it("History reloads when HEAD moves and on refresh", async () => {
+    vi.useFakeTimers();
+    let head = "a1";
+    const gitInfo = vi.fn(async () => ({ isRepo: true, branch: "feature-x", ahead: 0, behind: 0, upstream: null, head }));
+    const ws = stubWs({ gitInfo });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await vi.advanceTimersByTimeAsync(0);
+    fireEvent.click(screen.getByText("기록"));
+    await vi.advanceTimersByTimeAsync(0);
+    const afterOpen = ws.gitLog.mock.calls.length;
+    expect(afterOpen).toBeGreaterThan(0);
+    head = "b2"; // a commit landed (worker or this panel)
+    await vi.advanceTimersByTimeAsync(2600);
+    expect(ws.gitLog.mock.calls.length).toBeGreaterThan(afterOpen);
+    const afterHead = ws.gitLog.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.gitLog.mock.calls.length).toBeGreaterThan(afterHead);
   });
 });
