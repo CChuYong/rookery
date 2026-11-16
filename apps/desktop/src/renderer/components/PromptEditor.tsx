@@ -246,13 +246,19 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
     requestAnimationFrame(() => editor.focus());
   }, [editor, onCommandAction]);
 
-  // App shortcuts that pass through text fields (final review #3) — on macOS that includes Cmd+B, which Lexical would
-  // otherwise take as bold (invisible in the plain-text prompt). Claiming the command before Lexical's own keydown
-  // handling, without preventDefault, lets the event reach the window-level shortcut listener.
+  // App shortcuts that pass through text fields (final review #3). Claiming the command before Lexical's own keydown
+  // handling, without preventDefault, lets the event reach the window-level shortcut listener. Cmd+B is also Lexical's
+  // bold, which is real formatting (serialized as **text**): with text selected it stays bold, and only a collapsed
+  // cursor hands it to the sidebar toggle (round 2).
   useEffect(() => editor.registerCommand(KEY_DOWN_COMMAND, (event) => {
     const platform = window.rookery?.platform;
     const action = appShortcutFor(event, platform);
-    return action != null && appShortcutAllowedIn("text", action, platform);
+    if (action == null || !appShortcutAllowedIn("text", action, platform)) return false;
+    if (action === "toggleSidebar") {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection) && !selection.isCollapsed()) return false;
+    }
+    return true;
   }, COMMAND_PRIORITY_HIGH), [editor]);
 
   useEffect(() => {

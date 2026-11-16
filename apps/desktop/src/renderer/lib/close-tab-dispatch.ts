@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { modalLayerOpen } from "./focus.js";
+import { runGuarded } from "./leave-guard.js";
 
 // Cmd/Ctrl+W routing (audit #82, final review #2). main always intercepts the key (the default menu would otherwise
 // close the window, and on Windows/Linux a focused shell needs it as delete-word), forwards it here, and relies on
@@ -8,7 +9,12 @@ import { modalLayerOpen } from "./focus.js";
 //
 // Order: an open modal layer swallows the key (never close a tab or the window under a dialog); on Windows/Linux a
 // focused terminal receives Ctrl+W (0x17) as the shell's delete-word; then the workspace page handlers registered
-// by useCloseTabShortcut; nothing handled → close the window.
+// by useCloseTabShortcut; nothing handled → close the window, through the leave guard so a page with unsaved edits
+// (Settings) asks first (round 2).
+//
+// Readiness (round 2): the dispatcher tells main when it is mounted and when it is gone. main forwards the key only
+// while it is ready and otherwise closes the window itself, so ⌘W works before the renderer mounts and after the tree
+// is torn down by a render crash, without a timeout race.
 
 export type CloseTabHandler = () => boolean;
 
@@ -35,9 +41,11 @@ export function dispatchCloseTab(): boolean {
 /** Mounted once by App: listens for the forwarded key and falls back to closing the window when unhandled. */
 export function useCloseTabDispatch(): void {
   useEffect(() => {
-    const off = window.rookery?.win?.onCloseTab?.(() => {
-      if (!dispatchCloseTab()) window.rookery.win.close();
+    const win = window.rookery?.win;
+    const off = win?.onCloseTab?.(() => {
+      if (!dispatchCloseTab()) runGuarded(() => window.rookery.win.close());
     });
-    return () => off?.();
+    win?.setCloseTabReady?.(true);
+    return () => { win?.setCloseTabReady?.(false); off?.(); };
   }, []);
 }

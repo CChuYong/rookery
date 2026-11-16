@@ -105,6 +105,8 @@ export interface RookeryWin {
   onMaximizeChange(cb: (maximized: boolean) => void): () => void;
   // Cmd/Ctrl+W pressed (main intercepts it so it no longer closes the window, audit #82).
   onCloseTab(cb: () => void): () => void;
+  // The close-tab dispatcher is mounted (true) or gone (false); while not ready main closes the window on Cmd/Ctrl+W.
+  setCloseTabReady?(ready: boolean): void;
 }
 
 // Type of window.rookery.update — auto-update controls/status for the settings "About" section.

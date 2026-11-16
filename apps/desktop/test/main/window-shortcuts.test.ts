@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { windowShortcut } from "../../src/main/window-shortcuts.js";
+import { routeWindowShortcut, windowShortcut } from "../../src/main/window-shortcuts.js";
 
 const key = (over: Partial<Parameters<typeof windowShortcut>[0]> = {}) => ({ type: "keyDown", key: "w", code: "KeyW", meta: false, control: false, shift: false, alt: false, ...over });
 
@@ -27,5 +27,16 @@ describe("windowShortcut matches the physical W key (review fix 4)", () => {
   it("uses input.code, not the produced character", () => {
     expect(windowShortcut(key({ meta: true, key: "ㅈ" }), "darwin")).toBe("closeTab");
     expect(windowShortcut(key({ control: true, key: "w", code: "KeyZ" }), "win32")).toBeNull();
+  });
+});
+
+// Round 2 (re-review C): Cmd/Ctrl+W goes to the renderer only while its dispatcher says it is ready; otherwise main
+// closes the window itself (before the renderer mounts, after a render crash, while a reload is in flight).
+describe("routeWindowShortcut (round 2)", () => {
+  it("forwards close-tab to a ready renderer and closes the window otherwise", () => {
+    expect(routeWindowShortcut("closeTab", true)).toBe("forward");
+    expect(routeWindowShortcut("closeTab", false)).toBe("closeWindow");
+    expect(routeWindowShortcut("closeWindow", true)).toBe("closeWindow");
+    expect(routeWindowShortcut(null, true)).toBeNull();
   });
 });

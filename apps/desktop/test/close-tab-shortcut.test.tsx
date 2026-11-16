@@ -8,8 +8,9 @@ import { useCloseTabDispatch } from "../src/renderer/lib/close-tab-dispatch.js";
 let fire: () => void = () => {};
 const termWrite = vi.fn();
 const winClose = vi.fn();
+const setReady = vi.fn();
 const setRookery = (platform: string) => {
-  (window as unknown as { rookery: unknown }).rookery = { platform, term: { write: termWrite }, win: { close: winClose, onCloseTab: (cb: () => void) => { fire = cb; return () => { fire = () => {}; }; } } };
+  (window as unknown as { rookery: unknown }).rookery = { platform, term: { write: termWrite }, win: { close: winClose, setCloseTabReady: setReady, onCloseTab: (cb: () => void) => { fire = cb; return () => { fire = () => {}; }; } } };
 };
 setRookery("darwin");
 
@@ -24,7 +25,7 @@ function Host({ pageKey }: { pageKey: string }): JSX.Element {
 const tabs = (dirty: boolean, active: string) => ({
   byPage: { p1: { tabs: [{ id: "agent", kind: "agent" }, { id: "file:/x.ts", kind: "file", path: "/x.ts", title: "x.ts", dirty }], activeTabId: active } },
 } as never);
-afterEach(() => { cleanup(); setRookery("darwin"); termWrite.mockClear(); winClose.mockClear(); document.body.innerHTML = ""; });
+afterEach(() => { cleanup(); setRookery("darwin"); termWrite.mockClear(); winClose.mockClear(); setReady.mockClear(); document.body.innerHTML = ""; });
 
 describe("useCloseTabShortcut (audit #82)", () => {
   it("closes a clean active editor tab", () => {
@@ -124,5 +125,16 @@ describe("Cmd/Ctrl+W routing (final review #2)", () => {
     act(() => fire());
     expect(termWrite).toHaveBeenCalledWith("t9", "\x17");
     expect(winClose).not.toHaveBeenCalled();
+  });
+});
+
+// Round 2 (re-review C): main forwards Cmd+W only while the dispatcher is mounted. Before it mounts, or after the
+// tree is gone (a render crash unmounts it), main closes the window itself, so the key is never dead.
+describe("Cmd/Ctrl+W readiness signal (round 2)", () => {
+  it("reports ready on mount and gone on unmount", () => {
+    const { unmount } = render(<Dispatch />);
+    expect(setReady).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(setReady).toHaveBeenLastCalledWith(false);
   });
 });

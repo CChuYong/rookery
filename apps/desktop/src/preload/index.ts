@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("rookery", {
       ipcRenderer.on("app:closeTab", h);
       return () => { ipcRenderer.removeListener("app:closeTab", h); };
     },
+    // The renderer's close-tab dispatcher mounted/unmounted: main forwards Cmd/Ctrl+W only while it is ready.
+    setCloseTabReady: (ready: boolean) => ipcRenderer.send("win:closeTabReady", ready),
   },
   // App version + auto-update controls (settings "About" section: show version, manual check, install).
   getVersion: () => ipcRenderer.invoke("app:version") as Promise<string>,

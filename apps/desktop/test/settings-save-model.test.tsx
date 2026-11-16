@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { SettingsPage } from "../src/renderer/components/SettingsPage.js";
 import { useStore } from "../src/renderer/store/store.js";
+import { useCloseTabDispatch } from "../src/renderer/lib/close-tab-dispatch.js";
 
 // useT falls back to ko when no I18nProvider is mounted, so the labels below are the ko strings.
 const base = {
@@ -257,5 +258,42 @@ describe("SettingsPage leave guard", () => {
     expect(onClose).not.toHaveBeenCalled();
     await act(async () => { d.resolve(); await d.promise; });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+});
+
+// Round 2 (re-review A): Cmd+W on a page without editor tabs closes the window, so on Settings it must pass the same
+// unsaved-changes guard as every other way out.
+describe("Cmd+W on Settings goes through the leave guard (round 2)", () => {
+  function Dispatch(): null { useCloseTabDispatch(); return null; }
+  const mount = (): { fire: () => void; close: ReturnType<typeof vi.fn> } => {
+    const ref = { fire: () => {} };
+    const close = vi.fn();
+    (window as unknown as { rookery: unknown }).rookery = {
+      platform: "darwin",
+      win: { close, onCloseTab: (cb: () => void) => { ref.fire = cb; return () => { ref.fire = () => {}; }; } },
+    };
+    return { fire: () => ref.fire(), close };
+  };
+  afterEach(() => { delete (window as unknown as { rookery?: unknown }).rookery; });
+
+  it("dirty Settings: Cmd+W asks first and keeps the window; Discard closes it", async () => {
+    const { fire, close } = mount();
+    render(<><Dispatch /><SettingsPage {...base} /></>);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "changed" } });
+    act(() => fire());
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(close).not.toHaveBeenCalled();
+    act(() => fire()); // a second Cmd+W under the confirm does nothing
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("버리고 닫기"));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("clean Settings: Cmd+W closes the window right away", () => {
+    const { fire, close } = mount();
+    render(<><Dispatch /><SettingsPage {...base} /></>);
+    act(() => fire());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

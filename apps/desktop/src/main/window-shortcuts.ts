@@ -13,3 +13,11 @@ export function windowShortcut(input: ShortcutInput, platform: NodeJS.Platform):
   if (!primary) return null;
   return input.shift ? "closeWindow" : "closeTab";
 }
+
+// What main does with a window shortcut. Close-tab goes to the renderer only while its dispatcher reported ready;
+// before it mounts, after a render crash tore the tree down, or while a reload is in flight, nobody would answer, so
+// main closes the window itself (round 2).
+export function routeWindowShortcut(action: WindowShortcut, rendererReady: boolean): "forward" | "closeWindow" | null {
+  if (!action) return null;
+  return action === "closeTab" && rendererReady ? "forward" : "closeWindow";
+}
