@@ -32,7 +32,8 @@ export function Tooltip({ label, side = "top", align = "center", className, chil
   return (
     <span
       className={cn("group group/tip relative inline-flex", className)}
-      onKeyDown={(e) => { if (e.key === "Escape" && !hidden) setHidden(true); }}
+      // The first Escape only hides the bubble and claims the key, so it doesn't also close the page behind it.
+      onKeyDown={(e) => { if (e.key === "Escape" && !hidden) { e.preventDefault(); setHidden(true); } }}
       onMouseLeave={() => setHidden(false)}
       onBlur={() => setHidden(false)}
     >

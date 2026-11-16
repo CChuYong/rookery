@@ -76,6 +76,8 @@ describe("appShortcutFor (audit #140)", () => {
     expect(toggleSidebar).not.toHaveBeenCalled();
     fireEvent.keyDown(getByText("btn"), { key: "b", metaKey: true });
     expect(toggleSidebar).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(getByText("btn"), { key: "b", metaKey: true, repeat: true }); // fix round 1: auto-repeat ignored
+    expect(toggleSidebar).toHaveBeenCalledTimes(1);
     delete (window as unknown as { rookery?: unknown }).rookery;
   });
 });

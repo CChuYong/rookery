@@ -56,7 +56,7 @@ export function ContextMenu({ x, y, items, onClose, header, anchorRect }: { x: n
     const onScroll = (): void => { if (ref.current?.contains(document.activeElement)) trigger.restore(); onClose(); };
     const esc = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
-      e.preventDefault(); // claimed: a page-level Escape (Settings/Automation close) must not also fire
+      e.preventDefault(); // marks the key as used; the page-level Escape stands back anyway while a [role=menu] is open
       trigger.restore();
       onClose();
     };

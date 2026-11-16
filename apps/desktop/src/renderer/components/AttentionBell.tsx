@@ -161,6 +161,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
         onClick={toggle}
         aria-label={muted ? t("attentionBell.ariaMuted", { count: items.length }) : t("attentionBell.aria", { count: items.length })}
         aria-expanded={open}
+        aria-haspopup="dialog"
         title={muted ? t("attentionBell.titleMuted") : t("attentionBell.title")}
         className={cn(
           "no-drag relative flex items-center justify-center transition-colors",

@@ -160,7 +160,19 @@ function SessionsImpl(p: {
   const [q, setQ] = useState(""); // text filter by session name (audit #118), shown past SEARCH_MIN sessions
   // The whole list is one tab stop (the open session's row), Arrow keys move between rows (audit #107).
   const listRef = useRef<HTMLDivElement | null>(null);
-  useRovingTabIndex(listRef);
+  const roving = useRovingTabIndex(listRef);
+  const refocusRow = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = refocusRow.current;
+    if (renaming || !id) return;
+    refocusRow.current = null;
+    Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-roving-item]") ?? []).find((el) => el.dataset.rowId === id)?.focus();
+  }, [renaming]);
+  // After a delete confirm closes, the row that opened it may already be gone: land on the list's stop, not <body>.
+  const closeConfirm = (): void => {
+    setConfirm(null);
+    setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) roving.focusStop(); }, 0);
+  };
   const [scrolled, setScrolled] = useState(false); // when not at the top, show a fade/blur below the header (scroll shadow)
   // List-arrival animation: seed with the sessions present at first non-empty load; only sessions that appear AFTER that
   // rise-in (avoids a flash-storm of the whole list on cold load / reconnect). Mirrors RepoTree/GitChanges.
@@ -273,8 +285,9 @@ function SessionsImpl(p: {
             aria-label={t("sessions.renameLabel", { name })}
             onKeyDown={(e) => {
               if (isImeComposing(e)) return; // the Enter that commits a Korean syllable must not also commit the rename (audit #76)
-              if (e.key === "Enter") { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }
-              else if (e.key === "Escape") setRenaming(null);
+              // A keyboard rename (Enter/Escape) puts focus back on the row; Escape is claimed so it doesn't also close the page.
+              if (e.key === "Enter") { refocusRow.current = s.id; p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }
+              else if (e.key === "Escape") { e.preventDefault(); refocusRow.current = s.id; setRenaming(null); }
             }}
             onBlur={() => { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }}
             className="w-full"
@@ -286,6 +299,7 @@ function SessionsImpl(p: {
       <div key={s.id} className={cn("group relative", isFreshSession(s.id) && "rise-in")}>
         <button
           data-roving-item
+          data-row-id={s.id}
           aria-current={isActive ? "page" : undefined}
           aria-keyshortcuts={`${SHORTCUT.menu.aria} ${p.onRename ? SHORTCUT.rename.aria : ""} ${p.onDelete ? SHORTCUT.delete.aria() : ""}`.trim()}
           onClick={() => p.onSelect(s.id)}
@@ -471,7 +485,7 @@ function SessionsImpl(p: {
           body={t("sessions.deleteBody", { name: confirm.name })}
           confirmLabel={t("common.delete")}
           variant="danger"
-          onCancel={() => setConfirm(null)}
+          onCancel={closeConfirm}
           onConfirm={() => p.onDelete?.(confirm.id)}
         />
       )}

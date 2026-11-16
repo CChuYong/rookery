@@ -418,3 +418,27 @@ describe("SettingsPage keyboard (audit #131 #129)", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
+
+// Fix round 1: the page-level Escape must not fire while a popover is open (its own Escape listener may run later)
+// or while the focused field holds typed text (a typed secret is not part of the draft).
+describe("SettingsPage Escape layering (fix round 1)", () => {
+  it("stands back while a status-bar popover is open", async () => {
+    const { ResourceMonitor } = await import("../src/renderer/components/ResourceMonitor.js");
+    const onClose = vi.fn();
+    render(<><SettingsPage {...base} onClose={onClose} /><ResourceMonitor snapshot={null} variant="statusbar" /></>);
+    fireEvent.click(screen.getByRole("button", { name: "리소스" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not close from a field that holds typed text", () => {
+    const onClose = vi.fn();
+    render(<SettingsPage {...base} onClose={onClose} />);
+    fireEvent.click(screen.getByRole("tab", { name: "모델" }));
+    const key = screen.getByPlaceholderText(/sk-ant-/);
+    fireEvent.change(key, { target: { value: "sk-ant-typed" } });
+    key.focus();
+    fireEvent.keyDown(key, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

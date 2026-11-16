@@ -30,3 +30,12 @@ describe("Tooltip visibility (audit #132)", () => {
     expect(bubble.className).toContain("invisible");
   });
 });
+
+describe("Tooltip Escape claim (fix round 1)", () => {
+  it("claims the first Escape so a page behind it does not close too", () => {
+    const { getByRole } = render(<Tooltip label="설정"><button>gear</button></Tooltip>);
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    getByRole("button", { name: "gear" }).dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+  });
+});

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { Sessions } from "../src/renderer/views/Sessions.js";
 
 const mk = (over: Record<string, unknown>) => ({ id: "s1", cwd: "/code/app", status: "active", lastActivity: new Date().toISOString(), origin: "ui", ...over });
@@ -348,5 +349,36 @@ describe("Sessions keyboard + accessible names (audit T11)", () => {
     expect(onRename).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onRename).toHaveBeenCalledWith("s1", "새 이름");
+  });
+});
+
+// Fix round 1: a keyboard rename puts focus back on its row (Escape claimed so a page behind doesn't close), and a
+// confirmed delete lands on the list's stop instead of <body>.
+describe("Sessions focus after rename/delete (fix round 1)", () => {
+  it("refocuses the row after Enter or Escape in the rename input, and claims Escape", () => {
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    fireEvent.keyDown(screen.getByText("row").closest("button")!, { key: "F2" });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "row 이름 변경" }), { key: "Enter" });
+    expect(document.activeElement).toBe(screen.getByText("row").closest("button"));
+    fireEvent.keyDown(screen.getByText("row").closest("button")!, { key: "F2" });
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const input = screen.getByRole("textbox", { name: "row 이름 변경" });
+    act(() => { input.dispatchEvent(esc); });
+    expect(esc.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(screen.getByText("row").closest("button"));
+  });
+
+  it("after a confirmed delete, focus lands on a remaining row", async () => {
+    function Host(): JSX.Element {
+      const [list, setList] = useState([mk({ id: "a", label: "alpha" }), mk({ id: "b", label: "beta" })]);
+      return <Sessions activeId={null} onSelect={() => {}} onDelete={(id) => setList((l) => l.filter((x) => x.id !== id))} sessions={list as never} />;
+    }
+    render(<Host />);
+    const beta = screen.getByText("beta").closest("button")!;
+    beta.focus();
+    fireEvent.keyDown(beta, { key: "Delete" });
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText("alpha").closest("button")));
   });
 });

@@ -108,6 +108,8 @@ export function ResourceMonitor({
       <button
         type="button"
         aria-label={t("resourceMonitor.resources")}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={toggle}
         title={t("resourceMonitor.tooltip")}
         className={cn(
@@ -130,6 +132,9 @@ export function ResourceMonitor({
           <div
             ref={panelRef}
             tabIndex={-1}
+            // a popover layer: page-level Escape (Settings/Automation) stands back while it is open
+            role="dialog"
+            aria-label={t("resourceMonitor.resources")}
             className={cn(
               "absolute z-50 w-[300px] focus:outline-none", MENU_SURFACE,
               // The status bar sits at the bottom of the viewport, so its popover opens upward; the collapsed

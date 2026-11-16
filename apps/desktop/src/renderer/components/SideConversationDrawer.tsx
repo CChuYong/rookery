@@ -102,9 +102,12 @@ export function SideConversationDrawer({
     <aside
       ref={asideRef}
       aria-label={t("sideConversation.title")}
-      // Escape closes the drawer unless something inside already used it (a composer popup or the model menu).
+      // Escape closes the drawer unless something inside already used it (a composer popup or the model menu). React
+      // bubbles keys from portals (the image lightbox) through this tree too: only an Escape from the drawer's own DOM
+      // counts, and never while a modal layer is open — closing would end the side conversation.
       onKeyDown={(e) => {
         if (e.key !== "Escape" || e.defaultPrevented) return;
+        if (!e.currentTarget.contains(e.target as Node) || document.querySelector('[aria-modal="true"]')) return;
         e.preventDefault();
         onClose();
       }}

@@ -94,17 +94,22 @@ export function useScrollActiveIntoView(listRef: RefObject<HTMLElement | null>, 
 // Roving tabindex for a list of rows (audit #107): the whole list is ONE tab stop — the row marked aria-current (else the
 // last focused row, else the first) — and ArrowUp/ArrowDown/Home/End move between rows. Tab stops are managed on the
 // DOM (not via props) so rows rendered by memoised children or added later are covered too; a MutationObserver
-// re-applies them when rows come and go. Typing targets inside the list (a rename input) keep their keys.
-export function useRovingTabIndex(containerRef: RefObject<HTMLElement | null>, itemSelector = "[data-roving-item]"): void {
+// re-applies them when rows come and go. Typing targets inside the list (a rename input) keep their keys. When the
+// focused row is removed (deleted), focus moves to the list's stop instead of falling to <body>. `focusStop()` puts
+// focus on the stop explicitly (e.g. after a delete confirm whose trigger row is gone).
+export type RovingList = { focusStop: () => void };
+export function useRovingTabIndex(containerRef: RefObject<HTMLElement | null>, itemSelector = "[data-roving-item]"): RovingList {
+  const api = useRef<RovingList>({ focusStop: () => {} });
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
     let last: HTMLElement | null = null;
+    let focusInside = false;
     // Rows inside a folded (inert) group are skipped.
     const items = (): HTMLElement[] => Array.from(root.querySelectorAll<HTMLElement>(itemSelector)).filter((el) => !el.closest("[inert]"));
-    const apply = (): void => {
+    const apply = (): HTMLElement | undefined => {
       const all = items();
-      if (all.length === 0) return;
+      if (all.length === 0) return undefined;
       const active = document.activeElement as HTMLElement | null;
       const stop =
         all.find((el) => el === active) ??
@@ -115,10 +120,21 @@ export function useRovingTabIndex(containerRef: RefObject<HTMLElement | null>, i
         const want = el === stop ? "0" : "-1";
         if (el.getAttribute("tabindex") !== want) el.setAttribute("tabindex", want);
       }
+      return stop;
+    };
+    const onMutate = (): void => {
+      const lostFocus = focusInside && last !== null && !last.isConnected && (!document.activeElement || document.activeElement === document.body);
+      const stop = apply();
+      if (lostFocus) stop?.focus();
     };
     const onFocusIn = (e: FocusEvent): void => {
       const item = (e.target as HTMLElement | null)?.closest?.<HTMLElement>(itemSelector);
-      if (item && root.contains(item)) { last = item; apply(); }
+      if (item && root.contains(item)) { last = item; focusInside = true; apply(); }
+    };
+    const onFocusOut = (e: FocusEvent): void => {
+      const next = e.relatedTarget as Node | null;
+      // relatedTarget null = the row was removed or the window lost focus: keep the flag for the removal fallback.
+      if (next && !root.contains(next)) focusInside = false;
     };
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.defaultPrevented || e.altKey || e.metaKey || e.ctrlKey || isTypingTarget(e.target)) return;
@@ -131,21 +147,30 @@ export function useRovingTabIndex(containerRef: RefObject<HTMLElement | null>, i
       all[next]?.focus();
       all[next]?.scrollIntoView?.({ block: "nearest" });
     };
+    api.current.focusStop = () => { apply()?.focus(); };
     apply();
     root.addEventListener("focusin", onFocusIn);
+    root.addEventListener("focusout", onFocusOut);
     root.addEventListener("keydown", onKeyDown);
-    const mo = typeof MutationObserver !== "undefined" ? new MutationObserver(apply) : null;
+    const mo = typeof MutationObserver !== "undefined" ? new MutationObserver(onMutate) : null;
     mo?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-current", "inert"] });
     return () => {
       root.removeEventListener("focusin", onFocusIn);
+      root.removeEventListener("focusout", onFocusOut);
       root.removeEventListener("keydown", onKeyDown);
       mo?.disconnect();
+      api.current.focusStop = () => {};
     };
   }, [containerRef, itemSelector]);
+  return api.current;
 }
 
 // Escape closes a full page (Settings, the Automation list) the way it closes New session (audit #129) — but only when
-// nothing else owns the key: a modal dialog, a focused menu/popover/listbox, or a control that already handled it.
+// nothing else owns the key. This window listener can run BEFORE a popover's own Escape listener (registration order),
+// so a popover's preventDefault can't be relied on: it stands back while any popup layer is open at all (a modal, a
+// menu, a listbox, a non-hidden popover dialog, or a trigger reporting aria-expanded), and while the focused field
+// holds typed text (a half-typed secret must not vanish with the page).
+const OPEN_LAYER = '[aria-modal="true"], [role="menu"], [role="listbox"], [role="dialog"]:not([hidden]), [aria-haspopup][aria-expanded="true"]';
 export function usePageEscape(onEscape: (() => void) | undefined): void {
   const cb = useRef(onEscape);
   cb.current = onEscape;
@@ -154,9 +179,10 @@ export function usePageEscape(onEscape: (() => void) | undefined): void {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== "Escape" || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (document.querySelector('[aria-modal="true"]')) return;
+      if (document.querySelector(OPEN_LAYER)) return;
       const active = document.activeElement as HTMLElement | null;
       if (active?.closest?.('[role="dialog"], [role="menu"], [role="listbox"], [aria-expanded="true"]')) return;
+      if (isMidTyping(active)) return;
       cb.current?.();
     };
     window.addEventListener("keydown", onKey);

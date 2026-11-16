@@ -67,7 +67,8 @@ export function useAppShortcuts(handlers: Record<AppShortcut, () => void>): void
   ref.current = handlers;
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.defaultPrevented || isTypingTarget(e.target) || document.querySelector('[aria-modal="true"]')) return;
+      // A held key auto-repeats: toggling the sidebar 30 times a second is never what anyone meant.
+      if (e.repeat || e.defaultPrevented || isTypingTarget(e.target) || document.querySelector('[aria-modal="true"]')) return;
       const action = appShortcutFor(e, window.rookery?.platform);
       if (!action) return;
       e.preventDefault();

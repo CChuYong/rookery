@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect, useId } from "react";
+import { memo, useState, useRef, useEffect, useId, useLayoutEffect } from "react";
 import { isImeComposing, useRovingTabIndex } from "../lib/focus.js";
 import { SHORTCUT, isDeleteKey, isMenuKey, isRenameKey, withShortcut } from "../lib/shortcuts.js";
 import { ChevronRight, FolderGit2, Plus, Archive, Search, Loader2, MoreHorizontal, Settings2 } from "lucide-react";
@@ -110,7 +110,19 @@ function RepoTreeImpl(p: {
   const [onlyActive, setOnlyActive] = useState(false); // show only running/idle/unread workers
   // Worker rows are one tab stop (the open worker's row), Arrow keys move between them (audit #107).
   const listRef = useRef<HTMLDivElement | null>(null);
-  useRovingTabIndex(listRef);
+  const roving = useRovingTabIndex(listRef);
+  const refocusRow = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = refocusRow.current;
+    if (renaming || !id) return;
+    refocusRow.current = null;
+    Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-roving-item]") ?? []).find((el) => el.dataset.rowId === id)?.focus();
+  }, [renaming]);
+  // After a delete confirm closes, the row that opened it may already be gone: land on the list's stop, not <body>.
+  const closeConfirm = (): void => {
+    setConfirm(null);
+    setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) roving.focusStop(); }, 0);
+  };
   const treeId = useId();
   // worker spawn appearance: workers present in the first non-empty fleet are excluded as the seed; only workers spawned afterward get the rise-in.
   // Membership is non-mutating, so the class stays for the row's whole lifetime (not re-evaluated) and the appearance isn't cut off by status-change re-renders.
@@ -151,8 +163,9 @@ function RepoTreeImpl(p: {
             aria-label={t("repoTree.renameLabel", { name: cleanLabel(sub.label, sub.id) })}
             onKeyDown={(e) => {
               if (isImeComposing(e)) return; // the IME's committing Enter must not also commit the rename (audit #76)
-              if (e.key === "Enter") { p.onRenameSub?.(sub.id, renaming.value.trim() || sub.label); setRenaming(null); }
-              else if (e.key === "Escape") setRenaming(null);
+              // A keyboard rename (Enter/Escape) puts focus back on the row; Escape is claimed so it doesn't also close the page.
+              if (e.key === "Enter") { refocusRow.current = sub.id; p.onRenameSub?.(sub.id, renaming.value.trim() || sub.label); setRenaming(null); }
+              else if (e.key === "Escape") { e.preventDefault(); refocusRow.current = sub.id; setRenaming(null); }
             }}
             onBlur={() => { p.onRenameSub?.(sub.id, renaming.value.trim() || sub.label); setRenaming(null); }}
             className="w-full"
@@ -168,6 +181,7 @@ function RepoTreeImpl(p: {
       <div key={sub.id} className={cn("group relative", isFreshSpawn(sub.id) && "rise-in")}>
         <button
           data-roving-item
+          data-row-id={sub.id}
           aria-current={active ? "page" : undefined}
           aria-keyshortcuts={`${SHORTCUT.menu.aria} ${p.onRenameSub ? SHORTCUT.rename.aria : ""} ${p.onDeleteSub ? SHORTCUT.delete.aria() : ""}`.trim()}
           onClick={() => p.onSelectSub(sub.id)}
@@ -397,7 +411,7 @@ function RepoTreeImpl(p: {
           body={t("repoTree.deleteWorkerConfirm", { name: confirm.name })}
           confirmLabel={t("common.delete")}
           variant="danger"
-          onCancel={() => setConfirm(null)}
+          onCancel={closeConfirm}
           onConfirm={() => p.onDeleteSub?.(confirm.id)}
         />
       )}
