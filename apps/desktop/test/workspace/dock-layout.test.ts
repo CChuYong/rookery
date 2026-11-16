@@ -4,6 +4,7 @@ import {
   groupConstraints,
   rootColumnGroupIds,
   unhideLeaves,
+  sideWidthOverride,
   applyDockConstraints,
   reopenPosition,
   hidePanels,
@@ -239,6 +240,28 @@ describe("side column width memory (review fix 1)", () => {
     const fresh = dock(1400, 900);
     fresh.fromJSON({ ...json, grid: patched as never });
     expect(isKindVisible(fresh, "files")).toBe(true);
+  });
+  // Final review #7: the remembered width belongs to the full-height side column only. A side group stacked inside
+  // a column (its saved size is a height) keeps its own size when it is saved visible.
+  it("sideWidthOverride applies the remembered width to root-column groups only", () => {
+    const grid: SerializedGrid = {
+      orientation: "HORIZONTAL",
+      root: { type: "branch", size: 900, data: [
+        { type: "branch", size: 1080, data: [
+          { type: "leaf", size: 660, data: { id: "1" } },
+          { type: "leaf", size: 240, visible: false, data: { id: "2" } },
+        ] },
+        { type: "leaf", size: 220, visible: false, data: { id: "3" } },
+      ] },
+    };
+    const sizeFor = sideWidthOverride(grid, 400);
+    expect(sizeFor("3")).toBe(400);
+    expect(sizeFor("2")).toBeUndefined();
+    const patched = unhideLeaves(grid, new Set(["2", "3"]), sizeFor);
+    const root = patched.root as Extract<SerializedGrid["root"], { type: "branch" }>;
+    const column = root.data[0] as Extract<SerializedGrid["root"], { type: "branch" }>;
+    expect(column.data[1]).toMatchObject({ size: 240, data: { id: "2" } });
+    expect(root.data[1]).toMatchObject({ size: 400, data: { id: "3" } });
   });
   it("savedSideColumnWidth is undefined without a side root column", () => {
     expect(savedSideColumnWidth({ orientation: "HORIZONTAL", root: { type: "leaf", size: 1, data: { id: "1", views: ["panel:conversation"] } } })).toBeUndefined();

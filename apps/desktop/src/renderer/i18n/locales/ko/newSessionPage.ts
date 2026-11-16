@@ -15,4 +15,5 @@ export default {
   "newSessionPage.authBlockedCta": "설정 → Claude 열기",
   "newSessionPage.folderMenu": "작업 폴더",
   "newSessionPage.chooseFolder": "폴더 선택…",
+  "newSessionPage.reposLoadFailed": "레포 목록을 불러오지 못했어요",
 } satisfies Catalog;

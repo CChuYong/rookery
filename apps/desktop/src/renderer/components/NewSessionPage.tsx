@@ -17,6 +17,7 @@ import { useDraftStore, EMPTY_DRAFT } from "../store/drafts.js";
 import { useStore } from "../store/store.js";
 import { Select, Input } from "../ui/input.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
+import { LoadFailed } from "../ui/load-state.js";
 
 // New master session — full page (entire main area). The input field is identical to the chat composer (markdown, file attachments, @ prefill, / skills).
 // Start with it empty for an empty session. @ and / operate live against the repo/folder (cwd) picked below (if none selected, the daemon's default cwd).
@@ -29,6 +30,8 @@ export const NEW_SESSION_DRAFT_KEY = "newSession";
 export function NewSessionPage(p: {
   repos: Array<{ name: string; path: string }>;
   reposLoaded?: boolean; // repos.list has answered → only then is an empty list "no repositories" (audit #89)
+  reposLoadFailed?: boolean; // repos.list failed → the folder menu says so with a retry (final review #12)
+  onRetryRepos?: () => unknown;
   defaultModel: string;
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, settings.codexMasterModel)
@@ -101,6 +104,12 @@ export function NewSessionPage(p: {
     >
       {(close) => (
         <div className="flex flex-col">
+          {!(p.reposLoaded ?? true) && p.reposLoadFailed && p.onRetryRepos && (
+            <>
+              <LoadFailed message={t("newSessionPage.reposLoadFailed")} onRetry={p.onRetryRepos} className="px-2 py-1.5" />
+              <div className="my-1 h-px bg-line" aria-hidden />
+            </>
+          )}
           {p.repos.length > 0 && (
             <>
               <p className="px-2 pb-1 pt-1.5 text-meta text-muted">{t("newSessionPage.pickRepoFolder")}</p>

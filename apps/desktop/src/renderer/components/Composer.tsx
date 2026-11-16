@@ -20,6 +20,7 @@ import { ChromeMenu, ComposerFooter, COMPOSER_BOX, MenuField, SendButton } from 
 import { Tooltip } from "./Tooltip.js";
 import { PromptEditor } from "./PromptEditor.js";
 import type { SlashCommand, PromptEditorHandle } from "./PromptEditor.js";
+import { isSideOpenCancelled } from "../lib/side-cancel.js";
 
 // After Stop is clicked, how long the worker may stay busy before we surface the "Recover" escalation. A soft
 // interrupt normally lands in ~1-2s; past this, the turn is almost certainly wedged in a long tool call/workflow.
@@ -237,7 +238,8 @@ export function Composer({
       if (alive.current) { promptRef.current?.clear(); setImages([]); }
     } catch (err) {
       // The one place a failed send is reported: inline, next to the kept draft (callers don't toast it too, audit #32).
-      if (alive.current) setError(t("composer.sendFailed", { reason: err instanceof Error ? err.message : String(err) }));
+      // A Side closed while opening keeps the draft too, but it is a cancel, not a failure (final review #8).
+      if (alive.current && !isSideOpenCancelled(err)) setError(t("composer.sendFailed", { reason: err instanceof Error ? err.message : String(err) }));
     }
     finally { sendingRef.current = false; if (alive.current) setSending(false); }
   };
@@ -372,9 +374,10 @@ export function Composer({
 
   const sendReason = disabled ? undefined : importing ? t("images.importing") : !hasText && !allowEmpty ? t("composer.sendEmpty") : undefined;
   const showStop = busy && onStop && !disabled;
-  // A read-only composer at rest (an ended worker, a Slack session) drops its dead input buttons so it doesn't look
-  // writable; the placeholder says why (audit #117).
-  const inert = disabled && !busy;
+  // A read-only composer (an ended worker, a Slack session) drops its dead input buttons so it doesn't look writable;
+  // the placeholder says why (audit #117). Busy or not (final review #9): a Slack turn running behind a read-only
+  // composer used to bring a disabled send back, shifting the footer at every turn start and end.
+  const inert = disabled;
 
   return (
     <div
@@ -458,7 +461,7 @@ export function Composer({
                 label={sendLabelText}
                 hint={sendReason}
                 loading={sending}
-                disabled={disabled || importing || (!hasText && !allowEmpty)}
+                disabled={importing || (!hasText && !allowEmpty)}
                 onClick={submit}
               />
             )}

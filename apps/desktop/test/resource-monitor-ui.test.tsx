@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ResourceMonitor } from "../src/renderer/components/ResourceMonitor.js";
 import { I18nProvider } from "../src/renderer/i18n/provider.js";
@@ -120,5 +120,18 @@ describe("ResourceMonitor failure", () => {
     expect(screen.getByText("Couldn't read resource usage")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  // Final review #11: the retry follows the poll's promise — busy while it runs, and a second failure is said.
+  it("a retry shows progress and then says it failed again", async () => {
+    let fail!: (e: Error) => void;
+    const onRefresh = vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    renderEn(<ResourceMonitor snapshot={null} failed onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    const retry = screen.getByRole("button", { name: "Retry" });
+    fireEvent.click(retry);
+    expect(retry).toHaveAttribute("aria-busy", "true");
+    await act(async () => { fail(new Error("")); });
+    expect(await screen.findByText("Retry failed")).toBeInTheDocument();
   });
 });

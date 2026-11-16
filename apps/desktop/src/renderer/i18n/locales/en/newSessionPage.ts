@@ -15,4 +15,5 @@ export default {
   "newSessionPage.authBlockedCta": "Open Settings → Claude",
   "newSessionPage.folderMenu": "Working folder",
   "newSessionPage.chooseFolder": "Choose folder…",
+  "newSessionPage.reposLoadFailed": "Couldn't load the repo list",
 } satisfies Catalog;

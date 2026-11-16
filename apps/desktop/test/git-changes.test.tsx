@@ -106,6 +106,39 @@ describe("GitChanges", () => {
     expect(await screen.findByText("app.ts")).toBeInTheDocument();
   });
 
+  // Final review #6: a non-repo folder stops calling gitChanges (it only throws there); the poll keeps checking
+  // gitInfo so a `git init` is picked up, and then changes load again.
+  it("stops polling gitChanges in a folder that isn't a repository, and resumes once it becomes one", async () => {
+    vi.useFakeTimers();
+    let repo = false;
+    const gitInfo = vi.fn(async () => (repo ? { branch: "main", ahead: 0, behind: 0, upstream: null } : { isRepo: false }));
+    const gitChanges = vi.fn(async () => { if (!repo) throw new Error("fatal: not a git repository"); return [{ path: "a.ts", x: "?", y: "?", added: 0, deleted: 0 }]; });
+    stubWs({ gitInfo, gitChanges });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    await vi.advanceTimersByTimeAsync(0);
+    const afterFirst = gitChanges.mock.calls.length;
+    expect(afterFirst).toBeLessThanOrEqual(1); // the first read can't know yet
+    await vi.advanceTimersByTimeAsync(2600 * 3);
+    expect(gitChanges.mock.calls.length).toBe(afterFirst);
+    expect(gitInfo.mock.calls.length).toBeGreaterThanOrEqual(4);
+    repo = true;
+    await vi.advanceTimersByTimeAsync(2600);
+    expect(gitChanges.mock.calls.length).toBeGreaterThan(afterFirst);
+    vi.useRealTimers();
+    expect(await screen.findByText("a.ts")).toBeInTheDocument();
+  });
+
+  // Final review #10: a failed retry names the reason once (the detail line), not again in the retry note.
+  it("a failed retry does not repeat the reason", async () => {
+    const gitChanges = vi.fn().mockRejectedValue(new Error("index file corrupt"));
+    stubWs({ gitChanges });
+    render(<GitChanges root="/r" pageKey="p1" />);
+    expect(await screen.findByText("Git 상태를 불러오지 못했어요")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByText(/다시 시도했지만/)).toBeInTheDocument();
+    expect(screen.getAllByText(/index file corrupt/)).toHaveLength(1);
+  });
+
   // audit #39: the chevron really collapses its section.
   it("section heads are real collapse toggles", async () => {
     render(<GitChanges root="/r" pageKey="p1" />);

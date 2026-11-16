@@ -35,4 +35,5 @@ export default {
   "app.reposHomeHint": "Pick a worker on the left, or spawn a new one.",
   "app.reposHomeEmpty": "No repos registered yet.",
   "app.settingsLoadFailed": "Couldn't load settings",
+  "app.reposLoadFailed": "Couldn't load the repo list",
 } satisfies Catalog;

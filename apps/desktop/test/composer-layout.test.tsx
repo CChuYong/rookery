@@ -107,4 +107,14 @@ describe("Composer read-only at rest", () => {
     expect(screen.getByText("Worker ended — view only")).toBeInTheDocument();
     expect(screen.getByText("Opus 4.8")).toBeInTheDocument();
   });
+
+  // Final review #9: a read-only composer never shows send, busy or not, so the footer doesn't shift when a turn
+  // starts or ends (a Slack session's turn runs while its desktop composer stays read-only).
+  it("hides send while disabled even during a turn", () => {
+    const { rerender } = render(<Composer onSend={() => {}} onStop={() => {}} disabled busy placeholder="Slack — view only" />);
+    expect(screen.queryByRole("button", { name: "보내기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "중단" })).toBeNull();
+    rerender(<Composer onSend={() => {}} onStop={() => {}} disabled busy={false} placeholder="Slack — view only" />);
+    expect(screen.queryByRole("button", { name: "보내기" })).toBeNull();
+  });
 });

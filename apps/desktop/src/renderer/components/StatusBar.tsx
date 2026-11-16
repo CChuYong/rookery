@@ -69,7 +69,7 @@ export function StatusBar(p: {
   usageEmpty?: boolean;
   resources: ResourceSnapshot | null;
   resourcesFailed?: boolean;
-  onResourceRefresh: () => void;
+  onResourceRefresh: () => void | Promise<void>; // the read's promise, so the monitor's Retry can follow it
   onResourceOpenChange: (open: boolean) => void;
   notifyOn: boolean;
   onToggleNotify: () => void;

@@ -23,4 +23,14 @@ describe("ReposHome (audit #23)", () => {
     fireEvent.click(screen.getByRole("button", { name: "새 레포" }));
     expect(onNewRepo).toHaveBeenCalledTimes(1);
   });
+
+  // Final review #12 (#89): a failed repos.list shows the failure with a retry, not a blank area forever.
+  it("shows a load failure with a retry while the repo list hasn't arrived", () => {
+    const onRetry = vi.fn(() => Promise.resolve());
+    render(<ReposHome hasRepos={false} loaded={false} loadFailed onRetry={onRetry} onNewWorker={() => {}} onNewRepo={() => {}} />);
+    expect(screen.getByText("레포 목록을 불러오지 못했어요")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "새 레포" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });

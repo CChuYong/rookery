@@ -27,6 +27,7 @@ import {
   setSideColumnWidth,
   sideColumnWidth,
   unhideLeaves,
+  sideWidthOverride,
   INSPECTOR_DEFAULT_WIDTH,
   type SerializedGrid,
 } from "./dock-layout.js";
@@ -184,7 +185,8 @@ export function WorkspaceDock({ pageKey, agentKind, onApi }: { pageKey: string; 
     const auto = autoHidden();
     if (auto.length === 0) return json;
     const ids = new Set(api.groups.filter((g) => !g.api.isVisible && g.panels.length > 0 && g.panels.every((p) => auto.includes(panelKind(p) as HideableKind))).map((g) => g.id));
-    return { ...json, grid: unhideLeaves(json.grid as unknown as SerializedGrid, ids, () => sideWidthRef.current) as unknown as SerializedDockview["grid"] };
+    const grid = json.grid as unknown as SerializedGrid;
+    return { ...json, grid: unhideLeaves(grid, ids, sideWidthOverride(grid, sideWidthRef.current)) as unknown as SerializedDockview["grid"] };
   };
 
   // Reconcile editor panels against the page's non-agent workspace tabs: add missing (as tabs in the conversation

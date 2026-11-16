@@ -47,7 +47,7 @@ export function ResourceMonitor({
   snapshot: ResourceSnapshot | null;
   failed?: boolean; // several reads in a row failed → say so (with a refresh) instead of a skeleton forever (audit #137)
   collapsed?: boolean;
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>; // a promise drives the failure Retry's progress and its second-failure note
   onOpenChange?: (open: boolean) => void;
   variant?: "sidebar" | "statusbar"; // statusbar: borderless 11px trigger that opens the popover upward (bottom bar has no room below it)
   closeKey?: string; // the current route: a change closes the popover (audit #27)
@@ -149,7 +149,7 @@ export function ResourceMonitor({
                   ref={refreshRef}
                   type="button"
                   aria-label={t("common.refresh")}
-                  onClick={onRefresh}
+                  onClick={() => { void Promise.resolve(onRefresh()).catch(() => {}); }}
                   className="rounded p-1 text-muted hover:bg-raised hover:text-fg-dim"
                 >
                   <RefreshCw size={12} />

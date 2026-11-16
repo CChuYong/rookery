@@ -83,14 +83,27 @@ export function GitChanges({ root, pageKey, version = 0, onViewBranchDiff }: { r
   const rootRef = useRef(root);
   rootRef.current = root;
 
+  // Known not to be a repository (per root): reads then skip gitChanges, which only throws there (final review #6).
+  // gitInfo keeps being polled, so a `git init` is picked up and the next pass reads changes again.
+  const notRepoRef = useRef(false);
+
   // One read of info + changes. Resolves to the failure text (or null) instead of rejecting, so polling never throws.
   const fetchAll = useCallback(async (): Promise<string | null> => {
     const forRoot = root;
-    const [i, c] = await Promise.allSettled([window.rookery.ws.gitInfo(forRoot), window.rookery.ws.gitChanges(forRoot)]);
+    const skipChanges = notRepoRef.current;
+    const [i, c0] = await Promise.allSettled([
+      window.rookery.ws.gitInfo(forRoot),
+      skipChanges ? Promise.resolve(null) : window.rookery.ws.gitChanges(forRoot),
+    ]);
     if (rootRef.current !== forRoot) return null;
     if (i.status === "fulfilled") setInfo(i.value);
-    if (i.status === "fulfilled" && i.value.isRepo === false) { setLoadErr(null); return null; } // not a repository: its own state
-    if (c.status === "fulfilled") setChanges(c.value);
+    const notRepo = i.status === "fulfilled" && i.value.isRepo === false;
+    notRepoRef.current = notRepo;
+    if (notRepo) { setLoadErr(null); return null; } // not a repository: its own state
+    // It just became a repository (or gitInfo failed after a non-repo read): read the changes now.
+    const [c] = skipChanges ? await Promise.allSettled([window.rookery.ws.gitChanges(forRoot)]) : [c0];
+    if (rootRef.current !== forRoot) return null;
+    if (c.status === "fulfilled" && c.value !== null) setChanges(c.value);
     const failure = c.status === "rejected" ? errText(c.reason) : i.status === "rejected" ? errText(i.reason) : null;
     setLoadErr(failure);
     return failure;
@@ -101,6 +114,7 @@ export function GitChanges({ root, pageKey, version = 0, onViewBranchDiff }: { r
   // so watching the worktree root won't catch commits → lightly poll while the panel is visible to auto-reflect commits/staging.
   useEffect(() => {
     setChanges(null); setInfo(null); setLoadErr(null);
+    notRepoRef.current = false;
     void fetchAll();
     const iv = setInterval(() => { if (panelVisible(panelRef.current)) void fetchAll(); }, 2500);
     const onFocus = (): void => { void fetchAll(); };
@@ -118,9 +132,11 @@ export function GitChanges({ root, pageKey, version = 0, onViewBranchDiff }: { r
     setHistoryKey((k) => k + 1);
     try { await fetchAll(); } finally { setRefreshing(false); }
   };
+  // The reason is already the LoadFailed detail (it follows loadErr), so a failed retry rejects without repeating it
+  // (final review #10): the retry note then reads just "tried again, still failing".
   const retry = async (): Promise<void> => {
     const failure = await fetchAll();
-    if (failure) throw new Error(failure);
+    if (failure) throw new Error("");
   };
 
   const act = async (kind: Busy, fn: () => Promise<{ ok: boolean; error?: string }>): Promise<{ ok: boolean } | null> => {

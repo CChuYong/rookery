@@ -9,6 +9,7 @@ import { Conversation } from "../views/Conversation.js";
 import type { ConversationProps } from "../views/Conversation.js";
 import { useT } from "../i18n/provider.js";
 import { toast } from "../store/toasts.js";
+import { SideOpenCancelled, isSideOpenCancelled } from "../lib/side-cancel.js";
 import { SideConversationDrawer } from "./SideConversationDrawer.js";
 
 // Shared conversation panel for master sessions / workers. Subscribes to transcript, pending, and progress state itself, per kind
@@ -72,7 +73,7 @@ export function ConversationPane({
     setSide({ id: null, question: text, images });
     await (images?.length ? onSideStart(text, images) : onSideStart(text)).then((sideId) => {
       if (sideGeneration.current === generation) setSide({ id: sideId, question: text, images });
-      else { onSideClose?.(sideId); throw new Error("Side opening cancelled"); } // preserve source input when closed while opening
+      else { onSideClose?.(sideId); throw new SideOpenCancelled(); } // preserve source input when closed while opening
     }).catch((error) => { if (sideGeneration.current === generation) setSide(null); throw error; });
     clearAcceptedDraft(id, text, images, acceptedDraft);
   }, [onSideStart, onSideSend, onSideClose, side, id]);
@@ -81,7 +82,8 @@ export function ConversationPane({
   const handleCommandAction = useCallback((action: CommandAction, argument?: string) => {
     if (action.type === "open-panel") {
       // A /side command has no composer draft to keep, so its failure is a toast (the Side button's is inline).
-      if (argument) void askSide(argument).catch((error) => toast.error(t("toast.sendFailed"), String(error)));
+      // A cancel (the drawer closed while opening) is the user's own doing: no toast.
+      if (argument) void askSide(argument).catch((error) => { if (!isSideOpenCancelled(error)) toast.error(t("toast.sendFailed"), String(error)); });
       return;
     }
     onCommandAction?.(action, argument);

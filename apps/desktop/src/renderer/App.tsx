@@ -61,6 +61,7 @@ import { SidebarRail } from "./components/SidebarRail.js";
 import { ReposHome } from "./components/ReposHome.js";
 import { useHistoryShortcuts } from "./lib/useHistoryShortcuts.js";
 import { useCloseTabDispatch } from "./lib/close-tab-dispatch.js";
+import { makeResourcePoll } from "./lib/resource-poll.js";
 import { APP_SHORTCUT, useAppShortcuts, withShortcut } from "./lib/shortcuts.js";
 import { shortBranch } from "./lib/branch.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
@@ -436,23 +437,21 @@ export function App(): JSX.Element {
   // Consecutive resources.get failures: after a few, the popover shows a failure + refresh instead of a skeleton
   // that never resolves (audit #137). Any success clears it.
   const [resourcesFailed, setResourcesFailed] = useState(false);
-  const resourceFails = useRef(0);
-  const pollResourcesOnce = useCallback(() => {
-    void window.rookery.resources.get().then(
-      (r) => { resourceFails.current = 0; setResourcesFailed(false); setResources(r); },
-      () => { resourceFails.current += 1; if (resourceFails.current >= 3) setResourcesFailed(true); },
-    );
-  }, []);
+  // Returns the read's promise (rejects on failure) so the monitor's Retry shows progress and a second failure.
+  const pollResourcesOnce = useMemo(
+    () => makeResourcePoll(() => window.rookery.resources.get(), { snapshot: setResources, failed: setResourcesFailed }),
+    [],
+  );
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let live = true;
     const tick = (): void => {
       if (!live) return;
-      if (document.visibilityState === "visible") pollResourcesOnce();
+      if (document.visibilityState === "visible") void pollResourcesOnce().catch(() => {}); // counted by the poll itself
       timer = setTimeout(tick, resOpen ? 2000 : 4000);
     };
     tick();
-    const onVis = (): void => { if (document.visibilityState === "visible") pollResourcesOnce(); };
+    const onVis = (): void => { if (document.visibilityState === "visible") void pollResourcesOnce().catch(() => {}); };
     document.addEventListener("visibilitychange", onVis);
     return () => { live = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [resOpen, pollResourcesOnce]);
@@ -1526,7 +1525,7 @@ export function App(): JSX.Element {
             }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -1649,7 +1648,7 @@ export function App(): JSX.Element {
             </>
             )
           ) : (
-            <ReposHome hasRepos={s.repos.length > 0} loaded={s.reposLoaded} onNewWorker={newWorker} onNewRepo={onNewRepo} />
+            <ReposHome hasRepos={s.repos.length > 0} loaded={s.reposLoaded} loadFailed={s.reposLoadFailed} onRetry={loadRepos} onNewWorker={newWorker} onNewRepo={onNewRepo} />
           )
         ) : !s.activeSessionId && restorePending && !s.sessionsLoadFailed && !s.fleetLoadFailed ? (
           <div className="flex min-h-0 flex-1 flex-col justify-center px-6" aria-busy="true">
@@ -1657,7 +1656,7 @@ export function App(): JSX.Element {
           </div>
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : dockable && masterRender ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <SessionHeader

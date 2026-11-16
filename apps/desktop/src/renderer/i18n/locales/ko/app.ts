@@ -35,4 +35,5 @@ export default {
   "app.reposHomeHint": "왼쪽에서 워커를 고르거나 새 워커를 스폰하세요.",
   "app.reposHomeEmpty": "등록된 레포가 없어요.",
   "app.settingsLoadFailed": "설정을 불러오지 못했어요",
+  "app.reposLoadFailed": "레포 목록을 불러오지 못했어요",
 } satisfies Catalog;

@@ -68,6 +68,13 @@ export function rootColumnGroupIds(grid: SerializedGrid): Set<string> {
   return ids;
 }
 
+// The `sizeFor` for unhideLeaves when saving: the remembered side width applies only to full-height root columns
+// (a stacked side group's saved size is a height, final review #7).
+export function sideWidthOverride(grid: SerializedGrid, width: number): (groupId: string) => number | undefined {
+  const rootColumns = rootColumnGroupIds(grid);
+  return (groupId) => (rootColumns.has(groupId) ? width : undefined);
+}
+
 // Copy of a serialized grid with the given leaves shown again. Used to persist a layout while the narrow-window
 // rule has hidden the side panel: the saved layout keeps the panel at its own width, and the largest visible
 // sibling gives that width back so the branch still adds up (audit #81). `sizeFor` may override the saved size of a

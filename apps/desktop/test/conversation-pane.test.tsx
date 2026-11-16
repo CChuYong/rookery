@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { useStore } from "../src/renderer/store/store.js";
 import { ConversationPane } from "../src/renderer/components/ConversationPane.js";
 import { setPromptEditorText } from "./prompt-editor-helpers.js";
+import { useToastStore } from "../src/renderer/store/toasts.js";
 
 // Shared master/worker composer busy rule: running (authoritative) ‖ pending (optimistic) → stop button.
 // Since both go through the same component, only one side can't break in isolation — lock it with both cases.
@@ -101,6 +102,39 @@ describe("ConversationPane Side drawer", () => {
     expect(screen.getByText("/review")).toBeInTheDocument();
     expect(screen.queryByText((_text, el) => el?.textContent === "/btw<질문>")).toBeNull();
     expect(screen.queryByText((_text, el) => el?.textContent === "/side<질문>")).toBeNull();
+  });
+});
+
+// Final review #8: closing the drawer while a Side is still opening is the user's own cancel, not a failure.
+describe("ConversationPane Side cancel while opening (final review #8)", () => {
+  beforeEach(() => { reset(); useToastStore.setState({ toasts: [] }); });
+
+  it("a /side command cancelled while opening shows no 'send failed' toast", async () => {
+    let opened!: (id: string) => void;
+    const onSideStart = vi.fn(() => new Promise<string>((resolve) => { opened = resolve; }));
+    const onSideClose = vi.fn();
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} commands={SIDE_COMMANDS} />);
+    const editor = screen.getByRole("textbox");
+    setPromptEditorText(editor, "/side why?");
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(onSideStart).toHaveBeenCalledWith("why?");
+    fireEvent.click(await screen.findByRole("button", { name: "닫기" }));
+    await act(async () => { opened("late-side"); });
+    expect(onSideClose).toHaveBeenCalledWith("late-side");
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("the Side button cancelled while opening keeps the draft without an inline error", async () => {
+    let opened!: (id: string) => void;
+    const onSideStart = vi.fn(() => new Promise<string>((resolve) => { opened = resolve; }));
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    setPromptEditorText(editor, "why this?");
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
+    fireEvent.click(await screen.findByRole("button", { name: "닫기" }));
+    await act(async () => { opened("late-side"); });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent("why this?");
   });
 });
 

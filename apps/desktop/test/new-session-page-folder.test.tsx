@@ -18,6 +18,18 @@ describe("NewSessionPage folder menu", () => {
     expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/code/app" }));
   });
 
+  // Final review #12 (#89): a failed repos.list is said in the folder menu, with a retry, instead of an empty group.
+  it("says when the repo list failed and retries from the folder menu", () => {
+    const onRetryRepos = vi.fn(() => Promise.resolve());
+    render(<NewSessionPage repos={[]} reposLoaded={false} reposLoadFailed onRetryRepos={onRetryRepos} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /작업 폴더/ }));
+    const menu = screen.getByRole("dialog", { name: /작업 폴더/ });
+    expect(within(menu).getByText("레포 목록을 불러오지 못했어요")).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("button", { name: "다시 시도" }));
+    expect(onRetryRepos).toHaveBeenCalledTimes(1);
+    expect(within(menu).getByRole("button", { name: /폴더 선택…/ })).toBeInTheDocument(); // the OS dialog still works
+  });
+
   it("puts provider, model, effort and speed into the composer's model menu", () => {
     render(<NewSessionPage repos={[]} defaultModel="claude-opus-4-8" defaultEffort="high" onStart={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Opus 4\.8 · 높음/ }));
