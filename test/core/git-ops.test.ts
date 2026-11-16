@@ -94,6 +94,52 @@ describe("RealGitOps (real git, no network)", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }, 20000);
 
+  // Final review #5: an orphan branch (or a shallow clone missing the fork point) has no merge base. `--merge-base`
+  // then fails with exit 128 "no merge base found"; the diff falls back to the plain worktree-vs-base diff instead of
+  // throwing (the pre-merge-base behaviour).
+  it("falls back to a plain diff against the base when there is no merge base", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gitops-nomb-"));
+    const repo = path.join(dir, "repo");
+    fs.mkdirSync(repo);
+    const sh = (args: string[], cwd: string) => execFileSync("git", args, { cwd });
+    sh(["init", "-q"], repo);
+    sh(["config", "user.email", "x@x.com"], repo);
+    sh(["config", "user.name", "x"], repo);
+    fs.writeFileSync(path.join(repo, "README.md"), "hi\n");
+    sh(["add", "-A"], repo);
+    sh(["commit", "-qm", "init"], repo);
+    const g = new RealGitOps();
+    const base = await g.currentBranch(repo);
+    const wt = path.join(dir, "wt");
+    await g.addWorktree(repo, wt, "rookery/orphan", base);
+    sh(["checkout", "-q", "--orphan", "lonely"], wt);
+    sh(["rm", "-rqf", "."], wt);
+    fs.writeFileSync(path.join(wt, "alone.txt"), "solo\n");
+    sh(["add", "-A"], wt);
+    sh(["commit", "-qm", "orphan root"], wt);
+
+    const diff = await g.diff(wt, base);
+    expect(diff).toContain("alone.txt");
+    expect(diff).toContain("README.md"); // plain diff: the base's file shows as removed
+
+    // Older git (no --merge-base): `git merge-base` exits 1 with no output when there is none — same fallback.
+    const proto = g as unknown as { git: (cwd: string, args: string[]) => Promise<string> };
+    const realGit = proto.git.bind(g);
+    const calls: string[][] = [];
+    proto.git = async (cwd, args) => {
+      calls.push(args);
+      if (args.includes("--merge-base")) throw execErr(129, OLD_GIT_USAGE);
+      return realGit(cwd, args);
+    };
+    const oldDiff = await g.diff(wt, base);
+    expect(oldDiff).toContain("alone.txt");
+    expect(calls.map((a) => a[0])).toEqual(["diff", "merge-base", "diff"]);
+    // A bad revision is still an error, not a silent fallback.
+    proto.git = realGit;
+    await expect(g.diff(wt, "no-such-ref")).rejects.toThrow();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 20000);
+
   // Real git 2.26.2 output for `git diff --merge-base …` (verified in review): exit 129, and stderr is ONLY the usage
   // line — it never names the option.
   const OLD_GIT_USAGE = "usage: git diff [<options>] [<commit> [<commit>]] [--] [<path>...]\n";

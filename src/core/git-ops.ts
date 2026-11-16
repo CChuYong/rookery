@@ -38,6 +38,13 @@ export function isUnknownMergeBaseOption(err: unknown): boolean {
   return /^usage: git diff\b/m.test(stderr) || /(unknown|invalid) option:? '?--merge-base/i.test(stderr);
 }
 
+// No common ancestor between HEAD and the base (an orphan branch, a shallow clone missing the fork point):
+// `git diff --merge-base` exits 128 with "no merge base found". Matched on the C-locale message (gitEnv forces LC_ALL=C).
+export function isNoMergeBase(err: unknown): boolean {
+  const e = err as { code?: unknown; stderr?: unknown } | null;
+  return e?.code === 128 && /no merge base found/i.test(String(e.stderr ?? ""));
+}
+
 export class RealGitOps implements GitOps {
   private async git(cwd: string, args: string[]): Promise<string> {
     return this.gitEnv(cwd, args, {});
@@ -87,13 +94,24 @@ export class RealGitOps implements GitOps {
     // `--end-of-options`: treat base only as a revision, not an option (SEC-1, e.g. blocks arbitrary file writes via `--output=`).
     // `--merge-base` (git ≥ 2.30): diff the worktree against merge-base(base, HEAD), i.e. only what this branch changed
     // since it forked — commits that land on the base ref later (a fetch moving origin/main) don't show up as reverse edits.
+    // Without a merge base the diff falls back to the plain worktree-vs-base diff (the pre-merge-base behaviour) rather
+    // than failing the whole view.
+    const plain = (): Promise<string> => this.git(worktreePath, ["diff", "--end-of-options", base]);
     try {
       return await this.git(worktreePath, ["diff", "--merge-base", "--end-of-options", base]);
     } catch (err) {
+      if (isNoMergeBase(err)) return plain();
       if (!isUnknownMergeBaseOption(err)) throw err;
       // Older git: resolve the merge base explicitly. base is never allowed to look like an option here (SEC-1).
       if (base.startsWith("-")) throw err;
-      const mb = (await this.git(worktreePath, ["merge-base", "HEAD", base])).trim();
+      let mb: string;
+      try {
+        mb = (await this.git(worktreePath, ["merge-base", "HEAD", base])).trim();
+      } catch (mbErr) {
+        // `git merge-base` exits 1 with no output when there is no common ancestor (a bad revision is 128).
+        if ((mbErr as { code?: unknown } | null)?.code === 1) return plain();
+        throw mbErr;
+      }
       return this.git(worktreePath, ["diff", "--end-of-options", mb]);
     }
   }
