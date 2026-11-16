@@ -207,10 +207,11 @@ describe("HeaderControls dock-mode toggle state (audit #4 #11)", () => {
     renderSession();
     const btn = screen.getByLabelText("터미널");
     expect(btn).toHaveAttribute("aria-pressed", "true");
-    expect(btn).toHaveAttribute("title", "터미널 닫기");
+    // audit #140 (intentional change): the tooltip now names the Ctrl+` shortcut it already had
+    expect(btn).toHaveAttribute("title", "터미널 닫기 (Ctrl+`)");
     fireEvent.click(btn);
     expect(btn).toHaveAttribute("aria-pressed", "false");
-    expect(btn).toHaveAttribute("title", "터미널 열기");
+    expect(btn).toHaveAttribute("title", "터미널 열기 (Ctrl+`)");
   });
 
   it("right toggle stays on while Files is still showing with Git closed, and a click hides the rest (audit #8)", () => {

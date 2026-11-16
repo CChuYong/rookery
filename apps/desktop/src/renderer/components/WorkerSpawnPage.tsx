@@ -14,6 +14,7 @@ import { spawnDraftKey, useDraftStore, type SpawnDraftSource } from "../store/dr
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
+import { isImeComposing, useScrollActiveIntoView } from "../lib/focus.js";
 import type { SourceItem, SourceProviderId } from "@daemon/core/source-intake.js";
 import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
 
@@ -77,6 +78,8 @@ export function WorkerSpawnPage(p: {
   const spawningRef = useRef(false);
   // -1 = nothing highlighted yet, so the first ArrowDown press lands cleanly on index 0.
   const [highlight, setHighlight] = useState(-1);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  useScrollActiveIntoView(resultsRef, highlight); // the arrow-key highlight stays in view (audit #70)
   const [moreOpen, setMoreOpen] = useState(false);
   const seq = useRef(0);
 
@@ -209,11 +212,11 @@ export function WorkerSpawnPage(p: {
   // live, so no window-level key capture (that would swallow Escape for their menus). Escape is intentionally inert
   // here so a typed task is never lost; the source search's own Escape still closes just its results list.
   const onFormKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void spawn(); }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isImeComposing(e)) { e.preventDefault(); void spawn(); }
   };
 
   const onTaskKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) { e.preventDefault(); void spawn(); }
+    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !isImeComposing(e)) { e.preventDefault(); void spawn(); }
   };
 
   // Quiet text control (the composer's footer style): no border, a lift on hover.
@@ -284,7 +287,7 @@ export function WorkerSpawnPage(p: {
                   onFocus={() => setFocused(true)}
                   onBlur={() => setFocused(false)}
                   onKeyDown={(e) => {
-                    if (!dropdownOpen) return;
+                    if (!dropdownOpen || isImeComposing(e)) return; // the IME's committing Enter must not pick a result (audit #76)
                     if (e.key === "ArrowDown" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.min(results.length - 1, h + 1)); }
                     else if (e.key === "ArrowUp" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
                     else if (e.key === "Enter" && highlight >= 0 && highlight < results.length) { e.preventDefault(); pickSource(results[highlight]!); }
@@ -299,7 +302,7 @@ export function WorkerSpawnPage(p: {
             )}
             {sourceMode && p.searchSource && !selected && dropdownOpen && (
               // onMouseDown preventDefault: keeps the input focused so a click on a result isn't swallowed by blur.
-              <div id="worker-spawn-source-results" role="listbox" className="mx-3 mt-1 max-h-72 overflow-y-auto rounded-md border border-line bg-ink" onMouseDown={(e) => e.preventDefault()}>
+              <div ref={resultsRef} id="worker-spawn-source-results" role="listbox" className="mx-3 mt-1 max-h-72 overflow-y-auto rounded-md border border-line bg-ink" onMouseDown={(e) => e.preventDefault()}>
                 {searching && results.length === 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
                 {/* A failed search (expired token, gh error) is not "no results" (audit #36). */}
                 {!searching && searchError && <div role="alert" className="px-3 py-2 text-meta text-fail">{t("workerSpawnModal.searchFailed")}</div>}

@@ -1,4 +1,7 @@
 import { memo, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { isImeComposing, useRovingTabIndex } from "../lib/focus.js";
+import { SHORTCUT, isDeleteKey, isMenuKey, isRenameKey, withShortcut } from "../lib/shortcuts.js";
 import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder, Search } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
@@ -155,6 +158,9 @@ function SessionsImpl(p: {
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
   const [q, setQ] = useState(""); // text filter by session name (audit #118), shown past SEARCH_MIN sessions
+  // The whole list is one tab stop (the open session's row), Arrow keys move between rows (audit #107).
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useRovingTabIndex(listRef);
   const [scrolled, setScrolled] = useState(false); // when not at the top, show a fade/blur below the header (scroll shadow)
   // List-arrival animation: seed with the sessions present at first non-empty load; only sessions that appear AFTER that
   // rise-in (avoids a flash-storm of the whole list on cold load / reconnect). Mirrors RepoTree/GitChanges.
@@ -234,6 +240,22 @@ function SessionsImpl(p: {
   // The text filter applies to the archive too (review m5).
   const archived = p.sessions.filter((s) => s.archived && (effectiveSource === "all" || srcOf(s.origin) === effectiveSource) && (!query || sessName(s).toLowerCase().includes(query)));
 
+  // Keyboard paths for the row's mouse actions (audit #107): with the row actions out of the tab order, the row itself
+  // takes F2 (rename), Delete / Cmd+Backspace (delete…) and Shift+F10 / the Menu key (the same menu as '⋯').
+  const rowKeys = (e: ReactKeyboardEvent<HTMLButtonElement>, s: Session, name: string): void => {
+    if (isMenuKey(e)) {
+      e.preventDefault();
+      const r = e.currentTarget.getBoundingClientRect();
+      setMenu({ id: s.id, x: r.left + 12, y: r.bottom, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+    } else if (isRenameKey(e) && p.onRename) {
+      e.preventDefault();
+      setRenaming({ id: s.id, value: name });
+    } else if (isDeleteKey(e) && p.onDelete) {
+      e.preventDefault();
+      setConfirm({ id: s.id, name });
+    }
+  };
+
   const Row = (s: Session): JSX.Element => {
     const name = sessName(s);
     const isActive = s.id === p.activeId;
@@ -248,7 +270,9 @@ function SessionsImpl(p: {
             autoFocus
             value={renaming.value}
             onChange={(e) => setRenaming({ id: s.id, value: e.target.value })}
+            aria-label={t("sessions.renameLabel", { name })}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return; // the Enter that commits a Korean syllable must not also commit the rename (audit #76)
               if (e.key === "Enter") { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }
               else if (e.key === "Escape") setRenaming(null);
             }}
@@ -261,8 +285,12 @@ function SessionsImpl(p: {
     return (
       <div key={s.id} className={cn("group relative", isFreshSession(s.id) && "rise-in")}>
         <button
+          data-roving-item
+          aria-current={isActive ? "page" : undefined}
+          aria-keyshortcuts={`${SHORTCUT.menu.aria} ${p.onRename ? SHORTCUT.rename.aria : ""} ${p.onDelete ? SHORTCUT.delete.aria() : ""}`.trim()}
           onClick={() => p.onSelect(s.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: s.id, x: e.clientX, y: e.clientY }); }}
+          onKeyDown={(e) => rowKeys(e, s, name)}
           className={cn(
             // Row geometry + selection come from lib/ui-tokens.ts, shared with RepoTree.tsx (audit #76 #109).
             SIDEBAR_ROW,
@@ -303,7 +331,9 @@ function SessionsImpl(p: {
         <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           {p.onPin && (
             <button
+              tabIndex={-1}
               title={s.pinned ? t("sessions.unpin") : t("sessions.pin")}
+              aria-label={t(s.pinned ? "sessions.unpinNamed" : "sessions.pinNamed", { name })}
               onClick={(e) => { e.stopPropagation(); p.onPin!(s.id, !s.pinned); }}
               className={cn("rounded p-1 hover:bg-line/60", s.pinned ? "text-accent" : "text-muted hover:text-fg-dim")}
             >
@@ -312,7 +342,9 @@ function SessionsImpl(p: {
           )}
           {p.onDelete && (
             <button
+              tabIndex={-1}
               title={t("common.delete")}
+              aria-label={t("sessions.deleteNamed", { name })}
               onClick={(e) => { e.stopPropagation(); setConfirm({ id: s.id, name }); }}
               className="rounded p-1 text-muted hover:bg-line/60 hover:text-fail"
             >
@@ -320,8 +352,10 @@ function SessionsImpl(p: {
             </button>
           )}
           <button
-            title={t("common.moreActions")}
-            aria-label={t("common.moreActions")}
+            tabIndex={-1}
+            title={withShortcut(t("common.moreActions"), SHORTCUT.menu.label())}
+            aria-label={t("common.moreActionsFor", { name })}
+            aria-haspopup="menu"
             onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }); }}
             className="rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           >
@@ -335,7 +369,7 @@ function SessionsImpl(p: {
   const menuSession = menu ? p.sessions.find((x) => x.id === menu.id) : undefined;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
+    <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
       {/* sticky header — the tab area is opaque (nothing shows through), and the thin frosted fade below it appears naturally only 'when not at the top'. */}
       {showSegment && (
         <div ref={segWrapRef} className="sticky top-0 z-10 bg-sunk">
@@ -421,10 +455,12 @@ function SessionsImpl(p: {
           anchorRect={menu.rect}
           onClose={() => setMenu(null)}
           items={[
-            { label: t("sessions.rename"), onClick: () => setRenaming({ id: menu.id, value: sessName(menuSession) }) },
+            // Pin is in the menu too: the hover Pin button is out of the tab order, so this is its keyboard path.
+            ...(p.onPin ? [{ label: menuSession.pinned ? t("sessions.unpin") : t("sessions.pin"), onClick: () => p.onPin!(menu.id, !menuSession.pinned) }] : []),
+            { label: t("sessions.rename"), shortcut: { label: SHORTCUT.rename.label(), aria: SHORTCUT.rename.aria }, onClick: () => setRenaming({ id: menu.id, value: sessName(menuSession) }) },
             { label: t("sessions.fork"), onClick: () => p.onFork?.(menu.id) },
             { label: menuSession.archived ? t("sessions.unarchive") : t("sessions.archive"), onClick: () => p.onArchive?.(menu.id, !menuSession.archived) },
-            { label: t("sessions.deleteEllipsis"), danger: true, onClick: () => setConfirm({ id: menu.id, name: sessName(menuSession) }) },
+            { label: t("sessions.deleteEllipsis"), danger: true, shortcut: { label: SHORTCUT.delete.label(), aria: SHORTCUT.delete.aria() }, onClick: () => setConfirm({ id: menu.id, name: sessName(menuSession) }) },
           ]}
         />
       )}
@@ -451,7 +487,7 @@ function ArchivedSection({ items, render }: { items: Session[]; render: (s: Sess
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-1">
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 text-meta font-medium text-faint hover:text-fg-dim">
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 text-meta font-medium text-faint hover:text-fg-dim">
         <ChevronRight size={12} className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-90")} />
         <Archive size={12} /> {t("sessions.archivedSection", { count: items.length })}
       </button>

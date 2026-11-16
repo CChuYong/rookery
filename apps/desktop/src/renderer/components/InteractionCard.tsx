@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isMidTyping, useFocusReturn } from "../lib/focus.js";
 import { CheckCircle2, KeyRound, HelpCircle } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { Button } from "../ui/button.js";
@@ -12,9 +13,33 @@ export interface InteractionAnswer {
   answers?: Record<string, string | string[]>;
 }
 
+// Requests whose card already took focus once — a virtualised list remounts cards on scroll, which must not keep
+// pulling focus back to them.
+const autoFocused = new Set<string>();
+
 // Inline card for master canUseTool (approve/AskUserQuestion). Once resolved, it is replaced by a one-line summary (buttons removed).
+// Focus (audit #74): the turn is blocked on this card, so when it appears its first action takes focus — unless the user
+// is mid-typing somewhere (a non-empty composer, an editor, a terminal). Answering hands focus back to where it was.
 export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (requestId: string, res: InteractionAnswer) => void }): JSX.Element {
   const t = useT();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const prior = useFocusReturn();
+  useEffect(() => {
+    if (item.resolved || autoFocused.has(item.requestId)) return;
+    autoFocused.add(item.requestId);
+    if (isMidTyping(document.activeElement)) return;
+    cardRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per request
+  }, [item.requestId]);
+  const wasResolved = useRef(!!item.resolved);
+  useLayoutEffect(() => {
+    if (item.resolved && !wasResolved.current) {
+      // The buttons are gone: focus inside the card fell to <body> — give it back.
+      const active = document.activeElement;
+      if (!active || active === document.body || cardRef.current?.contains(active)) prior.restore();
+    }
+    wasResolved.current = !!item.resolved;
+  }, [item.resolved, prior]);
   // ask: question index → selected labels (single-select holds 1, multiSelect accumulates via toggle).
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   // Which action was clicked and sent to the daemon (interaction.respond is fire-and-forget, so this is our only
@@ -23,7 +48,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
 
   if (item.resolved) {
     return (
-      <div className="max-w-[80%] self-start whitespace-pre-wrap rounded-md border border-line-soft bg-surface px-3 py-2 text-ui text-fg-dim">
+      <div ref={cardRef} className="max-w-[80%] self-start whitespace-pre-wrap rounded-md border border-line-soft bg-surface px-3 py-2 text-ui text-fg-dim">
         {item.summary ?? (item.expired ? t("interactionCard.expired") : <CheckCircle2 size={14} className="inline-block -mt-0.5 text-pr" aria-hidden />)}
       </div>
     );
@@ -40,7 +65,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
       onRespond?.(item.requestId, { decision });
     };
     return (
-      <div className={cardCls}>
+      <div ref={cardRef} role="group" aria-label={t("interactionCard.approvePrompt")} className={cardCls}>
         <div className="mb-1.5 flex items-center gap-1.5 text-body text-fg">
           <KeyRound size={14} className="shrink-0 text-muted" aria-hidden /> {t("interactionCard.approvePrompt")}
         </div>
@@ -81,7 +106,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   };
 
   return (
-    <div className={cardCls}>
+    <div ref={cardRef} role="group" aria-label={t("interactionCard.askPrompt")} className={cardCls}>
       <div className="mb-2 flex items-center gap-1.5 text-ui text-fg-dim">
         <HelpCircle size={14} className="shrink-0 text-muted" aria-hidden /> {t("interactionCard.askPrompt")}
       </div>

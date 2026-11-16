@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isTypingTarget } from "./focus.js";
 
 type KeyLike = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 
@@ -12,13 +13,6 @@ export function historyShortcutFor(e: KeyLike, platform: string | undefined): "b
   }
   if (!e.altKey || e.metaKey || e.ctrlKey) return null;
   return e.key === "ArrowLeft" ? "back" : e.key === "ArrowRight" ? "forward" : null;
-}
-
-// Typing targets keep their keys (Monaco/xterm both type into a textarea; Cmd+[ is outdent in the editor).
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el || typeof el.closest !== "function") return false;
-  return !!el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], .monaco-editor");
 }
 
 // Wires the history keys plus the mouse back/forward buttons (button 3/4) to the app's navigation history.

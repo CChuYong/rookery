@@ -11,6 +11,7 @@ import { UsagePanel, type UsageTab } from "./UsagePanel.js";
 import { ResourceMonitor } from "./ResourceMonitor.js";
 import { AttentionBell } from "./AttentionBell.js";
 import { Tooltip } from "./Tooltip.js";
+import { APP_SHORTCUT, withShortcut } from "../lib/shortcuts.js";
 
 // Usage strip + its detail popover (audit #25): the strip is a button, the popover is the full UsagePanel (titles,
 // reset times, provider tabs, hints). It opens upward and closes on Escape, an outside click or a route change.
@@ -131,8 +132,8 @@ export function StatusBar(p: {
             <Power size={12} className={cn(p.restarting && "animate-pulse motion-reduce:animate-none")} />
           </button>
         </Tooltip>
-        <Tooltip label={t("app.settings")} side="top" align="end">
-          <button onClick={p.onToggleSettings} aria-label={t("app.settings")} className={iconBtn(p.settingsActive)}>
+        <Tooltip label={withShortcut(t("app.settings"), APP_SHORTCUT.settings.label())} side="top" align="end">
+          <button onClick={p.onToggleSettings} aria-label={t("app.settings")} aria-keyshortcuts={APP_SHORTCUT.settings.aria()} className={iconBtn(p.settingsActive)}>
             <Settings size={12} />
           </button>
         </Tooltip>

@@ -18,4 +18,5 @@ export default {
   "fileTree.searching": "Searching…",
   "fileTree.walkFailed": "Couldn't list the files",
   "fileTree.walkTruncated": "Results are truncated — try a more specific search",
+  "fileTree.treeLabel": "Files",
 } satisfies Catalog;

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { rovingIndex, useReturnFocusOnClose } from "../lib/focus.js";
 import { Bell, BellOff, Zap, CircleAlert, Eye, X } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store/store.js";
@@ -104,7 +106,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
   };
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.preventDefault(); setOpen(false); } };
     const click = (e: MouseEvent): void => {
       if (panelRef.current?.contains(e.target as Node) || btnRef.current?.contains(e.target as Node)) return;
       setOpen(false);
@@ -113,6 +115,20 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
     window.addEventListener("mousedown", click);
     return () => { window.removeEventListener("keydown", esc); window.removeEventListener("mousedown", click); };
   }, [open]);
+  // Focus (audit #75, same contract as ResourceMonitor #61): opening moves focus to the first item (or the panel when
+  // empty) so a keyboard user lands in it; closing (Escape, picking an item) gives focus back to the bell.
+  useEffect(() => {
+    if (!open) return;
+    (panelRef.current?.querySelector<HTMLElement>("[data-bell-item]") ?? panelRef.current)?.focus();
+  }, [open]);
+  useReturnFocusOnClose(open, btnRef, panelRef);
+  const onPanelKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const rows = Array.from(panelRef.current?.querySelectorAll<HTMLElement>("[data-bell-item]") ?? []);
+    const next = rovingIndex(e.key, rows.indexOf(document.activeElement as HTMLElement), rows.length);
+    if (next === null) return;
+    e.preventDefault();
+    rows[next]?.focus();
+  };
 
   const dismiss = (it: AttentionItem): void => {
     if (it.kind === "worker-review" && it.nav.workerId) s.clearAttention(it.nav.workerId);
@@ -169,9 +185,11 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
         <div
           ref={panelRef}
           role="dialog"
+          tabIndex={-1}
           aria-label={t("attentionBell.title")}
+          onKeyDown={onPanelKeyDown}
           style={{ top: pos.top, left: pos.left }}
-          className={cn("fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden", MENU_SURFACE)}
+          className={cn("fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden focus:outline-none", MENU_SURFACE)}
         >
           <div className="flex items-center gap-2 px-2.5 pb-1 pt-1.5">
             <span className="min-w-0 flex-1 text-meta font-medium text-faint">{t("attentionBell.title")}</span>
@@ -197,7 +215,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
                     <div className={cn("px-2.5 pb-0.5 pt-2 text-meta font-medium", tier === 0 ? "text-accent" : tier === 1 ? "text-fail" : "text-faint")}>{title}</div>
                     {rows.map((it) => (
                       <div key={it.key} className="group flex items-center gap-2 rounded-md px-2.5 py-1.5 hover:bg-raised">
-                        <button onClick={() => go(it)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <button data-bell-item onClick={() => go(it)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                           {icon(it.kind)}
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-body text-fg-dim">{it.label}</span>
@@ -210,7 +228,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; noti
                           <button
                             onClick={() => dismiss(it)}
                             aria-label={t("attentionBell.dismiss")}
-                            className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-ink/60 hover:text-fg-dim group-hover:opacity-100"
+                            className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-ink/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                           >
                             <X size={12} />
                           </button>

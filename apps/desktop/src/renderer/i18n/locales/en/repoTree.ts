@@ -29,4 +29,5 @@ export default {
   "repoTree.menuBranchDiff": "View branch diff",
   "repoTree.menuBranchDiffHint": "Everything this worker changed since its base (read-only)",
   "repoTree.archivedSection": "Archived ({count})",
+  "repoTree.renameLabel": "Rename {name}",
 } satisfies Catalog;

@@ -16,6 +16,7 @@ import { useT } from "../i18n/provider.js";
 import { shortBranch } from "../lib/branch.js";
 import { useDockPanelsStore, isHidden, panelToggleState, rightGroupKindsFor, type HideableKind } from "../store/dock-panels.js";
 import { useLayoutStore } from "../store/layout.js";
+import { APP_SHORTCUT, withShortcut } from "../lib/shortcuts.js";
 
 const EMPTY_HIDDEN: HideableKind[] = []; // stable ref for the "nothing hidden yet" case
 
@@ -180,7 +181,7 @@ function HeaderControls({ termPageKey, termPageOpen, rightOpen, onToggleTerm, on
         // dock mode: the panel can be dragged anywhere, so "(bottom panel)" would lie here (#49a) — the tooltip says
         // "Show/Hide terminal" instead. aria-label stays the panel name; aria-pressed carries the state (audit #11).
         // The legacy (!dock) toggle above keeps terminalTitle.
-        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} aria-pressed={dockTerminalOpen} title={dockTerminalOpen ? t("workspaceHeaders.terminalHide") : t("workspaceHeaders.terminalShow")} className={btn(dockTerminalOpen)}>
+        <button onClick={() => useDockPanelsStore.getState().toggle_(termPageKey, "terminal")} aria-label={t("workspaceHeaders.terminalAria")} aria-pressed={dockTerminalOpen} aria-keyshortcuts={APP_SHORTCUT.terminal.aria()} title={withShortcut(dockTerminalOpen ? t("workspaceHeaders.terminalHide") : t("workspaceHeaders.terminalShow"), APP_SHORTCUT.terminal.label())} className={btn(dockTerminalOpen)}>
           <SquareTerminal size={14} />
         </button>
       )}

@@ -28,4 +28,8 @@ export default {
   "sessions.loadFailed": "목록을 불러오지 못했어요",
   "sessions.filterPlaceholder": "세션 필터…",
   "sessions.noMatches": "일치하는 세션이 없어요.",
+  "sessions.renameLabel": "{name} 이름 변경",
+  "sessions.pinNamed": "{name} 고정",
+  "sessions.unpinNamed": "{name} 고정 해제",
+  "sessions.deleteNamed": "{name} 삭제",
 } satisfies Catalog;

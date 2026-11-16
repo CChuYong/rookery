@@ -9,4 +9,7 @@ export default {
   "repoModal.register": "등록",
   "repoModal.nameTaken": "이미 같은 이름의 레포가 있어요",
   "repoModal.pathTaken": "이미 같은 경로의 레포가 있어요",
+  "repoModal.nameLabel": "이름",
+  "repoModal.pathLabel": "경로",
+  "repoModal.descLabel": "설명",
 } satisfies Catalog;

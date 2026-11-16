@@ -33,4 +33,6 @@ export default {
   "composer.sendFailedPlain": "보내지 못했어요.",
   "composer.recovered": "워커를 복구했어요",
   "composer.noCommands": "사용할 수 있는 명령이 없어요",
+  "composer.commandsLabel": "명령",
+  "composer.filesLabel": "파일",
 } satisfies Catalog;

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Input } from "../ui/input.js";
 import { Button } from "../ui/button.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
@@ -15,6 +15,7 @@ export function RepoModal(p: {
 }): JSX.Element {
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
+  const id = useId();
   const [f, setF] = useState({ name: "", path: "", description: "" });
   const { closing, dismiss } = useDismissTransition(p.onClose);
   // trim-based duplicate validation
@@ -37,11 +38,30 @@ export function RepoModal(p: {
         className={dialogPanelClass({ size: "md", closing })}
       >
         <div className="mb-4 text-title font-medium text-fg">{t("repoModal.title")}</div>
+        {/* Visible labels (audit #77): a placeholder alone vanishes once typed into. Errors are tied to their field. */}
         <div className="flex flex-col gap-2.5">
-          <Input autoFocus placeholder={t("repoModal.namePlaceholder")} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-          {nameTaken && <p className="text-ui text-fail">{t("repoModal.nameTaken")}</p>}
+          <label htmlFor={`${id}-name`} className="-mb-1.5 text-ui text-fg-dim">{t("repoModal.nameLabel")}</label>
+          <Input
+            id={`${id}-name`}
+            autoFocus
+            placeholder={t("repoModal.namePlaceholder")}
+            value={f.name}
+            aria-invalid={nameTaken || undefined}
+            aria-describedby={nameTaken ? `${id}-name-err` : undefined}
+            onChange={(e) => setF({ ...f, name: e.target.value })}
+          />
+          {nameTaken && <p id={`${id}-name-err`} className="text-ui text-fail">{t("repoModal.nameTaken")}</p>}
+          <label htmlFor={`${id}-path`} className="-mb-1.5 text-ui text-fg-dim">{t("repoModal.pathLabel")}</label>
           <div className="flex gap-2">
-            <Input className="min-w-0 flex-1" placeholder={t("repoModal.pathPlaceholder")} value={f.path} onChange={(e) => setF({ ...f, path: e.target.value })} />
+            <Input
+              id={`${id}-path`}
+              className="min-w-0 flex-1"
+              placeholder={t("repoModal.pathPlaceholder")}
+              value={f.path}
+              aria-invalid={pathTaken || undefined}
+              aria-describedby={pathTaken ? `${id}-path-err ${id}-hint` : `${id}-hint`}
+              onChange={(e) => setF({ ...f, path: e.target.value })}
+            />
             <Button
               variant="outline"
               size="md"
@@ -53,10 +73,11 @@ export function RepoModal(p: {
               {t("repoModal.browse")}
             </Button>
           </div>
-          {pathTaken && <p className="text-ui text-fail">{t("repoModal.pathTaken")}</p>}
-          <Input placeholder={t("repoModal.descPlaceholder")} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+          {pathTaken && <p id={`${id}-path-err`} className="text-ui text-fail">{t("repoModal.pathTaken")}</p>}
+          <label htmlFor={`${id}-desc`} className="-mb-1.5 text-ui text-fg-dim">{t("repoModal.descLabel")}</label>
+          <Input id={`${id}-desc`} placeholder={t("repoModal.descPlaceholder")} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         </div>
-        <p className="mt-2 text-ui leading-relaxed text-muted">{t("repoModal.pathHint")}</p>
+        <p id={`${id}-hint`} className="mt-2 text-ui leading-relaxed text-muted">{t("repoModal.pathHint")}</p>
         <div className="mt-4 flex justify-end gap-2 border-t border-line pt-4">
           <Button variant="outline" size="md" onClick={dismiss}>{t("common.cancel")}</Button>
           <Button variant="primary" size="md" onClick={register} disabled={!name || !path || nameTaken || pathTaken}>{t("repoModal.register")}</Button>

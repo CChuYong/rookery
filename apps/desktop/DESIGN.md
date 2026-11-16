@@ -45,6 +45,13 @@ Shared patterns (use them, don't restyle per call site):
   `SendButton` (26px neutral circle, arrow-up, tooltip names the action or why it is disabled) and `ChromeMenu` +
   `MenuField` (the model menu: backend, model, effort, permission mode, speed; the trigger reads `Opus 4.8 · High`
   plus only non-default choices). Enter submits on all three; Shift+Enter is a newline.
+- `lib/focus.ts` — keyboard/focus contract for every overlay and list: `useFocusReturn` (focus back to the trigger,
+  captured at first render), `useReturnFocusOnClose` (toggled popovers), `useRovingTabIndex` (a list is one tab stop,
+  Arrow/Home/End move, `aria-current` marks the open row), `useScrollActiveIntoView` (popup highlight stays visible),
+  `isImeComposing` (every Enter that commits text checks it), `usePageEscape` (full pages close on Esc when nothing
+  else owns it). `useFocusTrap` builds on it. `lib/shortcuts.ts` holds the row keys (F2, Delete/⌘⌫, Shift+F10) and
+  the app keys (⌘B, ⌘N, ⌘,) with their labels — show a shortcut next to its control (`withShortcut` title,
+  `aria-keyshortcuts`, or a menu item's `shortcut`), and never fire one inside a text field, Monaco or xterm.
 - A failed send is reported once, inline in the composer next to the kept draft; App send paths don't toast it too.
 - Confirm rule — anything irreversible (delete, revert, discard, secret removal, token rotation) goes through
   `ui/confirm-dialog.tsx` (`secondary` adds a middle action); a light, undoable action runs at once and offers Undo in

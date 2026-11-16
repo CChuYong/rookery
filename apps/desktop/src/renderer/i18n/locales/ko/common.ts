@@ -57,4 +57,5 @@ export default {
   "common.effortMax": "최대",
   "common.effortUltra": "울트라",
   "common.noLimit": "제한 없음",
+  "common.moreActionsFor": "{name} 더보기",
 } satisfies Catalog;

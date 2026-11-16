@@ -9,4 +9,7 @@ export default {
   "repoModal.register": "Register",
   "repoModal.nameTaken": "A repo with this name already exists",
   "repoModal.pathTaken": "A repo at this path already exists",
+  "repoModal.nameLabel": "Name",
+  "repoModal.pathLabel": "Path",
+  "repoModal.descLabel": "Description",
 } satisfies Catalog;

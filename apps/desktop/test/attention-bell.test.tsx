@@ -112,3 +112,22 @@ describe("AttentionBell", () => {
     expect(screen.getByLabelText(/알림 대기열/)).toHaveAttribute("aria-label", "알림 대기열 (0건) — OS 알림 꺼짐"); // review m4
   });
 });
+
+// audit #75: the popover opened with focus left on the bell, and closing it lost focus.
+describe("AttentionBell focus (audit #75)", () => {
+  it("moves focus to the first item on open, roves with the arrows, and returns it to the bell on Escape", () => {
+    useStore.setState({ fleet: { w1: w("w1", "failed"), w2: w("w2", "error") } } as never);
+    render(<AttentionBell onNavigate={vi.fn()} />);
+    const bell = screen.getByLabelText(/알림 대기열/);
+    bell.focus();
+    fireEvent.click(bell);
+    const items = screen.getByRole("dialog").querySelectorAll("[data-bell-item]");
+    expect(items.length).toBe(2);
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(bell);
+  });
+});

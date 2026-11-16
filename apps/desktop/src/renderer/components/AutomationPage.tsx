@@ -13,6 +13,8 @@ import { cn } from "../lib/cn.js";
 import { referencedVars } from "../lib/automation-vars.js";
 import { RunAutomationDialog } from "./RunAutomationDialog.js";
 import { formatNextRun } from "../lib/relative-time.js";
+import { usePageEscape } from "../lib/focus.js";
+import { withShortcut } from "../lib/shortcuts.js";
 
 // Resolved Slack id → display name maps (audit #51). Missing entries fall back to the raw id — this is the
 // pre-existing behavior, so a slow/failed/disconnected resolution never blocks or breaks the card.
@@ -63,6 +65,7 @@ export function AutomationPage(p: {
   onResolveSlackRefs?: (channels: string[], users: string[]) => Promise<SlackRefNames>;
 }): JSX.Element {
   const t = useT();
+  usePageEscape(p.onClose); // Escape closes the list like the header X (audit #129) — nothing here holds a draft
   const locale = useLocale();
   // Resolved-name cache for the lifetime of this page mount — ids already requested (resolved or not) are never
   // re-requested just because the automations list re-rendered (e.g. after a toggle/lastStatus update).
@@ -130,7 +133,7 @@ export function AutomationPage(p: {
         <span className="text-body font-medium text-fg">{t("automationPage.title")}</span>
         <Button variant="outline" size="sm" className="no-drag ml-auto" onClick={p.onNew}><Plus size={14} /> {t("automationPage.newJob")}</Button>
         {p.onClose && (
-          <Button variant="ghost" size="iconSm" className="no-drag" onClick={p.onClose} aria-label={t("common.close")}><X size={14} /></Button>
+          <Button variant="ghost" size="iconSm" className="no-drag" onClick={p.onClose} aria-label={t("common.close")} title={withShortcut(t("common.close"), "Esc")}><X size={14} /></Button>
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -178,11 +181,11 @@ export function AutomationPage(p: {
                       </span>
                     </button>
                     <div data-row-actions className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                      {p.onViewSessions && <button type="button" title={t("automationPage.viewSessions")} aria-label={t("automationPage.viewSessions")} onClick={() => p.onViewSessions!(a.id)} className={ROW_ICON}><MessagesSquare size={14} /></button>}
-                      <button type="button" title={t("automationPage.edit")} aria-label={t("automationPage.edit")} onClick={() => p.onEdit(a)} className={ROW_ICON}><Pencil size={14} /></button>
-                      <button type="button" title={t("automationPage.delete")} aria-label={t("automationPage.delete")} onClick={() => setConfirmDelete(a)} className={cn(ROW_ICON, "hover:text-fail")}><Trash2 size={14} /></button>
+                      {p.onViewSessions && <button type="button" title={t("automationPage.viewSessions")} aria-label={t("automationPage.viewSessionsFor", { name: a.name })} onClick={() => p.onViewSessions!(a.id)} className={ROW_ICON}><MessagesSquare size={14} /></button>}
+                      <button type="button" title={t("automationPage.edit")} aria-label={t("automationPage.editFor", { name: a.name })} onClick={() => p.onEdit(a)} className={ROW_ICON}><Pencil size={14} /></button>
+                      <button type="button" title={t("automationPage.delete")} aria-label={t("automationPage.deleteFor", { name: a.name })} onClick={() => setConfirmDelete(a)} className={cn(ROW_ICON, "hover:text-fail")}><Trash2 size={14} /></button>
                     </div>
-                    <button type="button" title={t("automationPage.run")} aria-label={t("automationPage.run")} disabled={!!running[a.id]} onClick={() => { referencedVars(actionText(a)).length ? setRunTarget(a) : void run(a.id); }} className={ROW_ICON}>{running[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}</button>
+                    <button type="button" title={t("automationPage.run")} aria-label={t("automationPage.runFor", { name: a.name })} disabled={!!running[a.id]} onClick={() => { referencedVars(actionText(a)).length ? setRunTarget(a) : void run(a.id); }} className={ROW_ICON}>{running[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}</button>
                     <button
                       type="button"
                       role="switch"

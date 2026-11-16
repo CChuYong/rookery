@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ArrowUp, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { MENU_SURFACE } from "../lib/ui-tokens.js";
+import { useReturnFocusOnClose } from "../lib/focus.js";
 import { Tooltip } from "./Tooltip.js";
 
 // Shared chrome of the three "write a prompt" surfaces (conversation composer, New session, New worker): one box,
@@ -84,6 +85,8 @@ export function ChromeMenu({
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const close = (): void => setOpen(false);
+  // A pick inside the panel (children's close) hides it with focus inside: hand focus back to the trigger.
+  useReturnFocusOnClose(open, triggerRef, panelRef);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent): void => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false); };
@@ -93,7 +96,16 @@ export function ChromeMenu({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
   return (
-    <div ref={rootRef} className="relative flex min-w-0">
+    <div
+      ref={rootRef}
+      className="relative flex min-w-0"
+      // Focus leaving the trigger+panel (Tab past the last control, a click elsewhere) closes the menu — it used to stay
+      // open behind the user. relatedTarget null = focus went nowhere (window blur, a non-focusable click), so keep it.
+      onBlur={(e) => {
+        const next = e.relatedTarget as Node | null;
+        if (open && next && !rootRef.current?.contains(next)) setOpen(false);
+      }}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -103,6 +115,12 @@ export function ChromeMenu({
         aria-controls={panelId}
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape" || !open) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(false);
+        }}
         className={cn(
           "group flex h-6 min-w-0 items-center gap-1 rounded px-1.5 text-ui text-fg-dim transition-colors hover:bg-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-40",
           open && "bg-raised text-fg",

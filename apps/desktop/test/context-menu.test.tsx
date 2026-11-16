@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { useState } from "react";
 import { ContextMenu, clampMenuPosition } from "../src/renderer/components/ContextMenu.js";
 
 // audit #26: a tall menu opened near the bottom/right edge used to run off-screen (the last "Delete…" item was
@@ -47,5 +48,55 @@ describe("ContextMenu viewport clamp (audit #26)", () => {
     render(<ContextMenu x={10} y={10} onClose={() => {}} header={<span>42% ctx</span>} items={[{ label: "Reset layout", onClick: () => {} }]} />);
     expect(screen.getByText("42% ctx")).toBeInTheDocument();
     expect(screen.getAllByRole("menuitem")).toHaveLength(1);
+  });
+});
+
+// audit #67: closing the menu dropped focus on <body>, Tab walked out of an open menu, and there was no Home/End.
+describe("ContextMenu focus (audit #67)", () => {
+  function Harness({ onPick }: { onPick: () => void }): JSX.Element {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>trigger</button>
+        {open && <ContextMenu x={10} y={10} onClose={() => setOpen(false)} items={[{ label: "Rename", onClick: onPick }, { label: "Fork", onClick: () => {} }, { label: "Delete…", onClick: () => {}, danger: true }]} />}
+      </>
+    );
+  }
+  const openMenu = (): HTMLElement => {
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    return trigger;
+  };
+
+  it("returns focus to the trigger on Escape", () => {
+    render(<Harness onPick={() => {}} />);
+    const trigger = openMenu();
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("returns focus to the trigger before an item runs (so a dialog it opens can restore it)", () => {
+    let focusedDuringPick: Element | null = null;
+    render(<Harness onPick={() => { focusedDuringPick = document.activeElement; }} />);
+    const trigger = openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(focusedDuringPick).toBe(trigger);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes on Tab instead of letting focus wander out, and supports Home/End", () => {
+    render(<Harness onPick={() => {}} />);
+    const trigger = openMenu();
+    const menu = screen.getByRole("menu");
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Delete…" }));
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.keyDown(menu, { key: "Tab" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });

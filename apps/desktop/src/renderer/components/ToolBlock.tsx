@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChevronRight, FileText, Boxes } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { baseName as basename } from "../lib/path.js";
@@ -34,6 +34,7 @@ export function ToolBlock({
 }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const regionId = useId();
   const err = ok === false;
   const hasDetail = Boolean(input || result);
   const live = status !== "complete";
@@ -52,6 +53,8 @@ export function ToolBlock({
       <div className="group flex h-6 w-full items-center gap-1.5 rounded px-1 text-ui transition-colors hover:bg-raised/50">
         <button
           onClick={() => hasDetail && setOpen((v) => !v)}
+          aria-expanded={hasDetail ? open : undefined}
+          aria-controls={hasDetail ? regionId : undefined}
           className={cn("flex min-w-0 items-center gap-1.5", hasDetail ? "cursor-pointer" : "cursor-default")}
         >
           {hasDetail ? (
@@ -110,7 +113,7 @@ export function ToolBlock({
           </div>
         </div>
       )}
-      <Collapse open={open && hasDetail}>
+      <Collapse open={open && hasDetail} id={regionId}>
         <div className="ml-5 space-y-2 rounded-md border border-line-soft bg-sunk px-3 py-2">
           {input && (
             <div>

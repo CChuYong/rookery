@@ -108,19 +108,19 @@ describe("FileTree", () => {
     await waitFor(() => expect((window as any).rookery.ws.rename).toHaveBeenCalledWith("/r/a.ts", "/r/renamed.ts"));
   });
 
-  it("keeps an edited file name on Escape and closes the prompt from Cancel", async () => {
+  // audit #133 (intentional change): this one-line prompt now closes on Escape — there is no draft worth keeping, and
+  // the shared draft-form convention (Escape ignored) was the reason it could not be cancelled from the keyboard.
+  it("closes the name prompt on Escape and from Cancel", async () => {
     render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
     fireEvent.contextMenu(await screen.findByText("a.ts"));
     fireEvent.click(await screen.findByText("이름 변경"));
-    const dialog = await screen.findByRole("dialog");
-    const input = within(dialog).getByRole("textbox");
-    fireEvent.change(input, { target: { value: "keep-name.ts" } });
-
+    await screen.findByRole("dialog");
     fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(input).toHaveValue("keep-name.ts");
-
+    fireEvent.contextMenu(screen.getByText("a.ts"));
+    fireEvent.click(await screen.findByText("이름 변경"));
+    const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "취소" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -212,7 +212,9 @@ describe("FileTree", () => {
   });
 
   describe("fs-op failure feedback (#11)", () => {
-    it("toasts opFailed when a rename rejects (the dialog is already closed by then)", async () => {
+    // audit #133 (intentional change): the prompt stays open while the rename runs and shows the failure inline,
+    // keeping the typed name — it used to close first, so a failure left only a toast and the name was gone.
+    it("keeps the name prompt open with an inline error when a rename rejects", async () => {
       mockWs({ rename: vi.fn(async () => { throw new Error("boom"); }) });
       render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
       fireEvent.contextMenu(await screen.findByText("a.ts"));
@@ -221,7 +223,10 @@ describe("FileTree", () => {
       const input = within(dialog).getByRole("textbox");
       fireEvent.change(input, { target: { value: "renamed.ts" } });
       fireEvent.keyDown(input, { key: "Enter" });
-      await waitFor(() => expect(useToastStore.getState().toasts.some((x) => x.text === "파일 작업에 실패했어요")).toBe(true));
+      expect(await within(dialog).findByText(/파일 작업에 실패했어요/)).toBeInTheDocument();
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(input).toHaveValue("renamed.ts");
+      expect(input).toHaveAttribute("aria-invalid", "true");
     });
 
     it("toasts opFailed when a trash rejects", async () => {
@@ -232,6 +237,61 @@ describe("FileTree", () => {
       const dialog = await screen.findByRole("dialog");
       fireEvent.click(within(dialog).getByRole("button", { name: "삭제" }));
       await waitFor(() => expect(useToastStore.getState().toasts.some((x) => x.text === "파일 작업에 실패했어요")).toBe(true));
+    });
+  });
+
+  // audit #68: rename/delete/menu from the keyboard, not only by right-click.
+  describe("keyboard row actions (audit #68)", () => {
+    it("F2 renames the selected row (basename preselected), Delete asks to trash, Shift+F10 opens its menu", async () => {
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      await screen.findByText("a.ts");
+      const body = screen.getByTestId("filetree-body");
+      fireEvent.keyDown(body, { key: "End" }); // select a.ts
+      fireEvent.keyDown(body, { key: "F2" });
+      const input = within(await screen.findByRole("dialog")).getByRole("textbox") as HTMLInputElement;
+      expect(input.value).toBe("a.ts");
+      expect([input.selectionStart, input.selectionEnd]).toEqual([0, 1]); // "a" — the extension is left out
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "취소" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+      fireEvent.keyDown(body, { key: "Delete" });
+      expect(await screen.findByText(/휴지통/)).toBeInTheDocument();
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "취소" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+      fireEvent.keyDown(body, { key: "F10", shiftKey: true });
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+    });
+
+    it("rows are not their own tab stops; the tree points at the selection with aria-activedescendant", async () => {
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      const row = (await screen.findByText("a.ts")).closest("[data-path]") as HTMLElement;
+      expect(row).toHaveAttribute("tabindex", "-1");
+      const body = screen.getByTestId("filetree-body");
+      fireEvent.keyDown(body, { key: "End" });
+      expect(body.getAttribute("aria-activedescendant")).toBe(row.id);
+    });
+  });
+
+  // audit #69: the finder results were mouse-only.
+  describe("filter keyboard (audit #69)", () => {
+    it("Enter in the search box opens the top match; ArrowDown moves into the results, Arrow/Enter there", async () => {
+      render(<FileTree root="/r" pageKey="p1" version={0} activeTabPath={null} />);
+      await screen.findByText("src");
+      const search = screen.getByRole("textbox", { name: "파일 검색" });
+      fireEvent.change(search, { target: { value: "ts" } });
+      await screen.findByText("src/b.ts");
+      fireEvent.keyDown(search, { key: "Enter", keyCode: 229 }); // IME commit — ignored
+      expect(useWsStore.getState().byPage.p1?.activeTabId).toBeUndefined();
+      fireEvent.keyDown(search, { key: "Enter" });
+      await waitFor(() => expect(useWsStore.getState().byPage.p1?.activeTabId).toBe("file:/r/a.ts"));
+
+      fireEvent.keyDown(search, { key: "ArrowDown" });
+      const body = screen.getByTestId("filetree-body");
+      expect(document.activeElement).toBe(body);
+      fireEvent.keyDown(body, { key: "ArrowDown" });
+      fireEvent.keyDown(body, { key: "Enter" });
+      await waitFor(() => expect(useWsStore.getState().byPage.p1?.activeTabId).toBe("file:/r/src/b.ts"));
     });
   });
 });

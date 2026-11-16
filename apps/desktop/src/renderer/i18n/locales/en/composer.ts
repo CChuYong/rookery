@@ -33,4 +33,6 @@ export default {
   "composer.sendFailedPlain": "Couldn't send.",
   "composer.recovered": "Worker recovered",
   "composer.noCommands": "No commands available",
+  "composer.commandsLabel": "Commands",
+  "composer.filesLabel": "Files",
 } satisfies Catalog;

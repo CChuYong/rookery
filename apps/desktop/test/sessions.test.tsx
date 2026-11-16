@@ -86,7 +86,8 @@ describe("Sessions pin + hover actions", () => {
 describe("Sessions overflow '⋯' button (audit #45)", () => {
   it("is reachable by role/name and opens the same menu as right-click (Rename/Fork visible)", () => {
     render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onDelete={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
-    const moreBtn = screen.getByRole("button", { name: "더보기" });
+    // audit #78: the overflow button's accessible name says which row it acts on (was a bare "더보기" on every row)
+    const moreBtn = screen.getByRole("button", { name: "row 더보기" });
     fireEvent.click(moreBtn);
     expect(screen.getByText("이름 변경")).toBeInTheDocument();
     expect(screen.getByText("포크")).toBeInTheDocument();
@@ -95,7 +96,7 @@ describe("Sessions overflow '⋯' button (audit #45)", () => {
   it("clicking a menu item opened via '⋯' invokes the corresponding callback", () => {
     const onFork = vi.fn();
     render(<Sessions activeId={null} onSelect={() => {}} onFork={onFork} sessions={[mk({ id: "s1", label: "row" })] as never} />);
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "row 더보기" }));
     fireEvent.click(screen.getByText("포크"));
     expect(onFork).toHaveBeenCalledWith("s1");
   });
@@ -302,5 +303,50 @@ describe("Sessions text filter (audit #118)", () => {
   it("stays hidden for a short list", () => {
     render(<Sessions sessions={many.slice(0, 3) as never} activeId={null} onSelect={() => {}} />);
     expect(screen.queryByPlaceholderText("세션 필터…")).toBeNull();
+  });
+});
+
+// audit #107 #76 #77 #78: one tab stop per list, Arrow keys between rows, the open row marked aria-current, keyboard
+// paths for the row actions, named action buttons, a labelled rename input that ignores the IME's committing Enter.
+describe("Sessions keyboard + accessible names (audit T11)", () => {
+  const rows = [mk({ id: "a", label: "alpha" }), mk({ id: "b", label: "beta" }), mk({ id: "c", label: "gamma" })];
+
+  it("is a single tab stop on the open session, with Arrow navigation and aria-current", () => {
+    render(<Sessions activeId="b" onSelect={() => {}} onPin={vi.fn()} onDelete={vi.fn()} sessions={rows as never} />);
+    const beta = screen.getByText("beta").closest("button")!;
+    const alpha = screen.getByText("alpha").closest("button")!;
+    expect(beta).toHaveAttribute("aria-current", "page");
+    expect(beta).toHaveAttribute("tabindex", "0");
+    expect(alpha).toHaveAttribute("tabindex", "-1");
+    // the hover actions are not extra tab stops per row
+    expect(screen.getByRole("button", { name: "beta 삭제" })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "beta 고정" })).toHaveAttribute("tabindex", "-1");
+    beta.focus();
+    fireEvent.keyDown(beta, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(alpha);
+  });
+
+  it("opens the row menu on Shift+F10, renames on F2 and asks to delete on Delete", () => {
+    const onDelete = vi.fn();
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} onDelete={onDelete} onPin={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    const row = screen.getByText("row").closest("button")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "고정" })).toBeInTheDocument(); // pin has a keyboard path now
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(row, { key: "Delete" });
+    expect(screen.getByText("세션 삭제")).toBeInTheDocument();
+  });
+
+  it("labels the rename input and ignores the Enter that commits an IME syllable", () => {
+    const onRename = vi.fn();
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={onRename} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    fireEvent.keyDown(screen.getByText("row").closest("button")!, { key: "F2" });
+    const input = screen.getByRole("textbox", { name: "row 이름 변경" });
+    fireEvent.change(input, { target: { value: "새 이름" } });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(onRename).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledWith("s1", "새 이름");
   });
 });

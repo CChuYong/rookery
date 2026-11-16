@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { ToolBlock } from "./ToolBlock.js";
@@ -13,6 +13,7 @@ type ToolItem = Extract<LogItem, { kind: "tool" }>;
 export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { tools: ToolItem[]; onOpenFile?: (path: string) => void; onSelectWorker?: (id: string) => void; className?: string }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const regionId = useId();
   // Always call hooks above the early return (rules of hooks). Settle once when the group transitions from 'running' to 'ended'.
   const running = tools.some((t) => t.status !== "complete");
   const justSettled = useJustEnded(running);
@@ -27,6 +28,8 @@ export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { to
       {/* same flat one-line row as a single ToolBlock — no box, no coloured border, just the aggregate dot + count. */}
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={regionId}
         className="group flex h-6 w-full items-center gap-1.5 rounded px-1 text-ui transition-colors hover:bg-raised/50"
       >
         <ChevronRight size={12} className={cn("shrink-0 text-faint transition-transform duration-200 ease-out", open && "rotate-90")} />
@@ -35,7 +38,7 @@ export function ToolGroup({ tools, onOpenFile, onSelectWorker, className }: { to
         <span className="truncate text-meta text-faint">{names}</span>
         {errors > 0 && <span className="ml-1 shrink-0 text-meta text-fail">{t(errors === 1 ? "toolGroup.errorsOne" : "toolGroup.errorsMany", { count: errors })}</span>}
       </button>
-      <Collapse open={open}>
+      <Collapse open={open} id={regionId}>
         <div className="ml-5 flex flex-col gap-0.5 pt-0.5">
           {tools.map((t, i) => (
             <ToolBlock key={i} name={t.name} status={t.status} ok={t.ok} input={t.input} result={t.result} elapsedSec={t.elapsedSec} workflow={t.workflow} onOpenFile={onOpenFile} onSelectWorker={onSelectWorker} />

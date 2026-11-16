@@ -57,6 +57,25 @@ describe("ConversationPane Side drawer", () => {
     expect(onSideSend).toHaveBeenCalledWith("side-w", "which file?");
   });
 
+  // audit #73: Escape closes the drawer, opening moves focus into it, closing hands focus back to the main composer.
+  it("closes on Escape and returns focus to the composer that opened it", async () => {
+    const onSideStart = vi.fn(async () => "side-1");
+    const onSideClose = vi.fn();
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
+    const editor = screen.getByRole("textbox");
+    setPromptEditorText(editor, "why?");
+    const sideBtn = screen.getByRole("button", { name: "사이드 질문" });
+    sideBtn.focus();
+    fireEvent.click(sideBtn);
+    const drawer = await screen.findByRole("complementary", { name: "사이드 질문" });
+    await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
+    expect(screen.queryByRole("complementary", { name: "사이드 질문" })).toBeNull();
+    // the button that opened it is gone while the drawer is open, so focus lands on the conversation's composer
+    expect(document.activeElement).toBe(editor);
+  });
+
   it("uses registry-provided /btw and /side actions alongside prompt commands", () => {
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={async () => "side-1"} commands={[
       ...SIDE_COMMANDS,

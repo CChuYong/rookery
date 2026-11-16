@@ -387,3 +387,34 @@ describe("SettingsPage unsaved-changes guard", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
+
+// audit #131 #129: the category rail is a real vertical tablist (one tab stop, arrows move and select, a labelled
+// panel), and Escape closes the page through the same unsaved-changes guard as the X.
+describe("SettingsPage keyboard (audit #131 #129)", () => {
+  it("moves between categories with the arrow keys and labels the panel by its tab", () => {
+    render(<SettingsPage {...base} />);
+    const general = screen.getByRole("tab", { name: "일반" });
+    expect(general).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: "Slack" })).toHaveAttribute("tabindex", "-1");
+    general.focus();
+    fireEvent.keyDown(general, { key: "ArrowDown" });
+    const slack = screen.getByRole("tab", { name: "Slack" });
+    expect(slack).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(slack);
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", slack.id);
+  });
+
+  it("closes on Escape when clean, and asks first when there are unsaved edits", () => {
+    const onClose = vi.fn();
+    const { unmount } = render(<SettingsPage {...base} onClose={onClose} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    unmount();
+    const onClose2 = vi.fn();
+    render(<SettingsPage {...base} onClose={onClose2} />);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "other" } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose2).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});

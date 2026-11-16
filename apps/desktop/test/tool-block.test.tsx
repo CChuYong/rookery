@@ -145,3 +145,25 @@ describe("ToolBlock Dynamic Workflow state", () => {
     expect(screen.getByText("Workflow launched")).toBeInTheDocument();
   });
 });
+
+// audit #72: every expand/collapse row reports its state (aria-expanded) and points at the region it controls.
+describe("disclosure rows expose aria-expanded (audit #72)", () => {
+  it("ToolBlock, ToolGroup and ThinkingBlock toggle aria-expanded and point aria-controls at their region", async () => {
+    const { ToolGroup } = await import("../src/renderer/components/ToolGroup.js");
+    const { ThinkingBlock } = await import("../src/renderer/components/ThinkingBlock.js");
+    const tool = { kind: "tool" as const, name: "Read", status: "complete" as const, input: "x", result: "y" };
+    render(
+      <>
+        <ToolBlock name="Bash" status="complete" input="ls" result="ok" />
+        <ToolGroup tools={[tool, { ...tool, name: "Grep" }] as never} />
+        <ThinkingBlock text="hmm" />
+      </>,
+    );
+    for (const btn of [screen.getByText("Bash").closest("button")!, screen.getByText(/Read, Grep/).closest("button")!, screen.getByText("Thinking").closest("button")!]) {
+      expect(btn).toHaveAttribute("aria-expanded", "false");
+      expect(document.getElementById(btn.getAttribute("aria-controls")!)).not.toBeNull();
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute("aria-expanded", "true");
+    }
+  });
+});

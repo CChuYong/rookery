@@ -27,4 +27,8 @@ export default {
   "automationPage.enabledFor": "{name} enabled",
   "automationPage.enabledOn": "On — click to turn off",
   "automationPage.enabledOff": "Off — click to turn on",
+  "automationPage.viewSessionsFor": "Runs of {name}",
+  "automationPage.editFor": "Edit {name}",
+  "automationPage.deleteFor": "Delete {name}",
+  "automationPage.runFor": "Run {name} now",
 } satisfies Catalog;

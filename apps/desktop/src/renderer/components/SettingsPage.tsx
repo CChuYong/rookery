@@ -1,5 +1,7 @@
 import { SpeedControl } from "./SpeedControl.js";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { rovingIndex, usePageEscape } from "../lib/focus.js";
+import { withShortcut } from "../lib/shortcuts.js";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SlackStatus } from "@daemon/core/events.js";
 import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
@@ -144,6 +146,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
   const [tab, setTab] = useState<Tab>("general");
+  const railId = useId().replace(/:/g, "");
   // Which provider's config the "Models" tab shows — a pill sub-toggle inside that tab. Ephemeral
   // (defaults to Claude each open), matching the top-level `tab`'s non-persisted behavior.
   const [modelsProvider, setModelsProvider] = useState<ModelsProvider>("claude");
@@ -246,6 +249,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     void navigator.clipboard.writeText(url).then(() => { setMcpCopied(true); window.setTimeout(() => setMcpCopied(false), 1500); }).catch(() => {});
   };
   const requestClose = (): void => requestLeave(p.onClose);
+  usePageEscape(requestClose); // Escape closes like the header X — through the same unsaved-changes guard (audit #129)
 
   // Native folder-picker dialog (preload bridge), same as for worktree/session cwd.
   const pickCwd = async (): Promise<void> => {
@@ -296,20 +300,38 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     <>
       <div className="drag flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="text-body font-medium text-fg">{t("settings.title")}</span>
-        <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={requestClose} aria-label={t("settings.close")}>
+        <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={requestClose} aria-label={t("settings.close")} title={withShortcut(t("settings.close"), "Esc")}>
           <X size={14} />
         </Button>
       </div>
       <div className="flex min-h-0 flex-1">
         {/* category rail — VS Code settings layout: a left list of categories (not tabs-as-pills). A dot marks a
             category that holds unsaved changes. */}
-        <nav role="tablist" aria-label={t("settings.title")} className="w-[160px] shrink-0 overflow-y-auto bg-sunk py-2">
+        {/* Tab pattern done fully (audit #131): one tab stop (the selected category), ArrowUp/Down/Home/End move and
+            select, and the panel is labelled by its tab. */}
+        <nav
+          role="tablist"
+          aria-label={t("settings.title")}
+          aria-orientation="vertical"
+          onKeyDown={(e) => {
+            const i = rovingIndex(e.key, tabs.findIndex((x) => x.value === tab), tabs.length);
+            if (i === null) return;
+            e.preventDefault();
+            const next = tabs[i]!.value;
+            setTab(next);
+            document.getElementById(`${railId}-tab-${next}`)?.focus();
+          }}
+          className="w-[160px] shrink-0 overflow-y-auto bg-sunk py-2"
+        >
           {tabs.map((item) => (
             <button
               key={item.value}
+              id={`${railId}-tab-${item.value}`}
               type="button"
               role="tab"
               aria-selected={tab === item.value}
+              aria-controls={`${railId}-panel`}
+              tabIndex={tab === item.value ? 0 : -1}
               onClick={() => setTab(item.value)}
               className={cn(
                 "flex h-[26px] w-full items-center gap-2 px-3 text-left text-body transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi",
@@ -325,7 +347,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
         <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <div className={cn("break-keep px-6 py-6", tab === "capabilities" ? "max-w-[880px]" : "max-w-[720px]")}>
-          <div key={tab} role="tabpanel" className="rise-in">
+          <div key={tab} id={`${railId}-panel`} role="tabpanel" aria-labelledby={`${railId}-tab-${tab}`} className="rise-in">
             {tab === "general" && (
               <div className="flex flex-col gap-6">
                 <Row label={t("settings.botName")} hint={t("settings.botNameDesc")}>

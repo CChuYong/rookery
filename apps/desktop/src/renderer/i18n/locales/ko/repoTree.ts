@@ -29,4 +29,5 @@ export default {
   "repoTree.menuBranchDiff": "브랜치 전체 변경 보기",
   "repoTree.menuBranchDiffHint": "기준 브랜치 이후 이 워커의 모든 변경 사항 (읽기 전용)",
   "repoTree.archivedSection": "보관함 ({count})",
+  "repoTree.renameLabel": "{name} 이름 변경",
 } satisfies Catalog;

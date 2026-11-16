@@ -441,3 +441,19 @@ it("labels the next run with the viewer's zone only when the trigger's timezone 
   expect(b!.textContent!.length).toBeGreaterThan(a!.textContent!.length);
   expect(b!.textContent!.startsWith(a!.textContent!)).toBe(true);
 });
+
+// audit #78: every row's actions were read as a bare "편집"/"삭제" — the accessible name now says which automation.
+it("names each row action after its automation", () => {
+  render(<AutomationPage automations={[cronJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByRole("button", { name: "nightly 편집" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "nightly 삭제" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "nightly 지금 실행" })).toBeInTheDocument();
+});
+
+// audit #129: the list page closes on Escape like New session (nothing on it holds a draft).
+it("closes the automation list on Escape", () => {
+  const onClose = vi.fn();
+  render(<AutomationPage automations={[cronJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} onClose={onClose} />);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

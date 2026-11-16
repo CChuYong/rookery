@@ -18,4 +18,5 @@ export default {
   "fileTree.searching": "검색하는 중…",
   "fileTree.walkFailed": "파일 목록을 불러오지 못했어요",
   "fileTree.walkTruncated": "결과가 잘렸어요 — 검색어를 더 구체적으로 입력해 보세요",
+  "fileTree.treeLabel": "파일",
 } satisfies Catalog;

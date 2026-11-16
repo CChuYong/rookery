@@ -28,4 +28,8 @@ export default {
   "sessions.loadFailed": "Couldn't load the list",
   "sessions.filterPlaceholder": "Filter sessions…",
   "sessions.noMatches": "No matching sessions.",
+  "sessions.renameLabel": "Rename {name}",
+  "sessions.pinNamed": "Pin {name}",
+  "sessions.unpinNamed": "Unpin {name}",
+  "sessions.deleteNamed": "Delete {name}",
 } satisfies Catalog;

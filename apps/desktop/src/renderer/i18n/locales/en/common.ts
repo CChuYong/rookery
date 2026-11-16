@@ -20,4 +20,5 @@ export default {
   "common.effortMax": "Max",
   "common.effortUltra": "Ultra",
   "common.noLimit": "No limit",
+  "common.moreActionsFor": "More actions for {name}",
 } satisfies Catalog;

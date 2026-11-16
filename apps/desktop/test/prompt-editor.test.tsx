@@ -284,3 +284,29 @@ describe("PromptEditor empty slash catalogue", () => {
     expect(queryByText("사용할 수 있는 명령이 없어요")).toBeNull();
   });
 });
+
+// audit #70: the arrow-key highlight walked out of the popup's scroll area, and the popup had no listbox semantics.
+describe("PromptEditor slash popup keyboard (audit #70)", () => {
+  it("keeps the highlighted command in view and exposes it as the editor's active descendant", async () => {
+    const scrolled: Element[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    try {
+      const ref = createRef<PromptEditorHandle>();
+      const { findByRole, getByRole } = render(<PromptEditor ref={ref} commands={CMDS} />);
+      insert(ref, "/re");
+      const list = await findByRole("listbox");
+      const editor = getByRole("textbox");
+      const options = list.querySelectorAll('[role="option"]');
+      expect(options).toHaveLength(2);
+      expect(editor.getAttribute("aria-controls")).toBe(list.id);
+      expect(editor.getAttribute("aria-activedescendant")).toBe(options[0]!.id);
+      fireEvent.keyDown(editor, { key: "ArrowDown" });
+      await waitFor(() => expect(editor.getAttribute("aria-activedescendant")).toBe(options[1]!.id));
+      expect(options[1]).toHaveAttribute("aria-selected", "true");
+      expect(scrolled).toContain(options[1]);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+});

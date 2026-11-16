@@ -1,4 +1,7 @@
+import { useRef } from "react";
 import { Icon } from "@iconify/react";
+import { useScrollActiveIntoView } from "../lib/focus.js";
+import { useT } from "../i18n/provider.js";
 import { fileIcon, FOLDER_ICON } from "../lib/fileIcon.js";
 import type { BrowseEntry } from "../types/rookery.js";
 import { cn } from "../lib/cn.js";
@@ -15,22 +18,33 @@ function humanSize(n: number): string {
 }
 
 // Chat @ path autocomplete popup (same position/tone as the slash popup). Icon + name (folders get a trailing /) + file size.
+// role=listbox/option + ids so the editor can point aria-activedescendant at the highlight; the highlighted row is kept
+// in view while the arrow keys move it (audit #70).
 export function FileMentionPopup({
+  id,
   entries,
   sel,
   onHover,
   onPick,
 }: {
+  id?: string;
   entries: BrowseEntry[];
   sel: number;
   onHover: (i: number) => void;
   onPick: (entry: BrowseEntry) => void;
 }): JSX.Element {
+  const t = useT();
+  const listRef = useRef<HTMLDivElement>(null);
+  useScrollActiveIntoView(listRef, sel);
   return (
-    <div className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto", MENU_SURFACE)}>
+    <div ref={listRef} id={id} role="listbox" aria-label={t("composer.filesLabel")} className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto", MENU_SURFACE)}>
       {entries.map((e, i) => (
         <button
           key={e.name}
+          id={id ? `${id}-${i}` : undefined}
+          role="option"
+          aria-selected={i === sel}
+          tabIndex={-1}
           type="button"
           className={cn("flex w-full items-center gap-2 px-2.5 py-1.5 text-left", MENU_ITEM, i === sel && MENU_ITEM_ACTIVE)}
           onMouseEnter={() => onHover(i)}

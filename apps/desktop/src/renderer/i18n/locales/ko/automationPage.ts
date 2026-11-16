@@ -27,4 +27,8 @@ export default {
   "automationPage.enabledFor": "{name} 활성",
   "automationPage.enabledOn": "켜짐 — 눌러서 끄기",
   "automationPage.enabledOff": "꺼짐 — 눌러서 켜기",
+  "automationPage.viewSessionsFor": "{name} 실행 세션",
+  "automationPage.editFor": "{name} 편집",
+  "automationPage.deleteFor": "{name} 삭제",
+  "automationPage.runFor": "{name} 지금 실행",
 } satisfies Catalog;

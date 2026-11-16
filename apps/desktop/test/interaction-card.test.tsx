@@ -107,3 +107,29 @@ describe("InteractionCard", () => {
     expect(screen.getByText("응답 전송 중…")).toBeInTheDocument();
   });
 });
+
+// audit #74: the turn is blocked on this card, but reaching it took a string of Shift+Tabs.
+describe("InteractionCard focus (audit #74)", () => {
+  it("takes focus on its first action when the user is not mid-typing, and gives it back once answered", () => {
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    const item: Item = { kind: "interaction", requestId: "F1", mode: "approve", toolName: "Bash", resolved: false };
+    const { rerender } = render(<InteractionCard item={item} onRespond={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "승인" }));
+    expect(screen.getByRole("group", { name: "이 작업을 승인할까요?" })).toBeInTheDocument();
+    rerender(<InteractionCard item={{ ...item, resolved: true, summary: "ok" }} onRespond={vi.fn()} />);
+    expect(document.activeElement).toBe(composer);
+    composer.remove();
+  });
+
+  it("leaves focus alone while the user has a half-typed draft", () => {
+    const composer = document.createElement("textarea");
+    composer.value = "half a thought";
+    document.body.appendChild(composer);
+    composer.focus();
+    render(<InteractionCard item={{ kind: "interaction", requestId: "F2", mode: "approve", resolved: false }} onRespond={vi.fn()} />);
+    expect(document.activeElement).toBe(composer);
+    composer.remove();
+  });
+});

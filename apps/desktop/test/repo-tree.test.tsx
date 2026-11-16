@@ -184,7 +184,8 @@ describe("RepoTree worker-row overflow '⋯' button (audit #45)", () => {
         onDeleteSub={vi.fn()}
       />,
     );
-    const moreBtn = screen.getByRole("button", { name: "더보기" });
+    // audit #78: the overflow button names the worker it acts on
+    const moreBtn = screen.getByRole("button", { name: "worker1 더보기" });
     fireEvent.click(moreBtn);
     expect(screen.getByText("이름 변경")).toBeInTheDocument();
     expect(screen.getByText("포크")).toBeInTheDocument();
@@ -204,7 +205,7 @@ describe("RepoTree worker-row overflow '⋯' button (audit #45)", () => {
         onForkSub={onForkSub}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "worker1 더보기" }));
     fireEvent.click(screen.getByText("포크"));
     expect(onForkSub).toHaveBeenCalledWith("w1");
   });
@@ -504,8 +505,53 @@ describe("RepoTree worker menu — branch diff (audit #84)", () => {
         onViewBranchDiff={onViewBranchDiff}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "worker1 더보기" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /브랜치 전체 변경 보기/ }));
     expect(onViewBranchDiff).toHaveBeenCalledWith("w1");
+  });
+});
+
+// audit #107 #72 #76 #77: worker rows are one tab stop with Arrow navigation and aria-current, the repo fold header
+// reports aria-expanded, the filter and rename inputs are labelled, and the IME's committing Enter doesn't rename.
+describe("RepoTree keyboard + accessible names (audit T11)", () => {
+  const w2 = { ...worker, id: "w2", label: "worker2", branch: "rookery/w2" };
+  const base = { repos: [repo] as never, onSelectSub: () => {}, onNewRepo: () => {}, onRemoveRepo: () => {}, onNewSub: () => {} };
+  beforeEach(() => useRepoTreeStore.setState({ collapsed: {} }));
+
+  it("roves between worker rows and marks the open one", () => {
+    render(<RepoTree {...base} fleet={[worker, w2] as never} activeSubId="w2" />);
+    const r1 = screen.getByText("worker1").closest("button")!;
+    const r2 = screen.getByText("worker2").closest("button")!;
+    expect(r2).toHaveAttribute("aria-current", "page");
+    expect(r2).toHaveAttribute("tabindex", "0");
+    expect(r1).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "worker1 더보기" })).toHaveAttribute("tabindex", "-1");
+    r2.focus();
+    fireEvent.keyDown(r2, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(r1);
+  });
+
+  it("the repo header says whether it is expanded", () => {
+    render(<RepoTree {...base} fleet={[worker] as never} activeSubId={null} />);
+    const header = screen.getByText("app").closest("button")!;
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("Shift+F10 opens the worker menu; F2 renames through a labelled input that ignores the IME Enter", () => {
+    const onRenameSub = vi.fn();
+    render(<RepoTree {...base} fleet={[worker] as never} activeSubId={null} onRenameSub={onRenameSub} />);
+    const row = screen.getByText("worker1").closest("button")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(row, { key: "F2" });
+    const input = screen.getByRole("textbox", { name: "worker1 이름 변경" });
+    fireEvent.change(input, { target: { value: "새 워커" } });
+    fireEvent.keyDown(input, { key: "Enter", nativeEvent: { isComposing: true }, keyCode: 229 });
+    expect(onRenameSub).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRenameSub).toHaveBeenCalledWith("w1", "새 워커");
   });
 });

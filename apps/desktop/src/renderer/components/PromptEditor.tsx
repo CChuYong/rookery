@@ -36,6 +36,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -46,6 +47,7 @@ import { cn } from "../lib/cn.js";
 import { MENU_ITEM, MENU_ITEM_ACTIVE, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { FileMentionPopup } from "./FileMentionPopup.js";
+import { useScrollActiveIntoView } from "../lib/focus.js";
 import {
   $createFileMentionNode,
   $isFileMentionNode,
@@ -175,6 +177,10 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
     && slashMatches.length > 0
     && !slashDismissed
     && !disabled;
+  const popupId = useId();
+  const slashListRef = useRef<HTMLDivElement>(null);
+  // The arrow keys move the highlight; keep it inside the popup's scroll area (audit #70).
+  useScrollActiveIntoView(slashListRef, slashOpen ? slashSel : -1);
   // A bare "/" with no command catalogue at all says so instead of doing nothing (audit #35). A longer token that
   // matches nothing (a path like /usr/local) stays quiet.
   const slashEmpty = slashQuery === ""
@@ -371,10 +377,14 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
   return (
     <div className="relative">
       {slashOpen && (
-        <div className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden", MENU_SURFACE)}>
+        <div ref={slashListRef} id={`${popupId}-slash`} role="listbox" aria-label={t("composer.commandsLabel")} className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden", MENU_SURFACE)}>
           {slashMatches.map((command, index) => (
             <button
               key={command.name}
+              id={`${popupId}-slash-${index}`}
+              role="option"
+              aria-selected={index === slashSel}
+              tabIndex={-1}
               type="button"
               className={cn("flex w-full flex-col items-start gap-0.5 px-2.5 py-1.5 text-left", MENU_ITEM, index === slashSel && MENU_ITEM_ACTIVE)}
               onMouseEnter={() => setSlashSel(index)}
@@ -398,6 +408,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
       )}
       {fileMention.open && (
         <FileMentionPopup
+          id={`${popupId}-mention`}
           entries={fileMention.entries}
           sel={fileMention.sel}
           onHover={fileMention.setSel}
@@ -414,6 +425,11 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
           <ContentEditable
             role="textbox"
             aria-label={props.ariaLabel ?? t("composer.editorAriaLabel")}
+            // Combobox wiring for the slash / @ popups (audit #70): the editor keeps focus, the popup's highlighted
+            // option is announced through aria-activedescendant.
+            aria-autocomplete="list"
+            aria-controls={fileMention.open ? `${popupId}-mention` : slashOpen ? `${popupId}-slash` : undefined}
+            aria-activedescendant={fileMention.open ? `${popupId}-mention-${fileMention.sel}` : slashOpen ? `${popupId}-slash-${slashSel}` : undefined}
             aria-multiline="true"
             style={props.minHeight ? { minHeight: props.minHeight } : undefined}
             className={editorClassName}

@@ -15,6 +15,7 @@ import { LoadFailed, EmptyState } from "../ui/load-state.js";
 import { Tooltip } from "./Tooltip.js";
 import { toast } from "../store/toasts.js";
 import { useT } from "../i18n/provider.js";
+import { isImeComposing } from "../lib/focus.js";
 
 type Change = { path: string; x: string; y: string; added: number; deleted: number };
 type Info = Awaited<ReturnType<Window["rookery"]["ws"]["gitInfo"]>>;
@@ -312,7 +313,7 @@ export function GitChanges({ root, pageKey, version = 0, onViewBranchDiff }: { r
               size="sm"
               value={msg}
               onChange={(e) => setMsg(e.target.value)}
-              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && msg.trim() && staged.length && !busy) void commit(); }}
+              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !isImeComposing(e) && msg.trim() && staged.length && !busy) void commit(); }}
               placeholder={staged.length ? t("gitChanges.commitPlaceholder") : t("gitChanges.commitPlaceholderEmpty")}
               rows={2}
               className="w-full resize-none"

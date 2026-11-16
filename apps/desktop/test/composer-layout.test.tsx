@@ -25,6 +25,23 @@ describe("Composer model menu", () => {
     expect(trigger).toHaveFocus();
   });
 
+  // Task 4 carry-over (audit T11 focus family): Tab out of the open menu left it open, and Escape on the trigger did nothing.
+  it("closes when focus tabs out of it, and on Escape from the trigger", () => {
+    render(<><Composer onSend={() => {}} controls={master} /><button>outside</button></>);
+    const trigger = screen.getByRole("button", { name: /Opus 4\.8 · 높음/ });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("dialog");
+    const outside = screen.getByRole("button", { name: "outside" });
+    fireEvent.blur(within(menu).getAllByRole("combobox")[0]!, { relatedTarget: outside });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
   it("shows only non-default permission and speed choices on the trigger", () => {
     const { rerender } = render(<Composer onSend={() => {}} controls={master} />);
     expect(screen.queryByRole("button", { name: /권한 우회/ })).toBeNull(); // the default mode is not shouted on the bar

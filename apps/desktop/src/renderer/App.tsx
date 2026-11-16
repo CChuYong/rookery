@@ -60,6 +60,7 @@ import { SettingsPage } from "./components/SettingsPage.js";
 import { SidebarRail } from "./components/SidebarRail.js";
 import { ReposHome } from "./components/ReposHome.js";
 import { useHistoryShortcuts } from "./lib/useHistoryShortcuts.js";
+import { APP_SHORTCUT, useAppShortcuts, withShortcut } from "./lib/shortcuts.js";
 import { shortBranch } from "./lib/branch.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
 import { Button } from "./ui/button.js";
@@ -725,6 +726,12 @@ export function App(): JSX.Element {
     else void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
   }, [loadWorkerHistory]);
   const create = () => navigate({ overlay: "newSession" }); // open the new-session full page (mutually exclusive with settings/automation)
+  // IDE shortcuts (audit #140): Cmd/Ctrl+B sidebar, Cmd/Ctrl+N new session, Cmd/Ctrl+, settings — hinted on their controls.
+  useAppShortcuts({
+    toggleSidebar: () => toggleSidebar(),
+    newSession: () => create(),
+    settings: () => navigate({ overlay: overlay === "settings" ? null : "settings" }),
+  });
   // Getting Started "first worker": land the user in a composer pre-filled with an example natural-language ask
   // (register the repo → spawn a worker → report back). With no usable session yet, seed the New Session page's
   // draft instead. Existing drafts are never clobbered; the epoch bump makes an already-mounted pane pick the seed up.
@@ -1295,6 +1302,7 @@ export function App(): JSX.Element {
   const navBtn = (label: string, Icon: typeof MessageSquare, active: boolean, onClick: () => void, badge = false) => (
     <button
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors",
         active ? ROW_SELECTED : "text-muted hover:bg-raised/60 hover:text-fg-dim", // the shared neutral selection (audit #101)
@@ -1347,7 +1355,7 @@ export function App(): JSX.Element {
             <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
               <ChevronRight size={14} />
             </button>
-            <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} title={t("app.collapseSidebar")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim">
+            <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} aria-keyshortcuts={APP_SHORTCUT.toggleSidebar.aria()} title={withShortcut(t("app.collapseSidebar"), APP_SHORTCUT.toggleSidebar.label())} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim">
               <PanelLeftClose size={14} />
             </button>
           </div>
@@ -1382,6 +1390,9 @@ export function App(): JSX.Element {
             {!showRepos && (
               <button
                 onClick={create}
+                aria-current={overlay === "newSession" ? "page" : undefined}
+                aria-keyshortcuts={APP_SHORTCUT.newSession.aria()}
+                title={withShortcut(t("app.newSession"), APP_SHORTCUT.newSession.label())}
                 className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "newSession" ? ROW_SELECTED : "text-fg-dim hover:bg-raised/60 hover:text-fg")}
               >
                 <Plus size={14} className="shrink-0" /> {t("app.newSession")}
@@ -1391,6 +1402,7 @@ export function App(): JSX.Element {
             {showRepos && (
               <button
                 onClick={newWorker}
+                aria-current={overlay === "spawnWorker" ? "page" : undefined}
                 className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "spawnWorker" ? ROW_SELECTED : "text-fg-dim hover:bg-raised/60 hover:text-fg")}
               >
                 <Plus size={14} className="shrink-0" /> {t("app.newWorker")}

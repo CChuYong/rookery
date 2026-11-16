@@ -49,3 +49,33 @@ describe("useHistoryShortcuts", () => {
     expect(fwd).toHaveBeenCalledTimes(1);
   });
 });
+
+// audit #140: the IDE shortcut set beyond Ctrl+` — sidebar, new session, settings.
+describe("appShortcutFor (audit #140)", () => {
+  it("maps Cmd+B/N/, on macOS and Ctrl elsewhere; ignores Shift/Alt and the other modifier", async () => {
+    const { appShortcutFor } = await import("../src/renderer/lib/shortcuts.js");
+    const key = (k: Partial<KeyboardEvent>) => ({ key: "", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...k });
+    expect(appShortcutFor(key({ key: "b", metaKey: true }), "darwin")).toBe("toggleSidebar");
+    expect(appShortcutFor(key({ key: "n", metaKey: true }), "darwin")).toBe("newSession");
+    expect(appShortcutFor(key({ key: ",", metaKey: true }), "darwin")).toBe("settings");
+    expect(appShortcutFor(key({ key: "b", ctrlKey: true }), "darwin")).toBeNull();
+    expect(appShortcutFor(key({ key: "b", ctrlKey: true }), "linux")).toBe("toggleSidebar");
+    expect(appShortcutFor(key({ key: "B", ctrlKey: true, shiftKey: true }), "win32")).toBeNull();
+  });
+
+  it("useAppShortcuts fires outside text fields only", async () => {
+    const { useAppShortcuts } = await import("../src/renderer/lib/shortcuts.js");
+    (window as unknown as { rookery: unknown }).rookery = { platform: "darwin" };
+    const toggleSidebar = vi.fn();
+    function H(): JSX.Element {
+      useAppShortcuts({ toggleSidebar, newSession: () => {}, settings: () => {} });
+      return <div><input aria-label="field" /><button>btn</button></div>;
+    }
+    const { getByLabelText, getByText } = render(<H />);
+    fireEvent.keyDown(getByLabelText("field"), { key: "b", metaKey: true });
+    expect(toggleSidebar).not.toHaveBeenCalled();
+    fireEvent.keyDown(getByText("btn"), { key: "b", metaKey: true });
+    expect(toggleSidebar).toHaveBeenCalledTimes(1);
+    delete (window as unknown as { rookery?: unknown }).rookery;
+  });
+});

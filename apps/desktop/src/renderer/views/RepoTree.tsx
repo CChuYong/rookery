@@ -1,4 +1,6 @@
-import { memo, useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect, useId } from "react";
+import { isImeComposing, useRovingTabIndex } from "../lib/focus.js";
+import { SHORTCUT, isDeleteKey, isMenuKey, isRenameKey, withShortcut } from "../lib/shortcuts.js";
 import { ChevronRight, FolderGit2, Plus, Archive, Search, Loader2, MoreHorizontal, Settings2 } from "lucide-react";
 import { useStore } from "../store/store.js";
 import { useRepoTreeStore } from "../store/repotree.js";
@@ -106,6 +108,10 @@ function RepoTreeImpl(p: {
   const [removeConfirm, setRemoveConfirm] = useState<{ name: string } | null>(null);
   const [q, setQ] = useState(""); // fleet-at-scale filter: by worker label
   const [onlyActive, setOnlyActive] = useState(false); // show only running/idle/unread workers
+  // Worker rows are one tab stop (the open worker's row), Arrow keys move between them (audit #107).
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useRovingTabIndex(listRef);
+  const treeId = useId();
   // worker spawn appearance: workers present in the first non-empty fleet are excluded as the seed; only workers spawned afterward get the rise-in.
   // Membership is non-mutating, so the class stays for the row's whole lifetime (not re-evaluated) and the appearance isn't cut off by status-change re-renders.
   // When a view switch remounts RepoTree, the seed is re-captured from the current fleet so workers don't re-appear.
@@ -142,7 +148,9 @@ function RepoTreeImpl(p: {
             autoFocus
             value={renaming.value}
             onChange={(e) => setRenaming({ id: sub.id, value: e.target.value })}
+            aria-label={t("repoTree.renameLabel", { name: cleanLabel(sub.label, sub.id) })}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return; // the IME's committing Enter must not also commit the rename (audit #76)
               if (e.key === "Enter") { p.onRenameSub?.(sub.id, renaming.value.trim() || sub.label); setRenaming(null); }
               else if (e.key === "Escape") setRenaming(null);
             }}
@@ -159,8 +167,25 @@ function RepoTreeImpl(p: {
     return (
       <div key={sub.id} className={cn("group relative", isFreshSpawn(sub.id) && "rise-in")}>
         <button
+          data-roving-item
+          aria-current={active ? "page" : undefined}
+          aria-keyshortcuts={`${SHORTCUT.menu.aria} ${p.onRenameSub ? SHORTCUT.rename.aria : ""} ${p.onDeleteSub ? SHORTCUT.delete.aria() : ""}`.trim()}
           onClick={() => p.onSelectSub(sub.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: sub.id, x: e.clientX, y: e.clientY }); }}
+          onKeyDown={(e) => {
+            // Keyboard paths for the row's mouse actions (audit #107; the '⋯' is out of the tab order).
+            if (isMenuKey(e)) {
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenu({ id: sub.id, x: r.left + 12, y: r.bottom, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+            } else if (isRenameKey(e) && p.onRenameSub) {
+              e.preventDefault();
+              setRenaming({ id: sub.id, value: sub.label });
+            } else if (isDeleteKey(e) && p.onDeleteSub) {
+              e.preventDefault();
+              setConfirm({ id: sub.id, name: sub.label });
+            }
+          }}
           className={cn(
             // Row geometry + selection come from lib/ui-tokens.ts, shared with Sessions.tsx (audit #76 #109). Two-line
             // (title+cost / branch+state) so the branch is visible without opening the worker (DESIGN shell anatomy).
@@ -204,8 +229,10 @@ function RepoTreeImpl(p: {
         {/* overflow '⋯' — worker rows previously had zero hover actions and the menu was right-click-only (audit #45; macOS
             has no context-menu key for keyboard users). Opens the SAME menu, reachable by left-click/Enter, positioned at the button. */}
         <button
-          title={t("common.moreActions")}
-          aria-label={t("common.moreActions")}
+          tabIndex={-1}
+          title={withShortcut(t("common.moreActions"), SHORTCUT.menu.label())}
+          aria-label={t("common.moreActionsFor", { name: cleanLabel(sub.label, sub.id) })}
+          aria-haspopup="menu"
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: sub.id, x: r.left, y: r.bottom + 4, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }); }}
           className="absolute bottom-0.5 right-1.5 rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
         >
@@ -217,6 +244,7 @@ function RepoTreeImpl(p: {
 
   const group = (key: string, title: string, subs: FleetRow[], opts: { removable: boolean; canAdd: boolean; repoId?: string }) => {
     const foldable = subs.length > 0; // collapsible only when there are workers. Otherwise just a flat header.
+    const groupId = `${treeId}-group-${key.replace(/\s+/g, "_")}`; // aria-controls target (ids can't hold whitespace)
     const open = foldable && (filtering || !collapsed[key]); // filtering forces groups open so matches surface
     const headerInner = (
       <>
@@ -238,7 +266,7 @@ function RepoTreeImpl(p: {
           onContextMenu={hasMenu ? (e) => { e.preventDefault(); openRepoMenu(e.clientX, e.clientY); } : undefined}
         >
           {foldable ? (
-            <button onClick={() => setCollapsed(key, open)} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left">
+            <button onClick={() => setCollapsed(key, open)} aria-expanded={open} aria-controls={groupId} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left">
               {headerInner}
             </button>
           ) : (
@@ -276,7 +304,7 @@ function RepoTreeImpl(p: {
             </button>
           )}
         </div>
-        <Collapse open={open}>
+        <Collapse open={open} id={groupId}>
           <div className="ml-3 flex flex-col gap-0.5 border-l border-line pl-2">
             {subs.map(subButton)}
           </div>
@@ -288,11 +316,11 @@ function RepoTreeImpl(p: {
   const menuSub = menu ? p.fleet.find((x) => x.id === menu.id) : undefined;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto">
+    <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto">
       {live.length > 4 && (
         <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 transition-colors focus-within:border-accent/50">
           <Search size={12} className="shrink-0 text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("repoTree.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("repoTree.filterPlaceholder")} aria-label={t("repoTree.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
           <button onClick={() => setOnlyActive((v) => !v)} title={t("repoTree.onlyActiveTitle")} aria-pressed={onlyActive} className={cn("shrink-0 rounded px-1.5 py-0.5 text-meta font-medium transition-colors", onlyActive ? "bg-raised text-fg" : "text-muted hover:text-fg-dim")}>
             {t("repoTree.onlyActive")}
           </button>
@@ -311,7 +339,7 @@ function RepoTreeImpl(p: {
 
       {archived.length > 0 && (
         <div className="mt-1">
-          <button onClick={() => setArchOpen(!archOpen)} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-meta font-medium text-faint hover:text-fg-dim">
+          <button onClick={() => setArchOpen(!archOpen)} aria-expanded={archOpen} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-meta font-medium text-faint hover:text-fg-dim">
             <ChevronRight size={12} className={cn("transition-transform duration-200 ease-out", archOpen && "rotate-90")} />
             <Archive size={12} /> {t("repoTree.archivedSection", { count: archived.length })}
           </button>
@@ -333,7 +361,7 @@ function RepoTreeImpl(p: {
           anchorRect={menu.rect}
           onClose={() => setMenu(null)}
           items={[
-            { label: t("repoTree.menuRename"), onClick: () => setRenaming({ id: menu.id, value: menuSub.label }) },
+            { label: t("repoTree.menuRename"), shortcut: { label: SHORTCUT.rename.label(), aria: SHORTCUT.rename.aria }, onClick: () => setRenaming({ id: menu.id, value: menuSub.label }) },
             { label: t("repoTree.menuFork"), onClick: () => p.onForkSub?.(menu.id) },
             ...(p.onViewBranchDiff ? [{ label: t("repoTree.menuBranchDiff"), hint: t("repoTree.menuBranchDiffHint"), onClick: () => p.onViewBranchDiff?.(menu.id) }] : []),
             // stop: whenever the worker is not terminal (running/background/idle) — keeps the worktree and pauses
@@ -344,7 +372,7 @@ function RepoTreeImpl(p: {
               ? [{ label: t("repoTree.menuStop"), hint: t("repoTree.menuStopHint"), onClick: () => p.onStopSub?.(menu.id) }]
               : []),
             { label: menuSub.archived ? t("repoTree.menuUnarchive") : t("repoTree.menuArchive"), onClick: () => p.onArchiveSub?.(menu.id, !menuSub.archived) },
-            { label: t("repoTree.menuDelete"), hint: t("repoTree.menuDeleteHint"), danger: true, onClick: () => setConfirm({ id: menu.id, name: menuSub.label }) },
+            { label: t("repoTree.menuDelete"), hint: t("repoTree.menuDeleteHint"), danger: true, shortcut: { label: SHORTCUT.delete.label(), aria: SHORTCUT.delete.aria() }, onClick: () => setConfirm({ id: menu.id, name: menuSub.label }) },
           ]}
         />
       )}

@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { Tooltip } from "./Tooltip.js";
+import { APP_SHORTCUT, withShortcut } from "../lib/shortcuts.js";
 
 // Collapsed sidebar = a navigation rail (audit #19), the VS Code activity-bar idea: expand, history, the two views
 // and the new-item entry for the current view. Everything else (resources, bell, restart, capabilities, automation,
@@ -39,7 +40,7 @@ export function SidebarRail(p: {
   );
   return (
     <>
-      <button onClick={p.onExpand} aria-label={t("app.expandSidebar")} title={t("app.expandSidebar")} className={plain}>
+      <button onClick={p.onExpand} aria-label={t("app.expandSidebar")} aria-keyshortcuts={APP_SHORTCUT.toggleSidebar.aria()} title={withShortcut(t("app.expandSidebar"), APP_SHORTCUT.toggleSidebar.label())} className={plain}>
         <PanelLeft size={14} />
       </button>
       <button onClick={p.onBack} disabled={!p.canBack} aria-label={t("app.back")} title={t("app.back")} className={plain}>
