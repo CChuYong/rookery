@@ -4,7 +4,7 @@ export default {
   "toast.saveFailed": "Couldn't save changes",
   "toast.deleteFailed": "Couldn't delete",
   "toast.forkFailed": "Couldn't fork",
-  "toast.sendFailed": "Failed to send message",
+  "toast.sendFailed": "Couldn't send the message",
   "toast.spawnFailed": "Couldn't spawn the worker",
   "toast.registerFailed": "Couldn't register the repo",
   "toast.automationFailed": "Automation action failed",
@@ -14,4 +14,5 @@ export default {
   "toast.workerSpawned": "Worker spawned",
   "toast.keySaved": "Key saved",
   "toast.restored": "Restored to checkpoint",
+  "toast.mcpTokenRegenerated": "Token regenerated — register the new URL in your external clients",
 } satisfies Catalog;

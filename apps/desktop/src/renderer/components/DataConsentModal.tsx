@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { useT } from "../i18n/provider.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
 import { Button } from "../ui/button.js";
+import { dialogOverlayClass, dialogPanelClass } from "../ui/dialog.js";
 
 interface DataConsentModalProps {
   onAccept: () => Promise<unknown>; // caller returns the settings.set promise so failures surface here (audit #7)
@@ -34,13 +35,13 @@ export function DataConsentModal({ onAccept }: DataConsentModalProps): JSX.Eleme
     // the dialog-in entrance used by RepoModal/RestartDaemonDialog/etc.), and the raw button below is now
     // <Button variant="primary">. No exit animation is wired (no useDismissTransition) — this gate has no
     // dismiss path other than a successful Accept, which unmounts it at the App.tsx mount site.
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim">
+    <div className={dialogOverlayClass()}>
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="bg-surface border border-line rounded-xl p-6 max-w-md w-full mx-4 shadow-pop motion-safe:animate-[dialog-in_160ms_ease-out]"
+        className={dialogPanelClass({ size: "md" })}
       >
         <h2 id={titleId} className="text-title font-medium text-fg mb-2">{t("dataConsent.title")}</h2>
         <p className="text-body leading-relaxed text-muted mb-5">{t("dataConsent.body")}</p>

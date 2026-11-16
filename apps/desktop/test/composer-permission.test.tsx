@@ -15,7 +15,7 @@ describe("Composer permission-mode selector", () => {
     expect(sel).toBeInTheDocument();
     expect(sel.value).toBe("bypassPermissions");
     // The 4 mode labels (Claude official names)
-    ["Bypass Permissions", "Default", "Plan Mode", "Accept Edits"].forEach((l) => expect(screen.getByText(l)).toBeInTheDocument());
+    ["권한 우회", "기본", "계획 모드", "편집 자동 승인"].forEach((l) => expect(screen.getByText(l)).toBeInTheDocument());
     fireEvent.change(sel, { target: { value: "default" } });
     expect(onPermissionMode).toHaveBeenCalledWith("default");
   });
@@ -35,11 +35,11 @@ describe("Composer permission-mode selector", () => {
     );
     const sel = screen.getByTitle(/권한 모드|Permission mode/) as HTMLSelectElement;
     expect(sel.value).toBe("bypassPermissions");
-    expect(screen.getByText("Bypass Permissions")).toBeInTheDocument();
-    expect(screen.getByText("Plan Mode")).toBeInTheDocument();
+    expect(screen.getByText("권한 우회")).toBeInTheDocument();
+    expect(screen.getByText("계획 모드")).toBeInTheDocument();
     // restricted: the master-only modes are NOT offered to a worker
-    expect(screen.queryByText("Default")).toBeNull();
-    expect(screen.queryByText("Accept Edits")).toBeNull();
+    expect(screen.queryByText("기본")).toBeNull();
+    expect(screen.queryByText("편집 자동 승인")).toBeNull();
     fireEvent.change(sel, { target: { value: "plan" } });
     expect(onPermissionMode).toHaveBeenCalledWith("plan");
   });

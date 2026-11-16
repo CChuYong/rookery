@@ -90,6 +90,11 @@ interface TermStore extends TermState {
   toggleOpen_: (key: string) => void;
   setOpen_: (key: string, open: boolean) => void;
   setHeight_: (h: number) => void;
+  // Not persisted: per-page counter asking the page's TerminalPanel to open a shell. The dock bumps it when the
+  // terminal toggle / Ctrl+` shows a terminal panel that has no shell yet, so one press gives a prompt instead of an
+  // empty strip with a second "New terminal" step (audit #80).
+  shellRequests: Record<string, number>;
+  requestShell_: (key: string) => void;
 }
 export const useTermStore = create<TermStore>()(
   persist(
@@ -103,6 +108,8 @@ export const useTermStore = create<TermStore>()(
       toggleOpen_: (key) => set((s) => setLayout(toggleOpen(s, key), key)),
       setOpen_: (key, open) => set((s) => setLayout(setDrawerOpen(s, key, open), key)),
       setHeight_: (h) => set((s) => setHeight(s, h)),
+      shellRequests: {},
+      requestShell_: (key) => set((s) => ({ shellRequests: { ...s.shellRequests, [key]: (s.shellRequests[key] ?? 0) + 1 } })),
     }),
     {
       name: "rookery.term",

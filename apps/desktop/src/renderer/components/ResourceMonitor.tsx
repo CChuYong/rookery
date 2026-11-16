@@ -3,7 +3,9 @@ import { Cpu, RefreshCw } from "lucide-react";
 import type { ResourceSnapshot, ResourceBucket } from "../types/rookery.js";
 import { fmtBytes } from "../format.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { cn } from "../lib/cn.js";
+import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 
 function pct(n: number): string {
@@ -35,16 +37,20 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
 
 export function ResourceMonitor({
   snapshot,
+  failed,
   collapsed,
   onRefresh,
   onOpenChange,
   variant = "sidebar",
+  closeKey,
 }: {
   snapshot: ResourceSnapshot | null;
+  failed?: boolean; // several reads in a row failed → say so (with a refresh) instead of a skeleton forever (audit #137)
   collapsed?: boolean;
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>; // a promise drives the failure Retry's progress and its second-failure note
   onOpenChange?: (open: boolean) => void;
   variant?: "sidebar" | "statusbar"; // statusbar: borderless 11px trigger that opens the popover upward (bottom bar has no room below it)
+  closeKey?: string; // the current route: a change closes the popover (audit #27)
 }): JSX.Element {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -69,6 +75,22 @@ export function ResourceMonitor({
     return () => window.removeEventListener("keydown", esc);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close/onOpenChange are recreated every render; open alone gates (re)bind
   }, [open]);
+  // Close on a route change or a window resize (audit #27): keyboard/focus navigation never crosses the click-catcher
+  // overlay, so the popover used to stay open over the next page's form.
+  const lastKey = useRef(closeKey);
+  useEffect(() => {
+    if (lastKey.current === closeKey) return;
+    lastKey.current = closeKey;
+    if (open) close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a route change should close
+  }, [closeKey]);
+  useEffect(() => {
+    if (!open) return;
+    const onResize = (): void => close();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close/onOpenChange are recreated every render
+  }, [open]);
   // Move focus inside on open — the Refresh button when present, otherwise the panel itself (audit #61: previously
   // opening left focus on the trigger button, so keyboard users had no way to tell the popover had opened).
   useEffect(() => {
@@ -79,13 +101,15 @@ export function ResourceMonitor({
   const label = snapshot ? fmtBytes(snapshot.memBytes) : "—";
   // Hotness = the worse of CPU / RAM-share. ≥70 amber, ≥90 red + led-live so a saturated host pulses coral right in the chrome.
   const hot = snapshot ? Math.max(snapshot.cpuPct, snapshot.ramSharePct) : 0;
-  const hotTone = hot >= 90 ? "text-fail" : hot >= 70 ? "text-run" : null;
+  const hotTone = hot >= 90 ? "text-fail" : hot >= 70 ? "text-warn" : null; // a threshold is a warning, not "running" (audit #100)
 
   return (
     <div className="relative">
       <button
         type="button"
         aria-label={t("resourceMonitor.resources")}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={toggle}
         title={t("resourceMonitor.tooltip")}
         className={cn(
@@ -108,8 +132,11 @@ export function ResourceMonitor({
           <div
             ref={panelRef}
             tabIndex={-1}
+            // a popover layer: page-level Escape (Settings/Automation) stands back while it is open
+            role="dialog"
+            aria-label={t("resourceMonitor.resources")}
             className={cn(
-              "absolute z-50 w-[300px] rounded-lg border border-line bg-surface p-1.5 shadow-pop focus:outline-none",
+              "absolute z-50 w-[300px] focus:outline-none", MENU_SURFACE,
               // The status bar sits at the bottom of the viewport, so its popover opens upward; the collapsed
               // sidebar rail opens to the right (no room below); the full sidebar footer opens downward.
               variant === "statusbar" ? "bottom-full left-0 mb-1" : collapsed ? "left-full top-0 ml-2" : "left-0 top-full mt-1",
@@ -122,7 +149,7 @@ export function ResourceMonitor({
                   ref={refreshRef}
                   type="button"
                   aria-label={t("common.refresh")}
-                  onClick={onRefresh}
+                  onClick={() => { void Promise.resolve(onRefresh()).catch(() => {}); }}
                   className="rounded p-1 text-muted hover:bg-raised hover:text-fg-dim"
                 >
                   <RefreshCw size={12} />
@@ -153,6 +180,8 @@ export function ResourceMonitor({
                   </div>
                 )}
               </>
+            ) : failed ? (
+              <LoadFailed message={t("resourceMonitor.loadFailed")} onRetry={() => onRefresh?.()} />
             ) : (
               <SkeletonRows rows={5} className="px-2 py-2" />
             )}

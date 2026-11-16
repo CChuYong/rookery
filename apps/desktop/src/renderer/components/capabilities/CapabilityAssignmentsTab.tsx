@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
 import type {
   CapabilityAgentKind,
   CapabilityBinding,
@@ -11,6 +11,7 @@ import type {
 import { useT } from "../../i18n/provider.js";
 import { cn } from "../../lib/cn.js";
 import { Button } from "../../ui/button.js";
+import { LoadFailed, EmptyState } from "../../ui/load-state.js";
 import type { CapabilityCenterApi, CapabilityTargetOptions } from "./types.js";
 
 export interface CapabilityAssignmentsTabProps {
@@ -49,9 +50,12 @@ function audienceLabel(t: ReturnType<typeof useT>, binding: CapabilityBinding): 
 export function CapabilityAssignmentsTab({ api, generation, targets }: CapabilityAssignmentsTabProps): JSX.Element {
   const t = useT();
   const [library, setLibrary] = useState<CapabilityLibrarySnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // first load: nothing to show yet
+  const [refreshing, setRefreshing] = useState(false); // reload with the list kept on screen (audit #90)
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const libraryRef = useRef(library);
+  libraryRef.current = library;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [packInstanceId, setPackInstanceId] = useState("");
   const [scopeKind, setScopeKind] = useState<CapabilityScopeKind>("rookery");
@@ -71,10 +75,11 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
 
   useEffect(() => {
     let current = true;
-    setLoading(true); setError(null);
+    if (libraryRef.current) setRefreshing(true); else setLoading(true);
+    setError(null);
     void api.loadLibrary().then(
-      (next) => { if (current) { setLibrary(next); setLoading(false); } },
-      (cause) => { if (current) { setError(message(cause)); setLoading(false); } },
+      (next) => { if (current) { setLibrary(next); setLoading(false); setRefreshing(false); } },
+      (cause) => { if (current) { setError(message(cause)); setLoading(false); setRefreshing(false); } },
     );
     return () => { current = false; };
   }, [api, generation, reloadKey]);
@@ -144,13 +149,14 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
       .catch((cause) => setFormError(message(cause))).finally(() => setSaving(false));
   };
 
-  if (loading) return <div className="flex justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
-  if (error) return <div className="flex flex-col items-center gap-3 py-20 text-center"><CircleAlert size={26} className="text-fail" /><p className="text-ui text-fail">{t("capabilities.assignmentsLoadFailed")}</p><p className="text-meta text-muted">{error}</p><Button variant="outline" size="sm" onClick={() => setReloadKey((value) => value + 1)}>{t("common.retry")}</Button></div>;
+  if (loading && !library) return <div className="flex justify-center gap-2 py-24 text-ui text-muted"><Loader2 size={14} className="animate-spin" /> {t("common.loading")}</div>;
+  if (error && !library) return <LoadFailed layout="stack" message={t("capabilities.assignmentsLoadFailed")} detail={error} onRetry={() => setReloadKey((value) => value + 1)} />;
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)]">
       <section className="min-w-0">
         <div className="mb-3"><h2 className="text-title font-medium text-fg">{t("capabilities.assignments")}</h2><p className="mt-1 text-meta text-muted">{t("capabilities.assignmentsDescription")}</p></div>
+        {error && <LoadFailed className="mb-3 rounded-[var(--radius)] border border-line px-3.5" message={t("capabilities.refreshFailed")} detail={error} onRetry={() => setReloadKey((value) => value + 1)} retrying={refreshing} />}
         {library?.bindings.length ? (
           <div className="divide-y divide-line-soft border-y border-line">
             {library.bindings.map((binding) => {
@@ -159,7 +165,7 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
                 <div key={binding.id} data-testid={`capability-binding-${binding.id}`} className="px-3 py-2.5">
                   <div className="flex flex-wrap items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2"><h3 className="text-body font-medium text-fg">{pack?.manifest.displayName ?? binding.packInstanceId}</h3><span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className={cn("h-1.5 w-1.5 rounded-full", binding.enabled ? "bg-pr" : "bg-stop")} aria-hidden />{binding.enabled ? t("capabilities.bindingEnabled") : t("capabilities.bindingTombstone")}</span></div>
+                      <div className="flex flex-wrap items-center gap-2"><h3 className="text-body font-medium text-fg">{pack?.manifest.displayName ?? binding.packInstanceId}</h3><span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className={cn("h-1.5 w-1.5 rounded-full", binding.enabled ? "bg-pr" : "bg-stop")} aria-hidden />{binding.enabled ? t("capabilities.bindingEnabled") : t("capabilities.bindingOffHere")}</span></div>
                       <p className="mt-1 text-meta text-fg-dim">{scopeLabel(t, binding.scopeKind)}{binding.scopeRef ? ` · ${[...targets.repos, ...targets.sessions, ...targets.workers].find((item) => item.id === binding.scopeRef)?.label ?? binding.scopeRef}` : ""}</p>
                       <p className="mt-1 text-meta text-faint">{audienceLabel(t, binding)}</p>
                       <p className="mt-1 text-meta text-faint">{t("capabilities.bindingInheritance")}</p>
@@ -171,7 +177,7 @@ export function CapabilityAssignmentsTab({ api, generation, targets }: Capabilit
               );
             })}
           </div>
-        ) : <div className="flex flex-col items-center gap-2 py-16 text-center text-muted"><Plus size={25} className="opacity-40" /><p className="text-ui">{t("capabilities.assignmentsEmpty")}</p></div>}
+        ) : <EmptyState layout="stack">{t("capabilities.assignmentsEmpty")}</EmptyState>}
       </section>
 
       <section className="h-fit rounded-lg border border-line bg-surface p-4">

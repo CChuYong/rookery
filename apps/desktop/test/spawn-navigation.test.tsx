@@ -44,8 +44,8 @@ describe("spawn page navigation (Back never reopens a spent spawn form)", () => 
   it("a successful spawn replaces the spawn page: Back returns to where the user was before opening it", async () => {
     g().navigate({ overlay: "spawnWorker", showRepos: true, repoId: "r1" }); // repo tree "+" pushes
     render(<SpawnPageHost />);
-    fireEvent.change(screen.getByPlaceholderText(/Ctrl\+Enter/), { target: { value: "do it" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.change(screen.getByPlaceholderText(/적어주세요/), { target: { value: "do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     await waitFor(() => expect(g().activeWorkerId).toBe("w-new"));
     expect([g().overlay, g().navBack.length, g().navFwd.length]).toEqual([null, 1, 0]);
     g().goBack();
@@ -58,7 +58,7 @@ describe("spawn page navigation (Back never reopens a spent spawn form)", () => 
     fireEvent.change(screen.getByRole("combobox", { name: "레포" }), { target: { value: "web" } });
     await waitFor(() => expect(screen.getByRole("combobox", { name: "레포" })).toHaveValue("web"));
     expect([g().repoSettingsId, g().navBack.length]).toEqual(["r2", 1]);
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     await waitFor(() => expect(g().activeWorkerId).toBe("w-new"));
     g().goBack();
     expect([g().overlay, g().activeSessionId]).toEqual([null, "s1"]);
@@ -69,7 +69,7 @@ describe("spawn page navigation (Back never reopens a spent spawn form)", () => 
     let finish!: (id: string) => void;
     g().navigate({ overlay: "spawnWorker", showRepos: true, repoId: "r1" });
     render(<SpawnPageHost spawn={() => new Promise<string>((resolve) => { finish = resolve; })} />);
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     g().navigate({ overlay: "settings" }); // the user leaves mid-spawn
     finish("w-late");
     await waitFor(() => expect(g().activeWorkerId).toBe("w-late"));

@@ -8,10 +8,12 @@ describe("default template", () => {
   it("master has no nested panel", () => {
     expect(defaultPanels("master").map((x) => x.kind)).toEqual(["conversation", "files", "git", "terminal"]);
   });
-  it("conversation is the root (no anchor); files anchor right of it; git stacks within files", () => {
+  // audit #5 #6 (intentional change): files opens on the dock's right edge (no anchor) instead of "right of the
+  // conversation", which split the conversation's column once a terminal sat below it.
+  it("conversation is the root (no anchor); files sits on the dock's right edge; git stacks within files", () => {
     const p = defaultPanels("master");
     expect(p[0]).toEqual({ kind: "conversation" });
-    expect(p[1]).toEqual({ kind: "files", anchor: "conversation", direction: "right" });
+    expect(p[1]).toEqual({ kind: "files", direction: "right" });
     expect(p[2]).toEqual({ kind: "git", anchor: "files", direction: "within" });
   });
 });

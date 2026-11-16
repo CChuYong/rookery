@@ -4,9 +4,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { WorkflowAgentSummary, WorkflowPhaseSummary, WorkflowRunSnapshot } from "@daemon/core/workflow-activity.js";
 import { MessageList } from "../components/MessageList.js";
 import { cn } from "../lib/cn.js";
+import { ROW_SELECTED } from "../lib/ui-tokens.js";
 import { absoluteDate, relativeTime } from "../lib/relative-time.js";
 import { workflowAgentKey } from "../store/reduce.js";
 import { useStore } from "../store/store.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { useLocale, useT } from "../i18n/provider.js";
 
 export interface WorkflowRunsProps {
@@ -76,7 +78,7 @@ function AgentRoster({
               onClick={() => onSelect(agent)}
               className={cn(
                 "absolute left-0 top-0 flex w-full items-center gap-2 rounded px-2 text-left text-body transition-colors hover:bg-raised/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi",
-                selectedKey?.endsWith(`/${key}`) && "bg-accent/10",
+                selectedKey?.endsWith(`/${key}`) && ROW_SELECTED,
               )}
               style={{ height: row.size, transform: `translateY(${row.start}px)` }}
             >
@@ -176,7 +178,7 @@ function PhaseSection({
           {active.length > 0 && <AgentRoster taskId={taskId} agents={active} selectedKey={selectedKey} onSelect={onSelect} />}
           {completed.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle(completedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+              <button type="button" onClick={() => toggle(completedKey)} aria-expanded={expanded.has(completedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
                 <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", expanded.has(completedKey) && "rotate-90")} /> {t("workflowActivity.completedAgents", { count: completed.length })}
               </button>
               {expanded.has(completedKey) && <AgentRoster taskId={taskId} agents={completed} selectedKey={selectedKey} onSelect={onSelect} />}
@@ -184,7 +186,7 @@ function PhaseSection({
           )}
           {stopped.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle(stoppedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+              <button type="button" onClick={() => toggle(stoppedKey)} aria-expanded={expanded.has(stoppedKey)} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
                 <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", expanded.has(stoppedKey) && "rotate-90")} /> {t("workflowActivity.stoppedAgents", { count: stopped.length })}
               </button>
               {expanded.has(stoppedKey) && <AgentRoster taskId={taskId} agents={stopped} selectedKey={selectedKey} onSelect={onSelect} />}
@@ -274,7 +276,7 @@ function WorkflowRun({
           )}
           {completed.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle("completed")} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+              <button type="button" onClick={() => toggle("completed")} aria-expanded={completedOpen} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
                 <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", completedOpen && "rotate-90")} /> {t("workflowActivity.completedAgents", { count: completed.length })}
               </button>
               {completedOpen && <AgentRoster taskId={run.taskId} agents={completed} selectedKey={selectedKey} onSelect={select} />}
@@ -282,7 +284,7 @@ function WorkflowRun({
           )}
           {stopped.length > 0 && (
             <>
-              <button type="button" onClick={() => toggle("stopped")} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
+              <button type="button" onClick={() => toggle("stopped")} aria-expanded={stoppedOpen} className="flex w-full items-center gap-1 px-1 py-1 text-left text-meta font-medium text-muted hover:text-fg-dim">
                 <ChevronRight size={12} className={cn("transition-transform motion-reduce:transition-none", stoppedOpen && "rotate-90")} /> {t("workflowActivity.stoppedAgents", { count: stopped.length })}
               </button>
               {stoppedOpen && <AgentRoster taskId={run.taskId} agents={stopped} selectedKey={selectedKey} onSelect={select} />}
@@ -295,7 +297,14 @@ function WorkflowRun({
         <div className="border-t border-line">
           <div className="px-3 py-1.5 text-meta font-medium text-muted">{t("workflowActivity.selectedAgent")}</div>
           {loading && <div className="px-3 pb-3 text-meta text-muted">{t("workflowActivity.historyLoading")}</div>}
-          {failed && <div className="px-3 pb-3 text-meta text-fail">{t("workflowActivity.historyFailed")}</div>}
+          {/* Retry right where the failure shows (audit #48); its progress is the loading line above. */}
+          {failed && !loading && selectedKey && (
+            <LoadFailed
+              className="px-3 pb-3 pt-0 text-meta"
+              message={t("workflowActivity.historyFailed")}
+              onRetry={() => loadAgentHistory(workerId, run.taskId, selectedKey.slice(`${workerId}/${run.taskId}/`.length))}
+            />
+          )}
           {selectedLog && !loading && !failed && <div className="flex h-72 min-h-0 flex-col"><MessageList kind="worker" items={selectedLog} /></div>}
         </div>
       )}

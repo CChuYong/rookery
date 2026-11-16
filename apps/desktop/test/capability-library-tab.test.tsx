@@ -75,6 +75,25 @@ describe("CapabilityLibraryTab", () => {
     expect(await screen.findByText("아직 등록된 capability가 없어요.")).toBeInTheDocument();
   });
 
+  // audit #90: refetch keeps the list; audit #49: an action failure stays inline instead of replacing the tab.
+  it("a generation refetch keeps the list, and a failed import shows inline without hiding it", async () => {
+    let finish!: (v: CapabilityLibrarySnapshot) => void;
+    const loadLibrary = vi.fn().mockResolvedValueOnce(library).mockReturnValueOnce(new Promise<CapabilityLibrarySnapshot>((res) => { finish = res; }));
+    const addPack = vi.fn(async () => { throw new Error("manifest invalid"); });
+    const subject = api({ loadLibrary, addPack });
+    const { rerender } = render(<CapabilityLibraryTab api={subject} generation={0} repos={[]} pickDirectory={async () => "/picked"} />);
+    await screen.findByText("Team Pack");
+    rerender(<CapabilityLibraryTab api={subject} generation={1} repos={[]} pickDirectory={async () => "/picked"} />);
+    await waitFor(() => expect(loadLibrary).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Team Pack")).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).toBeNull();
+    finish(library);
+    fireEvent.click(screen.getByRole("button", { name: "Pack 가져오기" }));
+    expect(await screen.findByText(/manifest invalid/)).toBeInTheDocument();
+    expect(screen.getByText("Team Pack")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pack 가져오기" })).toBeInTheDocument();
+  });
+
   it("requires review before trust and shows safe pack, file, MCP, and compatibility details", async () => {
     const setTrust = vi.fn(async () => ({ ...pack, status: "trusted" as const }));
     render(<CapabilityLibraryTab api={api({ setTrust })} generation={0} repos={[]} pickDirectory={async () => null} />);
@@ -124,8 +143,25 @@ describe("CapabilityLibraryTab", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("pack-1"));
     fireEvent.click(within(card).getByRole("button", { name: "삭제" }));
     expect(removePack).not.toHaveBeenCalled();
-    fireEvent.click(within(card).getByRole("button", { name: "Pack 제거" }));
+    // The confirm is the shared dialog now (audit #103), not a second button inside the card.
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Pack 제거" }));
     await waitFor(() => expect(removePack).toHaveBeenCalledWith("pack-1"));
+  });
+
+  it("asks before deleting a stored secret, which can't be recovered (audit #103)", async () => {
+    const configured = { ...pack, secrets: [{ key: "issue-token", configured: true }] };
+    const deleteSecret = vi.fn(async (_id: string, key: string) => ({ key, configured: false }));
+    render(<CapabilityLibraryTab api={api({ loadLibrary: async () => ({ ...library, packs: [configured] }), deleteSecret })} generation={0} repos={[]} pickDirectory={async () => null} />);
+    const card = await screen.findByTestId("capability-pack-pack-1");
+    fireEvent.click(within(card).getByRole("button", { name: "검토 펼치기" }));
+    // the pack's own Delete is the first "삭제"; the secret's is inside the secrets form
+    const secretDelete = within(within(card).getByLabelText("issue-token 값").closest("form")!).getByRole("button", { name: "삭제" });
+    fireEvent.click(secretDelete);
+    expect(deleteSecret).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "secret 삭제" }));
+    await waitFor(() => expect(deleteSecret).toHaveBeenCalledWith("pack-1", "issue-token"));
   });
 
   it("labels repo-owned packs, renders discovery diagnostics, and leaves removal to the repo index", async () => {
@@ -201,7 +237,7 @@ describe("CapabilityLibraryTab", () => {
 
     await waitFor(() => expect(createMcpPack).toHaveBeenCalledWith(expect.objectContaining({ repoId: "repo-1" })));
     expect(await screen.findByText("MCP pack과 레포 연결을 저장했어요.")).toBeInTheDocument();
-    expect(screen.getByText(/Rookery의 Master\/Worker 대상과 secret 설정/)).toBeInTheDocument();
+    expect(screen.getByText(/Rookery의 마스터\/워커 대상과 secret 설정/)).toBeInTheDocument();
     const generatedCard = await screen.findByTestId("capability-pack-generated-pack");
     expect(generatedCard.className).toContain("ring-pr/15");
     expect(within(generatedCard).getByText("검토 필요")).toBeInTheDocument();

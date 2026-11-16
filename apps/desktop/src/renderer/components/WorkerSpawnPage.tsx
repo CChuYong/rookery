@@ -1,9 +1,11 @@
 import type { SpeedPreference } from "@daemon/core/speed.js";
 import { SpeedControl } from "./SpeedControl.js";
+import { ChromeMenu, ComposerFooter, COMPOSER_BOX, MenuField, SendButton } from "./ComposerChrome.js";
+import { shortModelLabel, permLabel } from "./Composer.js";
 import { defaultSpeed } from "../lib/speed.js";
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
-import { ArrowUp, GitBranch, Loader2, ShieldOff, SlidersHorizontal, X } from "lucide-react";
+import { GitBranch, SlidersHorizontal, X } from "lucide-react";
 import { Input, Select, Textarea } from "../ui/input.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
@@ -12,6 +14,7 @@ import { spawnDraftKey, useDraftStore, type SpawnDraftSource } from "../store/dr
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
+import { isImeComposing, useScrollActiveIntoView } from "../lib/focus.js";
 import type { SourceItem, SourceProviderId } from "@daemon/core/source-intake.js";
 import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
 
@@ -28,6 +31,7 @@ export function WorkerSpawnPage(p: {
   defaultEffort: string;
   codexDefaultModel?: string; // placeholder shown in the free-text model field when provider === "codex" (daemon-side default, e.g. settings.codexWorkerModel)
   branches?: string[]; // base branch candidates (picker hidden if absent)
+  branchesState?: "loading" | "ready" | "failed"; // the branch list request: the picker holds its place while loading and says when it failed
   integrations?: IntegrationsStatus; // only connected integrations enable GitHub/Linear modes
   searchSource?: (provider: SourceProviderId, query: string) => Promise<SourceItem[]>; // search issues/tickets
   onSpawn: (task: string, label: string, model?: string, effort?: string, base?: string, ticket?: { key: string; url: string }, permissionMode?: string, provider?: string, costBudgetUsd?: number, speed?: SpeedPreference | null) => void | Promise<void>;
@@ -68,11 +72,15 @@ export function WorkerSpawnPage(p: {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SourceItem[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false); // the last search failed (token, gh, network) — not "no results"
   const [focused, setFocused] = useState(false); // show results dropdown only when the search box is focused
   const [spawning, setSpawning] = useState(false);
   const spawningRef = useRef(false);
   // -1 = nothing highlighted yet, so the first ArrowDown press lands cleanly on index 0.
   const [highlight, setHighlight] = useState(-1);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  useScrollActiveIntoView(resultsRef, highlight); // the arrow-key highlight stays in view (audit #70)
+  const [moreOpen, setMoreOpen] = useState(false);
   const seq = useRef(0);
 
   const githubOk = !!p.integrations?.github.available;
@@ -83,17 +91,18 @@ export function WorkerSpawnPage(p: {
     { value: "linear", label: "Linear", disabled: !linearOk, title: linearOk ? undefined : t("workerSpawnModal.linearHint") },
   ];
   const sourceMode = mode === "github" || mode === "linear";
-  const dropdownOpen = focused && (searching || results.length > 0 || q.trim().length > 0);
+  const dropdownOpen = focused && (searching || searchError || results.length > 0 || q.trim().length > 0);
 
   useEffect(() => {
     if (!sourceMode || !p.searchSource || selected) return;
     const mine = ++seq.current;
     setSearching(true);
+    setSearchError(false);
     setHighlight(-1); // a new query is in flight — drop any highlight from the previous result list
     const t = setTimeout(() => {
       p.searchSource!(mode, q)
         .then((items) => { if (seq.current === mine) { setResults(items); setSearching(false); } })
-        .catch(() => { if (seq.current === mine) { setResults([]); setSearching(false); } });
+        .catch(() => { if (seq.current === mine) { setResults([]); setSearchError(true); setSearching(false); } });
     }, 250);
     return () => clearTimeout(t);
   }, [q, mode, selected]);
@@ -131,12 +140,20 @@ export function WorkerSpawnPage(p: {
   // never renders blank and spawn() never submits a level the model lacks (finding [23]). The raw `effort`
   // state keeps the user's last explicit choice untouched (so switching provider back to claude restores it).
   const currentEffort = effectiveEffort(provider, effortModel, effort, codexModels);
+  // An entered budget must be a positive amount; anything else is an error, never a silently dropped limit (audit #37).
+  const cb = costBudget.trim() ? Number(costBudget) : undefined;
+  const budgetInvalid = cb != null && !(Number.isFinite(cb) && cb > 0);
+  const budgetRef = useRef<HTMLInputElement>(null);
   const spawn = async (): Promise<void> => {
     if (spawningRef.current) return;
+    if (budgetInvalid) {
+      setMoreOpen(true);
+      requestAnimationFrame(() => budgetRef.current?.focus());
+      return;
+    }
     // codex: empty free-text field → send undefined so the daemon falls back to its codexWorkerModel default.
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
-    const cb = costBudget.trim() ? Number(costBudget) : undefined;
-    const costBudgetUsd = cb != null && Number.isFinite(cb) && cb > 0 ? cb : undefined;
+    const costBudgetUsd = cb;
     const draftRepo = p.repo; // the repo select is disabled while spawning, but pin the key anyway
     spawningRef.current = true;
     setSpawning(true);
@@ -190,17 +207,33 @@ export function WorkerSpawnPage(p: {
     setResults([]);
     setHighlight(-1);
   }, [p.repo]);
-  // ⌘/Ctrl+Enter spawns while focus is inside the form. This is a page, not a modal: the sidebar and status bar stay
+  // Enter in the task box spawns (Shift+Enter is a newline) — the same submit key as the other two composers (audit
+  // #86); ⌘/Ctrl+Enter still spawns from anywhere inside the form. This is a page, not a modal: the sidebar and status bar stay
   // live, so no window-level key capture (that would swallow Escape for their menus). Escape is intentionally inert
   // here so a typed task is never lost; the source search's own Escape still closes just its results list.
   const onFormKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void spawn(); }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isImeComposing(e)) { e.preventDefault(); void spawn(); }
   };
 
-  // Quiet text controls (NewSessionPage's chip style): no borders, a lift on hover.
-  const ghost = "h-6 min-w-0 border-0 bg-transparent px-1.5 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
-  const metaGhost = "h-6 min-w-0 border-0 bg-transparent px-1 text-meta text-muted hover:bg-raised hover:text-fg-dim focus:ring-0";
-  const [moreOpen, setMoreOpen] = useState(false);
+  // An empty task box (and no picked issue) swallows the Enter instead of spawning an idle worker by accident; a blank
+  // spawn stays available, deliberately, from the spawn button.
+  const onTaskKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || isImeComposing(e)) return;
+    e.preventDefault();
+    if (task.trim() || selected) void spawn();
+  };
+
+  // Quiet text control (the composer's footer style): no border, a lift on hover.
+  const ghost = "h-6 min-w-0 border-0 bg-transparent px-1 text-ui text-fg-dim hover:bg-raised hover:text-fg focus:ring-0";
+  const workerDefaultSpeed = defaultSpeed(settings, provider, "worker");
+  const modelLabel = provider === "codex"
+    ? codexModels?.find((m) => m.id === effortModel)?.displayName ?? (effortModel || t("settings.codexModelDefaultOption"))
+    : shortModelLabel(models.find((m) => m.id === model)?.label ?? model);
+  // Trigger text: model · effort, plus only the choices that differ from the default (Plan, Fast).
+  const summary = [modelLabel, effortSupported(effectiveModel) ? t(effortLabelKey(currentEffort)) : null,
+    permissionMode !== "bypassPermissions" ? permLabel(permissionMode, t) : null,
+    (speed ?? workerDefaultSpeed) === "fast" ? t("speed.fast") : null].filter(Boolean).join(" · ");
+  const showBranches = p.branches !== undefined || p.branchesState !== undefined;
 
   return (
     <>
@@ -211,10 +244,11 @@ export function WorkerSpawnPage(p: {
         </button>
       </div>
 
-      {/* One question, one box (the reference: a centred heading, the composer, a quiet meta row). Everything that is
-          rarely touched lives behind small controls under the box or the "More" toggle. */}
+      {/* One question, one box, a third of the way down (same column and offset as New session, audit #87). Everything
+          belongs to the box: source and base on the left of its footer, the model menu and spawn on the right, the
+          rarely touched options in a "More" section inside it. */}
       <div role="region" aria-label={t("workerSpawnModal.title")} onKeyDown={onFormKeyDown} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6">
-        <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col justify-center gap-3 pb-[12vh] pt-10">
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-10 pt-[14vh]">
           {/* Same quiet one-liner as NewSessionPage (no display type). The repo is part of the sentence; with several
               registered repos it is an inline select, so switching repo needs no separate control. */}
           <h1 id="worker-spawn-heading" className="text-title font-medium text-fg-dim">
@@ -237,178 +271,200 @@ export function WorkerSpawnPage(p: {
             <span>{t("workerSpawnModal.headingAfter")}</span>
           </h1>
 
-          <div className="relative">
-            <div className="flex flex-col rounded-xl border border-line bg-surface transition-colors focus-within:border-fg-dim/40">
-              {/* GitHub/Linear: the picked item, or its search field, sits at the top of the box */}
-              {sourceMode && p.searchSource && (
-                selected ? (
-                  <div className="mx-3 mt-3 flex items-center gap-2 rounded-md bg-raised px-2.5 py-1.5 text-ui">
-                    <span className="shrink-0 font-mono text-meta text-accent">{selected.identifier}</span>
-                    <span className="truncate text-fg">{selected.title}</span>
-                    <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={14} /></button>
-                  </div>
-                ) : (
-                  <Input
-                    autoFocus
-                    className="mx-3 mt-3 w-auto"
-                    size="sm"
-                    placeholder={mode === "github" ? t("workerSpawnModal.searchGithub") : t("workerSpawnModal.searchLinear")}
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    onFocus={() => setFocused(true)}
-                    onBlur={() => setFocused(false)}
-                    onKeyDown={(e) => {
-                      if (!dropdownOpen) return;
-                      if (e.key === "ArrowDown" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.min(results.length - 1, h + 1)); }
-                      else if (e.key === "ArrowUp" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
-                      else if (e.key === "Enter" && highlight >= 0 && highlight < results.length) { e.preventDefault(); pickSource(results[highlight]!); }
-                      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } // close only the results list, not the page
-                    }}
-                    role="combobox"
-                    aria-expanded={dropdownOpen}
-                    aria-controls="worker-spawn-source-results"
-                    aria-activedescendant={highlight >= 0 && highlight < results.length ? `worker-spawn-source-result-${highlight}` : undefined}
-                  />
-                )
-              )}
-              {sourceMode && p.searchSource && !selected && dropdownOpen && (
-                // onMouseDown preventDefault: keeps the input focused so a click on a result isn't swallowed by blur.
-                <div id="worker-spawn-source-results" role="listbox" className="mx-3 mt-1 max-h-72 overflow-y-auto rounded-md border border-line bg-ink" onMouseDown={(e) => e.preventDefault()}>
-                  {searching && results.length === 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
-                  {!searching && results.length === 0 && q.trim().length > 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
-                  {results.map((it, i) => (
-                    <button
-                      key={`${it.provider}:${it.id}`}
-                      id={`worker-spawn-source-result-${i}`}
-                      role="option"
-                      aria-selected={i === highlight}
-                      onClick={() => pickSource(it)}
-                      className={cn("flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
-                    >
-                      <span className="shrink-0 font-mono text-meta text-accent">{it.identifier}</span>
-                      <span className="truncate text-fg">{it.title}</span>
-                      {it.state && <span className="ml-auto shrink-0 text-meta text-muted">{it.state}</span>}
-                    </button>
-                  ))}
+          <div className={COMPOSER_BOX}>
+            {/* GitHub/Linear: the picked item, or its search field, sits at the top of the box */}
+            {sourceMode && p.searchSource && (
+              selected ? (
+                <div className="mx-3 mt-3 flex items-center gap-2 rounded-md bg-raised px-2.5 py-1.5 text-ui">
+                  <span className="shrink-0 font-mono text-meta text-accent">{selected.identifier}</span>
+                  <span className="truncate text-fg">{selected.title}</span>
+                  <button onClick={clearSelected} className="ml-auto shrink-0 rounded p-0.5 text-muted hover:text-fg" title={t("workerSpawnModal.clearSelection")} aria-label={t("workerSpawnModal.clearSelection")}><X size={14} /></button>
                 </div>
-              )}
-
-              <Textarea
-                autoFocus={mode === "direct"}
-                aria-labelledby="worker-spawn-heading"
-                // The whole box shows focus (focus-within border); text fields are outside the global focus-visible outline.
-                className="min-h-[84px] resize-none border-0 bg-transparent px-4 pt-3.5 text-prose focus:ring-0"
-                placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
-                value={task}
-                onChange={(e) => setTask(e.target.value)}
-              />
-
-              {/* Box footer: source on the left; agent backend · model · effort and the send button on the right. */}
-              <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2.5">
-                <Segment
-                  items={MODES}
-                  value={mode}
-                  onChange={switchMode}
-                  variant="pill"
-                  aria-label={t("workerSpawnModal.sourceLabel")}
-                  className="gap-0.5"
-                  itemClassName="px-1.5 py-0.5 text-meta"
+              ) : (
+                <Input
+                  autoFocus
+                  className="mx-3 mt-3 w-auto"
+                  size="sm"
+                  placeholder={mode === "github" ? t("workerSpawnModal.searchGithub") : t("workerSpawnModal.searchLinear")}
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  onKeyDown={(e) => {
+                    if (!dropdownOpen || isImeComposing(e)) return; // the IME's committing Enter must not pick a result (audit #76)
+                    if (e.key === "ArrowDown" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.min(results.length - 1, h + 1)); }
+                    else if (e.key === "ArrowUp" && results.length > 0) { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
+                    else if (e.key === "Enter" && highlight >= 0 && highlight < results.length) { e.preventDefault(); pickSource(results[highlight]!); }
+                    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } // close only the results list, not the page
+                  }}
+                  role="combobox"
+                  aria-expanded={dropdownOpen}
+                  aria-controls="worker-spawn-source-results"
+                  aria-activedescendant={highlight >= 0 && highlight < results.length ? `worker-spawn-source-result-${highlight}` : undefined}
                 />
-                <span className="ml-auto" />
-                <Select size="xs" className={ghost} value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")} aria-label={t("workerSpawnModal.provider")}>
-                  <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
-                  <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
-                </Select>
-                {provider === "codex" ? (
-                  codexModels != null ? (
-                    <Select
-                      size="xs"
-                      className={ghost}
-                      value={codexModel}
-                      onChange={(e) => {
-                        const nm = e.target.value;
-                        setCodexModel(nm);
-                        const de = codexDefaultEffort(nm, codexModels);
-                        if (de) setEffort(de);
-                      }}
-                      title={t("workerSpawnModal.modelTitle")}
-                      aria-label={t("workerSpawnModal.modelTitle")}
-                    >
-                      {/* "" = use the codexWorkerModel settings default (never auto-pick a catalog model). */}
-                      <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
-                      {codexModels.map((m) => (
-                        <option key={m.id} value={m.id}>{m.displayName}</option>
-                      ))}
-                      {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
-                    </Select>
-                  ) : (
-                    <Input size="xs" className="h-6 w-36" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")} />
-                  )
-                ) : (
-                  <Select size="xs" className={ghost} value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}>
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                    {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
-                  </Select>
-                )}
-                {effortSupported(effectiveModel) && (
-                  <Select size="xs" className={ghost} value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")} aria-label={t("workerSpawnModal.effortTitle")}>
-                    {effortOptions.map((ef) => (
-                      <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
-                    ))}
-                  </Select>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void spawn()}
-                  disabled={spawning}
-                  aria-label={t("workerSpawnModal.spawn")}
-                  aria-busy={spawning || undefined}
-                  title={t("workerSpawnModal.spawnHint")}
-                  className="ml-1 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full bg-fg text-ink transition-colors hover:bg-fg/90 disabled:bg-raised disabled:text-faint"
-                >
-                  {spawning ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={15} />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Meta row under the box: base branch and permission mode, plus "More". */}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2">
-            <span className="ml-auto" />
-            {p.branches && p.branches.length > 0 && (
-              <span className="flex items-center gap-0.5 text-muted">
-                <GitBranch size={12} className="shrink-0" aria-hidden />
-                <Select size="xs" className={metaGhost} value={base} onChange={(e) => setBase(e.target.value)} title={t("workerSpawnModal.baseTitle")} aria-label={t("workerSpawnModal.baseLabel")}>
-                  <option value="">{t("workerSpawnModal.baseDefault")}</option>
-                  {p.branches.map((b) => (
-                    <option key={b} value={b}>{t("workerSpawnModal.baseOption", { branch: b })}</option>
-                  ))}
-                </Select>
-              </span>
+              )
             )}
-            <span className="flex items-center gap-0.5 text-muted">
-              <ShieldOff size={12} className="shrink-0" aria-hidden />
-              {/* Only bypassPermissions / plan for workers; changeable later in the composer. */}
-              <Select size="xs" className={metaGhost} value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")} aria-label={t("workerSpawnModal.permLabel")}>
-                <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>
-                <option value="plan">{t("workerSpawnModal.permPlan")}</option>
-              </Select>
-            </span>
-            <button
-              type="button"
-              onClick={() => setMoreOpen((v) => !v)}
-              aria-expanded={moreOpen}
-              className="flex h-6 items-center gap-1 rounded px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
-            >
-              <SlidersHorizontal size={12} aria-hidden /> {t("workerSpawnModal.more")}
-            </button>
-          </div>
+            {sourceMode && p.searchSource && !selected && dropdownOpen && (
+              // onMouseDown preventDefault: keeps the input focused so a click on a result isn't swallowed by blur.
+              <div ref={resultsRef} id="worker-spawn-source-results" role="listbox" className="mx-3 mt-1 max-h-72 overflow-y-auto rounded-md border border-line bg-ink" onMouseDown={(e) => e.preventDefault()}>
+                {searching && results.length === 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.searching")}</div>}
+                {/* A failed search (expired token, gh error) is not "no results" (audit #36). */}
+                {!searching && searchError && <div role="alert" className="px-3 py-2 text-meta text-fail">{t("workerSpawnModal.searchFailed")}</div>}
+                {!searching && !searchError && results.length === 0 && q.trim().length > 0 && <div className="px-3 py-2 text-meta text-muted">{t("workerSpawnModal.noResults")}</div>}
+                {results.map((it, i) => (
+                  <button
+                    key={`${it.provider}:${it.id}`}
+                    id={`worker-spawn-source-result-${i}`}
+                    role="option"
+                    aria-selected={i === highlight}
+                    onClick={() => pickSource(it)}
+                    className={cn("flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-ui hover:bg-raised", i === highlight && "bg-raised")}
+                  >
+                    <span className="shrink-0 font-mono text-meta text-accent">{it.identifier}</span>
+                    <span className="truncate text-fg">{it.title}</span>
+                    {it.state && <span className="ml-auto shrink-0 text-meta text-muted">{it.state}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
 
-          {/* Rarely-touched options: label, a per-worker cost budget, and speed. */}
-          {/* Kept mounted (hidden) so typed values survive collapsing the panel. */}
-          <div hidden={!moreOpen} className="grid grid-cols-1 gap-x-4 gap-y-2 px-2 sm:grid-cols-2">
+            <Textarea
+              autoFocus={mode === "direct"}
+              aria-labelledby="worker-spawn-heading"
+              // The whole box shows focus (focus-within border); text fields are outside the global focus-visible outline.
+              className="min-h-[84px] resize-none border-0 bg-transparent px-3 pt-2.5 text-prose focus:ring-0"
+              placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+              onKeyDown={onTaskKeyDown}
+            />
+
+            {/* Box footer — the composer layout: source and base branch on the left, the model menu and spawn pinned right. */}
+            <ComposerFooter
+              className="px-3 pb-2"
+              left={
+                <>
+                  <Segment
+                    items={MODES}
+                    value={mode}
+                    onChange={switchMode}
+                    variant="pill"
+                    aria-label={t("workerSpawnModal.sourceLabel")}
+                    className="gap-0.5"
+                    itemClassName="px-1.5 py-0.5 text-meta"
+                  />
+                  {showBranches && (
+                    // Holds its place while the list loads and says when it failed (audit #36) — the spawn then uses the repo default.
+                    <span className="flex min-w-0 items-center gap-0.5 text-muted">
+                      <GitBranch size={12} className="shrink-0" aria-hidden />
+                      <Select
+                        size="xs"
+                        className={ghost}
+                        value={p.branchesState === "loading" || p.branchesState === "failed" ? "" : base}
+                        disabled={p.branchesState === "loading" || p.branchesState === "failed"}
+                        onChange={(e) => setBase(e.target.value)}
+                        title={p.branchesState === "failed" ? t("workerSpawnModal.branchesFailed") : t("workerSpawnModal.baseTitle")}
+                        aria-label={t("workerSpawnModal.baseLabel")}
+                      >
+                        {p.branchesState === "loading" ? <option value="">{t("workerSpawnModal.branchesLoading")}</option>
+                          : p.branchesState === "failed" ? <option value="">{t("workerSpawnModal.branchesFailed")}</option>
+                          : (
+                            <>
+                              <option value="">{t("workerSpawnModal.baseDefault")}</option>
+                              {(p.branches ?? []).map((b) => (
+                                <option key={b} value={b}>{t("workerSpawnModal.baseOption", { branch: b })}</option>
+                              ))}
+                            </>
+                          )}
+                      </Select>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setMoreOpen((v) => !v)}
+                    aria-expanded={moreOpen}
+                    aria-controls="worker-spawn-more"
+                    aria-describedby={budgetInvalid ? "worker-spawn-budget-error" : undefined}
+                    className="flex h-6 items-center gap-1 rounded px-1.5 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+                  >
+                    <SlidersHorizontal size={12} aria-hidden /> {t("workerSpawnModal.more")}
+                    {budgetInvalid && !moreOpen && <span className="h-1.5 w-1.5 rounded-full bg-fail" aria-hidden />}
+                  </button>
+                </>
+              }
+              right={
+                <>
+                  {/* Backend, model, effort, permission mode and speed — the same model menu as the other composers. */}
+                  <ChromeMenu summary={summary} ariaLabel={`${t("composer.modelMenu")}: ${summary}`} side="bottom" disabled={spawning}>
+                    <MenuField label={t("workerSpawnModal.provider")}>
+                      <Select size="sm" className="w-full" value={provider} onChange={(e) => setProvider(e.target.value as "claude" | "codex")} title={t("workerSpawnModal.provider")} aria-label={t("workerSpawnModal.provider")}>
+                        <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
+                        <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
+                      </Select>
+                    </MenuField>
+                    <MenuField label={t("composer.fieldModel")}>
+                      {provider === "codex" ? (
+                        codexModels != null ? (
+                          <Select
+                            size="sm"
+                            className="w-full"
+                            value={codexModel}
+                            onChange={(e) => {
+                              const nm = e.target.value;
+                              setCodexModel(nm);
+                              const de = codexDefaultEffort(nm, codexModels);
+                              if (de) setEffort(de);
+                            }}
+                            title={t("workerSpawnModal.modelTitle")}
+                            aria-label={t("workerSpawnModal.modelTitle")}
+                          >
+                            {/* "" = use the codexWorkerModel settings default (never auto-pick a catalog model). */}
+                            <option value="">{p.codexDefaultModel ? t("settings.codexModelDefaultOptionWith", { model: p.codexDefaultModel }) : t("settings.codexModelDefaultOption")}</option>
+                            {codexModels.map((m) => (
+                              <option key={m.id} value={m.id}>{m.displayName}</option>
+                            ))}
+                            {!codexModels.some((m) => m.id === codexModel) && codexModel && <option value={codexModel}>{codexModel}</option>}
+                          </Select>
+                        ) : (
+                          <Input size="sm" className="w-full" value={codexModel} onChange={(e) => setCodexModel(e.target.value)} placeholder={p.codexDefaultModel} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")} />
+                        )
+                      ) : (
+                        <Select size="sm" className="w-full" value={model} onChange={(e) => setModel(e.target.value)} title={t("workerSpawnModal.modelTitle")} aria-label={t("workerSpawnModal.modelTitle")}>
+                          {models.map((m) => (
+                            <option key={m.id} value={m.id}>{m.label}</option>
+                          ))}
+                          {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
+                        </Select>
+                      )}
+                    </MenuField>
+                    {effortSupported(effectiveModel) && (
+                      <MenuField label={t("composer.fieldEffort")}>
+                        <Select size="sm" className="w-full" value={currentEffort} onChange={(e) => setEffort(e.target.value)} title={t("workerSpawnModal.effortTitle")} aria-label={t("workerSpawnModal.effortTitle")}>
+                          {effortOptions.map((ef) => (
+                            <option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>
+                          ))}
+                        </Select>
+                      </MenuField>
+                    )}
+                    <MenuField label={t("composer.fieldPermission")}>
+                      {/* Only bypassPermissions / plan for workers; changeable later in the composer. */}
+                      <Select size="sm" className="w-full" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)} title={t("workerSpawnModal.permTitle")} aria-label={t("workerSpawnModal.permLabel")}>
+                        <option value="bypassPermissions">{t("workerSpawnModal.permBypass")}</option>
+                        <option value="plan">{t("workerSpawnModal.permPlan")}</option>
+                      </Select>
+                    </MenuField>
+                    <MenuField label={t("speed.label")} hint={t("speed.hint")}>
+                      <SpeedControl variant="field" hideLabel speed={speed} defaultSpeed={workerDefaultSpeed} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
+                    </MenuField>
+                  </ChromeMenu>
+                  <SendButton label={t("workerSpawnModal.spawn")} hint={t("workerSpawnModal.spawnHint")} loading={spawning} onClick={() => void spawn()} />
+                </>
+              }
+            />
+
+            {/* Rarely-touched options inside the box: label and a per-worker cost budget. */}
+            {/* Kept mounted (hidden) so typed values survive collapsing the section. */}
+            <div id="worker-spawn-more" hidden={!moreOpen} className="grid grid-cols-1 gap-x-4 gap-y-2 border-t border-line-soft px-3 py-2.5 sm:grid-cols-2">
               <label className="flex min-w-0 flex-col gap-1">
                 <span className="text-meta text-muted">{t("workerSpawnModal.labelLabel")}</span>
                 <Input size="sm" placeholder={t("workerSpawnModal.labelPlaceholder")} value={label} onChange={(e) => setLabel(e.target.value)} />
@@ -416,15 +472,24 @@ export function WorkerSpawnPage(p: {
               <label className="flex min-w-0 flex-col gap-1">
                 <span className="text-meta text-muted">{t("workerSpawnModal.costBudget")}</span>
                 {/* Empty = the workerCostBudgetUsd settings default applies (not unconditionally "no limit"). */}
-                <Input size="sm" inputMode="decimal" value={costBudget} onChange={(e) => setCostBudget(e.target.value)} placeholder={t("workerSpawnModal.costBudgetPlaceholder")} title={t("workerSpawnModal.costBudget")} />
-              </label>
-              <label className="flex min-w-0 flex-col gap-1">
-                <span className="text-meta text-muted">{t("speed.label")}</span>
-                <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, "worker")} provider={provider} model={provider === "codex" ? effortModel : model} onChange={setSpeed} />
+                <Input
+                  ref={budgetRef}
+                  size="sm"
+                  inputMode="decimal"
+                  value={costBudget}
+                  onChange={(e) => setCostBudget(e.target.value)}
+                  placeholder={t("workerSpawnModal.costBudgetPlaceholder")}
+                  title={t("workerSpawnModal.costBudget")}
+                  aria-invalid={budgetInvalid || undefined}
+                  aria-describedby={budgetInvalid ? "worker-spawn-budget-error" : undefined}
+                  className={cn(budgetInvalid && "border-fail")}
+                />
+                {budgetInvalid && <p id="worker-spawn-budget-error" className="text-meta text-fail">{t("workerSpawnModal.budgetInvalid")}</p>}
               </label>
               <p className="text-meta text-faint sm:col-span-2">{t("workerSpawnModal.footerNote")}</p>
+              {provider === "codex" && <p className="text-meta text-faint sm:col-span-2">{t("speed.budgetEstimated")}</p>}
+            </div>
           </div>
-          {provider === "codex" && <p className="px-2 text-meta text-faint">{t("speed.budgetEstimated")}</p>}
         </div>
       </div>
     </>

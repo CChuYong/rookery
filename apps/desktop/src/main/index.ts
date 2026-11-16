@@ -2,6 +2,7 @@ import { readSelectedAttachment } from "./selected-attachment.js";
 import { app, BrowserWindow, ipcMain, dialog, Notification, screen, shell, session } from "electron";
 import { buildCsp, isAllowedNavigation, decideWindowOpen } from "./csp.js";
 import { loadWindowState, serializeWindowState } from "./window-state.js";
+import { routeWindowShortcut, windowShortcut } from "./window-shortcuts.js";
 import { join, resolve, dirname } from "node:path";
 import { homedir, cpus, totalmem, tmpdir } from "node:os";
 import fs from "node:fs";
@@ -437,6 +438,27 @@ function createWindow(): void {
   const sendMax = (): void => { try { win.webContents.send("win:maximized", win.isMaximized()); } catch { /* */ } };
   win.on("maximize", sendMax);
   win.on("unmaximize", sendMax);
+  // Cmd/Ctrl+W → close the active editor tab in the renderer; Shift+Cmd/Ctrl+W → close the window (audit #82).
+  // before-input-event runs ahead of the menu accelerators, so preventDefault stops the default menu's Close Window.
+  // The renderer answers a key it did not handle (no workspace page: Settings, Automation, New session, spawn page)
+  // with win:close, so ⌘W still closes the window there (renderer lib/close-tab-dispatch.ts, final review #2).
+  // closeTabReady: the renderer's dispatcher is mounted (win:closeTabReady). Reset whenever the page goes away
+  // (reload/navigation, renderer process gone), so a dead renderer never swallows ⌘W (round 2).
+  let closeTabReady = false;
+  win.webContents.on("did-start-loading", () => { closeTabReady = false; });
+  win.webContents.on("render-process-gone", () => { closeTabReady = false; });
+  const onReady = (e: Electron.IpcMainEvent, ready: unknown): void => {
+    if (e.sender === win.webContents) closeTabReady = ready === true;
+  };
+  ipcMain.on("win:closeTabReady", onReady);
+  win.on("closed", () => ipcMain.removeListener("win:closeTabReady", onReady));
+  win.webContents.on("before-input-event", (event, input) => {
+    const route = routeWindowShortcut(windowShortcut(input, process.platform), closeTabReady);
+    if (!route) return;
+    event.preventDefault();
+    if (route === "closeWindow") win.close();
+    else win.webContents.send("app:closeTab");
+  });
   // On window close, save the normal bounds + maximized state (restored on next launch).
   win.on("close", () => {
     try {

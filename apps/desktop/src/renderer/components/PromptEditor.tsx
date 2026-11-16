@@ -24,6 +24,7 @@ import {
   HISTORY_PUSH_TAG,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
+  KEY_DOWN_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
@@ -36,6 +37,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -43,8 +45,11 @@ import {
 import type { CommandAction, CommandCandidate } from "@daemon/core/capabilities/commands.js";
 import type { BrowseResult } from "../types/rookery.js";
 import { cn } from "../lib/cn.js";
+import { MENU_ITEM, MENU_ITEM_ACTIVE, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { FileMentionPopup } from "./FileMentionPopup.js";
+import { useScrollActiveIntoView } from "../lib/focus.js";
+import { appShortcutAllowedIn, appShortcutFor } from "../lib/shortcuts.js";
 import {
   $createFileMentionNode,
   $isFileMentionNode,
@@ -174,6 +179,16 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
     && slashMatches.length > 0
     && !slashDismissed
     && !disabled;
+  const popupId = useId();
+  const slashListRef = useRef<HTMLDivElement>(null);
+  // The arrow keys move the highlight; keep it inside the popup's scroll area (audit #70).
+  useScrollActiveIntoView(slashListRef, slashOpen ? slashSel : -1);
+  // A bare "/" with no command catalogue at all says so instead of doing nothing (audit #35). A longer token that
+  // matches nothing (a path like /usr/local) stays quiet.
+  const slashEmpty = slashQuery === ""
+    && slashMatches.length === 0
+    && !slashDismissed
+    && !disabled;
 
   useEffect(() => editor.registerUpdateListener(({
     dirtyElements,
@@ -230,6 +245,21 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
     }
     requestAnimationFrame(() => editor.focus());
   }, [editor, onCommandAction]);
+
+  // App shortcuts that pass through text fields (final review #3). Claiming the command before Lexical's own keydown
+  // handling, without preventDefault, lets the event reach the window-level shortcut listener. Cmd+B is also Lexical's
+  // bold, which is real formatting (serialized as **text**): with text selected it stays bold, and only a collapsed
+  // cursor hands it to the sidebar toggle (round 2).
+  useEffect(() => editor.registerCommand(KEY_DOWN_COMMAND, (event) => {
+    const platform = window.rookery?.platform;
+    const action = appShortcutFor(event, platform);
+    if (action == null || !appShortcutAllowedIn("text", action, platform)) return false;
+    if (action === "toggleSidebar") {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection) && !selection.isCollapsed()) return false;
+    }
+    return true;
+  }, COMMAND_PRIORITY_HIGH), [editor]);
 
   useEffect(() => {
     const unregister = [
@@ -296,7 +326,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
           fileMention.dismiss();
           return true;
         }
-        if (slashOpen) {
+        if (slashOpen || slashEmpty) {
           event.preventDefault();
           setSlashDismissed(true);
           return true;
@@ -310,7 +340,7 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
       }, COMMAND_PRIORITY_HIGH),
     ];
     return () => unregister.forEach((dispose) => dispose());
-  }, [editor, fileMention, onEscape, onSubmit, pickCommand, slashMatches, slashOpen, slashSel]);
+  }, [editor, fileMention, onEscape, onSubmit, pickCommand, slashMatches, slashOpen, slashEmpty, slashSel]);
 
   useImperativeHandle(ref, () => ({
     insertFiles: (files) => {
@@ -364,12 +394,16 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
   return (
     <div className="relative">
       {slashOpen && (
-        <div className="pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-raised p-1 shadow-pop">
+        <div ref={slashListRef} id={`${popupId}-slash`} role="listbox" aria-label={t("composer.commandsLabel")} className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(420px,100%)] origin-bottom-left overflow-y-auto overflow-x-hidden", MENU_SURFACE)}>
           {slashMatches.map((command, index) => (
             <button
               key={command.name}
+              id={`${popupId}-slash-${index}`}
+              role="option"
+              aria-selected={index === slashSel}
+              tabIndex={-1}
               type="button"
-              className={`flex w-full flex-col items-start gap-0.5 rounded-md px-2.5 py-1.5 text-left ${index === slashSel ? "bg-accent/15" : "hover:bg-line/40"}`}
+              className={cn("flex w-full flex-col items-start gap-0.5 px-2.5 py-1.5 text-left", MENU_ITEM, index === slashSel && MENU_ITEM_ACTIVE)}
               onMouseEnter={() => setSlashSel(index)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => pickCommand(command)}
@@ -384,8 +418,14 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
           ))}
         </div>
       )}
+      {slashEmpty && (
+        <div role="status" className={cn("pop-in absolute bottom-full left-0 z-30 mb-2 w-[min(420px,100%)] origin-bottom-left px-2.5 py-1.5 text-ui text-muted", MENU_SURFACE)}>
+          {t("composer.noCommands")}
+        </div>
+      )}
       {fileMention.open && (
         <FileMentionPopup
+          id={`${popupId}-mention`}
           entries={fileMention.entries}
           sel={fileMention.sel}
           onHover={fileMention.setSel}
@@ -402,6 +442,11 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
           <ContentEditable
             role="textbox"
             aria-label={props.ariaLabel ?? t("composer.editorAriaLabel")}
+            // Combobox wiring for the slash / @ popups (audit #70): the editor keeps focus, the popup's highlighted
+            // option is announced through aria-activedescendant.
+            aria-autocomplete="list"
+            aria-controls={fileMention.open ? `${popupId}-mention` : slashOpen ? `${popupId}-slash` : undefined}
+            aria-activedescendant={fileMention.open ? `${popupId}-mention-${fileMention.sel}` : slashOpen ? `${popupId}-slash-${slashSel}` : undefined}
             aria-multiline="true"
             style={props.minHeight ? { minHeight: props.minHeight } : undefined}
             className={editorClassName}

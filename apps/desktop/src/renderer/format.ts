@@ -23,7 +23,7 @@ export function fmtUsdCompact(n: number): string {
 }
 // Context usage tone (single threshold — used in the session header SessionMetrics). Color-blindness is covered by the text (%) channel.
 export function ctxTone(pct: number): string {
-  return pct >= 85 ? "text-fail" : pct >= 65 ? "text-run" : "text-fg-dim";
+  return pct >= 85 ? "text-fail" : pct >= 65 ? "text-warn" : "text-fg-dim"; // warn, not the "running" blue (audit #100)
 }
 // Bytes → human-readable units. MB to 1 decimal, GB to 2 decimals (matches the abs/rm.png notation).
 export function fmtBytes(n: number): string {

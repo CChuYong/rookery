@@ -12,4 +12,13 @@ export default {
   "status.error": "Error",
   "status.failed": "Failed",
   "status.orphaned": "Orphaned",
+  "status.short_provisioning": "Preparing",
+  "status.short_running": "Running",
+  "status.short_background": "Background",
+  "status.short_idle": "Idle",
+  "status.short_stopped": "Stopped",
+  "status.short_done": "Done",
+  "status.short_error": "Error",
+  "status.short_failed": "Failed",
+  "status.short_orphaned": "Orphaned",
 } satisfies Catalog;

@@ -34,6 +34,10 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
     });
     edRef.current = ed;
     const id = `file:${path}`;
+    // Locked until the file has loaded, and kept locked when it can't be (read failure / too large): typing into the
+    // empty placeholder buffer and pressing Cmd+S would otherwise overwrite the real file (audit #17).
+    let loaded = false;
+    ed.updateOptions({ readOnly: true });
 
     const load = async (): Promise<void> => {
       let r: { content: string; tooLarge: boolean; readOnly?: true };
@@ -41,8 +45,9 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       catch { if (!disposed) setBanner("error"); return; } // outside the work folder / read failure → banner (so the reject doesn't leak as unhandled)
       if (disposed) return;
       setReadOnly(r.readOnly === true);
-      ed.updateOptions({ readOnly: r.readOnly === true });
       if (r.tooLarge) { setBanner("toolarge"); return; }
+      loaded = true;
+      ed.updateOptions({ readOnly: r.readOnly === true });
       savedRef.current = r.content;
       ed.setValue(r.content);
       setDirty(pageKey, id, false);
@@ -52,7 +57,7 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
 
     ed.onDidChangeModelContent(() => setDirty(pageKey, id, ed.getValue() !== savedRef.current));
     const save = (): void => {
-      if (ed.getOption(monaco.editor.EditorOption.readOnly)) return; // outside the work folder: nothing to save
+      if (!loaded || ed.getOption(monaco.editor.EditorOption.readOnly)) return; // not loaded, or outside the work folder: nothing to save
       const value = ed.getValue();
       lastWrittenRef.current = value; // synchronous record — even if the watcher echo arrives before the write's .then, it's recognized as a self-write
       void window.rookery.ws.write(path, value).then((res) => {
@@ -71,6 +76,18 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       // Read from disk to filter out self-write echoes / spurious events (the issue where a Cmd+S self-save was falsely flagged as "Changed on disk").
       void window.rookery.ws.read(path).then((r) => {
         if (disposed || r.tooLarge) return;
+        // The first read failed: this is the first good content — load it and unlock (review fix 7).
+        if (!loaded) {
+          loaded = true;
+          savedRef.current = r.content;
+          ed.setValue(r.content);
+          const outside = (r as { readOnly?: true }).readOnly === true; // same shape load() reads
+          setReadOnly(outside);
+          ed.updateOptions({ readOnly: outside });
+          setDirty(pageKey, id, false);
+          setBanner(null);
+          return;
+        }
         const action = decideDiskChange({ disk: r.content, lastWritten: lastWrittenRef.current, buffer: ed.getValue(), saved: savedRef.current });
         if (action === "ignore") return;
         if (action === "adopt") {
@@ -105,9 +122,9 @@ export function MonacoEditor({ pageKey, path }: { pageKey: string; path: string 
       )}
       <Collapse open={banner !== null}>
         {banner === "changed" ? (
-          <div className="flex items-center justify-between gap-2 border-b border-run/30 bg-run/12 px-3 py-1.5 text-ui text-run">
+          <div className="flex items-center justify-between gap-2 border-b border-warn/30 bg-warn/12 px-3 py-1.5 text-ui text-warn">
             <span>{t("monacoEditor.changedOnDisk")}</span>
-            <button onClick={reload} className="rounded border border-run/40 px-2 py-0.5 transition-colors hover:bg-run/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.reloadFromDisk")}</button>
+            <button onClick={reload} className="rounded border border-warn/40 px-2 py-0.5 transition-colors hover:bg-warn/15 active:scale-[0.97] motion-reduce:active:scale-100">{t("monacoEditor.reloadFromDisk")}</button>
           </div>
         ) : banner === "toolarge" ? (
           <div className="border-b border-line bg-raised px-3 py-1.5 text-ui text-muted">{t("monacoEditor.tooLarge")}</div>

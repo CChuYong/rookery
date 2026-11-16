@@ -1,7 +1,7 @@
 import type { ImageRef } from "@daemon/core/image-input.js";
 import { MessageImages } from "./MessageImages.js";
 import { memo, useEffect, useRef, useState, cloneElement, type ReactElement } from "react";
-import { MessageSquareDashed, ArrowDown } from "lucide-react";
+import { ArrowDown, Clock } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { ToolGroup } from "./ToolGroup.js";
 import { InteractionCard } from "./InteractionCard.js";
@@ -10,12 +10,18 @@ import { AssistantMessage } from "./AssistantMessage.js";
 import { UserMarkdown } from "./Markdown.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { cn } from "../lib/cn.js";
-import { railClass, statusTag, statusLabelKey, isLive } from "../lib/status.js";
+import { railClass, statusShortKey, statusLabelKey, isLive } from "../lib/status.js";
 import { scrollToBottom } from "../lib/scroll.js";
 import { useT } from "../i18n/provider.js";
 import { SkeletonRows } from "./Skeleton.js";
 
 type ToolItem = Extract<LogItem, { kind: "tool" }>;
+export interface PendingMessage { clientMsgId: string; text: string; images?: ImageRef[] }
+const NO_PENDING: PendingMessage[] = [];
+
+// The user bubble — confirmed, pending and failed messages share it so nothing jumps when an echo lands (audit #30);
+// only the edge, opacity and a small badge tell them apart.
+const USER_BUBBLE = "max-w-[80%] self-end [overflow-wrap:anywhere] rounded-md bg-raised px-3 py-2 text-prose leading-[1.6] text-fg";
 
 function MessageListImpl({
   items,
@@ -29,8 +35,12 @@ function MessageListImpl({
   onOpenFile,
   onSelectWorker,
   onRespond,
+  pending = NO_PENDING,
+  pendingQueued = false,
 }: {
   items: LogItem[];
+  pending?: PendingMessage[]; // optimistic messages not yet echoed — the last rows of the transcript (audit #31)
+  pendingQueued?: boolean; // a turn is running, so pending messages wait for it ("Queued"); otherwise they are "Sending…"
   kind?: "master" | "worker"; // which empty hint to show once loaded-and-empty (audit #43 — the worker copy must not say "master")
   loaded?: boolean; // the session.history/worker.history fetch for this id has succeeded at least once (default true — keeps direct/test callers on the old immediate-empty behavior)
   loadFailed?: boolean; // that fetch was rejected and hasn't succeeded since → error+retry instead of a permanently blank pane
@@ -62,8 +72,13 @@ function MessageListImpl({
     if (userJustSent) scrollToBottom(el);
     else if (stick.current) el.scrollTop = el.scrollHeight;
   }, [items]);
+  // A just-sent (pending) message is a discrete action — follow it to the bottom.
+  useEffect(() => {
+    const el = ref.current;
+    if (el && pending.length > 0) { scrollToBottom(el); stick.current = true; }
+  }, [pending.length]);
 
-  if (items.length === 0) {
+  if (items.length === 0 && pending.length === 0) {
     // No committed transcript yet — three distinct states (audit #43): still fetching, fetch failed, or genuinely
     // empty. Mirrors the loaded/loadFailed idiom already used by RepoTree/Sessions/AutomationPage: once loaded is
     // true, a later background-refresh failure (e.g. on reconnect) doesn't hide what's already showing.
@@ -71,8 +86,7 @@ function MessageListImpl({
       if (loadFailed) {
         return (
           <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center">
-            <button onClick={onRetryHistory} className="flex flex-col items-center gap-2.5 text-fail transition-colors hover:underline">
-              <MessageSquareDashed size={28} className="opacity-40" />
+            <button onClick={onRetryHistory} className="text-fail transition-colors hover:underline">
               <span className="text-body">{t("messageList.loadFailed")}</span>
             </button>
           </div>
@@ -85,8 +99,7 @@ function MessageListImpl({
       );
     }
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center text-muted">
-        <MessageSquareDashed size={28} className="opacity-40" />
+      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center text-muted">
         <p className="text-body">{t(kind === "worker" ? "messageList.emptyHintWorker" : "messageList.emptyHintMaster")}</p>
       </div>
     );
@@ -110,10 +123,7 @@ function MessageListImpl({
       if (it.role === "user") {
         // user message: a quiet raised bubble, right-aligned, narrower than the full column (T3's chat bubble).
         rows.push(
-          <div
-            key={i}
-            className="max-w-[80%] self-end [overflow-wrap:anywhere] rounded-md bg-raised px-3 py-2 text-prose leading-[1.6] text-fg"
-          >
+          <div key={i} className={USER_BUBBLE}>
             {/* markdown on the bubble (remarkBreaks keeps casual newlines; rehypeMentions keeps @file chips) */}
             <MessageImages images={it.images} />
             {it.content && <UserMarkdown content={it.content} />}
@@ -139,7 +149,7 @@ function MessageListImpl({
       // marker for a worker spawned by the master. if onSelectWorker is present (master conversation), click to jump to that worker view (repo tab).
       const wid = it.workerId;
       const dotCls = cn("h-1.5 w-1.5 shrink-0 rounded-full", isLive(it.status) ? "bg-run led-live" : railClass(it.status));
-      const tail = `→ ${statusTag(it.status).toLowerCase()}`;
+      const tail = `→ ${t(statusShortKey(it.status))}`;
       rows.push(
         onSelectWorker ? (
           <button
@@ -167,6 +177,18 @@ function MessageListImpl({
     // (the metrics log item itself is kept as-is, since the header reads it from logsBySession.)
     i++;
   }
+  for (const p of pending) {
+    rows.push(
+      <div key={`p:${p.clientMsgId}`} className={cn(USER_BUBBLE, "border border-dashed border-line opacity-70")}>
+        <span className="mb-1 flex items-center gap-1 text-meta text-muted">
+          {pendingQueued && <Clock size={12} aria-hidden />}
+          {t(pendingQueued ? "conversation.pendingBadge" : "conversation.sendingBadge")}
+        </span>
+        <MessageImages images={p.images} />
+        {p.text && <UserMarkdown content={p.text} />}
+      </div>,
+    );
+  }
 
   // rise-in only on the latest (last) row. with index keys, a new row mounts as a new DOM node → appears once (CSS runs only on mount).
   // while streaming, the same last row keeps its class so it doesn't re-run; when a new row is appended, only that new row animates in.
@@ -179,7 +201,7 @@ function MessageListImpl({
 
   // typing indicator right after sending (last item is my message) until the assistant responds.
   const last = items[items.length - 1];
-  const waiting = last?.kind === "message" && last.role === "user";
+  const waiting = pending.length === 0 && last?.kind === "message" && last.role === "user";
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -197,17 +219,20 @@ function MessageListImpl({
           stick.current = bottom;
           setAtBottom(bottom);
         }}
-        // [&>*]:shrink-0 — prevents the flexbox bug where direct children get vertically squished when the window shrinks (the container scrolls instead).
-        // mx-auto max-w-[720px] — a centered reading column (T3 Code), not edge-to-edge prose.
-        className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-2.5 overflow-y-auto px-6 py-5 [&>*]:shrink-0"
+        // The scroller spans the whole pane so its scrollbar sits at the pane edge and the wheel works over the side
+        // margins too (audit #14); the centered 720px reading column (T3 Code) lives inside it.
+        className="min-h-0 w-full flex-1 overflow-y-auto"
       >
-        {rows}
-        {waiting && (
-          <div role="status" className="rise-in flex h-6 items-center gap-1.5 self-start px-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent text-accent led-live" />
-            <span className="text-ui text-muted">{t("messageList.thinking")}</span>
-          </div>
-        )}
+        {/* [&>*]:shrink-0 — prevents the flexbox bug where direct children get vertically squished when the window shrinks. */}
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-2.5 px-6 py-5 [&>*]:shrink-0">
+          {rows}
+          {waiting && (
+            <div role="status" className="rise-in flex h-6 items-center gap-1.5 self-start px-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent text-accent led-live" />
+              <span className="text-ui text-muted">{t("messageList.thinking")}</span>
+            </div>
+          )}
+        </div>
       </div>
       {!atBottom && (
         <button
@@ -240,11 +265,12 @@ function FailedInput({
   const t = useT();
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [retryFailed, setRetryFailed] = useState<string>();
   return (
-    <div className="max-w-[80%] self-end rounded-md border border-line bg-raised px-3 py-2 text-ui">
+    <div className={cn(USER_BUBBLE, "border border-fail/40")}>
       <MessageImages images={item.images} />
       {item.text && <UserMarkdown content={item.text} />}
-      <div className="text-meta text-fail">{t("images.sendFailed")}</div>
+      <div className="text-meta text-fail">{retryFailed ?? t(item.images?.length ? "images.sendFailed" : "composer.sendFailedPlain")}</div>
       {onRestore && (
         <div className="flex gap-3">
           <button
@@ -272,10 +298,12 @@ function FailedInput({
           disabled={sending || sent}
           onClick={() => {
             setSending(true);
+            setRetryFailed(undefined);
             Promise.resolve()
               .then(() => onRetry(item.text, item.images))
               .then(() => setSent(true))
-              .catch(() => {})
+              // The retry is a send like any other: its failure is reported here, on the bubble (no toast).
+              .catch((err: unknown) => setRetryFailed(t("composer.sendFailed", { reason: err instanceof Error ? err.message : String(err) })))
               .finally(() => setSending(false));
           }}
         >

@@ -5,7 +5,12 @@ import { useStore } from "../src/renderer/store/store.js";
 import { I18nProvider } from "../src/renderer/i18n/provider.js";
 
 const controls = { provider: "codex", model: "gpt-5.5", editable: true, onSpeed: vi.fn(), speed: "fast" as const };
-const show = (extra = {}) => render(<I18nProvider systemLocale="en"><Composer onSend={vi.fn()} controls={{ ...controls, ...extra }} /></I18nProvider>);
+// The speed select lives in the composer's model menu (audit #85); open it so its options are reachable by role.
+const show = (extra = {}) => {
+  const view = render(<I18nProvider systemLocale="en"><Composer onSend={vi.fn()} controls={{ ...controls, ...extra }} /></I18nProvider>);
+  fireEvent.click(screen.getByRole("button", { name: /Model settings/ }));
+  return view;
+};
 beforeEach(() => useStore.getState().setCodexModels(null));
 describe("speed intent and observations", () => {
   it("shows requested Fast without inventing effective Fast and changes once", () => {
@@ -29,7 +34,8 @@ describe("speed intent and observations", () => {
     expect(screen.getByRole("option", { name: "Fast" })).not.toBeDisabled();
     expect(screen.queryByText("Availability unknown")).toBeNull();
     expect(screen.queryByText("Applies next turn")).toBeNull();
-    expect(screen.getByLabelText("Speed")).not.toHaveAttribute("title");
+    // audit #92: with no provider status the tooltip still says what the control means
+    expect(screen.getByLabelText("Speed")).toHaveAttribute("title", expect.stringContaining("Fast can cost more"));
   });
   it("keeps pending state out of the composer chrome", () => {
     show({ speed: "standard", speedObservation: { requested: "fast", state: "fast" } });

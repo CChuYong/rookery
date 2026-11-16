@@ -78,3 +78,58 @@ describe("MonacoEditor save-failure feedback (#10)", () => {
     expect(screen.queryByText(READ_ONLY)).toBeNull();
   });
 });
+
+// audit #17: until a file has actually loaded (or when it can't be), the empty buffer must not be editable or
+// savable — Cmd+S there would overwrite the real file with a few typed characters.
+describe("MonacoEditor locks the buffer until the file has loaded (audit #17)", () => {
+  it("is read-only and won't save while the first read is still in flight", async () => {
+    let finish!: (v: { content: string; tooLarge: boolean }) => void;
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(() => new Promise((r) => { finish = r; })), write });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+    await act(async () => finish({ content: "hello", tooLarge: false }));
+    expect(latestEditor().readOnly).toBe(false);
+  });
+
+  it("stays read-only and won't save after a read failure", async () => {
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(async () => { throw new Error("nope"); }), write });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    expect(await screen.findByText(OPEN_ERROR)).toBeInTheDocument();
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("stays read-only and won't save a file too large to open", async () => {
+    const write = vi.fn(async () => ({ ok: true }));
+    mockWs({ read: vi.fn(async () => ({ content: "", tooLarge: true })), write });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    await screen.findByText("미리보기 불가 — 바이너리이거나 너무 큰 파일이에요.");
+    expect(latestEditor().readOnly).toBe(true);
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
+// Review fix 7: a failed first read must not leave the editor locked for good — a later successful file-watch read
+// loads the file and unlocks it.
+describe("MonacoEditor recovers after a failed first read (review fix 7)", () => {
+  it("a file-watch read that succeeds loads the content, clears the banner and unlocks saving", async () => {
+    let changed: (p: string) => void = () => {};
+    const write = vi.fn(async () => ({ ok: true }));
+    const read = vi.fn().mockRejectedValueOnce(new Error("busy")).mockResolvedValue({ content: "later", tooLarge: false });
+    mockWs({ read, write, onChanged: vi.fn((cb: (p: string) => void) => { changed = cb; return () => {}; }) });
+    render(<MonacoEditor pageKey="p1" path="/r/a.ts" />);
+    expect(await screen.findByText(OPEN_ERROR)).toBeInTheDocument();
+    await act(async () => { changed("/r/a.ts"); await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => expect(latestEditor().getValue()).toBe("later"));
+    expect(latestEditor().readOnly).toBe(false);
+    await waitFor(() => expect(screen.queryByText(OPEN_ERROR)).toBeNull());
+    act(() => { latestEditor().commandCb?.(); });
+    expect(write).toHaveBeenCalledWith("/r/a.ts", "later");
+  });
+});

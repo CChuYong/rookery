@@ -70,7 +70,7 @@ export function RightSidebar({ open, pageKey, subId, cwd, activeTabPath, loadAge
   const width = open && entered ? widthState.width : 0;
   return (
     <>
-      <ResizeHandle onPointerDown={widthState.startDrag} />
+      <ResizeHandle onPointerDown={widthState.startDrag} handle={widthState.handle} label={t("rightSidebar.resize")} />
       <aside style={{ width }} className="flex shrink-0 flex-col overflow-hidden bg-sunk">
         {/* Empty bar matching the main-area header height (h-11) — aligns the segment tab line to the same height as the main-area TabBar (consistent hierarchy).
             Color matches the top of the main area (<main bg-ink>) with bg-ink. */}

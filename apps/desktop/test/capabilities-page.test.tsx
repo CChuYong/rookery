@@ -76,7 +76,10 @@ describe("CapabilitiesPage", () => {
     expect(screen.getByText("team-rules")).toBeInTheDocument();
     expect(screen.getAllByText("적용 예정").length).toBeGreaterThan(0);
     expect(screen.getAllByText("억제됨").length).toBeGreaterThan(0);
-    expect(screen.getByText(/원하는 리비전 1234567890ab/)).toBeInTheDocument();
+    // revision detail: sans label + mono hash, folded under Details (audit #98/#113)
+    expect(screen.getByText("목표 리비전")).toBeInTheDocument();
+    expect(screen.getByText("1234567890ab")).toHaveClass("font-mono");
+    expect(screen.getByText("활성화가 차단됐어요")).toBeInTheDocument();
     expect(within(screen.getByTestId("capability-summary")).getByText("2")).toBeInTheDocument();
   });
 
@@ -128,7 +131,7 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
     expect(await screen.findByRole("heading", { name: "Rookery 기본값" })).toBeInTheDocument();
     expect(loadSnapshot).toHaveBeenCalledWith(rookeryTarget);
-    expect(screen.getByText((content) => content.includes("범위 설정만 보여줍니다"))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("범위 설정만 보여 줘요"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "유효 상태" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "카탈로그" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "할당" })).toBeInTheDocument();
@@ -186,15 +189,15 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={null} {...pageProps(makeApi(loadSnapshot))} />);
     await screen.findByRole("heading", { name: "Rookery 기본값" });
 
-    const targetSelect = screen.getByLabelText("Effective 대상");
+    const targetSelect = screen.getByLabelText("확인 대상");
     expect(within(targetSelect).getByRole("option", { name: "Rookery 기본값" })).toBeInTheDocument();
     expect(within(targetSelect).getByRole("option", { name: "Repo One" })).toBeInTheDocument();
     expect(within(targetSelect).getByRole("option", { name: "Main" })).toBeInTheDocument();
     expect(within(targetSelect).getByRole("option", { name: "Worker 2" })).toBeInTheDocument();
     fireEvent.change(targetSelect, { target: { value: "repo:repo-1" } });
     await waitFor(() => expect(loadSnapshot).toHaveBeenLastCalledWith({ kind: "repo", id: "repo-1", provider: "claude", agent: "master" }));
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "codex" } });
-    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "worker" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("에이전트"), { target: { value: "worker" } });
     await waitFor(() => expect(loadSnapshot).toHaveBeenLastCalledWith({ kind: "repo", id: "repo-1", provider: "codex", agent: "worker" }));
     expect(screen.queryByTestId("capability-worker-reload")).toBeNull();
   });
@@ -215,6 +218,31 @@ describe("CapabilitiesPage", () => {
     await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
   });
 
+  // audit #90: a capabilities.changed refetch keeps the list on screen (no full-page spinner).
+  it("a generation refetch keeps the current list visible while it loads", async () => {
+    const next = deferred<CapabilitySnapshot>();
+    const loadSnapshot = vi.fn().mockResolvedValueOnce(snapshot).mockReturnValueOnce(next.promise);
+    const api = makeApi(loadSnapshot);
+    const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api, 1)} />);
+    await screen.findByText("release");
+    rerender(<CapabilitiesPage target={target} {...pageProps(api, 2)} />);
+    await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("release")).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).toBeNull();
+    next.resolve(snapshot);
+    await waitFor(() => expect(screen.getByText("release")).toBeInTheDocument());
+  });
+
+  it("a failed refetch keeps the list and reports the failure inline", async () => {
+    const loadSnapshot = vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error("socket closed"));
+    const api = makeApi(loadSnapshot);
+    const { rerender } = render(<CapabilitiesPage target={target} {...pageProps(api, 1)} />);
+    await screen.findByText("release");
+    rerender(<CapabilitiesPage target={target} {...pageProps(api, 2)} />);
+    expect(await screen.findByText(/socket closed/)).toBeInTheDocument();
+    expect(screen.getByText("release")).toBeInTheDocument();
+  });
+
   it("renders desired/applied drift and the pending lifecycle labels", async () => {
     const runtimeSnapshot: CapabilitySnapshot = {
       ...snapshot,
@@ -231,8 +259,9 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={target} {...pageProps(makeApi(async () => runtimeSnapshot))} />);
 
     await screen.findByText("Codex Main");
-    expect(screen.getByText(/원하는 리비전 abcdef123456/)).toBeInTheDocument();
-    expect(screen.getByText(/적용된 리비전 001122334455/)).toBeInTheDocument();
+    expect(screen.getByText("abcdef123456")).toBeInTheDocument(); // target revision
+    expect(screen.getByText("적용된 리비전")).toBeInTheDocument();
+    expect(screen.getByText("001122334455")).toBeInTheDocument();
     expect(screen.getAllByText("다음 턴에 적용").length).toBeGreaterThan(0);
     expect(screen.getAllByText("재시작 필요").length).toBeGreaterThan(0);
   });
@@ -250,9 +279,9 @@ describe("CapabilitiesPage", () => {
     render(<CapabilitiesPage target={workerTarget} {...pageProps(api)} />);
 
     await screen.findByTestId("capability-worker-reload");
-    fireEvent.click(screen.getByRole("button", { name: "대기 상태일 때" }));
+    fireEvent.click(screen.getByRole("button", { name: "대기 중일 때" }));
     await waitFor(() => expect(api.reloadWorker).toHaveBeenCalledWith("w1", true));
-    expect(await screen.findByText(/대기 상태가 되면/)).toBeInTheDocument();
+    expect(await screen.findByText(/대기 중이 되면/)).toBeInTheDocument();
   });
 
   it("shows worker reload failures and does not offer reload controls for a master session", async () => {
@@ -274,4 +303,36 @@ describe("CapabilitiesPage", () => {
     await screen.findByText("Main");
     expect(screen.queryByTestId("capability-worker-reload")).toBeNull();
   });
+});
+
+// audit #98: a calmer Effective view — only the states that occur, meta stated once per kind group.
+describe("CapabilitiesPage Effective density", () => {
+  it("hides zero counters in the summary", async () => {
+    render(<CapabilitiesPage {...pageProps(makeApi(async () => snapshot))} target={target} />);
+    const summary = await screen.findByTestId("capability-summary");
+    expect(within(summary).queryByText("0")).toBeNull();
+    expect(within(summary).queryByText("오류")).toBeNull(); // no error entries → no error counter
+    expect(within(summary).getByText("차단됨")).toBeInTheDocument();
+  });
+
+  it("states a group's shared meta once in its header and leaves the provider off rows that match the target", async () => {
+    render(<CapabilitiesPage {...pageProps(makeApi(async () => snapshot))} target={target} />);
+    await screen.findByText("release");
+    const hooks = screen.getByRole("region", { name: "훅" });
+    expect(within(hooks).getAllByText("Codex hooks/list")).toHaveLength(1); // header only, not repeated on the row
+    expect(within(screen.getByTestId("capability-hook")).queryByText("Codex")).toBeNull(); // same provider as the target
+    // A Rookery-provided entry on a Codex target still says where it comes from.
+    expect(within(screen.getByTestId("capability-command")).getByText("Rookery")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "도구 & MCP" }));
+    expect(within(screen.getByTestId("capability-managed-side-mcp")).getByText("Rookery")).toBeInTheDocument();
+  });
+});
+
+
+// Review fix 6: an entry kind the renderer doesn't know (newer daemon) still shows, in its own group after the rest.
+it("keeps entries of an unknown kind", async () => {
+  const future = { ...snapshot, entries: [...snapshot.entries, { id: "widget-1", kind: "widget" as never, name: "future-thing", provider: "codex" as const, source: "Codex widgets/list", scope: "repo" as const, state: "applied" as const, evidence: "runtime" as const }] };
+  render(<CapabilitiesPage {...pageProps(makeApi(async () => future))} target={target} />);
+  expect(await screen.findByText("future-thing")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "widget" })).toBeInTheDocument();
 });

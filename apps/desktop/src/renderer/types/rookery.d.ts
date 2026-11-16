@@ -18,7 +18,8 @@ export interface RookeryWs {
   onTree(cb: (root: string) => void): () => void;
   gitStatus(cwd: string): Promise<Array<{ path: string; status: string }>>;
   gitDiff(cwd: string, path: string): Promise<{ head: string; work: string }>;
-  gitInfo(cwd: string): Promise<{ branch: string; ahead: number; behind: number; upstream: string | null }>;
+  // isRepo:false = the folder is not a git repository; a git failure rejects (as gitChanges/gitLog/gitCommitFiles do).
+  gitInfo(cwd: string): Promise<{ isRepo: false } | { isRepo: true; branch: string; ahead: number; behind: number; upstream: string | null; head: string | null }>;
   gitChanges(cwd: string): Promise<Array<{ path: string; x: string; y: string; added: number; deleted: number }>>;
   gitStage(cwd: string, path: string): Promise<{ ok: boolean; error?: string }>;
   gitUnstage(cwd: string, path: string): Promise<{ ok: boolean; error?: string }>;
@@ -102,6 +103,10 @@ export interface RookeryWin {
   close(): void;
   isMaximized(): Promise<boolean>;
   onMaximizeChange(cb: (maximized: boolean) => void): () => void;
+  // Cmd/Ctrl+W pressed (main intercepts it so it no longer closes the window, audit #82).
+  onCloseTab(cb: () => void): () => void;
+  // The close-tab dispatcher is mounted (true) or gone (false); while not ready main closes the window on Cmd/Ctrl+W.
+  setCloseTabReady?(ready: boolean): void;
 }
 
 // Type of window.rookery.update — auto-update controls/status for the settings "About" section.

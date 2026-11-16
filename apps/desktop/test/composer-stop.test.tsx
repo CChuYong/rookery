@@ -63,3 +63,25 @@ describe("Composer stuck-stop → Recover escalation", () => {
     expect(screen.queryByRole("button", { name: /복구|Recover/ })).toBeNull();
   });
 });
+
+// Audit #34: Recover is a request with a result — show it in flight and block a second click until it settles.
+describe("Composer Recover progress", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("shows Recover as busy while the request runs and ignores repeat clicks", async () => {
+    let release!: () => void;
+    const onRecover = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    render(<Composer onSend={() => {}} controls={{ model: "claude-opus-4-8", editable: false }} onStop={() => {}} onRecover={onRecover} busy />);
+    fireEvent.click(screen.getByRole("button", { name: /중단|Stop/ }));
+    act(() => { vi.advanceTimersByTime(7000); });
+    const recover = screen.getByRole("button", { name: /복구|Recover/ });
+    fireEvent.click(recover);
+    expect(onRecover).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /복구|Recover/ })).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(screen.getByRole("button", { name: /복구|Recover/ }));
+    expect(onRecover).toHaveBeenCalledTimes(1);
+    await act(async () => release());
+    expect(screen.getByRole("button", { name: /복구|Recover/ })).not.toHaveAttribute("aria-busy");
+  });
+});

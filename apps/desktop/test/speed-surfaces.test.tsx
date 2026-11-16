@@ -17,9 +17,10 @@ const english = (child: JSX.Element) => <I18nProvider systemLocale="en">{child}<
 it("new master inherits each provider default and sends an explicit selection", () => {
   const onStart = vi.fn();
   render(english(<NewSessionPage repos={[]} defaultModel={settings.masterModel} defaultEffort="high" onStart={onStart} />));
+  fireEvent.click(screen.getByRole("button", { name: /Model settings/ })); // speed lives in the model menu (audit #85)
   expect(screen.getByLabelText("Speed")).toHaveValue("");
   expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
-  fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
+  fireEvent.change(screen.getByTitle("Backend"), { target: { value: "codex" } });
   expect(screen.getByRole("option", { name: "Standard (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "fast" } });
   fireEvent.click(screen.getByLabelText("Start"));
@@ -28,8 +29,8 @@ it("new master inherits each provider default and sends an explicit selection", 
 it("worker spawn carries its own selected preference and labels Codex budgets", () => {
   const onSpawn = vi.fn();
   render(english(<WorkerSpawnPage repo="app" defaultModel={settings.workerModel} defaultEffort="high" onSpawn={onSpawn} onClose={vi.fn()} />));
-  fireEvent.change(screen.getByTitle("Agent backend"), { target: { value: "codex" } });
-  fireEvent.click(screen.getByRole("button", { name: /More/ })); // speed lives behind More on the spawn page
+  fireEvent.change(screen.getByTitle("Backend"), { target: { value: "codex" } });
+  fireEvent.click(screen.getByRole("button", { name: /Model settings/ })); // speed lives in the model menu, as on the other composers
   expect(screen.getByRole("option", { name: "Fast (default)" })).toBeInTheDocument();
   fireEvent.change(screen.getByRole("combobox", { name: "Speed" }), { target: { value: "standard" } });
   fireEvent.click(screen.getByRole("button", { name: /Spawn|Start/ }));
@@ -73,7 +74,7 @@ it.each(["master", "worker"] as const)("%s composer restores intent; Side reads 
   const editor = document.querySelector("[contenteditable=true]") as HTMLElement;
   const { setPromptEditorText } = await import("./prompt-editor-helpers.js");
   setPromptEditorText(editor, "explain");
-  fireEvent.click(screen.getByRole("button", { name: "Ask separately" }));
+  fireEvent.click(screen.getByRole("button", { name: "Side question" }));
   await waitFor(() => expect(screen.getByText("Inherited: Fast")).toBeInTheDocument());
   expect(screen.getAllByLabelText("Speed")).toHaveLength(1);
 });

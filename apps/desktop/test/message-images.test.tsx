@@ -57,7 +57,7 @@ it("renders missing history placeholder and retries a failed fetch", async () =>
   await act(async () => observe([{ isIntersecting: true }]));
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "이미지를 불러올 수 없습니다. 다시 시도",
+      name: "이미지를 불러올 수 없어요. 다시 시도",
     }),
   );
   await waitFor(() => expect(screen.getByRole("img")).toBeInTheDocument());
@@ -101,4 +101,17 @@ it("opens a sent image full size on click and closes on Escape", async () => {
   expect(screen.getByRole("dialog", { name: "history.png" })).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+// audit #130: the lightbox was aria-modal without taking focus or offering a close button.
+it("focuses the lightbox's close button and gives focus back to the thumbnail when it closes", async () => {
+  render(<MessageImages images={[image]} eager />);
+  const open = await screen.findByRole("button", { name: /history\.png/ });
+  open.focus();
+  fireEvent.click(open);
+  const close = screen.getByRole("button", { name: "닫기" });
+  expect(document.activeElement).toBe(close);
+  fireEvent.click(close);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(open);
 });

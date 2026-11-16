@@ -10,7 +10,7 @@ export default {
   "forkDialog.crossNote": "Forks onto a different backend — carries the conversation context over.",
   "forkDialog.sameNote": "Forks on the same backend (native fork).",
   "forkDialog.modelTitle": "Model",
-  "forkDialog.effortTitle": "effort",
+  "forkDialog.effortTitle": "Effort",
   "forkDialog.codexNotReady": "Codex is not authenticated. Sign in from Settings → Codex.",
   "forkDialog.fork": "Fork",
 } satisfies Catalog;

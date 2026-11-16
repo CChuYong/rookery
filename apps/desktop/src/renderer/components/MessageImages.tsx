@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 import { useModalKeys } from "../lib/useModalKeys.js";
+import { useFocusTrap } from "../lib/useFocusTrap.js";
 import type { ImageRef } from "@daemon/core/image-input.js";
 import { getImageClient } from "../lib/image-client.js";
 import { useT } from "../i18n/provider.js";
@@ -152,18 +154,31 @@ export function MessageImage({
 }
 
 // Full-size view of an attached/sent image. Thumbnails are capped at 80px high, which is too small to read a
-// screenshot; click opens the image at its natural size (scaled down to fit), Escape or a click anywhere closes.
+// screenshot; click opens the image at its natural size (scaled down to fit), Escape, the close button or a click
+// anywhere closes. Focus (audit #130): trapped on the close button while open, back on the thumbnail afterwards.
 function ImageLightbox({ url, name, onClose }: { url: string; name: string; onClose: () => void }): JSX.Element {
   const t = useT();
+  const ref = useRef<HTMLDivElement>(null);
   useModalKeys({ escape: "close", onEscape: onClose });
+  useFocusTrap(ref);
   return createPortal(
     <div
+      ref={ref}
       role="dialog"
       aria-modal="true"
       aria-label={name}
       onClick={onClose}
       className="fixed inset-0 z-[120] flex cursor-zoom-out flex-col items-center justify-center gap-2 bg-scrim p-8 motion-safe:animate-[overlay-in_140ms_ease-out]"
     >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t("common.close")}
+        title={t("images.closePreview")}
+        className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-md text-fg-dim transition-colors hover:bg-raised hover:text-fg"
+      >
+        <X size={16} />
+      </button>
       <img src={url} alt={name} className="min-h-0 max-w-full flex-1 rounded-md object-contain" />
       <span className="max-w-full truncate text-meta text-fg-dim">{name}</span>
       <span className="sr-only">{t("images.closePreview")}</span>

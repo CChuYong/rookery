@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { cn } from "../lib/cn.js";
 
 // Height-safe expand/collapse primitive. Smoothly reveals its content via a
@@ -12,7 +12,9 @@ export function Collapse({
   children,
   durationMs = 200,
   className,
+  id,
 }: {
+  id?: string; // lets a disclosure button point aria-controls at this region
   open: boolean;
   children: ReactNode;
   durationMs?: number;
@@ -20,8 +22,17 @@ export function Collapse({
 }): JSX.Element {
   const wasOpen = useRef(open);
   if (open) wasOpen.current = true;
+  // A closed region keeps its content mounted (for the exit transition) but must not stay reachable: `inert` takes it
+  // out of the tab order and the roving lists, so Tab/Arrow keys can't land on a row inside a folded group.
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (open) ref.current?.removeAttribute("inert");
+    else ref.current?.setAttribute("inert", "");
+  }, [open]);
   return (
     <div
+      ref={ref}
+      id={id}
       className={cn(
         "collapse-anim grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows]",
         open ? "ease-out grid-rows-[1fr] opacity-100" : "ease-in grid-rows-[0fr] opacity-0",

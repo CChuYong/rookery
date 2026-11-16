@@ -73,4 +73,51 @@ describe("UsagePanel", () => {
     expect(screen.getByText("주간")).toBeInTheDocument();
     expect(screen.getByText("1.2M")).toBeInTheDocument(); // weeklyTokens 1200000 → fmtTok
   });
+
+  // audit #55: the gauge used to be orange at rest and sky-blue (the "running" colour) from 70% — the danger order read
+  // backwards. Now: neutral fill, the warn token only from 80%, fail from 90%.
+  const fillOf = (pct: number): string => {
+    const { container, unmount } = render(<UsagePanel usage={{ ...base, pct: { fiveHour: pct, sevenDay: null } as unknown as UsageSnapshot["pct"] }} />);
+    const cls = container.querySelector(".usage-fill")?.className ?? "";
+    unmount();
+    return cls;
+  };
+  it.each([
+    [37, "bg-fg-dim"],
+    [79, "bg-fg-dim"],
+    [80, "bg-warn"],
+    [89, "bg-warn"],
+    [90, "bg-fail"],
+  ])("sidebar meter at %i%% fills with %s", (pct, tone) => {
+    const cls = fillOf(pct);
+    expect(cls).toContain(tone);
+    expect(cls).not.toContain("bg-accent");
+    expect(cls).not.toContain("bg-run");
+  });
+
+  it("status-bar meter uses the same thresholds (warn past 80%)", () => {
+    const { container } = render(<UsagePanel variant="statusbar" usage={{ ...base, pct: { fiveHour: 85, sevenDay: 20 } as unknown as UsageSnapshot["pct"] }} />);
+    const fills = Array.from(container.querySelectorAll("span.origin-left")).map((el) => el.className);
+    expect(fills[0]).toContain("bg-warn");
+    expect(fills[1]).toContain("bg-fg-dim");
+  });
+});
+
+// audit #46: an answer with no numbers ends in an explicit empty state; a failure after data marks it stale.
+describe("UsagePanel empty and stale", () => {
+  it("empty snapshot + empty flag → 'no usage data', not 'loading…'", () => {
+    render(<UsagePanel usage={{} as never} empty />);
+    expect(screen.getByText(/사용량 정보가 없어요/)).toBeInTheDocument();
+    expect(screen.queryByText("사용량 불러오는 중…")).toBeNull();
+  });
+
+  it("status bar: empty snapshot + empty flag shows the empty copy instead of nothing", () => {
+    render(<UsagePanel usage={{} as never} empty variant="statusbar" />);
+    expect(screen.getByText(/사용량 정보가 없어요/)).toBeInTheDocument();
+  });
+
+  it("a failure after data arrived keeps the numbers and marks them stale", () => {
+    render(<UsagePanel usage={{ today: { costUSD: 1.5, totalTokens: 10 } } as never} loadFailed />);
+    expect(screen.getByText("갱신 실패")).toBeInTheDocument();
+  });
 });

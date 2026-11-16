@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { History, Loader2 } from "lucide-react";
 import { Button } from "../ui/button.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { cn } from "../lib/cn.js";
+import { MENU_ITEM, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -26,22 +30,34 @@ function checkpointTimeLabel(iso: string, now: number, t: TFunc, locale: Locale)
   return t("relativeTime.daysAgo", { n: rel.value });
 }
 
-// Per-worker-turn checkpoint restore menu. Fetches on open; on item click, confirms then restores.
+type Anchor = { bottom: number; right: number };
+const MENU_GAP = 4;
+const VIEWPORT_GUTTER = 8;
+
+// Per-worker-turn checkpoint restore menu. Fetches on open; on item click, asks in the shared ConfirmDialog (reverting
+// discards later changes to tracked files — irreversible, audit #103) then restores.
+// The dropdown is portaled with fixed positioning so the workspace header's overflow:hidden can't clip it, and
+// `openRequest` opens it from elsewhere (the narrow header's overflow menu, audit #21), anchored at that rect — this
+// works even while the menu's own button is hidden.
 export function CheckpointMenu({
   fetchCheckpoints,
   onRestore,
+  openRequest,
 }: {
   fetchCheckpoints: () => Promise<Checkpoint[]>;
   onRestore: (seq: number) => Promise<void>;
+  openRequest?: { seq: number; rect: Anchor };
 }): JSX.Element {
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Checkpoint[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [armed, setArmed] = useState<number | null>(null);
+  const [asking, setAsking] = useState<number | null>(null); // the seq whose revert the ConfirmDialog is asking about
   const [restoring, setRestoring] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null); // the wrapper around the trigger button (Button takes no ref)
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   // Shared by the initial open-fetch and the error state's retry button.
   const load = (): void => {
@@ -50,19 +66,44 @@ export function CheckpointMenu({
     void fetchCheckpoints().then(setItems).catch(() => setLoadError(true));
   };
 
-  const toggle = () => {
-    if (open) { setOpen(false); return; }
+  const openAt = (rect: Anchor | null): void => {
+    setAnchor(rect);
     setOpen(true);
-    setArmed(null);
+    setAsking(null);
     load();
   };
-  // Escape closes the open menu.
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    const r = triggerRef.current?.getBoundingClientRect();
+    openAt(r ? { bottom: r.bottom, right: r.right } : null);
+  };
+  const lastRequest = useRef(openRequest?.seq);
   useEffect(() => {
-    if (!open) return;
+    if (!openRequest || openRequest.seq === lastRequest.current) return;
+    lastRequest.current = openRequest.seq;
+    openAt(openRequest.rect);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new request seq is the only trigger
+  }, [openRequest?.seq]);
+  // Escape closes the open menu — unless the confirm dialog is up, whose own Escape only cancels the dialog.
+  useEffect(() => {
+    if (!open || asking !== null) return;
     const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [open]);
+  }, [open, asking]);
+  // In-flight guard (a ref, not the state: two calls in one tick both see the old `restoring`).
+  const inFlight = useRef(false);
+  const restore = (seq: number): void => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setRestoring(seq);
+    // Close only after settle: both paths reset restoring so a reopened menu is clickable again (the failure toast is
+    // fired by onRestore itself).
+    void onRestore(seq).then(
+      () => { inFlight.current = false; setOpen(false); setRestoring(null); },
+      () => { inFlight.current = false; setRestoring(null); },
+    );
+  };
   // Focus the first turn on open (audit #60 — reuses ContextMenu's precedent). Items load async (fetchCheckpoints
   // fires on toggle), so this re-runs once `items` actually arrives, not just on the `open` transition.
   useEffect(() => {
@@ -81,14 +122,20 @@ export function CheckpointMenu({
   };
 
   return (
-    <div className="relative">
+    <div ref={triggerRef} className="relative">
       <Button variant="ghost" size="sm" onClick={toggle} title={t("checkpointMenu.buttonTitle")} aria-haspopup="menu" aria-expanded={open}>
         <History size={14} /> {t("checkpointMenu.restore")}
       </Button>
-      {open && (
+      {open && createPortal(
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div ref={menuRef} onKeyDown={onMenuKeyDown} role="menu" className="menu-pop absolute right-0 z-40 mt-1 max-h-72 w-64 origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop">
+          <div
+            ref={menuRef}
+            onKeyDown={onMenuKeyDown}
+            role="menu"
+            style={anchor ? { top: anchor.bottom + MENU_GAP, right: Math.max(VIEWPORT_GUTTER, window.innerWidth - anchor.right) } : undefined}
+            className={cn("menu-pop fixed z-40 max-h-72 w-64 origin-top-right overflow-y-auto", MENU_SURFACE)}
+          >
             <div className="px-2 py-1 text-meta leading-relaxed text-muted">
               {t("checkpointMenu.hint")}
             </div>
@@ -105,28 +152,28 @@ export function CheckpointMenu({
                 key={c.seq}
                 role="menuitem"
                 disabled={restoring !== null}
-                onClick={() => {
-                  if (restoring !== null) return;
-                  if (armed === c.seq) {
-                    setRestoring(c.seq);
-                    // Close only after settle: both paths reset restoring/armed so a reopened menu is
-                    // clickable again (the failure toast is fired by onRestore itself).
-                    void onRestore(c.seq).then(
-                      () => { setOpen(false); setRestoring(null); setArmed(null); },
-                      () => { setRestoring(null); setArmed(null); },
-                    );
-                  } else setArmed(c.seq);
-                }}
-                className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-ui disabled:opacity-60 ${armed === c.seq ? "bg-fail/15 text-fail" : "text-fg-dim hover:bg-line/40"}`}
+                onClick={() => { if (restoring === null) setAsking(c.seq); }}
+                className={cn("flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-ui text-fg-dim disabled:opacity-60", MENU_ITEM)}
               >
                 <span className="font-mono">{t("checkpointMenu.turn", { turn: c.seq + 1 })}</span>
                 <span className="flex shrink-0 items-center gap-1 text-meta text-muted">
-                  {restoring === c.seq ? <Loader2 size={12} className="animate-spin" aria-hidden /> : armed === c.seq ? t("checkpointMenu.confirmRestore") : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
+                  {restoring === c.seq ? <Loader2 size={12} className="animate-spin" aria-hidden /> : checkpointTimeLabel(c.createdAt, Date.now(), t, locale)}
                 </span>
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body,
+      )}
+      {asking !== null && (
+        <ConfirmDialog
+          title={t("checkpointMenu.confirmTitle", { turn: asking + 1 })}
+          body={t("checkpointMenu.confirmBody")}
+          confirmLabel={t("checkpointMenu.restore")}
+          variant="danger"
+          onConfirm={() => restore(asking)}
+          onCancel={() => setAsking(null)}
+        />
       )}
     </div>
   );

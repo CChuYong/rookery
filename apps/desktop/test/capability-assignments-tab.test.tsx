@@ -35,18 +35,30 @@ function api(overrides: Partial<CapabilityCenterApi> = {}): CapabilityCenterApi 
 }
 
 describe("CapabilityAssignmentsTab", () => {
+  // audit #90: a capabilities.changed refetch keeps the assignment list (and any half-filled form) on screen.
+  it("a generation refetch keeps the list visible while it loads", async () => {
+    const loadLibrary = vi.fn().mockResolvedValueOnce(snapshot([binding])).mockReturnValueOnce(new Promise(() => {}));
+    const subject = api({ loadLibrary });
+    const { rerender } = render(<CapabilityAssignmentsTab api={subject} generation={0} targets={targets} />);
+    await screen.findByTestId("capability-binding-binding-1");
+    rerender(<CapabilityAssignmentsTab api={subject} generation={1} targets={targets} />);
+    await waitFor(() => expect(loadLibrary).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("capability-binding-binding-1")).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).toBeNull();
+  });
+
   it("starts with the canonical master/worker/UI audience and saves authoritative repo ids", async () => {
     const setBinding = vi.fn(async (id, input) => ({ id, ...input, createdAt: "t", updatedAt: "t" }));
     render(<CapabilityAssignmentsTab api={api({ setBinding })} generation={0} targets={targets} />);
     await screen.findByText("새 할당");
     expect(screen.getByLabelText("마스터")).toBeChecked();
     expect(screen.getByLabelText("워커")).toBeChecked();
-    expect(screen.getByLabelText("Side")).not.toBeChecked();
+    expect(screen.getByLabelText("사이드 질문")).not.toBeChecked();
     expect(screen.getByLabelText("UI")).toBeChecked();
 
     fireEvent.change(screen.getByLabelText("범위"), { target: { value: "repo-local" } });
     fireEvent.change(screen.getByLabelText("범위 대상"), { target: { value: "repo-1" } });
-    fireEvent.click(screen.getByLabelText("Side"));
+    fireEvent.click(screen.getByLabelText("사이드 질문"));
     fireEvent.click(screen.getByLabelText("Slack"));
     fireEvent.click(screen.getByLabelText("자동화"));
     fireEvent.click(screen.getByLabelText("외부"));
@@ -65,7 +77,7 @@ describe("CapabilityAssignmentsTab", () => {
     fireEvent.click(screen.getByLabelText("마스터"));
     fireEvent.click(screen.getByLabelText("워커"));
     fireEvent.click(screen.getByRole("button", { name: "할당 만들기" }));
-    expect(screen.getByText("Agent를 하나 이상 선택하세요.")).toBeInTheDocument();
+    expect(screen.getByText("에이전트를 하나 이상 선택하세요.")).toBeInTheDocument();
     expect(setBinding).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText("마스터"));
     fireEvent.click(screen.getByLabelText("UI"));
@@ -81,7 +93,7 @@ describe("CapabilityAssignmentsTab", () => {
     expect(within(card).getByText(/더 구체적인 일치 범위/)).toBeInTheDocument();
     expect(within(card).getByText(/Main Session/)).toBeInTheDocument();
     fireEvent.click(within(card).getByRole("button", { name: "편집" }));
-    fireEvent.click(screen.getByLabelText(/비활성 tombstone/));
+    fireEvent.click(screen.getByLabelText(/이 범위에서 끄기/));
     fireEvent.click(screen.getByRole("button", { name: "저장" }));
     await waitFor(() => expect(setBinding).toHaveBeenCalledWith("binding-1", expect.objectContaining({ enabled: false, scopeKind: "session", scopeRef: "session-1" })));
   });
@@ -122,4 +134,11 @@ describe("CapabilityAssignmentsTab", () => {
     expect(within(targetSelect).getByRole("option", { name: "App Repo" })).toBeInTheDocument();
     expect(within(targetSelect).queryByRole("option", { name: "Other Repo" })).toBeNull();
   });
+});
+
+// Review fix 3: a disabled row's status reads as a state, not as the form's command ("이 범위에서 끄기").
+it("labels a disabled assignment 'off at this scope'", async () => {
+  render(<CapabilityAssignmentsTab api={api({ loadLibrary: async () => snapshot([{ ...binding, enabled: false }]) })} generation={0} targets={targets} />);
+  const card = await screen.findByTestId("capability-binding-binding-1");
+  expect(within(card).getByText("이 범위에서 꺼짐")).toBeInTheDocument();
 });

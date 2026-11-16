@@ -64,7 +64,7 @@ describe("NestedAgents", () => {
     );
     expect(screen.getByText("🧩 explore: find X")).toBeInTheDocument();
     expect(screen.getByText("nested doing X")).toBeInTheDocument();
-    expect(screen.getByText(/중첩 에이전트 · 1/)).toBeInTheDocument();
+    expect(screen.getByText(/하위 에이전트 · 1/)).toBeInTheDocument();
   });
 });
 
@@ -236,6 +236,7 @@ describe("Conversation", () => {
   it("editable controls without effort render only the model selector (live model for a running worker)", () => {
     const onModel = vi.fn();
     render(<Conversation items={[]} onSend={() => {}} controls={{ model: "claude-opus-4-8", editable: true, onModel }} />);
+    fireEvent.click(screen.getByRole("button", { name: /모델 설정/ })); // the selectors live in the model menu (audit #85)
     const selects = screen.getAllByRole("combobox");
     expect(selects).toHaveLength(1); // model only, no effort selector
     fireEvent.change(selects[0], { target: { value: "claude-sonnet-4-6" } });
@@ -403,7 +404,7 @@ describe("MetricsView", () => {
     const items: LogItem[] = [{ kind: "metrics", contextPct: 25, tokens: 50000, turns: 3, durationMs: 12300, cost: 1.25 }];
     render(<MetricsView items={items} />);
     expect(screen.getByText("25%")).toBeInTheDocument();
-    expect(screen.getByText("50.0k tok")).toBeInTheDocument();
+    expect(screen.getByText("50.0k 토큰")).toBeInTheDocument();
     // the test environment has no I18nProvider, so it falls back to ko (metrics render in Korean)
     expect(screen.getByText("3턴")).toBeInTheDocument();
     expect(screen.getByText("$1.25")).toBeInTheDocument();
@@ -415,7 +416,7 @@ describe("MetricsView", () => {
   it("renders the terminalReason with a fail tone when present", () => {
     const items: LogItem[] = [{ kind: "metrics", contextPct: 25, tokens: 50000, turns: 3, durationMs: 12300, cost: 1.25, terminalReason: "api_error" }];
     render(<MetricsView items={items} />);
-    const reason = screen.getByText("⚠ api_error");
+    const reason = screen.getByText("⚠ API 오류");
     expect(reason).toBeInTheDocument();
     expect(reason).toHaveClass("text-fail");
   });
@@ -427,11 +428,19 @@ describe("MetricsView", () => {
 });
 
 describe("ConversationPane pending bubbles", () => {
-  it("renders pending messages as a queued bubble after committed items", () => {
+  it("renders pending messages as a sending bubble after committed items (idle conversation)", () => {
     useStore.setState({ pendingBySession: { s1: [{ clientMsgId: "c1", text: "대기메시지" }] } } as any);
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} />);
     expect(screen.getByText("대기메시지")).toBeInTheDocument();
+    // audit #31: "Queued" only while a turn runs; an idle send reads "Sending…"
+    expect(screen.getByText("보내는 중…")).toBeInTheDocument(); // sendingBadge (ko fallback)
+  });
+
+  it("labels pending messages Queued while the conversation's turn is running", () => {
+    useStore.setState({ pendingBySession: { s1: [{ clientMsgId: "c1", text: "대기메시지" }] }, running: { s1: true } } as any);
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} />);
     expect(screen.getByText("전송 대기")).toBeInTheDocument(); // pendingBadge (ko fallback)
+    useStore.setState({ running: {} } as any);
   });
 
   it("renders no pending bubbles when pending is empty for that conversation", () => {

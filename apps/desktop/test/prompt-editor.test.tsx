@@ -266,3 +266,72 @@ describe("PromptEditor", () => {
     expect(ref.current!.getText()).not.toContain("sent draft");
   });
 });
+
+// Audit #35: "/" with no command catalogue says so instead of doing nothing.
+describe("PromptEditor empty slash catalogue", () => {
+  it("shows a one-line empty state when '/' has no commands at all", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { findByText } = render(<PromptEditor ref={ref} commands={[]} />);
+    insert(ref, "/");
+    expect(await findByText("사용할 수 있는 명령이 없어요")).toBeInTheDocument();
+  });
+
+  it("stays quiet for a path-like token that matches nothing", async () => {
+    const ref = createRef<PromptEditorHandle>();
+    const { queryByText } = render(<PromptEditor ref={ref} commands={CMDS} />);
+    insert(ref, "/usr/zzz");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(queryByText("사용할 수 있는 명령이 없어요")).toBeNull();
+  });
+});
+
+// audit #70: the arrow-key highlight walked out of the popup's scroll area, and the popup had no listbox semantics.
+describe("PromptEditor slash popup keyboard (audit #70)", () => {
+  it("keeps the highlighted command in view and exposes it as the editor's active descendant", async () => {
+    const scrolled: Element[] = [];
+    const orig = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    try {
+      const ref = createRef<PromptEditorHandle>();
+      const { findByRole, getByRole } = render(<PromptEditor ref={ref} commands={CMDS} />);
+      insert(ref, "/re");
+      const list = await findByRole("listbox");
+      const editor = getByRole("textbox");
+      const options = list.querySelectorAll('[role="option"]');
+      expect(options).toHaveLength(2);
+      expect(editor.getAttribute("aria-controls")).toBe(list.id);
+      expect(editor.getAttribute("aria-activedescendant")).toBe(options[0]!.id);
+      fireEvent.keyDown(editor, { key: "ArrowDown" });
+      await waitFor(() => expect(editor.getAttribute("aria-activedescendant")).toBe(options[1]!.id));
+      expect(options[1]).toHaveAttribute("aria-selected", "true");
+      expect(scrolled).toContain(options[1]);
+    } finally {
+      Element.prototype.scrollIntoView = orig;
+    }
+  });
+});
+
+// Final review #3: on Windows/Linux Ctrl+B stays the editor's key (the macOS Cmd+B pass-through is covered in
+// prompt-editor-mac-keys.test.tsx, which needs Lexical loaded on an Apple navigator.platform).
+describe("PromptEditor app shortcut pass-through (final review #3)", () => {
+  const setPlatform = (platform: string | undefined): void => {
+    if (platform === undefined) delete (window as unknown as { rookery?: unknown }).rookery;
+    else (window as unknown as { rookery: unknown }).rookery = { platform };
+  };
+  it("Windows/Linux: Ctrl+B stays with the editor", async () => {
+    setPlatform("linux");
+    try {
+      const { getByRole } = render(<PromptEditor initialText="hello" />);
+      const root = getByRole("textbox");
+      await waitFor(() => expect(isLexicalEditor(getEditorPropertyFromDOMNode(root))).toBe(true));
+      const seen: boolean[] = [];
+      const onWindow = (e: KeyboardEvent): void => { seen.push(e.defaultPrevented); };
+      window.addEventListener("keydown", onWindow);
+      fireEvent.keyDown(root, { key: "b", ctrlKey: true });
+      window.removeEventListener("keydown", onWindow);
+      expect(seen).toEqual([true]);
+    } finally {
+      setPlatform(undefined);
+    }
+  });
+});

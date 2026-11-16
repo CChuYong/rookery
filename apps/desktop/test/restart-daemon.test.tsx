@@ -14,7 +14,8 @@ describe("Tooltip", () => {
     expect(tip).toBeInTheDocument();
     expect(tip.textContent).toBe("데몬 재시작");
     expect(tip.className).toMatch(/opacity-0/);
-    expect(tip.className).toMatch(/group-hover:opacity-100/);
+    // audit #132 (intentional change): the bubble keys off its own named group so an outer row's hover can't show it
+    expect(tip.className).toMatch(/group-hover\/tip:opacity-100/);
   });
 });
 

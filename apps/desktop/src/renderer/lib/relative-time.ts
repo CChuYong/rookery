@@ -28,3 +28,17 @@ export function absoluteDate(ts: number, now: number, locale?: string): string {
   const sameYear = d.getFullYear() === new Date(now).getFullYear();
   return d.toLocaleDateString(locale, sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
 }
+
+// An automation's next run in the viewer's local time (audit #53 — the list showed the daemon's raw UTC ISO string).
+// Later today → just the time; another day → date + time; another year → with the year. `withZone` appends the
+// short zone name (used when the trigger's own timezone differs from the viewer's). `timeZone` is for tests.
+export function formatNextRun(iso: string, now: number, locale?: string, timeZone?: string, withZone = false): string {
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return iso;
+  const dayKey = (ms: number): string => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+  const yearOf = (ms: number): string => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(ms);
+  const time: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", ...(withZone ? { timeZoneName: "short" } : {}) };
+  if (dayKey(ts) === dayKey(now)) return new Intl.DateTimeFormat(locale, { ...time, timeZone }).format(ts);
+  const date: Intl.DateTimeFormatOptions = yearOf(ts) === yearOf(now) ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" };
+  return new Intl.DateTimeFormat(locale, { ...date, ...time, timeZone }).format(ts);
+}

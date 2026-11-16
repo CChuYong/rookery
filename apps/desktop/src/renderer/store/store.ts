@@ -13,6 +13,7 @@ import { emptyState, reduceEvent, applySubEvent, seedSessionLog, seedWorkflowRun
 import type { AppState, FleetRow, LogItem } from "./reduce.js";
 import { navigate as navGo, replace as navReplace, back as navBackFn, forward as navFwdFn, reset as navReset } from "./navigation.js";
 import type { Location, Overlay, NavState } from "./navigation.js";
+import { runGuarded } from "../lib/leave-guard.js";
 import { MODELS } from "../lib/models.js";
 import type { ModelOption } from "../lib/models.js";
 
@@ -53,8 +54,14 @@ interface Store extends AppState {
   // "couldn't load" hint instead of staying blank forever (audit #55). Cleared by the next successful setUsage.
   usageLoadFailed: boolean;
   setUsageLoadFailed: (v: boolean) => void;
+  // usage.get keeps answering but with no numbers (ccusage missing / not logged in / still aggregating) — after a few
+  // such answers the panel says "no usage data" instead of "loading…" forever (audit #46).
+  usageEmpty: boolean;
+  setUsageEmpty: (v: boolean) => void;
   settings: SettingsValues | null;
   setSettings: (settings: SettingsValues) => void;
+  settingsLoadFailed: boolean; // settings.get rejected and hasn't succeeded since (audit #45)
+  setSettingsLoadFailed: (v: boolean) => void;
   // List of available models (live from the daemon's models.list, or the static fallback). Shared by the settings, spawn, and session model pickers.
   models: ModelOption[];
   setModels: (models: ModelOption[]) => void;
@@ -75,9 +82,13 @@ interface Store extends AppState {
   // Linear/GitHub integration connection status (on-demand pull). Used by the spawn dialog and the settings integrations section.
   integrations: IntegrationsStatus | null;
   setIntegrations: (i: IntegrationsStatus) => void;
+  integrationsFailed: boolean; // integrations.status rejected → "couldn't check" instead of "checking…" forever (audit #47)
+  setIntegrationsFailed: (v: boolean) => void;
   // Active Claude auth (api key vs subscription OAuth) — shown in Settings → Claude.
   authStatus: AuthStatus | null;
   setAuthStatus: (a: AuthStatus) => void;
+  authStatusFailed: boolean; // auth.status rejected (audit #47)
+  setAuthStatusFailed: (v: boolean) => void;
   // Per-UI-session model/effort/permissionMode overrides (independent of the default settings). Unset keys fall back to the global defaults.
   overrides: Record<string, { model?: string; effort?: string; permissionMode?: string }>;
   setOverride: (sid: string, patch: { model?: string; effort?: string; permissionMode?: string }) => void;
@@ -120,6 +131,10 @@ interface Store extends AppState {
   sessionFilter: { source: "all" | "ui" | "slack" | "automation"; automationId?: string | null };
   setSessionFilter: (f: Store["sessionFilter"]) => void;
   setRepos: (r: Store["repos"]) => void;
+  // repos.list arrival/failure (audit #89): the "no repositories" empty state and CTA wait for a real answer.
+  reposLoaded: boolean;
+  reposLoadFailed: boolean;
+  setReposLoadFailed: (v: boolean) => void;
   setDaemon: (d: Store["daemon"]) => void;
   setDaemonNote: (note: string | null) => void;
   seedHistory: (sid: string, events: Array<{ seq: number; type: string; payload: unknown; createdAt?: string }>) => void;
@@ -178,6 +193,14 @@ function applyWorkerDeletionState(
   return { ...base, attention };
 }
 
+// Runs a navigation, but when it would change the overlay (leave the current full page) the leave guard decides first.
+function guardedMove(get: () => Store, compute: (nav: NavState) => NavState, apply: () => void): void {
+  const s = get();
+  const next = compute({ loc: locOf(s), back: s.navBack, forward: s.navFwd });
+  if (next.loc.overlay === s.overlay) { apply(); return; }
+  runGuarded(apply);
+}
+
 export const useStore = create<Store>((set, get) => ({
   ...emptyState(),
   setSpeedIntent: (kind, id, speed) => {
@@ -191,23 +214,28 @@ export const useStore = create<Store>((set, get) => ({
   sessions: [], activeSessionId: null, activeWorkerId: null, repoSettingsId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
   historyLoaded: {}, historyLoadFailed: {},
   overlay: null, showRepos: false, navBack: [], navFwd: [],
-  navigate: (patch) => set((s) => ({ ...spreadNav(navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) })),
-  navigateReplace: (patch) => set((s) => ({ ...spreadNav(navReplace({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) })),
-  goBack: () => set((s) => spreadNav(navBackFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd }))),
-  goForward: () => set((s) => spreadNav(navFwdFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd }))),
+  // A move that changes the overlay first asks the page's leave guard (Settings with unsaved edits, lib/leave-guard).
+  navigate: (patch) => guardedMove(get, (nav) => navGo(nav, patch), () => set((s) => ({ ...spreadNav(navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) }))),
+  navigateReplace: (patch) => guardedMove(get, (nav) => navReplace(nav, patch), () => set((s) => ({ ...spreadNav(navReplace({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) }))),
+  goBack: () => guardedMove(get, navBackFn, () => set((s) => spreadNav(navBackFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd })))),
+  goForward: () => guardedMove(get, navFwdFn, () => set((s) => spreadNav(navFwdFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd })))),
   restoreLocation: (loc) => set(() => spreadNav(navReset(loc))),
   daemonNote: null,
   slack: "connecting",
   usage: null,
   setUsage: (usage) => set({ usage, usageLoadFailed: false }),
+  usageEmpty: false,
+  setUsageEmpty: (v) => set({ usageEmpty: v }),
   usageLoadFailed: false,
   setUsageLoadFailed: (v) => set({ usageLoadFailed: v }),
   settings: null,
   setSettings: (settings) => set((s) => {
     const changed = s.settings && (["masterModel", "workerModel", "codexMasterModel", "codexWorkerModel", "masterSpeed", "workerSpeed", "codexMasterSpeed", "codexWorkerSpeed"] as const).some((key) => s.settings?.[key] !== settings[key]);
     const invalidate = (logs: Record<string, LogItem[]>) => Object.fromEntries(Object.entries(logs).map(([id, items]) => [id, [...items, { kind: "speedReset" as const }]]));
-    return { settings, ...(changed ? { logsBySession: invalidate(s.logsBySession), workerLogs: invalidate(s.workerLogs) } : {}) };
+    return { settings, settingsLoadFailed: false, ...(changed ? { logsBySession: invalidate(s.logsBySession), workerLogs: invalidate(s.workerLogs) } : {}) };
   }),
+  settingsLoadFailed: false,
+  setSettingsLoadFailed: (v) => set({ settingsLoadFailed: v }),
   models: [...MODELS], // Initialize with the static fallback (no flicker) → swapped to live when models.list arrives
   setModels: (models) => set({ models: models.length ? models : [...MODELS] }),
   codexModels: null,
@@ -217,9 +245,13 @@ export const useStore = create<Store>((set, get) => ({
   mcpStatus: null,
   setMcpStatus: (mcpStatus) => set({ mcpStatus }),
   integrations: null,
-  setIntegrations: (integrations) => set({ integrations }),
+  setIntegrations: (integrations) => set({ integrations, integrationsFailed: false }),
+  integrationsFailed: false,
+  setIntegrationsFailed: (v) => set({ integrationsFailed: v }),
   authStatus: null,
-  setAuthStatus: (authStatus) => set({ authStatus }),
+  setAuthStatus: (authStatus) => set({ authStatus, authStatusFailed: false }),
+  authStatusFailed: false,
+  setAuthStatusFailed: (v) => set({ authStatusFailed: v }),
   overrides: loadOverrides(),
   setOverride: (sid, patch) => set((s) => { const overrides = { ...s.overrides, [sid]: { ...s.overrides[sid], ...patch } }; saveOverrides(overrides); return { overrides }; }),
   commands: [],
@@ -340,7 +372,10 @@ export const useStore = create<Store>((set, get) => ({
   setAutomationsLoadFailed: (v) => set({ automationsLoadFailed: v }),
   sessionFilter: { source: "ui" }, // Default to the isolated view (your own UI sessions) — so externally-driven Slack/automation sessions aren't mixed in by default. If empty, falls back to the first existing source.
   setSessionFilter: (sessionFilter) => set({ sessionFilter }),
-  setRepos: (repos) => set({ repos }),
+  setRepos: (repos) => set({ repos, reposLoaded: true, reposLoadFailed: false }),
+  reposLoaded: false,
+  reposLoadFailed: false,
+  setReposLoadFailed: (v) => set({ reposLoadFailed: v }),
   setDaemon: (daemon) => set({ daemon }),
   setDaemonNote: (daemonNote) => set({ daemonNote }),
   seedHistory: (sid, events) => set((s) => {

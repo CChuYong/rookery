@@ -7,7 +7,8 @@ const msg = (content: string, role: "user" | "assistant") => ({ kind: "message",
 describe("MessageList new-row entrance (rise-in on the last row only)", () => {
   it("marks the last committed row with rise-in, not earlier rows", () => {
     const { container } = render(<MessageList items={[msg("first", "assistant"), msg("second", "assistant")]} />);
-    const scroll = container.querySelector(".overflow-y-auto")!;
+    // Rows live in the reading column inside the scroller (audit #14 moved the 720px column inside it).
+    const scroll = container.querySelector(".overflow-y-auto")!.firstElementChild!;
     const rows = Array.from(scroll.children);
     expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(rows[rows.length - 1].className).toContain("rise-in");
@@ -31,5 +32,19 @@ describe("MessageList screen-reader live region", () => {
   it("marks the waiting bubble as a status region", () => {
     const { getByText } = render(<MessageList items={[msg("hello", "user")]} />);
     expect(getByText("생각하는 중…").closest("[role='status']")).not.toBeNull();
+  });
+});
+
+// audit #14: the scroller spans the whole pane (scrollbar at the pane edge, wheel works in the side margins); the
+// 720px reading column sits inside it.
+describe("MessageList scroller vs reading column (audit #14)", () => {
+  it("scrolls on a full-width element and centers a 720px column inside it", () => {
+    const { getByRole } = render(<MessageList items={[msg("hi", "assistant")]} />);
+    const log = getByRole("log");
+    expect(log.className).toContain("overflow-y-auto");
+    expect(log.className).not.toContain("max-w-[720px]");
+    const column = log.firstElementChild as HTMLElement;
+    expect(column.className).toContain("max-w-[720px]");
+    expect(column.className).toContain("mx-auto");
   });
 });

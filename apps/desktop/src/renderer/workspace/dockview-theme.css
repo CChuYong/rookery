@@ -27,10 +27,13 @@
   --dv-active-sash-color: var(--color-thumb-hi);
   --dv-drag-over-background-color: color-mix(in oklab, var(--color-accent) 14%, transparent);
   --dv-drag-over-border-color: var(--color-accent);
+  /* The one tab-strip marker (audit #99): active = full-strength text + this 1px neutral line. Segment `underline`,
+     TabBar, the terminal strip and Capability Center tabs draw the same line (lib/ui-tokens.ts TAB_LINE). */
+  --tab-line: var(--color-fg-dim);
 }
 
 /* Quiet tabs on the canvas plane: no strip background, no bottom rule, no dividers, no accent line. The active
-   tab is simply full-white text on a faint lift; inactive tabs are muted. The custom RookeryTab paints
+   tab is full-white text over the shared 1px neutral line; inactive tabs are muted. The custom RookeryTab paints
    icon/title/close (data-kind identifies the panel kind for the rules below); these rules own the tab shell. */
 .dockview-theme-rookery .dv-tabs-and-actions-container {
   padding: 0 8px;
@@ -43,20 +46,46 @@
 .dockview-theme-rookery .dv-tabs-and-actions-container:has(.rk-tab[data-kind="terminal"]) {
   height: 32px;
 }
-/* A conversation shown on its own needs no tab: hide the strip until a second tab (a file, a diff) joins it. */
-.dockview-theme-rookery .dv-groupview:has(> .dv-tabs-and-actions-container .rk-tab[data-kind="conversation"]):not(:has(> .dv-tabs-and-actions-container .dv-tab ~ .dv-tab)) > .dv-tabs-and-actions-container {
-  display: none;
-}
+/* The conversation's tab strip is always shown (audit #12): hiding it while the conversation was alone made the
+   whole conversation jump down 32px the moment the first file or diff opened. */
+/* Every tab sizes to its label (capped) and clips inside its own box, so a narrow window doesn't overflow early and
+   a long name ends in an ellipsis instead of being cut mid-letter (audit #2 #16). */
 .dockview-theme-rookery .dv-tabs-container > .dv-tab {
   position: relative;
   height: 24px;
   margin: 0 1px;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
   border-radius: var(--radius-sm);
   transition: background-color var(--dur-micro) ease, color var(--dur-micro) ease;
 }
+/* One marker for every tab strip (audit #16 → #99): text colour + the neutral line, no fill — the editor tabs, the
+   inspector card tabs and the in-panel strips now read the same. */
 .dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  background-color: transparent;
+  color: var(--color-fg);
+  box-shadow: inset 0 -1px 0 var(--tab-line);
+}
+/* The overflow list (dockview's chevron menu) marks the tab you are on (audit #2). */
+/* The focused group's active tab draws the line in the accent (a 1px accent line is the IDE's focus cue), so it reads
+   apart from the other groups' active tabs and from a hovered tab. */
+.dockview-theme-rookery .dv-groupview.dv-active-group > .dv-tabs-and-actions-container .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -1px 0 var(--color-accent);
+}
+/* (it is a list, so it uses the row-selection lift rather than the tab line) */
+.dockview-theme-rookery .dv-tabs-overflow-container .dv-tab.dv-active-tab {
   background-color: var(--color-raised);
   color: var(--color-fg);
+  box-shadow: inset 2px 0 0 var(--tab-line);
+}
+/* The overflow chevron is a keyboard stop now (audit #71): show where focus is. */
+.dockview-theme-rookery .dv-tabs-overflow-dropdown-default:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
 }
 .dockview-theme-rookery .dv-groupview > .dv-tabs-and-actions-container .dv-tab.dv-inactive-tab {
   background-color: transparent;
@@ -77,7 +106,8 @@
 .dockview-theme-rookery .dv-view:has(> .dv-groupview .rk-tab[data-kind="files"]),
 .dockview-theme-rookery .dv-view:has(> .dv-groupview .rk-tab[data-kind="git"]),
 .dockview-theme-rookery .dv-view:has(> .dv-groupview .rk-tab[data-kind="nested"]) {
-  padding: 8px 12px 12px 4px;
+  /* no top inset: the card's tab strip sits on the same line as the editor/conversation tab strip (audit #108) */
+  padding: 0 12px 12px 4px;
 }
 .dockview-theme-rookery .dv-groupview:has(.rk-tab[data-kind="files"]),
 .dockview-theme-rookery .dv-groupview:has(.rk-tab[data-kind="git"]),
@@ -101,7 +131,10 @@
 .dockview-theme-rookery .dv-groupview:has(.rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"])) .dv-tab.dv-active-tab {
   background-color: transparent !important;
   color: var(--color-fg);
-  box-shadow: inset 0 -1px 0 var(--color-fg-dim);
+  box-shadow: inset 0 -1px 0 var(--tab-line);
+}
+.dockview-theme-rookery .dv-groupview.dv-active-group:has(.rk-tab:is([data-kind="files"], [data-kind="git"], [data-kind="nested"])) .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -1px 0 var(--color-accent); /* same focused-group cue as the editor strip */
 }
 /* The inspector tabs' close × takes no width, so the three labels fit: on hover it replaces the tab's leading icon
    (it used to overlay the right edge, which painted over the label's last letters — "Files" read "Fil ×"). */

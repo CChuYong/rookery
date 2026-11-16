@@ -161,7 +161,7 @@ export function McpPackBuilderDialog(props: McpPackBuilderDialogProps): JSX.Elem
           {error && <p className="mt-4 rounded-md border border-fail/30 bg-fail/5 p-3 text-meta text-fail">{error}</p>}
         </form>
 
-        <div className="flex items-center gap-3 border-t border-line px-5 py-3"><p className="min-w-0 flex-1 text-meta text-run">{t("mcpPackBuilder.trustNotice")}</p><Button variant="outline" disabled={busy} onClick={dismiss}>{t("common.cancel")}</Button><Button variant="primary" aria-label={t(catalog ? "capabilityCatalog.registerMcp" : "mcpPackBuilder.create")} loading={busy} onClick={submit}>{t(catalog ? "capabilityCatalog.registerMcp" : "mcpPackBuilder.create")}</Button></div>
+        <div className="flex items-center gap-3 border-t border-line px-5 py-3"><p className="min-w-0 flex-1 text-meta text-warn">{t("mcpPackBuilder.trustNotice")}</p><Button variant="outline" disabled={busy} onClick={dismiss}>{t("common.cancel")}</Button><Button variant="primary" aria-label={t(catalog ? "capabilityCatalog.registerMcp" : "mcpPackBuilder.create")} loading={busy} onClick={submit}>{t(catalog ? "capabilityCatalog.registerMcp" : "mcpPackBuilder.create")}</Button></div>
       </div>
     </div>
   );

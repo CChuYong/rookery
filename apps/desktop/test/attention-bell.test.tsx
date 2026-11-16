@@ -37,14 +37,14 @@ describe("AttentionBell", () => {
     const btn = screen.getByRole("button");
     expect(btn.textContent).toBe(""); // no badge count
     fireEvent.click(btn);
-    expect(screen.getByText("지금 필요한 것이 없어요. 전부 순항 중 ✨")).toBeInTheDocument();
+    expect(screen.getByText("지금 확인할 일이 없어요.")).toBeInTheDocument();
   });
 
   it("badge counts items; clicking a failure row navigates and closes", () => {
     useStore.setState({ fleet: { w1: w("w1", "error") } } as never);
     const onNavigate = vi.fn();
     render(<AttentionBell onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     fireEvent.click(screen.getByText("w-w1"));
     expect(onNavigate).toHaveBeenCalledWith({ workerId: "w1" });
     expect(screen.queryByText("실패")).toBeNull(); // popover closed
@@ -53,7 +53,7 @@ describe("AttentionBell", () => {
   it("shows the worker status as a translated word, not the raw English token (Korean-default UI)", () => {
     useStore.setState({ fleet: { w1: w("w1", "error"), w2: w("w2", "stopped") }, attention: { w2: true } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     expect(screen.getByText(/워커 실패 · 오류/)).toBeInTheDocument(); // not "· error"
     expect(screen.getByText(/· 중지됨/)).toBeInTheDocument(); // not "· stopped"
     expect(screen.queryByText(/· error/)).toBeNull();
@@ -63,17 +63,17 @@ describe("AttentionBell", () => {
   it("dismissing a failure persists the ack (item gone after reopen)", () => {
     useStore.setState({ fleet: { w1: w("w1", "failed") } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
-    fireEvent.click(screen.getByLabelText("묵살"));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
+    fireEvent.click(screen.getByLabelText("닫기"));
     expect(useAcksStore.getState().acked).toContain("wfail:w1:failed");
-    expect(screen.getByText(/지금 필요한 것이 없어요/)).toBeInTheDocument(); // list emptied live
+    expect(screen.getByText(/지금 확인할 일이 없어요/)).toBeInTheDocument(); // list emptied live
   });
 
   it("dismissing a worker-review item flips the live unread map (no persisted ack)", () => {
     useStore.setState({ fleet: { w1: w("w1", "stopped") }, attention: { w1: true } } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
-    fireEvent.click(screen.getByLabelText("묵살"));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
+    fireEvent.click(screen.getByLabelText("닫기"));
     expect(useStore.getState().attention.w1).toBe(false);
     expect(useAcksStore.getState().acked).toEqual([]);
   });
@@ -85,9 +85,49 @@ describe("AttentionBell", () => {
       liveInteractionIds: new Set(["r1"]),
     } as never);
     render(<AttentionBell onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText(/어텐션 큐/));
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
     expect(screen.getByText("응답 대기")).toBeInTheDocument();
     expect(screen.getByText("질문 세션")).toBeInTheDocument();
-    expect(screen.queryByLabelText("묵살")).toBeNull(); // tier 0 resolves itself
+    expect(screen.queryByLabelText("닫기")).toBeNull(); // tier 0 resolves itself
+  });
+
+  // audit #20: the bell had no tooltip, and a second bell (the OS-notification toggle) sat next to it. The toggle now
+  // lives inside this popover, and the one bell shows a muted glyph + title while OS notifications are off.
+  it("has a tooltip naming what it is", () => {
+    render(<AttentionBell onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button")).toHaveAttribute("title", "지금 필요한 것");
+  });
+
+  it("hosts the OS-notification toggle and says when notifications are off", () => {
+    const onToggleNotify = vi.fn();
+    const { rerender } = render(<AttentionBell onNavigate={vi.fn()} notifyOn onToggleNotify={onToggleNotify} />);
+    fireEvent.click(screen.getByLabelText(/알림 대기열/));
+    const toggle = screen.getByRole("button", { name: /^OS 알림/ });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(toggle);
+    expect(onToggleNotify).toHaveBeenCalledTimes(1);
+    rerender(<AttentionBell onNavigate={vi.fn()} notifyOn={false} onToggleNotify={onToggleNotify} />);
+    expect(screen.getByRole("button", { name: /^OS 알림/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText(/알림 대기열/)).toHaveAttribute("title", "지금 필요한 것 — OS 알림 꺼짐");
+    expect(screen.getByLabelText(/알림 대기열/)).toHaveAttribute("aria-label", "알림 대기열 (0건) — OS 알림 꺼짐"); // review m4
+  });
+});
+
+// audit #75: the popover opened with focus left on the bell, and closing it lost focus.
+describe("AttentionBell focus (audit #75)", () => {
+  it("moves focus to the first item on open, roves with the arrows, and returns it to the bell on Escape", () => {
+    useStore.setState({ fleet: { w1: w("w1", "failed"), w2: w("w2", "error") } } as never);
+    render(<AttentionBell onNavigate={vi.fn()} />);
+    const bell = screen.getByLabelText(/알림 대기열/);
+    bell.focus();
+    fireEvent.click(bell);
+    const items = screen.getByRole("dialog").querySelectorAll("[data-bell-item]");
+    expect(items.length).toBe(2);
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(bell);
   });
 });

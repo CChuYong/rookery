@@ -107,3 +107,43 @@ describe("InteractionCard", () => {
     expect(screen.getByText("응답 전송 중…")).toBeInTheDocument();
   });
 });
+
+// audit #74: the turn is blocked on this card, but reaching it took a string of Shift+Tabs. Fix round 1: the card
+// itself takes focus (never a choice), so a keystroke meant for the composer can't approve a tool unreviewed, and it
+// never pulls focus out of a typing target — even an empty one.
+describe("InteractionCard focus (audit #74)", () => {
+  it("never moves focus out of a typing target, even an empty composer; Space there approves nothing", () => {
+    const onRespond = vi.fn();
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    render(<InteractionCard item={{ kind: "interaction", requestId: "F1", mode: "approve", toolName: "Bash", resolved: false }} onRespond={onRespond} />);
+    expect(document.activeElement).toBe(composer);
+    fireEvent.keyDown(composer, { key: " " });
+    fireEvent.keyUp(composer, { key: " " });
+    expect(onRespond).not.toHaveBeenCalled();
+    composer.remove();
+  });
+
+  it("otherwise focuses the card (not a choice): Enter/Space on it do nothing, and answering gives focus back", () => {
+    const onRespond = vi.fn();
+    const sidebarBtn = document.createElement("button");
+    document.body.appendChild(sidebarBtn);
+    sidebarBtn.focus();
+    const item: Item = { kind: "interaction", requestId: "F2", mode: "approve", toolName: "Bash", resolved: false };
+    const { rerender } = render(<InteractionCard item={item} onRespond={onRespond} />);
+    const card = screen.getByRole("group", { name: "이 작업을 승인할까요?" });
+    expect(document.activeElement).toBe(card);
+    fireEvent.keyDown(card, { key: " " });
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(onRespond).not.toHaveBeenCalled();
+    rerender(<InteractionCard item={{ ...item, resolved: true, summary: "ok" }} onRespond={onRespond} />);
+    expect(document.activeElement).toBe(sidebarBtn);
+    sidebarBtn.remove();
+  });
+
+  it("ask mode follows the same rule", () => {
+    render(<InteractionCard item={{ kind: "interaction", requestId: "F3", mode: "ask", resolved: false, questions: [{ question: "Q?", options: [{ label: "A" }] }] } as Item} onRespond={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("group", { name: "어시스턴트의 질문에 답해주세요" }));
+  });
+});

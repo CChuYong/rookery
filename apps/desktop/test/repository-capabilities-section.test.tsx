@@ -98,7 +98,7 @@ describe("RepositoryCapabilitiesSection", () => {
 
   it("explains direct overrides and inherited Rookery defaults", async () => {
     render(<RepositoryCapabilitiesSection repoId="repo-1" api={api({ loadLibrary: async () => snapshot([direct, custom, rookeryDefault]) })} generation={0} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={() => {}} />);
-    expect(await screen.findByTestId("repository-capability-mcp-1")).toHaveTextContent("Rookery 기본값을 덮어씁니다");
+    expect(await screen.findByTestId("repository-capability-mcp-1")).toHaveTextContent("Rookery 기본값을 덮어써요");
     expect(screen.getByTestId("repository-capability-bundle-1")).toHaveTextContent("Rookery 기본값: 비활성 · 워커");
   });
 
@@ -106,7 +106,7 @@ describe("RepositoryCapabilitiesSection", () => {
     const onPreviewEffective = vi.fn();
     render(<RepositoryCapabilitiesSection repoId="repo-1" api={api()} generation={0} onOpenCatalog={() => {}} onOpenAdvancedAssignments={() => {}} onPreviewEffective={onPreviewEffective} />);
     await screen.findByText("Docs MCP");
-    fireEvent.click(screen.getByRole("button", { name: "Effective 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유효 상태 미리보기" }));
     expect(onPreviewEffective).toHaveBeenCalledOnce();
   });
 });

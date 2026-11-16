@@ -49,6 +49,14 @@ function ToastRow({ toast }: { toast: Toast }): JSX.Element {
         <div className="font-medium leading-snug text-fg">{toast.text}</div>
         {toast.detail && <div className="mt-0.5 truncate font-mono text-meta text-muted" title={toast.detail}>{toast.detail}</div>}
       </div>
+      {toast.action && (
+        <button
+          onClick={() => { toast.action?.onClick(); animateOut(); }}
+          className="-my-0.5 shrink-0 rounded px-1.5 py-0.5 font-medium text-fg-dim transition-colors hover:bg-ink/40 hover:text-fg"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button onClick={animateOut} aria-label={t("common.close")} className="-mr-1 shrink-0 rounded p-0.5 text-muted transition-colors hover:text-fg"><X size={14} /></button>
     </div>
   );

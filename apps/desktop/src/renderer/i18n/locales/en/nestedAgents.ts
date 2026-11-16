@@ -1,4 +1,4 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "nestedAgents.title": "Nested agents",
+  "nestedAgents.title": "Sub-agents",
 } satisfies Catalog;

@@ -4,7 +4,7 @@ export default {
   "usagePanel.titleHint": "From ccusage — reflects your whole Claude account, not just this app.",
   "usagePanel.loading": "Loading usage…",
   "usagePanel.loadFailed": "Couldn't load usage",
-  "usagePanel.session5h": "Session · 5h",
+  "usagePanel.session5h": "5h window",
   "usagePanel.weekly": "Weekly",
   "usagePanel.weeklyOpus": "Weekly · Opus",
   "usagePanel.weeklySonnet": "Weekly · Sonnet",
@@ -18,4 +18,9 @@ export default {
   "usagePanel.resets": "resets {time}",
   "usagePanel.expand": "Expand usage",
   "usagePanel.collapse": "Collapse usage",
+  "usagePanel.details": "Usage details",
+  "usagePanel.empty": "No usage data — check that ccusage is installed and you're logged in",
+  "usagePanel.stale": "Refresh failed",
+  "usagePanel.session5hTitle": "Account-wide 5-hour usage limit — not this session's cost",
+  "usagePanel.limit": "limit",
 } satisfies Catalog;

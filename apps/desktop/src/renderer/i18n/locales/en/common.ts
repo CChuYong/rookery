@@ -1,4 +1,5 @@
 import type { Catalog } from "../../types.js";
+// The ko/en copy glossary (one term per concept) lives at the top of ../ko/common.ts.
 export default {
   "common.save": "Save",
   "common.saved": "Saved",
@@ -18,4 +19,6 @@ export default {
   "common.effortXhigh": "Extra high",
   "common.effortMax": "Max",
   "common.effortUltra": "Ultra",
+  "common.noLimit": "No limit",
+  "common.moreActionsFor": "More actions for {name}",
 } satisfies Catalog;

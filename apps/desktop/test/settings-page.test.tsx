@@ -54,7 +54,7 @@ describe("SettingsPage Anthropic API key input", () => {
     expect(onSaveAnthropicKey).toHaveBeenCalledWith("sk-ant-abc123");
   });
 
-  it("clears the input field after saving", () => {
+  it("clears the input field after saving", async () => {
     const onSaveAnthropicKey = vi.fn();
     render(<SettingsPage {...base} onSaveAnthropicKey={onSaveAnthropicKey} />);
     fireEvent.click(screen.getByText("모델"));
@@ -62,7 +62,8 @@ describe("SettingsPage Anthropic API key input", () => {
     fireEvent.change(input, { target: { value: "sk-ant-xyz" } });
     const saveButtons = screen.getAllByText("저장");
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
-    expect(input).toHaveValue("");
+    // cleared once the save is confirmed (a microtask later), not before (audit #94)
+    await waitFor(() => expect(input).toHaveValue(""));
   });
 
   it("Save button is disabled when the input is blank", () => {
@@ -97,7 +98,7 @@ describe("SettingsPage Rookery capability defaults", () => {
     await waitFor(() => expect(quickSetBinding).toHaveBeenCalledWith({
       packInstanceId: "pack-1", scopeKind: "rookery", scopeRef: "", mode: "enabled", agents: ["master", "worker"],
     }));
-    fireEvent.click(screen.getByRole("button", { name: "Effective 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "유효 상태 미리보기" }));
     expect(onPreviewCapabilities).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "저장됨" })).toBeNull();
   });
@@ -141,7 +142,7 @@ describe("SettingsPage Codex tab", () => {
     expect(input).toHaveAttribute("type", "password");
   });
 
-  it("calls onSaveCodexKey with the typed key, clears the field, and shows a saved note (no auth-status probe)", () => {
+  it("calls onSaveCodexKey with the typed key, clears the field, and shows a saved note (no auth-status probe)", async () => {
     const onSaveCodexKey = vi.fn();
     render(<SettingsPage {...base} onSaveCodexKey={onSaveCodexKey} />);
     fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
@@ -151,7 +152,7 @@ describe("SettingsPage Codex tab", () => {
     // identifies this dedicated key-save button (mirrors the Anthropic-key block's single-match idiom).
     fireEvent.click(screen.getByText("저장"));
     expect(onSaveCodexKey).toHaveBeenCalledWith("sk-codex-abc");
-    expect(input).toHaveValue("");
+    await waitFor(() => expect(input).toHaveValue("")); // after the confirmed save (audit #94)
     // Same placeholder pattern the slack token fields use to indicate "already saved" (no separate auth-status check for codex).
     expect(screen.getByPlaceholderText("저장됨 — 교체하려면 새 값을 입력하세요")).toBeInTheDocument();
   });
@@ -170,7 +171,7 @@ describe("SettingsPage Codex tab", () => {
     render(<SettingsPage {...base} onSave={onSave} />);
     fireEvent.click(screen.getByText("모델")); fireEvent.click(screen.getByText("Codex"));
     // scope by label to avoid ambiguity with other Codex-tab fields
-    fireEvent.change(screen.getByLabelText(/Codex 턴 유휴 타임아웃/), { target: { value: "60000" } });
+    fireEvent.change(screen.getByLabelText(/Codex 턴 무응답 타임아웃/), { target: { value: "60000" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codexTurnIdleTimeoutMs: "60000" }));
@@ -255,13 +256,13 @@ describe("SettingsPage workerCostBudgetUsd field", () => {
 
   it("empty by default shows the 'off' placeholder", () => {
     render(<SettingsPage {...base} />);
-    expect(screen.getByPlaceholderText("off")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("제한 없음")).toBeInTheDocument();
   });
 
   it("editing the field lands in the onSave(f) bulk-save payload", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
-    fireEvent.change(screen.getByPlaceholderText("off"), { target: { value: "10.5" } });
+    fireEvent.change(screen.getByPlaceholderText("제한 없음"), { target: { value: "10.5" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ workerCostBudgetUsd: "10.5" }));
@@ -287,11 +288,14 @@ describe("SettingsPage External MCP section", () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ mcpExposure: "full" }));
   });
 
-  it("when active with a URL, shows the URL and a regenerate button that fires the callback", () => {
+  it("when active with a URL, shows the URL and a regenerate button that fires the callback after a confirm (audit #103)", () => {
     const onRegenerateMcpToken = vi.fn();
     render(<SettingsPage {...base} settings={{ ...base.settings, mcpExposure: "readonly" }} mcpStatus={{ scope: "readonly", url: "http://127.0.0.1:8787/mcp-ext/tok" }} onRegenerateMcpToken={onRegenerateMcpToken} />);
     expect(screen.getByDisplayValue("http://127.0.0.1:8787/mcp-ext/tok")).toBeInTheDocument();
     fireEvent.click(screen.getByText("토큰 재발급"));
+    // rotating the token disconnects every registered client, so it asks first
+    expect(onRegenerateMcpToken).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "토큰 재발급" }));
     expect(onRegenerateMcpToken).toHaveBeenCalled();
   });
 
@@ -306,7 +310,7 @@ describe("SettingsPage Slack tab — slackProvider", () => {
   it("shows the slackProvider select defaulted to the settings value (claude)", () => {
     render(<SettingsPage {...base} />);
     fireEvent.click(screen.getByText("Slack"));
-    const select = screen.getByLabelText(/Slack 에이전트 백엔드/) as HTMLSelectElement;
+    const select = screen.getByLabelText(/Slack 백엔드/) as HTMLSelectElement;
     expect(select.value).toBe("claude");
   });
 
@@ -314,7 +318,7 @@ describe("SettingsPage Slack tab — slackProvider", () => {
     const onSave = vi.fn();
     render(<SettingsPage {...base} onSave={onSave} />);
     fireEvent.click(screen.getByText("Slack"));
-    fireEvent.change(screen.getByLabelText(/Slack 에이전트 백엔드/), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText(/Slack 백엔드/), { target: { value: "codex" } });
     const saveButtons = screen.getAllByText("저장"); // ko fallback
     fireEvent.click(saveButtons[saveButtons.length - 1]!);
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ slackProvider: "codex" }));
@@ -358,16 +362,17 @@ describe("SettingsPage unsaved-changes guard", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("Save & close runs save then closes", () => {
+  it("Save & close runs save then closes", async () => {
     const order: string[] = [];
-    const onSave = vi.fn(() => order.push("save"));
-    const onClose = vi.fn(() => order.push("close"));
+    const onSave = vi.fn(() => { order.push("save"); });
+    const onClose = vi.fn(() => { order.push("close"); });
     render(<SettingsPage {...base} onClose={onClose} onSave={onSave} />);
     makeDirty();
     fireEvent.click(closeBtn());
     fireEvent.click(screen.getByText("저장하고 닫기"));
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    // closes once the save resolved (a failed save keeps the page, audit #93)
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(order).toEqual(["save", "close"]);
   });
 
@@ -380,5 +385,60 @@ describe("SettingsPage unsaved-changes guard", () => {
     expect(onClose).not.toHaveBeenCalled();
     // the dialog unmounts after its exit-transition timeout (useDismissTransition)
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+// audit #131 #129: the category rail is a real vertical tablist (one tab stop, arrows move and select, a labelled
+// panel), and Escape closes the page through the same unsaved-changes guard as the X.
+describe("SettingsPage keyboard (audit #131 #129)", () => {
+  it("moves between categories with the arrow keys and labels the panel by its tab", () => {
+    render(<SettingsPage {...base} />);
+    const general = screen.getByRole("tab", { name: "일반" });
+    expect(general).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: "Slack" })).toHaveAttribute("tabindex", "-1");
+    general.focus();
+    fireEvent.keyDown(general, { key: "ArrowDown" });
+    const slack = screen.getByRole("tab", { name: "Slack" });
+    expect(slack).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(slack);
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", slack.id);
+  });
+
+  it("closes on Escape when clean, and asks first when there are unsaved edits", () => {
+    const onClose = vi.fn();
+    const { unmount } = render(<SettingsPage {...base} onClose={onClose} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    unmount();
+    const onClose2 = vi.fn();
+    render(<SettingsPage {...base} onClose={onClose2} />);
+    fireEvent.change(screen.getByDisplayValue("rookery"), { target: { value: "other" } });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose2).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+// Fix round 1: the page-level Escape must not fire while a popover is open (its own Escape listener may run later)
+// or while the focused field holds typed text (a typed secret is not part of the draft).
+describe("SettingsPage Escape layering (fix round 1)", () => {
+  it("stands back while a status-bar popover is open", async () => {
+    const { ResourceMonitor } = await import("../src/renderer/components/ResourceMonitor.js");
+    const onClose = vi.fn();
+    render(<><SettingsPage {...base} onClose={onClose} /><ResourceMonitor snapshot={null} variant="statusbar" /></>);
+    fireEvent.click(screen.getByRole("button", { name: "리소스" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not close from a field that holds typed text", () => {
+    const onClose = vi.fn();
+    render(<SettingsPage {...base} onClose={onClose} />);
+    fireEvent.click(screen.getByRole("tab", { name: "모델" }));
+    const key = screen.getByPlaceholderText(/sk-ant-/);
+    fireEvent.change(key, { target: { value: "sk-ant-typed" } });
+    key.focus();
+    fireEvent.keyDown(key, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

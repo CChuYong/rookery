@@ -1,8 +1,6 @@
 import type { ImageRef } from "@daemon/core/image-input.js";
-import { MessageImages } from "./MessageImages.js";
 import { latestSpeedObservation, lastReportedSpeed, speedPendingNextTurn } from "../lib/speed.js";
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
-import { Clock } from "lucide-react";
 import type { CommandAction } from "@daemon/core/capabilities/commands.js";
 import { useStore } from "../store/store.js";
 import type { LogItem } from "../store/reduce.js";
@@ -10,6 +8,8 @@ import { useDraftStore, EMPTY_DRAFT, clearAcceptedDraft } from "../store/drafts.
 import { Conversation } from "../views/Conversation.js";
 import type { ConversationProps } from "../views/Conversation.js";
 import { useT } from "../i18n/provider.js";
+import { toast } from "../store/toasts.js";
+import { SideOpenCancelled, isSideOpenCancelled } from "../lib/side-cancel.js";
 import { SideConversationDrawer } from "./SideConversationDrawer.js";
 
 // Shared conversation panel for master sessions / workers. Subscribes to transcript, pending, and progress state itself, per kind
@@ -18,7 +18,7 @@ import { SideConversationDrawer } from "./SideConversationDrawer.js";
 // run the same code, divergence bugs like "stop button only shows on one side" are structurally impossible.
 // EMPTY/EMPTY_PENDING are module constants (selector identity — prevents a new ref on every render).
 const EMPTY: LogItem[] = [];
-const EMPTY_PENDING: { clientMsgId: string; text: string }[] = [];
+const EMPTY_PENDING: { clientMsgId: string; text: string; images?: ImageRef[] }[] = [];
 
 export function ConversationPane({
   kind,
@@ -73,7 +73,7 @@ export function ConversationPane({
     setSide({ id: null, question: text, images });
     await (images?.length ? onSideStart(text, images) : onSideStart(text)).then((sideId) => {
       if (sideGeneration.current === generation) setSide({ id: sideId, question: text, images });
-      else { onSideClose?.(sideId); throw new Error("Side opening cancelled"); } // preserve source input when closed while opening
+      else { onSideClose?.(sideId); throw new SideOpenCancelled(); } // preserve source input when closed while opening
     }).catch((error) => { if (sideGeneration.current === generation) setSide(null); throw error; });
     clearAcceptedDraft(id, text, images, acceptedDraft);
   }, [onSideStart, onSideSend, onSideClose, side, id]);
@@ -81,11 +81,13 @@ export function ConversationPane({
     command.action.type !== "open-panel" || Boolean(onSideStart && !side)), [commands, onSideStart, side]);
   const handleCommandAction = useCallback((action: CommandAction, argument?: string) => {
     if (action.type === "open-panel") {
-      if (argument) void askSide(argument).catch(() => {});
+      // A /side command has no composer draft to keep, so its failure is a toast (the Side button's is inline).
+      // A cancel (the drawer closed while opening) is the user's own doing: no toast.
+      if (argument) void askSide(argument).catch((error) => { if (!isSideOpenCancelled(error)) toast.error(t("toast.sendFailed"), String(error)); });
       return;
     }
     onCommandAction?.(action, argument);
-  }, [askSide, onCommandAction]);
+  }, [askSide, onCommandAction, t]);
   const closeSide = useCallback(() => {
     sideGeneration.current++;
     sideRef.current = null;
@@ -93,20 +95,10 @@ export function ConversationPane({
     setSide(null);
   }, [side, onSideClose]);
   return (
-    <div className="relative flex min-h-0 flex-1">
+    // @container: the side drawer decides inline vs overlay from this pane's width (audit #9).
+    <div className="conversation-pane @container relative flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <Conversation key={draftGeneration} onRestoreInput={kind === "worker" && rest.disabled ? restoreInput : undefined} onRecoverInput={kind === "worker" && rest.disabled ? rest.onRecover : undefined} items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} controls={rest.controls ? { ...rest.controls, speedPending: speedPendingNextTurn(items), speedObservation: latestSpeedObservation(items), speedLastObservation: lastReportedSpeed(items) } : undefined} commands={composerCommands} busy={busy} initialText={initialDraft.text} initialImages={initialDraft.images} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} />
-        {pending.length > 0 && (
-          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-1 px-6 pb-2">
-            {pending.map((p) => (
-              <div key={p.clientMsgId} className="ml-auto max-w-[80%] rounded-md border border-dashed border-line bg-ink/30 px-3 py-2 text-ui text-fg-dim opacity-70">
-                <span className="mr-2 inline-flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-meta text-muted"><Clock size={12} /> {t("conversation.pendingBadge")}</span>
-                <MessageImages images={p.images} />
-                {p.text}
-              </div>
-            ))}
-          </div>
-        )}
+        <Conversation key={draftGeneration} onRestoreInput={kind === "worker" && rest.disabled ? restoreInput : undefined} onRecoverInput={kind === "worker" && rest.disabled ? rest.onRecover : undefined} items={items} kind={kind} loaded={historyLoaded} loadFailed={historyLoadFailed} onRetryHistory={retryHistory} {...rest} controls={rest.controls ? { ...rest.controls, speedPending: speedPendingNextTurn(items), speedObservation: latestSpeedObservation(items), speedLastObservation: lastReportedSpeed(items) } : undefined} commands={composerCommands} busy={busy} initialText={initialDraft.text} initialImages={initialDraft.images} onDraftChange={onDraftChange} onSideSend={onSideStart && !side ? askSide : undefined} onCommandAction={handleCommandAction} pending={pending} pendingQueued={statusRunning} />
       </div>
       {side && (
         <SideConversationDrawer

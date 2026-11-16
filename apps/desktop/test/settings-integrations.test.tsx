@@ -63,3 +63,27 @@ describe("SettingsPage Slack token placeholders", () => {
     expect(screen.queryByPlaceholderText("xapp-…")).toBeNull();
   });
 });
+
+// audit #47: a failed probe says so and offers a re-check instead of "checking…" forever.
+describe("SettingsPage failed status probes", () => {
+  it("integrations: 'couldn't check' with a Check again button that shows progress", async () => {
+    let done!: () => void;
+    const onRecheckStatus = vi.fn(() => new Promise<void>((res) => { done = res; }));
+    render(<SettingsPage {...base} integrations={null} integrationsFailed onRecheckStatus={onRecheckStatus} />);
+    fireEvent.click(screen.getByText("연동"));
+    expect(screen.queryByText("확인 중…")).toBeNull();
+    expect(screen.getAllByText(/확인하지 못했어요/).length).toBeGreaterThan(0);
+    const btn = screen.getByRole("button", { name: "다시 확인" });
+    fireEvent.click(btn);
+    expect(onRecheckStatus).toHaveBeenCalledTimes(1);
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    done();
+  });
+
+  it("Claude auth: 'couldn't check' replaces the endless checking label", () => {
+    render(<SettingsPage {...base} authStatus={null} authStatusFailed onRecheckStatus={async () => {}} />);
+    fireEvent.click(screen.getByText("모델"));
+    expect(screen.getByText("확인하지 못했어요")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 확인" })).toBeInTheDocument();
+  });
+});

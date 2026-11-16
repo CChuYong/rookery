@@ -1,5 +1,7 @@
 import { SpeedControl } from "./SpeedControl.js";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { rovingIndex, usePageEscape } from "../lib/focus.js";
+import { withShortcut } from "../lib/shortcuts.js";
 import type { SettingsValues } from "@daemon/core/settings.js";
 import type { SlackStatus } from "@daemon/core/events.js";
 import type { IntegrationsStatus } from "@daemon/protocol/messages.js";
@@ -15,36 +17,44 @@ import { cn } from "../lib/cn.js";
 import { useT } from "../i18n/provider.js";
 import { usePrefsStore } from "../store/prefs.js";
 import type { LocalePref } from "../i18n/types.js";
-import { useDismissTransition } from "../lib/useDismissTransition.js";
-import { useModalKeys } from "../lib/useModalKeys.js";
-import { useFocusTrap } from "../lib/useFocusTrap.js";
+import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { CapabilityScopeBindings } from "./capabilities/CapabilityScopeBindings.js";
 import type { CapabilityCenterApi } from "./capabilities/types.js";
+import { changedSettingKeys, dirtyTabs, msParts, type SettingsTab } from "../lib/settings-draft.js";
+import { setLeaveGuard } from "../lib/leave-guard.js";
 
-// VS Code settings composition: a section title with a hairline rule under it, then plain stacked settings —
-// no wells/cards. `Row` is the compact form (label+hint left, control right, e.g. a select or a short input);
-// `WideRow` puts the label on its own line above a full-width control (paths, tokens, allowlists, the MCP URL —
-// anything that would overflow a right-aligned slot). Both wrap the row in a <label> so the control keeps its
-// implicit accessible name (getByLabelText parity with the old Field component); status-only rows (no control)
-// use a plain <div> instead via `StatusRow`. The 20px rhythm between settings comes from the section's own gap.
+// VS Code settings composition (rookery-ide-ui skill): a scrolling list of settings, each = title (13px medium),
+// description (12px muted), control beneath — no wells, no right-aligned control column (that squeezed the
+// description into a ~260px column at 920px wide, audit #95, and made the control edge zig-zag, #110). A group
+// heading (`Section`) is used only where several settings belong together; a lone setting stands on its own
+// instead of repeating its title as a heading (#91). `Row` keeps a fixed-width control; `WideRow` a full-width one.
+// Both wrap the setting in a <label> so the control keeps its implicit accessible name; `CheckRow` puts a checkbox
+// before its title (VS Code's boolean setting); status-only rows (no control) use `StatusRow`. `break-keep` on the
+// page keeps Korean words whole when a line wraps.
 function Section({ title, desc, children }: { title: string; desc?: string; children: ReactNode }): JSX.Element {
   return (
     <section>
-      <h2 className="pb-1 text-body font-semibold text-fg">{title}</h2>
+      <h2 className="border-b border-line-soft pb-2 text-title font-medium text-fg">{title}</h2>
       {desc && <p className="mt-2 max-w-[70ch] text-ui leading-relaxed text-muted">{desc}</p>}
-      <div className="mt-3 flex flex-col gap-5">{children}</div>
+      <div className="mt-4 flex flex-col gap-4">{children}</div>
     </section>
+  );
+}
+
+function SettingText({ label, hint }: { label: ReactNode; hint?: ReactNode }): JSX.Element {
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-body font-medium text-fg">{label}</span>
+      {hint && <span className="max-w-[70ch] text-ui leading-relaxed text-muted">{hint}</span>}
+    </span>
   );
 }
 
 function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }): JSX.Element {
   return (
-    <label className="flex items-center justify-between gap-6">
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-body font-medium text-fg">{label}</span>
-        {hint && <span className="max-w-[70ch] text-ui leading-relaxed text-muted">{hint}</span>}
-      </span>
-      <span className="flex shrink-0 items-center gap-2">{children}</span>
+    <label className="flex flex-col items-start gap-1.5">
+      <SettingText label={label} hint={hint} />
+      <span className="flex max-w-full items-center gap-2">{children}</span>
     </label>
   );
 }
@@ -54,15 +64,19 @@ function WideRow({ label, hint, children }: { label?: ReactNode; hint?: ReactNod
   // <div> rather than a <label> (nothing to implicitly associate a control with).
   const Tag = label ? "label" : "div";
   return (
-    <Tag className="flex flex-col items-stretch gap-2">
-      {label && (
-        <span className="flex flex-col gap-0.5">
-          <span className="text-body font-medium text-fg">{label}</span>
-          {hint && <span className="max-w-[70ch] text-ui leading-relaxed text-muted">{hint}</span>}
-        </span>
-      )}
+    <Tag className="flex flex-col items-stretch gap-1.5">
+      {label && <SettingText label={label} hint={hint} />}
       {children}
     </Tag>
+  );
+}
+
+function CheckRow({ label, hint, checked, onChange }: { label: ReactNode; hint?: ReactNode; checked: boolean; onChange: (checked: boolean) => void }): JSX.Element {
+  return (
+    <label className="flex items-start gap-2">
+      <input type="checkbox" className="mt-[3px] accent-fg-dim" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <SettingText label={label} hint={hint} />
+    </label>
   );
 }
 
@@ -70,15 +84,69 @@ function StatusRow({ children }: { children: ReactNode }): JSX.Element {
   return <div className="flex items-center gap-3">{children}</div>;
 }
 
-type Tab = "general" | "slack" | "models" | "capabilities" | "integration";
-type ModelsProvider = "claude" | "codex";
+// "= 2 min" under a millisecond field (audit #119): the stored unit stays ms (the daemon reads raw ms strings), the
+// helper text says what the number means. `offKey` names what 0 does for this setting; without it 0 says nothing.
+function MsHint({ value, offKey }: { value: string | undefined; offKey?: string }): JSX.Element | null {
+  const t = useT();
+  const parts = msParts(value);
+  if (!parts) return null;
+  if (parts.unit === "off") return offKey ? <span className="text-ui text-muted">{t(offKey)}</span> : null;
+  return <span className="text-ui tabular-nums text-muted">{t(`settings.ms_${parts.unit}`, { count: parts.value })}</span>;
+}
 
-// Settings page that occupies the entire main area. As settings grew, it was split into General | Slack | Claude | Codex | Integration tabs.
-export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; onSaveLinearKey?: (key: string) => void; onSaveSlackTokens?: (bot: string, app: string) => void; onSaveAnthropicKey?: (key: string) => void; onSaveCodexKey?: (key: string) => void; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void; capabilityApi?: CapabilityCenterApi; capabilityGeneration?: number; onOpenCapabilityCatalog?: () => void; onOpenCapabilityAssignments?: () => void; onPreviewCapabilities?: () => void }): JSX.Element {
+// A write-only secret action (API key, tokens): the typed value stays in the field until the daemon confirms the
+// save, and the button shows progress meanwhile (audit #94). A failed save keeps the value so it can be retried
+// (the App path reports the failure once, as a toast).
+function useSecretSave(): { busy: boolean; run: (action: () => unknown, onSaved: () => void) => void } {
+  const [busy, setBusy] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const run = (action: () => unknown, onSaved: () => void): void => {
+    let result: unknown;
+    setBusy(true);
+    try { result = action(); } catch { setBusy(false); return; }
+    void Promise.resolve(result).then(
+      () => { if (alive.current) { setBusy(false); onSaved(); } },
+      () => { if (alive.current) setBusy(false); },
+    );
+  };
+  return { busy, run };
+}
+
+type Tab = SettingsTab;
+type ModelsProvider = "claude" | "codex";
+// Categories whose settings are all form-backed: the Save bar is always shown there. Integrations and
+// Capabilities have no draft fields of their own, so the bar appears there only while something is unsaved.
+const FORM_TABS: ReadonlySet<Tab> = new Set<Tab>(["general", "slack", "models"]);
+
+// A status probe that failed (instead of "checking…" forever, audit #47): says so and offers a re-check that shows
+// progress. The probe re-runs on its own each time Settings opens.
+function CheckFailed({ onRecheck }: { onRecheck?: () => Promise<void> }): JSX.Element {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-2 text-ui text-muted">
+      {t("settings.checkFailed")}
+      {onRecheck && (
+        <Button variant="outline" size="sm" loading={busy} aria-label={t("settings.recheck")} onClick={() => { setBusy(true); void onRecheck().catch(() => {}).finally(() => setBusy(false)); }}>
+          {t("settings.recheck")}
+        </Button>
+      )}
+    </span>
+  );
+}
+
+// Save model (audit #93): every form setting is a draft until the Save bar's Save — one model, one button, pinned
+// under the list so it is never scrolled away, with the unsaved count and a dot on each category that holds changes.
+// Two kinds of control deliberately act at once and say so: the app language (a local display preference) and the
+// Slack on/off switch (a connection action, not a stored value). Secrets (API keys, tokens) are write-only actions
+// with their own button next to the field — they can't be shown back, so they can't be part of a revertable draft.
+export function SettingsPage(p: { settings: SettingsValues; onSave: (next: SettingsValues) => void | Promise<void>; onClose: () => void; slack: SlackStatus; onSlackToggle: (enabled: boolean) => void; integrations?: IntegrationsStatus | null; authStatus?: AuthStatus | null; integrationsFailed?: boolean; authStatusFailed?: boolean; onRecheckStatus?: () => Promise<void>; onSaveLinearKey?: (key: string) => void | Promise<void>; onSaveSlackTokens?: (bot: string, app: string) => void | Promise<void>; onSaveAnthropicKey?: (key: string) => void | Promise<void>; onSaveCodexKey?: (key: string) => void | Promise<void>; mcpStatus?: { scope: "off" | "readonly" | "full"; url: string | null } | null; onRegenerateMcpToken?: () => void; capabilityApi?: CapabilityCenterApi; capabilityGeneration?: number; onOpenCapabilityCatalog?: () => void; onOpenCapabilityAssignments?: () => void; onPreviewCapabilities?: () => void }): JSX.Element {
   const t = useT();
   const localePref = usePrefsStore((s) => s.localePref);
   const setLocalePref = usePrefsStore((s) => s.setLocalePref);
   const [tab, setTab] = useState<Tab>("general");
+  const railId = useId().replace(/:/g, "");
   // Which provider's config the "Models" tab shows — a pill sub-toggle inside that tab. Ephemeral
   // (defaults to Claude each open), matching the top-level `tab`'s non-persisted behavior.
   const [modelsProvider, setModelsProvider] = useState<ModelsProvider>("claude");
@@ -91,6 +159,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   // Codex has no auth-status probe (unlike Anthropic's live check above) — this local flag is the only signal
   // that a key was saved this session, driving the same "saved" placeholder idiom the slack token fields use.
   const [codexKeySaved, setCodexKeySaved] = useState(false);
+  const linSave = useSecretSave();
+  const slackSave = useSecretSave();
+  const anthropicSave = useSecretSave();
+  const codexSave = useSecretSave();
   const models = useStore((s) => s.models); // live model list (initialized from the static fallback if none)
   const codexModels = useStore((s) => s.codexModels); // codex catalog from codex.models.list; null = couldn't fetch → free-text fallback for the defaults below
   const codexAuthStatus = useStore((s) => s.codexAuthStatus); // codex backend auth readiness (codex.authStatus); null = still probing / probe failed → "checking"
@@ -110,22 +182,74 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     p.onSlackToggle(p.slack === "off");
     slackToggleTimer.current = setTimeout(() => setSlackToggleBusy(false), 6000);
   };
-  const dirty = JSON.stringify(f) !== JSON.stringify(p.settings);
+  const changed = changedSettingKeys(f, p.settings);
+  const dirty = changed.length > 0;
+  const tabsWithChanges = dirtyTabs(changed);
   const allowAll = f.slackAllowAll === "1";
   const refuseReply = f.slackRefuseReply === "1";
+  // Same rule as the spawn page and the automation form: an entered budget is a positive amount, never silently dropped.
+  const budgetText = (f.workerCostBudgetUsd ?? "").trim();
+  const budgetInvalid = budgetText !== "" && !(Number.isFinite(Number(budgetText)) && Number(budgetText) > 0);
 
-  // Explicit-Save page + no auto-save → closing while dirty silently discarded edits (audit #18). Gate the page's own
-  // close affordance (the header X) behind a confirm when dirty; not dirty closes exactly as before. Out of scope:
-  // intercepting sidebar navigation away from the page — only this in-page close action.
-  const [confirmClose, setConfirmClose] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const budgetRef = useRef<HTMLInputElement>(null);
+  const inflight = useRef<Promise<boolean> | null>(null);
+  // Resolves true once the daemon accepted the settings; false on failure (the App path toasts it) — the draft stays.
+  // A save already running is joined rather than refused, so "Save and close" during it closes when it lands. An
+  // invalid budget refuses with its reason in view: the General category opens and the field takes focus.
+  const save = (): Promise<boolean> => {
+    if (inflight.current) return inflight.current;
+    if (budgetInvalid) {
+      setTab("general");
+      requestAnimationFrame(() => budgetRef.current?.focus());
+      return Promise.resolve(false);
+    }
+    setSaving(true);
+    const run = (async () => {
+      try {
+        await p.onSave(f);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        inflight.current = null;
+        if (alive.current) setSaving(false);
+      }
+    })();
+    inflight.current = run;
+    return run;
+  };
+
+  // Leaving with unsaved edits asks first (audit #18) — the header X, the in-page Capability Center links, and App
+  // navigation (sidebar, settings gear, back/forward) through the store's leave guard. "Save and close" leaves only
+  // once the save succeeded (audit #93). `pendingLeave` is the move the dialog will make; `leaving` lets that move
+  // pass the guard once the user chose.
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const leaving = useRef(false);
+  const leave = (action: () => void): void => {
+    leaving.current = true;
+    try { action(); } finally { leaving.current = false; }
+  };
+  const requestLeave = (action: () => void): void => {
+    if (dirtyRef.current) setPendingLeave(() => action);
+    else action();
+  };
+  useEffect(() => setLeaveGuard((proceed) => {
+    if (leaving.current || !dirtyRef.current) return false;
+    setPendingLeave(() => proceed);
+    return true;
+  }), []);
+  const [confirmRegen, setConfirmRegen] = useState(false); // rotating the MCP token cuts off every registered client (audit #103)
   const [mcpCopied, setMcpCopied] = useState(false);
   const copyMcpUrl = (url: string): void => {
     void navigator.clipboard.writeText(url).then(() => { setMcpCopied(true); window.setTimeout(() => setMcpCopied(false), 1500); }).catch(() => {});
   };
-  const requestClose = (): void => {
-    if (dirty) setConfirmClose(true);
-    else p.onClose();
-  };
+  const requestClose = (): void => requestLeave(p.onClose);
+  usePageEscape(requestClose); // Escape closes like the header X — through the same unsaved-changes guard (audit #129)
 
   // Native folder-picker dialog (preload bridge), same as for worktree/session cwd.
   const pickCwd = async (): Promise<void> => {
@@ -149,71 +273,126 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     { value: "claude", label: "Claude" },
     { value: "codex", label: t("settings.tabCodex") },
   ];
+  const showSaveBar = FORM_TABS.has(tab) || dirty;
+
+  // Claude/Codex model selects share one shape: the live list plus the saved value when it isn't in the list.
+  const claudeModelOptions = (value: string): JSX.Element => (
+    <>
+      {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
+      {!models.some((m) => m.id === value) && <option value={value}>{value}</option>}
+    </>
+  );
+  const codexModelField = (value: string | undefined, onChange: (v: string) => void): JSX.Element => (
+    codexModels != null ? (
+      <Select className="w-[240px]" value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{t("settings.codexModelDefaultOption")}</option>
+        {codexModels.map((m) => (
+          <option key={m.id} value={m.id}>{m.displayName}</option>
+        ))}
+        {value && !codexModels.some((m) => m.id === value) && <option value={value}>{value}</option>}
+      </Select>
+    ) : (
+      <Input className="w-[240px]" value={value ?? ""} placeholder="gpt-6.1-sol" onChange={(e) => onChange(e.target.value)} />
+    )
+  );
 
   return (
     <>
-      <div className="drag flex h-10 shrink-0 items-center gap-2 px-5">
+      <div className="drag flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="text-body font-medium text-fg">{t("settings.title")}</span>
-        <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={requestClose} aria-label={t("settings.close")}>
+        <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={requestClose} aria-label={t("settings.close")} title={withShortcut(t("settings.close"), "Esc")}>
           <X size={14} />
         </Button>
       </div>
       <div className="flex min-h-0 flex-1">
-        {/* category rail — VS Code settings layout: a left list of categories (not tabs-as-pills), driven by
-            the same tab state/handlers the old horizontal Segment used. */}
-        <nav role="tablist" aria-label={t("settings.title")} className="w-[180px] shrink-0 overflow-y-auto bg-sunk py-2">
+        {/* category rail — VS Code settings layout: a left list of categories (not tabs-as-pills). A dot marks a
+            category that holds unsaved changes. */}
+        {/* Tab pattern done fully (audit #131): one tab stop (the selected category), ArrowUp/Down/Home/End move and
+            select, and the panel is labelled by its tab. */}
+        <nav
+          role="tablist"
+          aria-label={t("settings.title")}
+          aria-orientation="vertical"
+          onKeyDown={(e) => {
+            const i = rovingIndex(e.key, tabs.findIndex((x) => x.value === tab), tabs.length);
+            if (i === null) return;
+            e.preventDefault();
+            const next = tabs[i]!.value;
+            setTab(next);
+            document.getElementById(`${railId}-tab-${next}`)?.focus();
+          }}
+          className="w-[160px] shrink-0 overflow-y-auto bg-sunk py-2"
+        >
           {tabs.map((item) => (
             <button
               key={item.value}
+              id={`${railId}-tab-${item.value}`}
               type="button"
               role="tab"
               aria-selected={tab === item.value}
+              aria-controls={`${railId}-panel`}
+              tabIndex={tab === item.value ? 0 : -1}
               onClick={() => setTab(item.value)}
               className={cn(
-                "flex h-[26px] w-full items-center px-3 text-left text-body transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi",
+                "flex h-[26px] w-full items-center gap-2 px-3 text-left text-body transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-hi",
                 tab === item.value ? "bg-raised text-fg" : "text-muted hover:bg-raised/60 hover:text-fg-dim",
               )}
             >
               {item.label}
+              {tabsWithChanges.has(item.value) && <span data-dirty-dot className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-fg-dim" aria-hidden />}
             </button>
           ))}
         </nav>
 
+        <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn("px-8 py-6", tab === "capabilities" ? "max-w-[880px]" : "max-w-[720px]")}>
-          <div key={tab} role="tabpanel" className="rise-in">
+        <div className={cn("break-keep px-6 py-6", tab === "capabilities" ? "max-w-[880px]" : "max-w-[720px]")}>
+          <div key={tab} id={`${railId}-panel`} role="tabpanel" aria-labelledby={`${railId}-tab-${tab}`} className="rise-in">
             {tab === "general" && (
-              <div className="flex flex-col gap-8">
-                <Section title={t("settings.botName")} desc={t("settings.botNameDesc")}>
-                  <Row label={t("settings.botName")}>
-                    <Input className="w-[240px]" value={f.masterName ?? ""} placeholder="rookery" maxLength={64} onChange={(e) => setF({ ...f, masterName: e.target.value })} />
-                  </Row>
-                </Section>
+              <div className="flex flex-col gap-6">
+                <Row label={t("settings.botName")} hint={t("settings.botNameDesc")}>
+                  <Input className="w-[240px]" value={f.masterName ?? ""} placeholder="rookery" maxLength={64} onChange={(e) => setF({ ...f, masterName: e.target.value })} />
+                </Row>
 
-                <Section title={t("settings.defaultFolder")} desc={t("settings.defaultFolderDesc")}>
-                  <WideRow label={t("settings.defaultFolderLabel")} hint={t("settings.defaultFolderHint")}>
-                    <div className="flex gap-2">
-                      <Input className="min-w-0 flex-1 font-mono text-ui" value={f.defaultSessionCwd ?? ""} placeholder={t("settings.defaultFolderPlaceholder")} onChange={(e) => setF({ ...f, defaultSessionCwd: e.target.value })} />
-                      <Button variant="outline" size="sm" onClick={pickDefaultCwd}>{t("settings.browse")}</Button>
-                    </div>
-                  </WideRow>
-                </Section>
+                <WideRow label={t("settings.defaultFolder")} hint={<>{t("settings.defaultFolderDesc")} {t("settings.defaultFolderHint")}</>}>
+                  <div className="flex gap-2">
+                    <Input className="min-w-0 flex-1 font-mono text-ui" title={f.defaultSessionCwd || undefined} value={f.defaultSessionCwd ?? ""} placeholder={t("settings.defaultFolderPlaceholder")} onChange={(e) => setF({ ...f, defaultSessionCwd: e.target.value })} />
+                    <Button variant="outline" size="md" onClick={pickDefaultCwd}>{t("settings.browse")}</Button>
+                  </div>
+                </WideRow>
 
-                {/* Worker model/effort defaults moved to Models → per provider. The cost budget is
-                    provider-agnostic (applies to Claude AND Codex workers), so it stays here in General. */}
-                <Section title={t("settings.workerBudget")}>
-                  <Row label={t("settings.workerCostBudgetUsd")} hint={<>{t("settings.workerCostBudgetUsdHint")} {t("speed.budgetEstimated")}</>}>
-                    <Input type="number" className="w-[120px] tabular-nums" value={f.workerCostBudgetUsd ?? ""} placeholder="off" onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
+                {/* Worker model/effort defaults live in Models → per provider. The cost budget is provider-agnostic
+                    (applies to Claude AND Codex workers), so it stays here in General. */}
+                <div className="flex flex-col gap-1.5">
+                  <Row label={t("settings.workerBudget")} hint={<>{t("settings.workerCostBudgetUsdHint")} {t("speed.budgetEstimated")}</>}>
+                    <Input ref={budgetRef} type="number" className={cn("w-[120px] tabular-nums", budgetInvalid && "border-fail")} value={f.workerCostBudgetUsd ?? ""} placeholder={t("common.noLimit")} aria-invalid={budgetInvalid || undefined} aria-describedby={budgetInvalid ? "settings-budget-error" : undefined} onChange={(e) => setF({ ...f, workerCostBudgetUsd: e.target.value })} />
+                    <span className="text-ui text-muted">USD</span>
                   </Row>
-                </Section>
+                  {budgetInvalid && <p id="settings-budget-error" className="text-ui text-fail">{t("workerSpawnModal.budgetInvalid")}</p>}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Row label={t("settings.usageRefreshMs")} hint={t("settings.usageDesc")}>
+                    <Input type="number" className="w-[120px] tabular-nums" placeholder="120000" value={f.usageRefreshMs ?? ""} onChange={(e) => setF({ ...f, usageRefreshMs: e.target.value })} />
+                    <MsHint value={f.usageRefreshMs || "120000"} />
+                  </Row>
+                </div>
+
+                <Row label={t("settings.language")} hint={<>{t("settings.languageDesc")} {t("settings.appliesNow")}</>}>
+                  <Select className="w-[240px]" value={localePref} onChange={(e) => setLocalePref(e.target.value as LocalePref)}>
+                    <option value="system">{t("settings.langSystem")}</option>
+                    <option value="ko">한국어</option>
+                    <option value="en">English</option>
+                  </Select>
+                </Row>
 
                 {/* External MCP server (rookery-as-MCP): expose fleet control to external MCP clients (Claude Code /
-                    Cursor / Codex). Off by default (fail-closed). The scope is f-backed (saved via the footer button);
+                    Cursor / Codex). Off by default (fail-closed). The scope is f-backed (saved via the Save bar);
                     the URL/token are live actions reflecting the SAVED state (mcpStatus). */}
                 <div>
                   <Section title={t("settings.mcpTitle")} desc={t("settings.mcpDesc")}>
                     <Row label={t("settings.mcpExposureLabel")} hint={t("settings.mcpExposureHint")}>
-                      <Select className="w-[180px]" value={f.mcpExposure ?? "off"} onChange={(e) => setF({ ...f, mcpExposure: e.target.value })}>
+                      <Select className="w-[240px]" value={f.mcpExposure ?? "off"} onChange={(e) => setF({ ...f, mcpExposure: e.target.value })}>
                         <option value="off">{t("settings.mcpScopeOff")}</option>
                         <option value="readonly">{t("settings.mcpScopeReadonly")}</option>
                         <option value="full">{t("settings.mcpScopeFull")}</option>
@@ -225,10 +404,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                           <p className="text-ui leading-relaxed text-muted">{t("settings.mcpAddHint")}</p>
                           <div className="flex gap-2">
                             <Input readOnly value={p.mcpStatus.url} className="min-w-0 flex-1 font-mono text-ui" onFocus={(e) => e.currentTarget.select()} />
-                            <Button variant="outline" size="sm" onClick={() => copyMcpUrl(p.mcpStatus!.url!)}>{mcpCopied ? t("settings.mcpCopied") : t("settings.mcpCopy")}</Button>
+                            <Button variant="outline" size="md" onClick={() => copyMcpUrl(p.mcpStatus!.url!)}>{mcpCopied ? t("settings.mcpCopied") : t("settings.mcpCopy")}</Button>
                           </div>
-                          <div className="flex justify-end">
-                            <Button variant="outline" size="sm" onClick={() => p.onRegenerateMcpToken?.()}>{t("settings.mcpRegenerate")}</Button>
+                          <div>
+                            <Button variant="outline" size="sm" onClick={() => setConfirmRegen(true)}>{t("settings.mcpRegenerate")}</Button>
                           </div>
                         </WideRow>
                       ) : (
@@ -237,28 +416,12 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     )}
                   </Section>
                   {f.mcpExposure === "full" && (
-                    <div className="mt-2 flex items-start gap-2 rounded-md border border-fail/30 bg-fail/5 px-3 py-2 text-ui leading-relaxed text-fg-dim">
-                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-fail" />
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-ui leading-relaxed text-fg-dim">
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
                       <span>{t("settings.mcpFullWarning")}</span>
                     </div>
                   )}
                 </div>
-
-                <Section title={t("settings.usage")} desc={t("settings.usageDesc")}>
-                  <Row label={t("settings.usageRefreshMs")}>
-                    <Input type="number" className="w-[120px] tabular-nums" placeholder="120000" value={f.usageRefreshMs ?? ""} onChange={(e) => setF({ ...f, usageRefreshMs: e.target.value })} />
-                  </Row>
-                </Section>
-
-                <Section title={t("settings.language")} desc={t("settings.languageDesc")}>
-                  <Row label={t("settings.language")}>
-                    <Select className="w-[180px]" value={localePref} onChange={(e) => setLocalePref(e.target.value as LocalePref)}>
-                      <option value="system">{t("settings.langSystem")}</option>
-                      <option value="ko">한국어</option>
-                      <option value="en">English</option>
-                    </Select>
-                  </Row>
-                </Section>
 
                 <UpdateSettings />
               </div>
@@ -273,10 +436,12 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                     <span className="text-body text-fg">
                       {p.slack === "up" ? t("settings.slackUp") : p.slack === "connecting" ? t("settings.slackConnecting") : p.slack === "error" ? t("settings.slackError") : p.slack === "off" ? t("settings.slackOff") : t("settings.slackNoToken")}
                     </span>
+                    {/* A connection action, applied at once (not part of the Save bar's draft). */}
                     <button
                       onClick={handleSlackToggle}
                       disabled={p.slack === "unconfigured" || slackToggleBusy}
                       aria-busy={slackToggleBusy || undefined}
+                      title={t("settings.appliesNow")}
                       className={cn("ml-auto flex items-center gap-1.5 rounded-sm border border-line px-2.5 py-1 text-meta font-medium text-fg-dim transition-colors duration-150 hover:bg-raised hover:text-fg disabled:opacity-40")}
                     >
                       {slackToggleBusy && <Loader2 size={12} className="animate-spin" aria-hidden />}
@@ -296,63 +461,47 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   <WideRow label={t("settings.slackAppToken")}>
                     <Input type="password" placeholder={p.slack !== "unconfigured" ? t("settings.secretSaved") : "xapp-…"} value={slackApp} onChange={(e) => setSlackApp(e.target.value)} />
                   </WideRow>
-                  <div className="flex justify-end">
-                    <Button variant="outline" size="sm" disabled={!slackBot.trim() || !slackApp.trim()} onClick={() => { p.onSaveSlackTokens?.(slackBot.trim(), slackApp.trim()); setSlackBot(""); setSlackApp(""); }}>{t("settings.slackTokensSave")}</Button>
+                  <div>
+                    <Button variant="outline" size="sm" loading={slackSave.busy} disabled={!slackBot.trim() || !slackApp.trim()} onClick={() => slackSave.run(() => p.onSaveSlackTokens?.(slackBot.trim(), slackApp.trim()), () => { setSlackBot(""); setSlackApp(""); })}>{t("settings.slackTokensSave")}</Button>
                   </div>
-                  <WideRow label={t("settings.slackCwd")} hint={t("settings.slackCwdHint")}>
-                    <div className="flex gap-2">
-                      <Input className="min-w-0 flex-1 font-mono text-ui" value={f.slackCwd ?? ""} onChange={(e) => setF({ ...f, slackCwd: e.target.value })} />
-                      <Button variant="outline" size="sm" onClick={pickCwd}>{t("settings.browse")}</Button>
-                    </div>
-                  </WideRow>
-                  <Row label={t("settings.slackAllowAll")}>
-                    <input type="checkbox" className="accent-fg-dim" checked={allowAll} onChange={(e) => setF({ ...f, slackAllowAll: e.target.checked ? "1" : "0" })} />
-                  </Row>
+                </Section>
+
+                <Section title={t("settings.slackAccess")}>
+                  <CheckRow label={t("settings.slackAllowAll")} checked={allowAll} onChange={(on) => setF({ ...f, slackAllowAll: on ? "1" : "0" })} />
                   {/* When allow-all is on, the allowlist is meaningless → disable the input. */}
                   <WideRow label={t("settings.slackAllowedUsers")} hint={t("settings.slackAllowedUsersHint")}>
                     <Input className="font-mono text-ui" value={f.slackAllowedUsers ?? ""} placeholder="U123,U456" disabled={allowAll} onChange={(e) => setF({ ...f, slackAllowedUsers: e.target.value })} />
                   </WideRow>
-                  <Row label={t("settings.slackRefuseReply")}>
-                    <input type="checkbox" className="accent-fg-dim" checked={refuseReply} onChange={(e) => setF({ ...f, slackRefuseReply: e.target.checked ? "1" : "0" })} />
-                  </Row>
+                  <CheckRow label={t("settings.slackRefuseReply")} checked={refuseReply} onChange={(on) => setF({ ...f, slackRefuseReply: on ? "1" : "0" })} />
                   {/* When auto-reply is off, disable the message input. */}
-                  <Row label={t("settings.slackRefusalMessage")} hint={t("settings.slackRefusalMessageHint")}>
-                    <Input className="w-[240px]" value={f.slackRefusalMessage ?? ""} disabled={!refuseReply} onChange={(e) => setF({ ...f, slackRefusalMessage: e.target.value })} />
-                  </Row>
+                  <WideRow label={t("settings.slackRefusalMessage")} hint={t("settings.slackRefusalMessageHint")}>
+                    <Input value={f.slackRefusalMessage ?? ""} disabled={!refuseReply} onChange={(e) => setF({ ...f, slackRefusalMessage: e.target.value })} />
+                  </WideRow>
+                </Section>
+
+                <Section title={t("settings.slackBehavior")}>
+                  <WideRow label={t("settings.slackCwd")} hint={t("settings.slackCwdHint")}>
+                    <div className="flex gap-2">
+                      <Input className="min-w-0 flex-1 font-mono text-ui" title={f.slackCwd || undefined} value={f.slackCwd ?? ""} onChange={(e) => setF({ ...f, slackCwd: e.target.value })} />
+                      <Button variant="outline" size="md" onClick={pickCwd}>{t("settings.browse")}</Button>
+                    </div>
+                  </WideRow>
                   <Row label={t("settings.slackLocale")} hint={t("settings.slackLocaleHint")}>
-                    <Select className="w-[180px]" value={f.slackLocale ?? "ko"} onChange={(e) => setF({ ...f, slackLocale: e.target.value })}>
+                    <Select className="w-[240px]" value={f.slackLocale ?? "ko"} onChange={(e) => setF({ ...f, slackLocale: e.target.value })}>
                       <option value="ko">한국어</option>
                       <option value="en">English</option>
                     </Select>
                   </Row>
                   <Row label={t("settings.slackProvider")} hint={t("settings.slackProviderHint")}>
-                    <Select className="w-[180px]" value={f.slackProvider ?? "claude"} onChange={(e) => setF({ ...f, slackProvider: e.target.value })}>
+                    <Select className="w-[240px]" value={f.slackProvider ?? "claude"} onChange={(e) => setF({ ...f, slackProvider: e.target.value })}>
                       <option value="claude">{t("workerSpawnModal.providerClaude")}</option>
                       <option value="codex">{t("workerSpawnModal.providerCodex")}</option>
                     </Select>
                   </Row>
-                  <Row label={t("settings.workerRelay")} hint={t("settings.workerRelayDesc")}>
-                    <input type="checkbox" className="accent-fg-dim" checked={f.workerSlackRelayEnabled === "1"} onChange={(e) => setF({ ...f, workerSlackRelayEnabled: e.target.checked ? "1" : "0" })} />
-                  </Row>
+                  <CheckRow label={t("settings.workerRelay")} hint={t("settings.workerRelayDesc")} checked={f.workerSlackRelayEnabled === "1"} onChange={(on) => setF({ ...f, workerSlackRelayEnabled: on ? "1" : "0" })} />
                   <WideRow label={t("settings.workerRelayChannel")} hint={t("settings.workerRelayChannelHint")}>
                     <Input className="font-mono text-ui" value={f.workerSlackRelayChannel ?? ""} placeholder="C0123456789" disabled={f.workerSlackRelayEnabled !== "1"} onChange={(e) => setF({ ...f, workerSlackRelayChannel: e.target.value })} />
                   </WideRow>
-                </Section>
-
-                {/* Master default model/effort lives here because the live default only governs non-UI entry points —
-                    Slack, the CLI, and automation rules that don't set a model. The desktop chat picks model/effort per session. */}
-                <Section title={t("settings.masterEntrypointModelEffort")} desc={t("settings.masterEntrypointDesc")}>
-                  <Row label={t("settings.masterModel")}>
-                    <Select className="w-[180px]" value={f.masterModel} onChange={(e) => setF({ ...f, masterModel: e.target.value })}>
-                      {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
-                      {!models.some((m) => m.id === f.masterModel) && <option value={f.masterModel}>{f.masterModel}</option>}
-                    </Select>
-                  </Row>
-                  <Row label={t("settings.effort")}>
-                    <Select className="w-[180px]" value={f.masterEffort} disabled={!effortSupported(f.masterModel)} onChange={(e) => setF({ ...f, masterEffort: e.target.value })}>
-                      {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
-                    </Select>
-                  </Row>
                 </Section>
               </div>
             )}
@@ -372,7 +521,9 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       </>
                     )}
                   </span>
-                  {!p.integrations ? (
+                  {!p.integrations && p.integrationsFailed ? (
+                    <CheckFailed onRecheck={p.onRecheckStatus} />
+                  ) : !p.integrations ? (
                     <span className="ml-auto shrink-0 text-ui text-muted">{t("settings.checking")}</span>
                   ) : !p.integrations.github.available ? (
                     <span className="ml-auto shrink-0 text-ui text-muted">{t("settings.ghAuthNeeded")}</span>
@@ -386,7 +537,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       Linear
                       {(() => {
                         const status = !p.integrations
-                          ? t("settings.checking")
+                          ? t(p.integrationsFailed ? "settings.checkFailed" : "settings.checking")
                           : p.integrations.linear.valid
                             ? (p.integrations.linear.user ?? t("settings.linearConnected"))
                             : p.integrations.linear.configured
@@ -406,7 +557,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                       value={linKey}
                       onChange={(e) => setLinKey(e.target.value)}
                     />
-                    <Button variant="outline" size="sm" disabled={!linKey.trim()} onClick={() => { p.onSaveLinearKey?.(linKey.trim()); setLinKey(""); }}>{t("common.connect")}</Button>
+                    <Button variant="outline" size="md" loading={linSave.busy} disabled={!linKey.trim()} onClick={() => linSave.run(() => p.onSaveLinearKey?.(linKey.trim()), () => setLinKey(""))}>{t("common.connect")}</Button>
                   </div>
                 </WideRow>
               </Section>
@@ -418,15 +569,15 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 scopeRef=""
                 api={p.capabilityApi}
                 generation={p.capabilityGeneration ?? 0}
-                onOpenCatalog={p.onOpenCapabilityCatalog ?? (() => {})}
-                onOpenAdvancedAssignments={p.onOpenCapabilityAssignments ?? (() => {})}
-                onPreviewEffective={p.onPreviewCapabilities ?? (() => {})}
+                onOpenCatalog={() => requestLeave(p.onOpenCapabilityCatalog ?? (() => {}))}
+                onOpenAdvancedAssignments={() => requestLeave(p.onOpenCapabilityAssignments ?? (() => {}))}
+                onPreviewEffective={() => requestLeave(p.onPreviewCapabilities ?? (() => {}))}
               />
             )}
 
             {tab === "models" && (
               <>
-                {/* pill sub-toggle (in-form selection) — visually distinct from the nav-tier underline tabs above */}
+                {/* pill sub-toggle (in-form selection) — visually distinct from the category list */}
                 <Segment
                   items={modelsProviders}
                   value={modelsProvider}
@@ -441,9 +592,10 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
               // While authStatus is still null (loading, or a silently-swallowed request failure), don't default to
               // method="none" — that renders a confident "No auth active" even when a key is actually working (audit #15).
               const checking = a == null;
+              const checkFailed = checking && !!p.authStatusFailed;
               const method = a?.method ?? "none";
               const dotCls = checking ? "bg-stop" : method === "api-key" ? "bg-accent" : method === "oauth" ? "bg-pr" : "bg-stop";
-              const label = checking ? t("settings.checking") : method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
+              const label = checkFailed ? "" : checking ? t("settings.checking") : method === "api-key" ? t("settings.claudeMethodApiKey") : method === "oauth" ? t("settings.claudeMethodSubscription") : t("settings.claudeMethodNone");
               const desc = method === "api-key" ? t("settings.claudeApiKeyActive") : method === "oauth" ? t("settings.claudeSubscriptionActive") : t("settings.claudeNoneActive");
               return (
                 <div className="flex flex-col gap-8">
@@ -456,47 +608,61 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                           {label}
                         </span>
                         {a?.method === "api-key" && a.apiKeyHint && <span className="shrink-0 font-mono text-ui text-muted">{a.apiKeyHint}</span>}
+                        {checkFailed && <CheckFailed onRecheck={p.onRecheckStatus} />}
                       </div>
                       {!checking && <p className="text-ui leading-relaxed text-muted">{desc}</p>}
                     </div>
                     <WideRow label={t("settings.anthropicApiKey")} hint={t("settings.anthropicApiKeyHint")}>
-                      <Input type="password" placeholder="sk-ant-…" value={anthropicKey} onChange={(e) => setAnthropicKey(e.target.value)} />
+                      <div className="flex gap-2">
+                        <Input type="password" className="min-w-0 flex-1" placeholder="sk-ant-…" value={anthropicKey} onChange={(e) => setAnthropicKey(e.target.value)} />
+                        <Button variant="outline" size="md" aria-label={t("settings.anthropicKeySave")} loading={anthropicSave.busy} disabled={!anthropicKey.trim()} onClick={() => anthropicSave.run(() => p.onSaveAnthropicKey?.(anthropicKey.trim()), () => setAnthropicKey(""))}>{t("common.save")}</Button>
+                      </div>
                     </WideRow>
-                    <div className="flex justify-end">
-                      <Button variant="outline" size="sm" disabled={!anthropicKey.trim()} onClick={() => { p.onSaveAnthropicKey?.(anthropicKey.trim()); setAnthropicKey(""); }}>{t("common.save")}</Button>
-                    </div>
                   </Section>
                   {a?.overridesSubscription && (
-                    <div className="mt-2 flex items-start gap-2 rounded-md border border-fail/30 bg-fail/5 px-3 py-2.5 text-ui leading-relaxed text-fg-dim">
-                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-fail" />
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2.5 text-ui leading-relaxed text-fg-dim">
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warn" />
                       <span>{t("settings.claudeOverrideWarn")}</span>
                     </div>
                   )}
                 </div>
 
-                <Section title={t("speed.label")} desc={t("speed.hint")}>
-                  <Row label={t("speed.masterDefault")}><SpeedControl speed={f.masterSpeed ?? "standard"} provider="claude" model={f.masterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, masterSpeed: speed ?? "standard" })} /></Row>
-                  <Row label={t("speed.workerDefault")}><SpeedControl speed={f.workerSpeed ?? "standard"} provider="claude" model={f.workerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, workerSpeed: speed ?? "standard" })} /></Row>
-                </Section>
-                {/* Claude worker defaults — moved from General so the Claude sub-tab is provider-complete. */}
-                <Section title={t("settings.workerModelEffort")} desc={t("settings.workerModelEffortDesc")}>
-                  <Row label={t("settings.workerModel")} hint={t("settings.applyNewWorker")}>
-                    <Select className="w-[180px]" value={f.workerModel} onChange={(e) => setF({ ...f, workerModel: e.target.value })}>
-                      {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
-                      {!models.some((m) => m.id === f.workerModel) && <option value={f.workerModel}>{f.workerModel}</option>}
+                {/* Every model default together (audit #51): master (non-UI entry points), worker, then speed — the
+                    same order as the Codex sub-tab. */}
+                <Section title={t("settings.masterEntrypointModelEffort")} desc={t("settings.masterEntrypointDesc")}>
+                  <Row label={t("settings.masterModel")}>
+                    <Select className="w-[240px]" value={f.masterModel} onChange={(e) => setF({ ...f, masterModel: e.target.value })}>
+                      {claudeModelOptions(f.masterModel)}
                     </Select>
                   </Row>
                   <Row label={t("settings.effort")}>
-                    <Select className="w-[180px]" value={f.workerEffort} disabled={!effortSupported(f.workerModel)} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
+                    <Select className="w-[240px]" value={f.masterEffort} disabled={!effortSupported(f.masterModel)} onChange={(e) => setF({ ...f, masterEffort: e.target.value })}>
                       {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
                     </Select>
                   </Row>
+                </Section>
+                <Section title={t("settings.workerModelEffort")} desc={t("settings.workerModelEffortDesc")}>
+                  <Row label={t("settings.workerModel")} hint={t("settings.applyNewWorker")}>
+                    <Select className="w-[240px]" value={f.workerModel} onChange={(e) => setF({ ...f, workerModel: e.target.value })}>
+                      {claudeModelOptions(f.workerModel)}
+                    </Select>
+                  </Row>
+                  <Row label={t("settings.effort")}>
+                    <Select className="w-[240px]" value={f.workerEffort} disabled={!effortSupported(f.workerModel)} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
+                      {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
+                    </Select>
+                  </Row>
+                </Section>
+                <Section title={t("speed.label")} desc={t("speed.hint")}>
+                  <Row label={t("speed.masterDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.masterSpeed ?? "standard"} provider="claude" model={f.masterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, masterSpeed: speed ?? "standard" })} /></Row>
+                  <Row label={t("speed.workerDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.workerSpeed ?? "standard"} provider="claude" model={f.workerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, workerSpeed: speed ?? "standard" })} /></Row>
                 </Section>
                 </div>
               );
             })()}
 
             {modelsProvider === "codex" && (
+              <div className="flex flex-col gap-8">
               <Section title={t("settings.codexTitle")} desc={t("settings.codexDesc")}>
                 {/* Auth-readiness card — parity with the Claude sub-tab. codexAuthStatus == null → "checking"
                     (don't render a confident "not authenticated" while the probe is still in flight). */}
@@ -536,107 +702,102 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                   );
                 })()}
 
-                <Row label={t("speed.masterDefault")} hint={t("speed.hint")}><SpeedControl speed={f.codexMasterSpeed ?? "standard"} provider="codex" model={f.codexMasterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, codexMasterSpeed: speed ?? "standard" })} /></Row>
-                <Row label={t("speed.workerDefault")}><SpeedControl speed={f.codexWorkerSpeed ?? "standard"} provider="codex" model={f.codexWorkerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, codexWorkerSpeed: speed ?? "standard" })} /></Row>
-                <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>
+                {/* The masked field can't show "set from a prior session" (the key is write-only), so the
+                    placeholder flips to a local saved note after this session's own confirmed save. The readiness
+                    card above IS the live "currently authenticated" signal (refetched after a save, see App.tsx). */}
+                <WideRow label={t("settings.codexApiKey")} hint={t("settings.codexApiKeyHint")}>
+                  <div className="flex gap-2">
+                    <Input type="password" className="min-w-0 flex-1" placeholder={codexKeySaved ? t("settings.secretSaved") : "sk-…"} value={codexKey} onChange={(e) => setCodexKey(e.target.value)} />
+                    <Button variant="outline" size="md" aria-label={t("settings.codexKeySave")} loading={codexSave.busy} disabled={!codexKey.trim()} onClick={() => codexSave.run(() => p.onSaveCodexKey?.(codexKey.trim()), () => { setCodexKey(""); setCodexKeySaved(true); })}>{t("common.save")}</Button>
+                  </div>
+                </WideRow>
+              </Section>
+
+              <Section title={t("settings.codexModelsTitle")}>
+                <Row label={t("settings.codexMasterModel")} hint={t("settings.codexMasterModelHint")}>
+                  {codexModelField(f.codexMasterModel, (v) => setF({ ...f, codexMasterModel: v }))}
+                </Row>
+                <Row label={t("settings.codexWorkerModel")} hint={t("settings.codexWorkerModelHint")}>
+                  {codexModelField(f.codexWorkerModel, (v) => setF({ ...f, codexWorkerModel: v }))}
+                </Row>
+              </Section>
+
+              <Section title={t("speed.label")} desc={t("speed.hint")}>
+                <Row label={t("speed.masterDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.codexMasterSpeed ?? "standard"} provider="codex" model={f.codexMasterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, codexMasterSpeed: speed ?? "standard" })} /></Row>
+                <Row label={t("speed.workerDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.codexWorkerSpeed ?? "standard"} provider="codex" model={f.codexWorkerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, codexWorkerSpeed: speed ?? "standard" })} /></Row>
+                <p className="text-ui leading-relaxed text-muted">{t("speed.budgetEstimated")}</p>
+              </Section>
+
+              <Section title={t("settings.advanced")}>
                 <WideRow label={t("settings.codexBin")} hint={t("settings.codexBinHint")}>
                   <Input className="font-mono text-ui" value={f.codexBin ?? ""} placeholder="codex" onChange={(e) => setF({ ...f, codexBin: e.target.value })} />
                 </WideRow>
-                <Row label={t("settings.codexWorkerModel")} hint={t("settings.codexWorkerModelHint")}>
-                  {codexModels != null ? (
-                    <Select className="w-[180px]" value={f.codexWorkerModel ?? ""} onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })}>
-                      <option value="">{t("settings.codexModelDefaultOption")}</option>
-                      {codexModels.map((m) => (
-                        <option key={m.id} value={m.id}>{m.displayName}</option>
-                      ))}
-                      {f.codexWorkerModel && !codexModels.some((m) => m.id === f.codexWorkerModel) && (
-                        <option value={f.codexWorkerModel}>{f.codexWorkerModel}</option>
-                      )}
-                    </Select>
-                  ) : (
-                    <Input className="w-[240px]" value={f.codexWorkerModel ?? ""} placeholder="gpt-6.1-sol" onChange={(e) => setF({ ...f, codexWorkerModel: e.target.value })} />
-                  )}
-                </Row>
-                <Row label={t("settings.codexMasterModel")} hint={t("settings.codexMasterModelHint")}>
-                  {codexModels != null ? (
-                    <Select className="w-[180px]" value={f.codexMasterModel ?? ""} onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })}>
-                      <option value="">{t("settings.codexModelDefaultOption")}</option>
-                      {codexModels.map((m) => (
-                        <option key={m.id} value={m.id}>{m.displayName}</option>
-                      ))}
-                      {f.codexMasterModel && !codexModels.some((m) => m.id === f.codexMasterModel) && (
-                        <option value={f.codexMasterModel}>{f.codexMasterModel}</option>
-                      )}
-                    </Select>
-                  ) : (
-                    <Input className="w-[240px]" value={f.codexMasterModel ?? ""} placeholder="gpt-6.1-sol" onChange={(e) => setF({ ...f, codexMasterModel: e.target.value })} />
-                  )}
-                </Row>
                 <Row label={t("settings.codexTurnIdleTimeoutMs")} hint={t("settings.codexTurnIdleTimeoutMsHint")}>
                   <Input type="number" className="w-[120px] tabular-nums" value={f.codexTurnIdleTimeoutMs ?? ""} placeholder="0" onChange={(e) => setF({ ...f, codexTurnIdleTimeoutMs: e.target.value })} />
+                  <MsHint value={f.codexTurnIdleTimeoutMs || "0"} offKey="settings.msOff" />
                 </Row>
                 <Row label={t("settings.codexHandshakeTimeoutMs")} hint={t("settings.codexHandshakeTimeoutMsHint")}>
                   <Input type="number" className="w-[120px] tabular-nums" value={f.codexHandshakeTimeoutMs ?? ""} placeholder="30000" onChange={(e) => setF({ ...f, codexHandshakeTimeoutMs: e.target.value })} />
+                  <MsHint value={f.codexHandshakeTimeoutMs || "30000"} offKey="settings.msOff" />
                 </Row>
-
-                {/* The masked field can't show "set from a prior session" (the key is write-only), so the
-                    placeholder flips to a local saved note after this session's own save. The readiness card
-                    above IS the live "currently authenticated" signal (refetched after a save, see App.tsx). */}
-                <WideRow label={t("settings.codexApiKey")} hint={t("settings.codexApiKeyHint")}>
-                  <Input type="password" placeholder={codexKeySaved ? t("settings.secretSaved") : "sk-…"} value={codexKey} onChange={(e) => setCodexKey(e.target.value)} />
-                </WideRow>
-                <div className="flex justify-end">
-                  <Button variant="outline" size="sm" disabled={!codexKey.trim()} onClick={() => { p.onSaveCodexKey?.(codexKey.trim()); setCodexKey(""); setCodexKeySaved(true); }}>{t("common.save")}</Button>
-                </div>
               </Section>
+              </div>
             )}
               </>
             )}
           </div>
+        </div>
+        </div>
 
-          {/* Save the General/Slack/Models form settings (tokens/Linear/toggles have their own buttons). Hidden only
-              on the Integration tab, which has no f-backed fields. (Models is now f-backed: Claude worker model/effort
-              + all codex fields; the Anthropic/Codex API keys keep their own save buttons.) */}
-          {tab !== "integration" && tab !== "capabilities" && (
-            <div className="mt-7 flex items-center justify-end gap-2 border-t border-line pt-4">
-              <Button variant="primary" disabled={!dirty} onClick={() => p.onSave(f)}>{dirty ? t("common.save") : t("common.saved")}</Button>
+          {/* The Save bar: pinned under the list so it never scrolls away (audit #93). On Integrations/Capabilities
+              (no draft fields) it shows only while edits from another category are unsaved. */}
+          {showSaveBar && (
+            <div className="flex h-11 shrink-0 items-center gap-2 border-t border-line px-6">
+              {dirty && (
+                <>
+                  <span className="text-ui text-fg-dim">{t("settings.unsavedCount", { count: changed.length })}</span>
+                  <Button variant="ghost" size="sm" disabled={saving} onClick={() => setF(p.settings)}>{t("settings.revert")}</Button>
+                </>
+              )}
+              <Button variant="primary" size="sm" className="ml-auto" loading={saving} disabled={!dirty || budgetInvalid} onClick={() => { void save(); }}>{dirty ? t("common.save") : t("common.saved")}</Button>
             </div>
           )}
         </div>
-        </div>
       </div>
-      {confirmClose && (
+      {confirmRegen && (
+        <ConfirmDialog
+          title={t("settings.mcpRegenerateConfirmTitle")}
+          body={t("settings.mcpRegenerateConfirmBody")}
+          confirmLabel={t("settings.mcpRegenerate")}
+          variant="danger"
+          onConfirm={() => p.onRegenerateMcpToken?.()}
+          onCancel={() => setConfirmRegen(false)}
+        />
+      )}
+      {pendingLeave && (
         <UnsavedChangesConfirm
-          onCancel={() => setConfirmClose(false)}
-          onDiscard={p.onClose}
-          onSave={() => { p.onSave(f); p.onClose(); }}
+          onCancel={() => setPendingLeave(null)}
+          onDiscard={() => leave(pendingLeave)}
+          onSave={() => { const action = pendingLeave; void save().then((ok) => { if (ok) leave(action); }); }}
         />
       )}
     </>
   );
 }
 
-// Unsaved-changes guard shown when the header X is clicked while dirty (audit #18) — same overlay/panel idiom as the
-// app's other confirm dialogs (AutomationPage's AutomationDeleteConfirm / Sessions' DeleteConfirm). Discard/Save both
-// close the whole page, so they fire directly rather than routing through the local exit-transition; Cancel (stay on
-// the page) uses `dismiss()` for the dialog's own animated exit.
+// Unsaved-changes guard shown when the header X is clicked while dirty (audit #18) — the shared ConfirmDialog with its
+// middle action (audit #102). Discard closes the page; Save closes it once the save succeeded (a failed save keeps
+// the page and its edits, audit #93); Cancel (stay on the page) just dismisses the dialog.
 function UnsavedChangesConfirm({ onCancel, onDiscard, onSave }: { onCancel: () => void; onDiscard: () => void; onSave: () => void }): JSX.Element {
   const t = useT();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const { closing, dismiss } = useDismissTransition(onCancel);
-  useModalKeys({ escape: "close", onEscape: dismiss, onSubmit: onSave });
-  useFocusTrap(panelRef);
   return (
-    <div className={cn("fixed inset-0 z-[110] flex items-center justify-center bg-scrim", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_140ms_ease-out]")}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t("settings.unsavedTitle")} className={cn("w-[380px] rounded-xl border border-line bg-surface p-5 shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_160ms_ease-out]")}>
-        <div className="mb-1.5 text-title font-medium">{t("settings.unsavedTitle")}</div>
-        <p className="text-ui leading-relaxed text-muted">{t("settings.unsavedBody")}</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button autoFocus onClick={dismiss} className="rounded-lg border border-line px-3 py-1.5 text-ui text-muted hover:bg-raised hover:text-fg-dim">{t("common.cancel")}</button>
-          <Button variant="outline" size="sm" onClick={onDiscard}>{t("settings.confirmDiscard")}</Button>
-          <Button variant="primary" size="sm" onClick={onSave}>{t("settings.confirmSave")}</Button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title={t("settings.unsavedTitle")}
+      body={t("settings.unsavedBody")}
+      confirmLabel={t("settings.confirmSave")}
+      secondary={{ label: t("settings.confirmDiscard"), onClick: onDiscard }}
+      onConfirm={onSave}
+      onCancel={onCancel}
+    />
   );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { relativeTime, absoluteDate } from "../src/renderer/lib/relative-time.js";
+import { relativeTime, absoluteDate, formatNextRun } from "../src/renderer/lib/relative-time.js";
 
 const SEC = 1000;
 const MIN = 60 * SEC;
@@ -51,5 +51,26 @@ describe("absoluteDate", () => {
   it("includes year when a different year from now", () => {
     const ts = new Date(2025, 5, 12, 12).getTime();
     expect(absoluteDate(ts, now2026, "en-US")).toBe("Jun 12, 2025");
+  });
+});
+
+// audit #53: an automation's next run, shown in the viewer's local time instead of the raw UTC ISO string.
+describe("formatNextRun", () => {
+  const ws = (s: string) => s.replace(/\s/g, " ");
+  const now = Date.parse("2026-11-15T12:00:00.000Z"); // 21:00 in Seoul
+  it("shows only the time when the run is later today", () => {
+    expect(ws(formatNextRun("2026-11-15T13:30:00.000Z", now, "en-US", "Asia/Seoul"))).toBe("10:30 PM");
+  });
+  it("adds the date for another day", () => {
+    expect(ws(formatNextRun("2026-11-15T18:00:00.000Z", now, "en-US", "Asia/Seoul"))).toBe("Nov 16, 3:00 AM");
+  });
+  it("adds the year when it differs", () => {
+    expect(ws(formatNextRun("2027-01-02T00:00:00.000Z", now, "en-US", "Asia/Seoul"))).toBe("Jan 2, 2027, 9:00 AM");
+  });
+  it("adds the viewer's short zone name on request (the trigger runs in another timezone)", () => {
+    expect(ws(formatNextRun("2026-11-15T18:00:00.000Z", now, "en-US", "Asia/Seoul", true))).toBe("Nov 16, 3:00 AM GMT+9");
+  });
+  it("returns the input unchanged when it isn't a date", () => {
+    expect(formatNextRun("soon", now, "en-US")).toBe("soon");
   });
 });

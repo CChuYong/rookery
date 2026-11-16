@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isTypingTarget, useFocusReturn } from "../lib/focus.js";
 import { CheckCircle2, KeyRound, HelpCircle } from "lucide-react";
 import type { LogItem } from "../store/reduce.js";
 import { Button } from "../ui/button.js";
@@ -12,9 +13,35 @@ export interface InteractionAnswer {
   answers?: Record<string, string | string[]>;
 }
 
+// Requests whose card already took focus once — a virtualised list remounts cards on scroll, which must not keep
+// pulling focus back to them.
+const autoFocused = new Set<string>();
+
 // Inline card for master canUseTool (approve/AskUserQuestion). Once resolved, it is replaced by a one-line summary (buttons removed).
+// Focus (audit #74): the turn is blocked on this card, so when it appears the CARD takes focus (one Tab from its choices,
+// announced as a labelled group) — never a choice itself, so a keystroke meant for the composer can't approve a tool
+// unreviewed. It never pulls focus out of a typing target (composer, input, editor, terminal), even an empty one.
+// Answering hands focus back to where it was.
 export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (requestId: string, res: InteractionAnswer) => void }): JSX.Element {
   const t = useT();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const prior = useFocusReturn();
+  useEffect(() => {
+    if (item.resolved || autoFocused.has(item.requestId)) return;
+    autoFocused.add(item.requestId);
+    if (isTypingTarget(document.activeElement)) return;
+    cardRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per request
+  }, [item.requestId]);
+  const wasResolved = useRef(!!item.resolved);
+  useLayoutEffect(() => {
+    if (item.resolved && !wasResolved.current) {
+      // The buttons are gone: focus inside the card fell to <body> — give it back.
+      const active = document.activeElement;
+      if (!active || active === document.body || cardRef.current?.contains(active)) prior.restore();
+    }
+    wasResolved.current = !!item.resolved;
+  }, [item.resolved, prior]);
   // ask: question index → selected labels (single-select holds 1, multiSelect accumulates via toggle).
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   // Which action was clicked and sent to the daemon (interaction.respond is fire-and-forget, so this is our only
@@ -23,7 +50,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
 
   if (item.resolved) {
     return (
-      <div className="max-w-[80%] self-start whitespace-pre-wrap rounded-md border border-line-soft bg-surface px-3 py-2 text-ui text-fg-dim">
+      <div ref={cardRef} className="max-w-[80%] self-start whitespace-pre-wrap rounded-md border border-line-soft bg-surface px-3 py-2 text-ui text-fg-dim">
         {item.summary ?? (item.expired ? t("interactionCard.expired") : <CheckCircle2 size={14} className="inline-block -mt-0.5 text-pr" aria-hidden />)}
       </div>
     );
@@ -31,7 +58,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
 
   // the one spot that keeps a bordered card: an interaction needs a turn's worth of actions and reads as a
   // distinct decision, not a message line — the accent line is a 2px edge, never a fill.
-  const cardCls = "max-w-[80%] self-start rounded-md border border-line border-l-2 border-l-accent/70 bg-surface px-3 py-2.5";
+  const cardCls = "max-w-[80%] self-start rounded-md border border-line border-l-2 border-l-accent/70 bg-surface px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-accent-hi";
   const sendingHint = sent ? <div className="mt-1.5 text-meta text-fg-dim">{t("interactionCard.sending")}</div> : null;
 
   if (item.mode === "approve") {
@@ -40,7 +67,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
       onRespond?.(item.requestId, { decision });
     };
     return (
-      <div className={cardCls}>
+      <div ref={cardRef} tabIndex={-1} role="group" aria-label={t("interactionCard.approvePrompt")} className={cardCls}>
         <div className="mb-1.5 flex items-center gap-1.5 text-body text-fg">
           <KeyRound size={14} className="shrink-0 text-muted" aria-hidden /> {t("interactionCard.approvePrompt")}
         </div>
@@ -81,7 +108,7 @@ export function InteractionCard({ item, onRespond }: { item: Item; onRespond?: (
   };
 
   return (
-    <div className={cardCls}>
+    <div ref={cardRef} tabIndex={-1} role="group" aria-label={t("interactionCard.askPrompt")} className={cardCls}>
       <div className="mb-2 flex items-center gap-1.5 text-ui text-fg-dim">
         <HelpCircle size={14} className="shrink-0 text-muted" aria-hidden /> {t("interactionCard.askPrompt")}
       </div>

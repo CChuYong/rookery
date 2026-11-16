@@ -2,7 +2,7 @@ import type { Catalog } from "../../types.js";
 export default {
   "attentionBell.title": "Needs you now",
   "attentionBell.aria": "Attention queue ({count} items)",
-  "attentionBell.empty": "Nothing needs you right now. Smooth sailing ✨",
+  "attentionBell.empty": "Nothing needs your attention.",
   "attentionBell.tier0": "Awaiting reply",
   "attentionBell.tier1": "Failures",
   "attentionBell.tier2": "Review pending",
@@ -14,4 +14,9 @@ export default {
   "attentionBell.dismiss": "Dismiss",
   "attentionBell.notifyTitle": "Awaiting your reply",
   "attentionBell.notifyBody": "Session {label} is waiting for your answer.",
+  "attentionBell.titleMuted": "Needs you now — OS notifications off",
+  "attentionBell.notifyToggle": "OS notifications",
+  "attentionBell.notifyOnState": "On",
+  "attentionBell.notifyOffState": "Off",
+  "attentionBell.ariaMuted": "Attention queue ({count} items) — OS notifications off",
 } satisfies Catalog;

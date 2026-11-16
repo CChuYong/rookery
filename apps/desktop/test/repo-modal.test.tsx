@@ -45,3 +45,16 @@ describe("RepoModal duplicate validation", () => {
     expect(onRegister).toHaveBeenCalledWith({ name: "ads", path: "/code/ads", description: "" });
   });
 });
+
+// audit #77: the fields relied on placeholders only, and the duplicate errors were not tied to their field.
+describe("RepoModal labels (audit #77)", () => {
+  it("labels every field and links a duplicate error to its input", () => {
+    render(<RepoModal repos={existing} onRegister={vi.fn()} onClose={() => {}} />);
+    const name = screen.getByLabelText("이름");
+    expect(screen.getByLabelText("경로")).toBeInTheDocument();
+    expect(screen.getByLabelText("설명")).toBeInTheDocument();
+    fireEvent.change(name, { target: { value: "app" } });
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveAccessibleDescription("이미 같은 이름의 레포가 있어요");
+  });
+});

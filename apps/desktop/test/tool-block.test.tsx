@@ -17,13 +17,13 @@ describe("ToolBlock file chip", () => {
   it("chip click does NOT toggle the input/result detail", () => {
     render(<ToolBlock name="Read" status="complete" input='{"file_path":"/r/a.ts"}' result="hello" onOpenFile={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /a\.ts/ }));
-    expect(screen.queryByText("result")).toBeNull(); // detail area not opened
+    expect(screen.queryByText("결과")).toBeNull(); // detail area not opened
   });
 
   it("chevron/body click still toggles detail", () => {
     render(<ToolBlock name="Read" status="complete" input='{"file_path":"/r/a.ts"}' result="hello" onOpenFile={vi.fn()} />);
     fireEvent.click(screen.getByText("Read")); // click the body (toggle)
-    expect(screen.getByText("result")).toBeInTheDocument();
+    expect(screen.getByText("결과")).toBeInTheDocument();
   });
 
   it("no chip for non-file tools", () => {
@@ -77,7 +77,7 @@ describe("ToolBlock worker chip", () => {
   it("chip click does NOT toggle the detail", () => {
     render(<ToolBlock name="spawn_worker" status="complete" result={SPAWN_RESULT} onSelectWorker={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /워커 보기/ }));
-    expect(screen.queryByText("result")).toBeNull();
+    expect(screen.queryByText("결과")).toBeNull();
   });
 
   it("no chip without onSelectWorker, for non-spawn tools, or on error", () => {
@@ -139,9 +139,31 @@ describe("ToolBlock Dynamic Workflow state", () => {
   it("shows a failed terminal outcome and keeps raw launch details behind disclosure", () => {
     render(<ToolBlock name="Workflow" status="complete" ok={false} input='{"name":"logic-audit"}' result="Workflow launched" workflow={{ ...workflow, status: "failed" }} />);
     expect(screen.getByText("실패")).toBeInTheDocument();
-    expect(screen.queryByText("result")).toBeNull();
+    expect(screen.queryByText("결과")).toBeNull();
     fireEvent.click(screen.getByText("logic-audit"));
-    expect(screen.getByText("result")).toBeInTheDocument();
+    expect(screen.getByText("결과")).toBeInTheDocument();
     expect(screen.getByText("Workflow launched")).toBeInTheDocument();
+  });
+});
+
+// audit #72: every expand/collapse row reports its state (aria-expanded) and points at the region it controls.
+describe("disclosure rows expose aria-expanded (audit #72)", () => {
+  it("ToolBlock, ToolGroup and ThinkingBlock toggle aria-expanded and point aria-controls at their region", async () => {
+    const { ToolGroup } = await import("../src/renderer/components/ToolGroup.js");
+    const { ThinkingBlock } = await import("../src/renderer/components/ThinkingBlock.js");
+    const tool = { kind: "tool" as const, name: "Read", status: "complete" as const, input: "x", result: "y" };
+    render(
+      <>
+        <ToolBlock name="Bash" status="complete" input="ls" result="ok" />
+        <ToolGroup tools={[tool, { ...tool, name: "Grep" }] as never} />
+        <ThinkingBlock text="hmm" />
+      </>,
+    );
+    for (const btn of [screen.getByText("Bash").closest("button")!, screen.getByText(/Read, Grep/).closest("button")!, screen.getByText("Thinking").closest("button")!]) {
+      expect(btn).toHaveAttribute("aria-expanded", "false");
+      expect(document.getElementById(btn.getAttribute("aria-controls")!)).not.toBeNull();
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute("aria-expanded", "true");
+    }
   });
 });

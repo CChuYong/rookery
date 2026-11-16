@@ -1126,7 +1126,7 @@ describe("Worker", () => {
     expect(agent.status()).toBe("stopped");
     const persisted = repos.listWorkerEvents("a1");
     const notices = persisted.filter((e) => e.type === "notice");
-    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.includes("Cost budget reached"))).toBe(true);
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.startsWith("비용 예산 도달 ("))).toBe(true); // notice.costBudgetWorker (reported cost), not the estimated variant
     const resultEvents = persisted.filter((e) => e.type === "result");
     expect(resultEvents.length).toBe(2); // both results were processed before stop
   });
@@ -1171,7 +1171,7 @@ describe("Worker", () => {
     await agent.waitUntilSettled();
     expect(agent.status()).toBe("stopped");
     const notices = repos.listWorkerEvents("a1").filter((e) => e.type === "notice");
-    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.includes("Cost budget reached"))).toBe(true);
+    expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.startsWith("비용 예산 도달 ("))).toBe(true); // notice.costBudgetWorker (reported cost), not the estimated variant
     expect(notices.some((e) => (JSON.parse(e.payload_json) as { text?: string }).text?.includes("Turn cap reached"))).toBe(false);
   });
 

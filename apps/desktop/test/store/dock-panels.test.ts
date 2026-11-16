@@ -5,6 +5,7 @@ import {
   rightGroupKindsFor,
   isHidden,
   isGroupOpen,
+  panelToggleState,
 } from "../../src/renderer/store/dock-panels.js";
 
 // audit #48: dock mode had no way to hide/restore the fixed Files/Git/Terminal/
@@ -27,15 +28,32 @@ describe("isHidden / isGroupOpen", () => {
     expect(isHidden(["terminal"], "files")).toBe(false);
     expect(isHidden([], "files")).toBe(false);
   });
-  it("isGroupOpen is true only when every kind in the group is visible", () => {
+  // audit #8 (intentional change): the group reads open while ANY member still shows — closing only Git used to
+  // flip the toggle off while Files was on screen.
+  it("isGroupOpen is true while any kind in the group is visible", () => {
     expect(isGroupOpen([], ["files", "git"])).toBe(true);
-    expect(isGroupOpen(["git"], ["files", "git"])).toBe(false);
+    expect(isGroupOpen(["git"], ["files", "git"])).toBe(true);
+    expect(isGroupOpen(["files", "git"], ["files", "git"])).toBe(false);
     expect(isGroupOpen(["nested"], ["files", "git"])).toBe(true); // unrelated hidden kind doesn't affect this group
+  });
+  it("isGroupOpen does not count panels hidden by the narrow-window rule as showing", () => {
+    expect(isGroupOpen([], ["files", "git"], ["files", "git"])).toBe(false);
+    expect(isGroupOpen(["git"], ["files", "git"], ["files"])).toBe(false);
+  });
+});
+
+// audit #4 #11: the toggle tells "closed by you" apart from "hidden because the window is narrow".
+describe("panelToggleState", () => {
+  it("open / closed / auto", () => {
+    expect(panelToggleState([], [], ["files", "git"])).toBe("open");
+    expect(panelToggleState(["files", "git"], [], ["files", "git"])).toBe("closed");
+    expect(panelToggleState([], ["files", "git"], ["files", "git"])).toBe("auto");
+    expect(panelToggleState(["git"], ["files"], ["files", "git"])).toBe("auto");
   });
 });
 
 describe("useDockPanelsStore", () => {
-  beforeEach(() => { useDockPanelsStore.setState({ hiddenByPage: {} }); });
+  beforeEach(() => { useDockPanelsStore.setState({ hiddenByPage: {}, autoHiddenByPage: {} }); });
 
   it("hide_ adds a kind once (idempotent) scoped to its page", () => {
     useDockPanelsStore.getState().hide_("p1", "terminal");
@@ -59,14 +77,31 @@ describe("useDockPanelsStore", () => {
     expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual([]);
   });
 
-  it("toggleGroup_ hides every kind when the group is fully open, shows every kind when any member is hidden", () => {
+  it("toggleGroup_ hides every kind while any member shows, shows every kind once all are hidden", () => {
     // Group fully open → toggling hides every kind in it.
     useDockPanelsStore.getState().toggleGroup_("p1", ["files", "git"]);
     expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual(["files", "git"]);
-    // Group partially hidden → toggling shows every kind in it (restores all).
-    useDockPanelsStore.getState().show_("p1", "files");
+    // All hidden → toggling shows every kind.
     useDockPanelsStore.getState().toggleGroup_("p1", ["files", "git"]);
     expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual([]);
+    // audit #8 (intentional change): partially hidden → toggling hides the rest instead of showing all.
+    useDockPanelsStore.getState().hide_("p1", "git");
+    useDockPanelsStore.getState().toggleGroup_("p1", ["files", "git"]);
+    expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual(["git", "files"]);
+  });
+
+  it("toggleGroup_ on a group the narrow-window rule hid shows it and drops the auto-hidden mark (audit #4 #7)", () => {
+    useDockPanelsStore.getState().setAutoHidden_("p1", ["files", "git"]);
+    useDockPanelsStore.getState().toggleGroup_("p1", ["files", "git"]);
+    expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual([]);
+    expect(useDockPanelsStore.getState().autoHiddenByPage.p1).toEqual([]);
+  });
+
+  it("hiding a panel the user had re-opened while narrow keeps it hidden after the window grows (audit #7)", () => {
+    useDockPanelsStore.getState().setAutoHidden_("p1", ["files"]);
+    useDockPanelsStore.getState().hide_("p1", "files");
+    expect(useDockPanelsStore.getState().autoHiddenByPage.p1).toEqual([]);
+    expect(useDockPanelsStore.getState().hiddenByPage.p1).toEqual(["files"]);
   });
 
   it("setHidden_ replaces a page's hidden set wholesale (used to sync from actual dockview presence)", () => {

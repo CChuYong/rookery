@@ -114,14 +114,14 @@ function CapabilityRow({ pack, library, scopeKind, scopeRef, state, api, onSaved
             <span className="inline-flex items-center gap-1.5 text-meta text-muted"><span className="h-2.5 w-px bg-line-soft" aria-hidden /><span>Claude</span><span className="h-2.5 w-px bg-line-soft" aria-hidden /><span>Codex</span></span>
           </div>
           {pack.manifest.description && <p className="mt-1 text-ui text-fg-dim">{pack.manifest.description}</p>}
-          {missingSecrets > 0 && <p className="mt-1.5 flex items-center gap-1 text-meta text-run"><ShieldAlert size={12} /> {t("repositorySettings.missingSecrets", { count: missingSecrets })}</p>}
+          {missingSecrets > 0 && <p className="mt-1.5 flex items-center gap-1 text-meta text-warn"><ShieldAlert size={12} /> {t("repositorySettings.missingSecrets", { count: missingSecrets })}</p>}
           {hint && <p className="mt-1.5 text-meta text-faint">{hint}</p>}
         </div>
       </div>
 
       {state.custom ? (
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line-soft pt-3">
-          <CircleAlert size={14} className="shrink-0 text-run" />
+          <CircleAlert size={14} className="shrink-0 text-warn" />
           <p className="min-w-0 flex-1 text-meta text-fg-dim">{t("repositorySettings.customAssignment")}</p>
           <Button variant="outline" size="sm" onClick={onOpenAdvancedAssignments}>{t("repositorySettings.openAdvanced")}</Button>
         </div>

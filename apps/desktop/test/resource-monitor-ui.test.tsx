@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ResourceMonitor } from "../src/renderer/components/ResourceMonitor.js";
 import { I18nProvider } from "../src/renderer/i18n/provider.js";
@@ -88,5 +88,50 @@ describe("ResourceMonitor keyboard/focus (audit #61)", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByText("Desktop App")).toBeNull();
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  // audit #27: keyboard/focus navigation never crosses the click-catcher overlay, so the popover used to stay open
+  // over the next page's form. It now closes when the route changes or the window is resized.
+  it("closes when its closeKey (the current route) changes", () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = renderEn(<ResourceMonitor snapshot={snap} onOpenChange={onOpenChange} closeKey="ov:spawnWorker" />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Desktop App")).toBeInTheDocument();
+    rerender(<I18nProvider systemLocale="en-US"><ResourceMonitor snapshot={snap} onOpenChange={onOpenChange} closeKey="ov:automation" /></I18nProvider>);
+    expect(screen.queryByText("Desktop App")).toBeNull();
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("closes when the window is resized", () => {
+    renderEn(<ResourceMonitor snapshot={snap} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Desktop App")).toBeInTheDocument();
+    fireEvent(window, new Event("resize"));
+    expect(screen.queryByText("Desktop App")).toBeNull();
+  });
+});
+
+// audit #137: repeated read failures end the skeleton with a message and a retry.
+describe("ResourceMonitor failure", () => {
+  it("failed + no snapshot → message and a retry that calls onRefresh", () => {
+    const onRefresh = vi.fn();
+    renderEn(<ResourceMonitor snapshot={null} failed onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    expect(screen.getByText("Couldn't read resource usage")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  // Final review #11: the retry follows the poll's promise — busy while it runs, and a second failure is said.
+  it("a retry shows progress and then says it failed again", async () => {
+    let fail!: (e: Error) => void;
+    const onRefresh = vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    renderEn(<ResourceMonitor snapshot={null} failed onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole("button", { name: /resources/i }));
+    const retry = screen.getByRole("button", { name: "Retry" });
+    fireEvent.click(retry);
+    expect(retry).toHaveAttribute("aria-busy", "true");
+    await act(async () => { fail(new Error("")); });
+    expect(await screen.findByText("Retry failed")).toBeInTheDocument();
   });
 });

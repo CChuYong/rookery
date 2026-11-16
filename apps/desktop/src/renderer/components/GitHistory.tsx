@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useWsStore } from "../store/workspace.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed, EmptyState } from "../ui/load-state.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
 import type { Locale } from "../i18n/types.js";
@@ -21,18 +22,34 @@ function commitDateLabel(dateSeconds: number, now: number, t: TFunc, locale: Loc
 }
 
 // Recent commit history list. Clicking a row → opens that commit's multi-file Diff page (commit tab).
-export function GitHistory({ root, pageKey, version = 0 }: { root: string; pageKey: string; version?: number }): JSX.Element {
+// Reloads when HEAD moves (`head`, from the Changes poll — catches commits a file watch can't see in a worktree) and
+// on the panel's refresh button (`refreshKey`), keeping the old list on screen meanwhile (audit #40).
+export function GitHistory({ root, pageKey, version = 0, head = null, refreshKey = 0 }: { root: string; pageKey: string; version?: number; head?: string | null; refreshKey?: number }): JSX.Element {
   const t = useT();
   const locale = useLocale();
   const [commits, setCommits] = useState<Commit[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const openCommit = useWsStore((s) => s.openCommit_);
+  const load = (live: () => boolean): Promise<void> =>
+    window.rookery.ws.gitLog(root, 80).then(
+      (c) => { if (live()) { setCommits(c); setError(null); } },
+      (e: unknown) => {
+        if (!live()) return;
+        const text = (e instanceof Error ? e.message : String(e)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+        setError(text);
+        throw new Error(text);
+      },
+    );
   useEffect(() => {
     let live = true;
-    void window.rookery.ws.gitLog(root, 80).then((c) => { if (live) setCommits(c); });
+    void load(() => live).catch(() => {});
     return () => { live = false; };
-  }, [root, version]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root, version, head, refreshKey]);
+  useEffect(() => { setCommits(null); setError(null); }, [root]);
+  if (!commits && error) return <LoadFailed message={t("gitHistory.loadFailed")} detail={error} onRetry={() => load(() => true)} />;
   if (!commits) return <SkeletonRows rows={8} />;
-  if (commits.length === 0) return <div className="px-3 py-3 text-ui text-muted">{t("gitHistory.noCommits")}</div>;
+  if (commits.length === 0) return <EmptyState>{t("gitHistory.noCommits")}</EmptyState>;
   return (
     <div className="py-1">
       {commits.map((c) => (

@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, AppWindow, Folder, SquareTerminal, Code, Check } from "lucide-react";
 import { cn } from "../lib/cn.js";
+import { MENU_ITEM, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { toast } from "../store/toasts.js";
 import type { DetectedApp } from "../types/rookery.js";
@@ -37,7 +38,7 @@ function AppGlyph({ app, size }: { app: DetectedApp; size: number }): JSX.Elemen
 }
 
 // Open the current work root (cwd/worker worktree) directly in an installed IDE/Finder/Terminal.
-// Split button: left = last-selected app icon (click = run immediately), right = dropdown (change app). The selection is remembered in localStorage.
+// Split button: left = last-selected app icon + "Open in <app>" (click = run immediately), right = ▾ dropdown (change app). The selection is remembered in localStorage.
 // The root is freshly resolved right before launch (ws.resolveRoot) — to handle the case where the worker worktree is created asynchronously.
 export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: string }): JSX.Element {
   const t = useT();
@@ -112,13 +113,16 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
     <div className="relative flex items-center">
       {/* quiet ghost split button — no permanent border/fill, just the two hover targets with a hairline between them. */}
       <div className="no-drag flex h-6 items-center overflow-hidden rounded-md">
+        {/* audit #24: the verb sits on the side that acts — "[icon] Open in <app>" launches, the chevron only picks.
+            The label drops at narrow header widths (globals.css), leaving the icon. */}
         <button
           onClick={() => selected && choose(selected.id, false)}
           aria-label={t("openInAppMenu.openCurrentFolder")}
           title={selected ? t("openInAppMenu.openInApp", { name: selected.name }) : t("openInAppMenu.openInOtherApp")}
-          className="flex h-full w-6 items-center justify-center text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+          className="flex h-full min-w-6 items-center justify-center gap-1.5 px-1 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
         >
           {selected ? <AppGlyph app={selected} size={14} /> : <AppWindow size={14} />}
+          <span className="workspace-header-openin-label max-w-[14ch] truncate">{selected ? t("openInAppMenu.openInApp", { name: selected.name }) : t("openInAppMenu.label")}</span>
         </button>
         <button
           ref={triggerRef}
@@ -127,10 +131,8 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
           aria-haspopup="menu"
           aria-expanded={open}
           title={t("openInAppMenu.selectOtherApp")}
-          className={cn("flex h-full items-center gap-1 border-l border-line px-1.5 text-meta transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
+          className={cn("flex h-full items-center border-l border-line px-1 transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
         >
-          {/* short text label (audit #59) — the icon+chevron split button used to be unlabeled and read as a stray glyph in the header */}
-          <span>{t("openInAppMenu.label")}</span>
           <ChevronDown size={12} />
         </button>
       </div>
@@ -142,7 +144,7 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
             onKeyDown={onMenuKeyDown}
             role="menu"
             style={menuPosition}
-            className="menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-pop"
+            className={cn("menu-pop fixed z-40 w-[min(13rem,calc(100vw-1rem))] origin-top-right overflow-y-auto", MENU_SURFACE)}
           >
             {apps === null && <div className="px-2 py-1.5 text-ui text-muted">{t("openInAppMenu.detectingApps")}</div>}
             {apps?.map((a) => (
@@ -151,7 +153,7 @@ export function OpenInAppMenu({ subId, cwd }: { subId?: string | null; cwd?: str
                 role="menuitemradio"
                 aria-checked={selected?.id === a.id}
                 onClick={() => choose(a.id, true)}
-                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-ui text-fg-dim hover:bg-line/40"
+                className={cn("flex w-full items-center gap-2.5 px-2 py-1.5 text-left text-ui text-fg-dim", MENU_ITEM)}
               >
                 <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center"><AppGlyph app={a} size={18} /></span>
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>

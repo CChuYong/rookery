@@ -28,8 +28,37 @@ strokeWidth 1.5; the orange accent only as 1–2px lines, focus rings, the curre
 `bg-raised`; mono only for measurements and code; no `uppercase`/`tracking-*` labels; no `·`-joined meta strings
 (unless a test pins the literal); motion = 80–120ms colour/opacity only.
 
+State colours: `run` (sky blue) means live/running only — a dot or a small word; `warn` (amber) is every caution
+(warning notes, notices, trust/bypass cautions, near-limit thresholds ≥80%); `fail` red; `pr` green; unread is a
+neutral `fg-dim` dot, never the running blue.
+
+Shared patterns (use them, don't restyle per call site):
+- `lib/ui-tokens.ts` — `ROW_SELECTED`/`ROW_IDLE`/`rowState()` (neutral selection, hover at half strength),
+  `ROW_CURRENT_MARK` (2px accent rule for the open item when it differs from the selection), `SIDEBAR_ROW`,
+  `TAB_ACTIVE`/`TAB_IDLE`/`TAB_LINE` (tab strips: full-strength text + one 1px `fg-dim` line, no fill or wash; the dock
+  tabs use the same line via `--tab-line`), `MENU_SURFACE`/`MENU_ITEM`/`MENU_ITEM_ACTIVE` (menus and popovers).
+  In-form choices use `Segment` `pill`; tab strips use `Segment` `underline` or the tokens above.
+- `ui/dialog.tsx` — `dialogPanelClass({ size: "sm" | "md" })` (360 / 480px, 8px radius, `p-5`, `shadow-pop`) and
+  `dialogOverlayClass()`; every modal panel uses them.
+- `components/ComposerChrome.tsx` — the three prompt surfaces (conversation, New session, New worker) share
+  `COMPOSER_BOX` (6px radius), `ComposerFooter` (context left, actions pinned right — send never wraps alone),
+  `SendButton` (26px neutral circle, arrow-up, tooltip names the action or why it is disabled) and `ChromeMenu` +
+  `MenuField` (the model menu: backend, model, effort, permission mode, speed; the trigger reads `Opus 4.8 · High`
+  plus only non-default choices). Enter submits on all three; Shift+Enter is a newline.
+- `lib/focus.ts` — keyboard/focus contract for every overlay and list: `useFocusReturn` (focus back to the trigger,
+  captured at first render), `useReturnFocusOnClose` (toggled popovers), `useRovingTabIndex` (a list is one tab stop,
+  Arrow/Home/End move, `aria-current` marks the open row), `useScrollActiveIntoView` (popup highlight stays visible),
+  `isImeComposing` (every Enter that commits text checks it), `usePageEscape` (full pages close on Esc when nothing
+  else owns it). `useFocusTrap` builds on it. `lib/shortcuts.ts` holds the row keys (F2, Delete/⌘⌫, Shift+F10) and
+  the app keys (⌘B, ⌘N, ⌘,) with their labels — show a shortcut next to its control (`withShortcut` title,
+  `aria-keyshortcuts`, or a menu item's `shortcut`), and never fire one inside a text field, Monaco or xterm.
+- A failed send is reported once, inline in the composer next to the kept draft; App send paths don't toast it too.
+- Confirm rule — anything irreversible (delete, revert, discard, secret removal, token rotation) goes through
+  `ui/confirm-dialog.tsx` (`secondary` adds a middle action); a light, undoable action runs at once and offers Undo in
+  `toast.info(text, { label, onClick })`. No same-button double-click confirms.
+
 ## Rules for editing components
 
 Change markup and classes only. Keep every handler, prop, `key`, `id`, `data-testid`, `aria-*`, role, i18n key and
 test-visible class (tests pin a few: `rise-in`, `dot-settle`, `transition`, `text-fail`, `fixed`, `w-full`,
-`opacity-0`/`group-hover:opacity-100`, `bg-accent/15`, button `disabled:*`). Never edit a test to make a change pass.
+`opacity-0`/`group-hover:opacity-100`, button `disabled:*`). Never edit a test to make a change pass.

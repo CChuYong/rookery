@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { MonacoDiff } from "./MonacoDiff.js";
 import { SkeletonRows } from "./Skeleton.js";
+import { LoadFailed } from "../ui/load-state.js";
 import { baseName as basename } from "../lib/path.js";
 import { cn } from "../lib/cn.js";
+import { rowState } from "../lib/ui-tokens.js";
 import { GIT_TONE } from "../lib/gitTone.js";
 import { useT } from "../i18n/provider.js";
 
@@ -15,18 +17,22 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
   const [files, setFiles] = useState<CFile[] | null>(null);
   const [info, setInfo] = useState<CInfo | null>(null);
   const [sel, setSel] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // the file list failed to load (git error, not "no files")
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!root) return;
     let live = true;
+    setError(null);
     void window.rookery.ws.gitCommitFiles(root, hash).then((fs) => {
       if (!live) return;
       setFiles(fs);
       setSel((cur) => cur ?? fs[0]?.path ?? null);
-    });
-    void window.rookery.ws.gitCommitInfo(root, hash).then((i) => { if (live) setInfo(i); });
+    }, (e: unknown) => { if (live) setError((e instanceof Error ? e.message : String(e)).replace(/^Error invoking remote method '[^']+': (Error: )?/, "")); });
+    void window.rookery.ws.gitCommitInfo(root, hash).then((i) => { if (live) setInfo(i); }, () => {});
     return () => { live = false; };
-  }, [root, hash]);
+  }, [root, hash, attempt]);
 
+  if (!files && error) return <LoadFailed message={t("commitView.loadFailed")} detail={error} onRetry={() => setAttempt((a) => a + 1)} />;
   if (!files) return <SkeletonRows rows={8} />;
   if (files.length === 0) return <div className="flex flex-1 items-center justify-center text-ui text-muted">{t("commitView.noChangedFiles")}</div>;
   const totalAdded = files.reduce((s, f) => s + f.added, 0);
@@ -57,7 +63,7 @@ export function CommitView({ root, hash }: { root: string; hash: string }): JSX.
             key={f.path}
             onClick={() => setSel(f.path)}
             title={f.path}
-            className={cn("flex h-6 w-full items-center gap-2 px-2.5 text-left text-ui", sel === f.path ? "bg-accent/15 text-fg" : "text-fg-dim hover:bg-raised")}
+            className={cn("flex h-6 w-full items-center gap-2 px-2.5 text-left text-ui", rowState(sel === f.path))}
           >
             <span className={cn("w-3 shrink-0 text-center font-mono text-meta", GIT_TONE[f.status] ?? "text-muted")}>{f.status}</span>
             <span className="min-w-0 flex-1 truncate">{basename(f.path)}</span>

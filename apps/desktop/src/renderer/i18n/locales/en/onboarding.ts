@@ -1,7 +1,7 @@
 import type { Catalog } from "../../types.js";
 export default {
-  "onboarding.welcomeTitle": "Welcome to rookery",
-  "onboarding.welcomeBody": "rookery is an orchestrator agent with memory. You talk to the master, and it spawns workers to get things done in isolated workspaces.",
+  "onboarding.welcomeTitle": "Welcome to Rookery",
+  "onboarding.welcomeBody": "Rookery is an orchestrator agent with memory. You talk to the master, and it spawns workers to get things done in isolated workspaces.",
   "onboarding.conceptTitle": "How it works",
   "onboarding.conceptBody": "Three things are all you need to know.",
   "onboarding.master": "Master",

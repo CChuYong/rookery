@@ -8,7 +8,7 @@ import { Input, Textarea } from "../ui/input.js";
 import { useDismissTransition } from "../lib/useDismissTransition.js";
 import { useModalKeys } from "../lib/useModalKeys.js";
 import { useFocusTrap } from "../lib/useFocusTrap.js";
-import { cn } from "../lib/cn.js";
+import { dialogOverlayClass, dialogPanelClass } from "../ui/dialog.js";
 
 function actionText(a: Automation): string {
   return a.action.kind === "master" ? a.action.prompt : a.action.task;
@@ -33,14 +33,14 @@ export function RunAutomationDialog({ automation, onClose, onRun }: {
   useFocusTrap(panelRef);
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4", closing ? "motion-safe:animate-[overlay-out_130ms_ease-in]" : "motion-safe:animate-[overlay-in_160ms_ease-out]")}
+      className={dialogOverlayClass({ closing })}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("runAutomationDialog.title")}
-        className={cn("flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop", closing ? "motion-safe:animate-[dialog-out_140ms_ease-in]" : "motion-safe:animate-[dialog-in_180ms_ease-out]")}
+        className={dialogPanelClass({ size: "md", closing, padded: false, className: "flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden" })}
       >
         <div className="shrink-0 px-5 pb-3 pt-5">
           <div className="flex items-center gap-2 text-title font-medium text-fg">

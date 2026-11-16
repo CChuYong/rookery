@@ -1,13 +1,19 @@
 import { memo, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder } from "lucide-react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { isImeComposing, useRovingTabIndex } from "../lib/focus.js";
+import { SHORTCUT, isDeleteKey, isMenuKey, isRenameKey, withShortcut } from "../lib/shortcuts.js";
+import { ChevronRight, Archive, Pin, Trash2, MoreHorizontal, Folder, Search } from "lucide-react";
 import { cn } from "../lib/cn.js";
-import { ContextMenu } from "../components/ContextMenu.js";
+import { SIDEBAR_ROW, rowState } from "../lib/ui-tokens.js";
+import { ContextMenu, type AnchorRect } from "../components/ContextMenu.js";
 import { ProviderBadge } from "../components/StatusBadge.js";
 import { Collapse } from "../components/Collapse.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
+import { LoadFailed } from "../ui/load-state.js";
+import { SkeletonRows } from "../components/Skeleton.js";
 import { baseName } from "../lib/path.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
-import { Select } from "../ui/input.js";
+import { Input, Select } from "../ui/input.js";
 import { relativeTime, absoluteDate } from "../lib/relative-time.js";
 import { useT, useLocale } from "../i18n/provider.js";
 import type { TFunc } from "../i18n/provider.js";
@@ -110,6 +116,8 @@ function groupByAutomation(sessions: Session[], automations: AutomationLite[], t
 }
 
 const sessName = (s: Session): string => s.label || baseName(s.cwd) || s.id;
+// Same idea as RepoTree's worker filter (shown past 4 live workers); sessions pile up faster, so a higher bar.
+const SEARCH_MIN = 8;
 // A session has no explicit title → its name fell back to the cwd folder (or id). This is what makes the sidebar a
 // wall of identical labels (audit #46, e.g. 'clover-space' x6) when several sessions share a working directory.
 const isFallbackNamed = (s: Session): boolean => !s.label;
@@ -130,7 +138,7 @@ function SessionsImpl(p: {
   activeId: string | null;
   loaded?: boolean; // session list has arrived from the daemon → only then is an empty list really "no sessions" (avoids the cold-connect false-empty flash)
   loadFailed?: boolean; // the initial fetch was rejected and hasn't succeeded since → show an error+retry row instead of staying blank forever (audit #14)
-  onRetry?: () => void; // re-fires session.list (cleared by the store once it succeeds)
+  onRetry?: () => unknown; // (may return a promise → the Retry button shows progress/failure) re-fires session.list (cleared by the store once it succeeds)
   onSelect: (id: string) => void;
   running?: Record<string, boolean>; // sessions with a master turn in progress → live pulse dot
   attention?: Record<string, boolean>; // sessions whose turn finished while unseen → right-side unread dot
@@ -146,9 +154,25 @@ function SessionsImpl(p: {
 }): JSX.Element {
   const t = useT();
   const locale = useLocale();
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number; rect?: AnchorRect } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [q, setQ] = useState(""); // text filter by session name (audit #118), shown past SEARCH_MIN sessions
+  // The whole list is one tab stop (the open session's row), Arrow keys move between rows (audit #107).
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const roving = useRovingTabIndex(listRef);
+  const refocusRow = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = refocusRow.current;
+    if (renaming || !id) return;
+    refocusRow.current = null;
+    Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-roving-item]") ?? []).find((el) => el.dataset.rowId === id)?.focus();
+  }, [renaming]);
+  // After a delete confirm closes, the row that opened it may already be gone: land on the list's stop, not <body>.
+  const closeConfirm = (): void => {
+    setConfirm(null);
+    setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) roving.focusStop(); }, 0);
+  };
   const [scrolled, setScrolled] = useState(false); // when not at the top, show a fade/blur below the header (scroll shadow)
   // List-arrival animation: seed with the sessions present at first non-empty load; only sessions that appear AFTER that
   // rise-in (avoids a flash-storm of the whole list on cold load / reconnect). Mirrors RepoTree/GitChanges.
@@ -213,7 +237,10 @@ function SessionsImpl(p: {
   const sourceFiltered = effectiveSource === "all" ? active : active.filter((s) => srcOf(s.origin) === effectiveSource);
   // automationId focus (cross-link): only that automation's sessions.
   const focusedAuto = effectiveSource === "automation" && filter.automationId;
-  const filtered = focusedAuto ? sourceFiltered.filter((s) => s.originRef === filter.automationId) : sourceFiltered;
+  const autoFiltered = focusedAuto ? sourceFiltered.filter((s) => s.originRef === filter.automationId) : sourceFiltered;
+  const showSearch = active.length > SEARCH_MIN;
+  const query = showSearch ? q.trim().toLowerCase() : "";
+  const filtered = query ? autoFiltered.filter((s) => sessName(s).toLowerCase().includes(query)) : autoFiltered;
   // The session you're currently viewing must never disappear from the sidebar just because the source filter (or
   // automation focus) would otherwise exclude it (audit #21) — otherwise there's no location highlight anywhere.
   const activeSession = p.activeId ? active.find((s) => s.id === p.activeId) : undefined;
@@ -222,7 +249,24 @@ function SessionsImpl(p: {
   const pinnedItems = [...visible.filter((s) => s.pinned)].sort(byActivityDesc);
   const rest = visible.filter((s) => !s.pinned);
 
-  const archived = p.sessions.filter((s) => s.archived && (effectiveSource === "all" || srcOf(s.origin) === effectiveSource));
+  // The text filter applies to the archive too (review m5).
+  const archived = p.sessions.filter((s) => s.archived && (effectiveSource === "all" || srcOf(s.origin) === effectiveSource) && (!query || sessName(s).toLowerCase().includes(query)));
+
+  // Keyboard paths for the row's mouse actions (audit #107): with the row actions out of the tab order, the row itself
+  // takes F2 (rename), Delete / Cmd+Backspace (delete…) and Shift+F10 / the Menu key (the same menu as '⋯').
+  const rowKeys = (e: ReactKeyboardEvent<HTMLButtonElement>, s: Session, name: string): void => {
+    if (isMenuKey(e)) {
+      e.preventDefault();
+      const r = e.currentTarget.getBoundingClientRect();
+      setMenu({ id: s.id, x: r.left + 12, y: r.bottom, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } });
+    } else if (isRenameKey(e) && p.onRename) {
+      e.preventDefault();
+      setRenaming({ id: s.id, value: name });
+    } else if (isDeleteKey(e) && p.onDelete) {
+      e.preventDefault();
+      setConfirm({ id: s.id, name });
+    }
+  };
 
   const Row = (s: Session): JSX.Element => {
     const name = sessName(s);
@@ -233,16 +277,20 @@ function SessionsImpl(p: {
     if (renaming?.id === s.id) {
       return (
         <div key={s.id} className="px-1 py-1">
-          <input
+          <Input
+            size="sm"
             autoFocus
             value={renaming.value}
             onChange={(e) => setRenaming({ id: s.id, value: e.target.value })}
+            aria-label={t("sessions.renameLabel", { name })}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }
-              else if (e.key === "Escape") setRenaming(null);
+              if (isImeComposing(e)) return; // the Enter that commits a Korean syllable must not also commit the rename (audit #76)
+              // A keyboard rename (Enter/Escape) puts focus back on the row; Escape is claimed so it doesn't also close the page.
+              if (e.key === "Enter") { refocusRow.current = s.id; p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }
+              else if (e.key === "Escape") { e.preventDefault(); refocusRow.current = s.id; setRenaming(null); }
             }}
             onBlur={() => { p.onRename?.(s.id, renaming.value.trim() || name); setRenaming(null); }}
-            className="w-full rounded-md border border-accent/60 bg-ink px-2 py-1 text-ui text-fg outline-none"
+            className="w-full"
           />
         </div>
       );
@@ -250,17 +298,22 @@ function SessionsImpl(p: {
     return (
       <div key={s.id} className={cn("group relative", isFreshSession(s.id) && "rise-in")}>
         <button
+          data-roving-item
+          data-row-id={s.id}
+          aria-current={isActive ? "page" : undefined}
+          aria-keyshortcuts={`${SHORTCUT.menu.aria} ${p.onRename ? SHORTCUT.rename.aria : ""} ${p.onDelete ? SHORTCUT.delete.aria() : ""}`.trim()}
           onClick={() => p.onSelect(s.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ id: s.id, x: e.clientX, y: e.clientY }); }}
+          onKeyDown={(e) => rowKeys(e, s, name)}
           className={cn(
-            // Row scale shared with RepoTree.tsx (audit #76) — one sidebar-list token set for both tabs.
-            "relative flex w-full items-center gap-1.5 rounded-md py-1.5 pl-2.5 pr-2.5 text-left text-body transition-colors",
+            // Row geometry + selection come from lib/ui-tokens.ts, shared with RepoTree.tsx (audit #76 #109).
+            SIDEBAR_ROW,
+            "items-center gap-1.5 text-body",
             // The hover actions are absolutely positioned over the row's right edge: reserve their width while they show,
             // so the title truncates under them instead of being painted over.
             "group-hover:pr-[4.75rem] group-focus-within:pr-[4.75rem]",
-            // Selected = lifted background + a 2px accent inset rule on the left (the ledger's own selection mark,
-            // not a per-row status rail — a running/attention state already has its own dot further along the row).
-            isActive ? "bg-raised text-fg" : "text-fg-dim hover:bg-raised/60 hover:text-fg",
+            // Selected = the shared neutral lift (no accent; a running/attention state has its own dot along the row).
+            rowState(isActive),
           )}
         >
           {/* master turn in progress = live pulse (same signature as the worker tree) */}
@@ -283,7 +336,8 @@ function SessionsImpl(p: {
               view (codex-only; a mixed claude/codex list must be scannable at a glance); the origin badge only in 'All'. */}
           {s.provider === "codex" && <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><ProviderBadge provider={s.provider} /></span>}
           {effectiveSource === "all" && <span className="shrink-0 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"><OriginBadge origin={s.origin} /></span>}
-          {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-run transition-opacity group-hover:opacity-0 group-focus-within:opacity-0" />}
+          {/* unread = a neutral dot (its own channel, audit #100) — the blue dot means "working", on the left */}
+          {p.attention?.[s.id] && !isActive && <span title={t("sessions.unreadDot")} className="dot-pop h-2 w-2 shrink-0 rounded-full bg-fg-dim transition-opacity group-hover:opacity-0 group-focus-within:opacity-0" />}
         </button>
         {/* hover actions (Pin / More / delete) — a 'sibling' of the main button (no nested buttons), absolutely positioned on the right. Shown only on group-hover/focus.
             The '⋯' opens the SAME right-click menu, but reachable by left-click/Enter (audit #45: the menu was previously right-click-only, and macOS has no
@@ -291,7 +345,9 @@ function SessionsImpl(p: {
         <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           {p.onPin && (
             <button
+              tabIndex={-1}
               title={s.pinned ? t("sessions.unpin") : t("sessions.pin")}
+              aria-label={t(s.pinned ? "sessions.unpinNamed" : "sessions.pinNamed", { name })}
               onClick={(e) => { e.stopPropagation(); p.onPin!(s.id, !s.pinned); }}
               className={cn("rounded p-1 hover:bg-line/60", s.pinned ? "text-accent" : "text-muted hover:text-fg-dim")}
             >
@@ -300,7 +356,9 @@ function SessionsImpl(p: {
           )}
           {p.onDelete && (
             <button
+              tabIndex={-1}
               title={t("common.delete")}
+              aria-label={t("sessions.deleteNamed", { name })}
               onClick={(e) => { e.stopPropagation(); setConfirm({ id: s.id, name }); }}
               className="rounded p-1 text-muted hover:bg-line/60 hover:text-fail"
             >
@@ -308,9 +366,11 @@ function SessionsImpl(p: {
             </button>
           )}
           <button
-            title={t("common.moreActions")}
-            aria-label={t("common.moreActions")}
-            onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4 }); }}
+            tabIndex={-1}
+            title={withShortcut(t("common.moreActions"), SHORTCUT.menu.label())}
+            aria-label={t("common.moreActionsFor", { name })}
+            aria-haspopup="menu"
+            onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ id: s.id, x: r.left, y: r.bottom + 4, rect: { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }); }}
             className="rounded p-1 text-muted opacity-0 transition-opacity hover:bg-line/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           >
             <MoreHorizontal size={14} />
@@ -323,7 +383,7 @@ function SessionsImpl(p: {
   const menuSession = menu ? p.sessions.find((x) => x.id === menu.id) : undefined;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
+    <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}>
       {/* sticky header — the tab area is opaque (nothing shows through), and the thin frosted fade below it appears naturally only 'when not at the top'. */}
       {showSegment && (
         <div ref={segWrapRef} className="sticky top-0 z-10 bg-sunk">
@@ -348,13 +408,21 @@ function SessionsImpl(p: {
       )}
 
       {!(p.loaded ?? true) && p.loadFailed ? (
-        <div className="flex items-center justify-between gap-2 px-2 py-3 text-ui leading-relaxed">
-          <span className="text-fail">{t("sessions.loadFailed")}</span>
-          <button onClick={p.onRetry} className="shrink-0 rounded-md border border-line px-2 py-0.5 text-meta text-muted hover:bg-raised hover:text-fg-dim">{t("common.retry")}</button>
-        </div>
+        <LoadFailed message={t("sessions.loadFailed")} onRetry={() => p.onRetry?.()} />
+      ) : !(p.loaded ?? true) ? (
+        <SkeletonRows rows={4} className="px-2" />
       ) : (
         (p.loaded ?? true) && p.sessions.length === 0 && <div className="px-2 py-3 text-ui leading-relaxed text-muted">{t("sessions.empty")}</div>
       )}
+
+      {showSearch && (
+        <div className="mx-1 mb-1 mt-0.5 flex items-center gap-1.5 rounded-md border border-line bg-ink/40 px-2 py-1 transition-colors focus-within:border-accent/50">
+          <Search size={12} className="shrink-0 text-muted" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("sessions.filterPlaceholder")} aria-label={t("sessions.filterPlaceholder")} className="min-w-0 flex-1 bg-transparent text-meta text-fg-dim placeholder:text-muted focus:outline-none" />
+        </div>
+      )}
+      {/* not while the open session is still listed (it's kept visible on purpose) or archived sessions match — review m5 */}
+      {query && visible.length === 0 && archived.length === 0 && <div className="px-2 py-3 text-ui text-muted">{t("sessions.noMatches")}</div>}
 
       {pinnedItems.length > 0 && (
         <div>
@@ -398,12 +466,15 @@ function SessionsImpl(p: {
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          anchorRect={menu.rect}
           onClose={() => setMenu(null)}
           items={[
-            { label: t("sessions.rename"), onClick: () => setRenaming({ id: menu.id, value: sessName(menuSession) }) },
+            // Pin is in the menu too: the hover Pin button is out of the tab order, so this is its keyboard path.
+            ...(p.onPin ? [{ label: menuSession.pinned ? t("sessions.unpin") : t("sessions.pin"), onClick: () => p.onPin!(menu.id, !menuSession.pinned) }] : []),
+            { label: t("sessions.rename"), shortcut: { label: SHORTCUT.rename.label(), aria: SHORTCUT.rename.aria }, onClick: () => setRenaming({ id: menu.id, value: sessName(menuSession) }) },
             { label: t("sessions.fork"), onClick: () => p.onFork?.(menu.id) },
             { label: menuSession.archived ? t("sessions.unarchive") : t("sessions.archive"), onClick: () => p.onArchive?.(menu.id, !menuSession.archived) },
-            { label: t("sessions.deleteEllipsis"), danger: true, onClick: () => setConfirm({ id: menu.id, name: sessName(menuSession) }) },
+            { label: t("sessions.deleteEllipsis"), danger: true, shortcut: { label: SHORTCUT.delete.label(), aria: SHORTCUT.delete.aria() }, onClick: () => setConfirm({ id: menu.id, name: sessName(menuSession) }) },
           ]}
         />
       )}
@@ -411,10 +482,10 @@ function SessionsImpl(p: {
       {confirm && (
         <ConfirmDialog
           title={t("sessions.deleteTitle")}
-          body={<><span className="text-fg-dim">{confirm.name}</span> {t("sessions.deleteBody")}</>}
+          body={t("sessions.deleteBody", { name: confirm.name })}
           confirmLabel={t("common.delete")}
           variant="danger"
-          onCancel={() => setConfirm(null)}
+          onCancel={closeConfirm}
           onConfirm={() => p.onDelete?.(confirm.id)}
         />
       )}
@@ -430,7 +501,7 @@ function ArchivedSection({ items, render }: { items: Session[]; render: (s: Sess
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-1">
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 text-meta font-medium text-faint hover:text-fg-dim">
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-center gap-1.5 px-2.5 pb-1 pt-2 text-meta font-medium text-faint hover:text-fg-dim">
         <ChevronRight size={12} className={cn("transition-transform duration-200 ease-out motion-reduce:transition-none", open && "rotate-90")} />
         <Archive size={12} /> {t("sessions.archivedSection", { count: items.length })}
       </button>

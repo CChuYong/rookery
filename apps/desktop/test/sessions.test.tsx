@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { Sessions } from "../src/renderer/views/Sessions.js";
 
 const mk = (over: Record<string, unknown>) => ({ id: "s1", cwd: "/code/app", status: "active", lastActivity: new Date().toISOString(), origin: "ui", ...over });
@@ -86,7 +87,8 @@ describe("Sessions pin + hover actions", () => {
 describe("Sessions overflow '⋯' button (audit #45)", () => {
   it("is reachable by role/name and opens the same menu as right-click (Rename/Fork visible)", () => {
     render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onDelete={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
-    const moreBtn = screen.getByRole("button", { name: "더보기" });
+    // audit #78: the overflow button's accessible name says which row it acts on (was a bare "더보기" on every row)
+    const moreBtn = screen.getByRole("button", { name: "row 더보기" });
     fireEvent.click(moreBtn);
     expect(screen.getByText("이름 변경")).toBeInTheDocument();
     expect(screen.getByText("포크")).toBeInTheDocument();
@@ -95,7 +97,7 @@ describe("Sessions overflow '⋯' button (audit #45)", () => {
   it("clicking a menu item opened via '⋯' invokes the corresponding callback", () => {
     const onFork = vi.fn();
     render(<Sessions activeId={null} onSelect={() => {}} onFork={onFork} sessions={[mk({ id: "s1", label: "row" })] as never} />);
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "row 더보기" }));
     fireEvent.click(screen.getByText("포크"));
     expect(onFork).toHaveBeenCalledWith("s1");
   });
@@ -226,6 +228,25 @@ describe("Sessions initial load failure (audit #14)", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  // audit #42: still loading → skeleton rows, not a blank column.
+  it("still loading → a skeleton, neither the empty copy nor the error row", () => {
+    const { container } = render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={false} loadFailed={false} />);
+    expect(container.querySelector(".sheen")).not.toBeNull();
+    expect(screen.queryByText("목록을 불러오지 못했어요")).toBeNull();
+  });
+
+  // audit #44: retry shows progress and says so when it fails again.
+  it("retry is busy while the request runs and reports a second failure", async () => {
+    let fail!: (e: Error) => void;
+    const onRetry = vi.fn(() => new Promise<void>((_res, rej) => { fail = rej; }));
+    render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={false} loadFailed={true} onRetry={onRetry} />);
+    const btn = screen.getByRole("button", { name: "다시 시도" });
+    fireEvent.click(btn);
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    await act(async () => { fail(new Error("timeout")); });
+    expect(await screen.findByText(/다시 시도했지만 실패했어요/)).toBeInTheDocument();
+  });
+
   it("loaded but empty → shows the normal empty copy, not the error row", () => {
     render(<Sessions sessions={[]} activeId={null} onSelect={() => {}} loaded={true} loadFailed={false} />);
     expect(screen.getByText("아직 대화가 없어요 — 위 ‘새 세션’으로 마스터에게 일을 맡겨보세요.")).toBeInTheDocument();
@@ -244,5 +265,120 @@ describe("Sessions fallback-name disambiguating subline (audit #46)", () => {
     render(<Sessions sessions={[mk({ id: "s1", label: "My Title" })] as never} activeId={null} onSelect={() => {}} />);
     expect(screen.getByText("My Title")).toBeInTheDocument();
     expect(screen.queryByText("방금")).toBeNull();
+  });
+});
+
+// audit #118: RepoTree had a text filter past a handful of workers; Sessions had none.
+describe("Sessions text filter (audit #118)", () => {
+  const many = Array.from({ length: 9 }, (_, i) => mk({ id: `s${i}`, label: i === 4 ? "release cadence" : `chat ${i}` }));
+  it("appears once there are more than 8 sessions and filters rows by name", () => {
+    render(<Sessions sessions={many as never} activeId={null} onSelect={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "CADENCE" } });
+    expect(screen.getByText("release cadence")).toBeInTheDocument();
+    expect(screen.queryByText("chat 1")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "nothing-like-this" } });
+    expect(screen.getByText("일치하는 세션이 없어요.")).toBeInTheDocument();
+  });
+  // review m5
+  it("doesn't claim 'no matches' while the open session is still listed, and filters the archive too", () => {
+    const withArchived = [...many, mk({ id: "a1", label: "old cadence notes", archived: true }), mk({ id: "a2", label: "old chat", archived: true })];
+    render(<Sessions sessions={withArchived as never} activeId="s1" onSelect={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "nothing-like-this" } });
+    expect(screen.getByText("chat 1")).toBeInTheDocument(); // the open session stays visible
+    expect(screen.queryByText("일치하는 세션이 없어요.")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "cadence" } });
+    fireEvent.click(screen.getByText(/보관함/));
+    expect(screen.getByText("old cadence notes")).toBeInTheDocument();
+    expect(screen.queryByText("old chat")).toBeNull();
+  });
+
+  // review round 2: matches only in the archive → no "no matches" line above an archive that has them.
+  it("doesn't say 'no matches' when only archived sessions match", () => {
+    const withArchived = [...many, mk({ id: "a1", label: "zebra notes", archived: true })];
+    render(<Sessions sessions={withArchived as never} activeId={null} onSelect={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText("세션 필터…"), { target: { value: "zebra" } });
+    expect(screen.queryByText("일치하는 세션이 없어요.")).toBeNull();
+    expect(screen.getByText(/보관함/)).toBeInTheDocument();
+  });
+
+  it("stays hidden for a short list", () => {
+    render(<Sessions sessions={many.slice(0, 3) as never} activeId={null} onSelect={() => {}} />);
+    expect(screen.queryByPlaceholderText("세션 필터…")).toBeNull();
+  });
+});
+
+// audit #107 #76 #77 #78: one tab stop per list, Arrow keys between rows, the open row marked aria-current, keyboard
+// paths for the row actions, named action buttons, a labelled rename input that ignores the IME's committing Enter.
+describe("Sessions keyboard + accessible names (audit T11)", () => {
+  const rows = [mk({ id: "a", label: "alpha" }), mk({ id: "b", label: "beta" }), mk({ id: "c", label: "gamma" })];
+
+  it("is a single tab stop on the open session, with Arrow navigation and aria-current", () => {
+    render(<Sessions activeId="b" onSelect={() => {}} onPin={vi.fn()} onDelete={vi.fn()} sessions={rows as never} />);
+    const beta = screen.getByText("beta").closest("button")!;
+    const alpha = screen.getByText("alpha").closest("button")!;
+    expect(beta).toHaveAttribute("aria-current", "page");
+    expect(beta).toHaveAttribute("tabindex", "0");
+    expect(alpha).toHaveAttribute("tabindex", "-1");
+    // the hover actions are not extra tab stops per row
+    expect(screen.getByRole("button", { name: "beta 삭제" })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "beta 고정" })).toHaveAttribute("tabindex", "-1");
+    beta.focus();
+    fireEvent.keyDown(beta, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(alpha);
+  });
+
+  it("opens the row menu on Shift+F10, renames on F2 and asks to delete on Delete", () => {
+    const onDelete = vi.fn();
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} onDelete={onDelete} onPin={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    const row = screen.getByText("row").closest("button")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "고정" })).toBeInTheDocument(); // pin has a keyboard path now
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(row, { key: "Delete" });
+    expect(screen.getByText("세션 삭제")).toBeInTheDocument();
+  });
+
+  it("labels the rename input and ignores the Enter that commits an IME syllable", () => {
+    const onRename = vi.fn();
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={onRename} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    fireEvent.keyDown(screen.getByText("row").closest("button")!, { key: "F2" });
+    const input = screen.getByRole("textbox", { name: "row 이름 변경" });
+    fireEvent.change(input, { target: { value: "새 이름" } });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(onRename).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledWith("s1", "새 이름");
+  });
+});
+
+// Fix round 1: a keyboard rename puts focus back on its row (Escape claimed so a page behind doesn't close), and a
+// confirmed delete lands on the list's stop instead of <body>.
+describe("Sessions focus after rename/delete (fix round 1)", () => {
+  it("refocuses the row after Enter or Escape in the rename input, and claims Escape", () => {
+    render(<Sessions activeId={null} onSelect={() => {}} onRename={vi.fn()} sessions={[mk({ id: "s1", label: "row" })] as never} />);
+    fireEvent.keyDown(screen.getByText("row").closest("button")!, { key: "F2" });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "row 이름 변경" }), { key: "Enter" });
+    expect(document.activeElement).toBe(screen.getByText("row").closest("button"));
+    fireEvent.keyDown(screen.getByText("row").closest("button")!, { key: "F2" });
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const input = screen.getByRole("textbox", { name: "row 이름 변경" });
+    act(() => { input.dispatchEvent(esc); });
+    expect(esc.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(screen.getByText("row").closest("button"));
+  });
+
+  it("after a confirmed delete, focus lands on a remaining row", async () => {
+    function Host(): JSX.Element {
+      const [list, setList] = useState([mk({ id: "a", label: "alpha" }), mk({ id: "b", label: "beta" })]);
+      return <Sessions activeId={null} onSelect={() => {}} onDelete={(id) => setList((l) => l.filter((x) => x.id !== id))} sessions={list as never} />;
+    }
+    render(<Host />);
+    const beta = screen.getByText("beta").closest("button")!;
+    beta.focus();
+    fireEvent.keyDown(beta, { key: "Delete" });
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText("alpha").closest("button")));
   });
 });

@@ -13,6 +13,7 @@ import type { BrowseResult } from "../types/rookery.js";
 import { PERMISSION_MODES, permLabel } from "./Composer.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
+import { cn } from "../lib/cn.js";
 
 // Comma-separated id string ↔ array. Drops empty tokens, and returns undefined when empty (= no filter).
 const parseIds = (s: string): string[] | undefined => {
@@ -122,6 +123,7 @@ export function AutomationForm(p: {
   const modelEffortSupported = (m: string): boolean => (isCodexList ? true : effortSupported(m));
 
   const submit = async () => {
+    if (budgetInvalid) return;
     setSubmitError(null);
     const ch = parseIds(channels);
     const fu = parseIds(fromUsers);
@@ -155,8 +157,9 @@ export function AutomationForm(p: {
     const resolvedPermissionMode = permissionMode || null;
     // maxTurns: an integer valid only for the worker action; master is always null
     const resolvedMaxTurns = actionKind === "worker" && maxTurns.trim() ? parseInt(maxTurns, 10) : null;
-    // costBudgetUsd: applies to BOTH action kinds — no worker-only guard (mirror the null-when-empty shape).
-    const resolvedCostBudget = costBudget.trim() && Number.isFinite(Number(costBudget)) && Number(costBudget) > 0 ? Number(costBudget) : null;
+    // costBudgetUsd: applies to BOTH action kinds — no worker-only guard (mirror the null-when-empty shape). An invalid
+    // entry never gets here (budgetInvalid blocks the save), so a non-empty value is a positive number.
+    const resolvedCostBudget = costBudget.trim() ? Number(costBudget) : null;
 
     setSaving(true);
     try {
@@ -187,7 +190,10 @@ export function AutomationForm(p: {
 
   const triggerValid = triggerKind === "cron" ? cron.trim().split(/\s+/).length >= 5 : triggerKind === "interval" ? Number(everyMinutes) >= 1 : triggerKind === "worker" ? onIdle || onStopped || onFailure : true;
   const actionValid = actionKind === "master" ? prompt.trim() && cwd.trim() : repo && task.trim();
-  const valid = name.trim() && triggerValid && actionValid;
+  // An entered budget must be a positive amount; anything else is an inline error that blocks the save, never a
+  // silently dropped limit (same rule as the spawn page and Settings).
+  const budgetInvalid = costBudget.trim() !== "" && !(Number.isFinite(Number(costBudget)) && Number(costBudget) > 0);
+  const valid = name.trim() && triggerValid && actionValid && !budgetInvalid;
 
   // repo path for the worker action (basis for @ file autocomplete)
   const repoPath = p.repos.find((r) => r.name === repo)?.path;
@@ -197,10 +203,8 @@ export function AutomationForm(p: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Header bar — matches the overlay-header pattern shared by SettingsPage/AutomationPage/NewSessionPage
-          (drag h-11 px-5 + sentence-case label + lucide X close); Cancel/Save moved to a body-bottom footer,
-          mirroring SettingsPage's Save placement (audit #75). */}
-      <div className="drag flex h-10 shrink-0 items-center gap-2 px-5">
+      {/* Header bar — the overlay-header pattern shared by SettingsPage/AutomationPage (h-10 px-4, ghost icon close). */}
+      <div className="drag flex h-10 shrink-0 items-center gap-2 px-4">
         <span className="shrink-0 select-none text-ui text-muted">
           {t("automationForm.eyebrow")}
         </span>
@@ -208,14 +212,9 @@ export function AutomationForm(p: {
         <span className="truncate text-body font-medium text-fg">
           {p.job === "new" ? t("automationModal.titleNew") : t("automationModal.titleEdit")}
         </span>
-        <button
-          type="button"
-          onClick={p.onClose}
-          aria-label={t("common.close")}
-          className="no-drag ml-auto rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-fg-dim"
-        >
+        <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={p.onClose} aria-label={t("common.close")}>
           <X size={14} />
-        </button>
+        </Button>
       </div>
 
       {/* Inline submit error (audit #4) — shown right under the header so a failed save (e.g. invalid cron) is
@@ -230,9 +229,8 @@ export function AutomationForm(p: {
 
           {/* ── Basic section */}
           <section className="flex flex-col gap-3">
-            <h3 className="text-body font-medium text-fg-dim">{t("automationModal.sectionBasic")}</h3>
             <label className="flex flex-col gap-1">
-              <span className="text-ui text-fg-dim">{t("automationModal.name")}</span>
+              <span className="text-body font-medium text-fg">{t("automationModal.name")}</span>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </label>
             <label className="flex items-center gap-2">
@@ -242,16 +240,14 @@ export function AutomationForm(p: {
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
               />
-              <span className="text-ui text-fg-dim">{t("automationModal.enabled")}</span>
+              <span className="text-body text-fg">{t("automationModal.enabled")}</span>
             </label>
           </section>
 
-          {/* ── Trigger section */}
-          <section className="flex flex-col gap-3">
-            <h3 className="text-body font-medium text-fg-dim">{t("automationModal.sectionTrigger")}</h3>
-
+          {/* ── Trigger section (when) */}
+          <section className="flex flex-col gap-3 border-t border-line-soft pt-5">
             <label className="flex flex-col gap-1">
-              <span className="text-ui text-fg-dim">{t("automationModal.triggerType")}</span>
+              <span className="text-body font-medium text-fg">{t("automationModal.triggerType")}</span>
               <Select
                 size="md"
                 className="w-full"
@@ -268,22 +264,22 @@ export function AutomationForm(p: {
             {triggerKind === "worker" ? (
               <>
                 <div className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.workerOn")}</span>
+                  <span className="text-body font-medium text-fg">{t("automationModal.workerOn")}</span>
                   <div className="flex flex-wrap gap-4 border-y border-line-soft py-2.5">
-                    <label className="flex items-center gap-2 text-ui text-fg-dim">
+                    <label className="flex items-center gap-2 text-body text-fg-dim">
                       <input type="checkbox" checked={onStopped} onChange={(e) => setOnStopped(e.target.checked)} /> {t("automationModal.workerOnStopped")}
                     </label>
-                    <label className="flex items-center gap-2 text-ui text-fg-dim">
+                    <label className="flex items-center gap-2 text-body text-fg-dim">
                       <input type="checkbox" checked={onFailure} onChange={(e) => setOnFailure(e.target.checked)} /> {t("automationModal.workerOnFailure")}
                     </label>
-                    <label className="flex items-center gap-2 text-ui text-fg-dim">
+                    <label className="flex items-center gap-2 text-body text-fg-dim">
                       <input type="checkbox" checked={onIdle} onChange={(e) => setOnIdle(e.target.checked)} /> {t("automationModal.workerOnIdle")}
                     </label>
                   </div>
-                  <span className="text-meta text-muted">{t("automationModal.workerOnHint")}</span>
+                  <span className="text-ui text-muted">{t("automationModal.workerOnHint")}</span>
                 </div>
                 <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.workerRepo")}</span>
+                  <span className="text-body font-medium text-fg">{t("automationModal.workerRepo")}</span>
                   <Select size="md" className="w-full" value={workerRepo} onChange={(e) => setWorkerRepo(e.target.value)}>
                     <option value="">{t("automationModal.workerRepoAll")}</option>
                     {p.repos.map((r) => (
@@ -293,31 +289,31 @@ export function AutomationForm(p: {
                 </label>
                 <div className="flex flex-col gap-1">
                   <label className="flex flex-col gap-1">
-                    <span className="text-ui text-fg-dim">{t("automationModal.workerLabel")}</span>
+                    <span className="text-body font-medium text-fg">{t("automationModal.workerLabel")}</span>
                     <Input value={workerLabel} onChange={(e) => setWorkerLabel(e.target.value)} />
                   </label>
-                  <span className="text-meta text-muted">{t("automationModal.workerLabelHint")}</span>
+                  <span className="text-ui text-muted">{t("automationModal.workerLabelHint")}</span>
                 </div>
               </>
             ) : triggerKind === "interval" ? (
               <div className="flex flex-col gap-1">
                 <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.everyMinutes")}</span>
+                  <span className="text-body font-medium text-fg">{t("automationModal.everyMinutes")}</span>
                   <Input type="number" min={1} value={everyMinutes} onChange={(e) => setEveryMinutes(e.target.value)} />
                 </label>
-                <span className="text-meta text-muted">{t("automationModal.everyMinutesHint")}</span>
+                <span className="text-ui text-muted">{t("automationModal.everyMinutesHint")}</span>
               </div>
             ) : triggerKind === "cron" ? (
               <>
                 <div className="flex flex-col gap-1">
                   <label className="flex flex-col gap-1">
-                    <span className="text-ui text-fg-dim">{t("automationModal.cron")}</span>
+                    <span className="text-body font-medium text-fg">{t("automationModal.cron")}</span>
                     <Input value={cron} onChange={(e) => setCron(e.target.value)} />
                   </label>
-                  <span className="text-meta text-muted">{t("automationModal.cronHint")}</span>
+                  <span className="text-ui text-muted">{t("automationModal.cronHint")}</span>
                 </div>
                 <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.timezone")}</span>
+                  <span className="text-body font-medium text-fg">{t("automationModal.timezone")}</span>
                   <Input value={tz} onChange={(e) => setTz(e.target.value)} />
                 </label>
               </>
@@ -325,32 +321,126 @@ export function AutomationForm(p: {
               <>
                 <div className="flex flex-col gap-1">
                   <label className="flex flex-col gap-1">
-                    <span className="text-ui text-fg-dim">{t("automationModal.channels")}</span>
+                    <span className="text-body font-medium text-fg">{t("automationModal.channels")}</span>
                     <Input value={channels} onChange={(e) => setChannels(e.target.value)} placeholder="C123,C456" />
                   </label>
-                  <span className="text-meta text-muted">{t("automationModal.channelsHint")}</span>
+                  <span className="text-ui text-muted">{t("automationModal.channelsHint")}</span>
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="flex flex-col gap-1">
-                    <span className="text-ui text-fg-dim">{t("automationModal.keyword")}</span>
+                    <span className="text-body font-medium text-fg">{t("automationModal.keyword")}</span>
                     <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} />
                   </label>
-                  <span className="text-meta text-muted">{t("automationModal.keywordHint")}</span>
+                  <span className="text-ui text-muted">{t("automationModal.keywordHint")}</span>
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="flex flex-col gap-1">
-                    <span className="text-ui text-fg-dim">{t("automationModal.fromUsers")}</span>
+                    <span className="text-body font-medium text-fg">{t("automationModal.fromUsers")}</span>
                     <Input value={fromUsers} onChange={(e) => setFromUsers(e.target.value)} placeholder="U123,U456" />
                   </label>
-                  <span className="text-meta text-muted">{t("automationModal.fromUsersHint")}</span>
+                  <span className="text-ui text-muted">{t("automationModal.fromUsersHint")}</span>
                 </div>
               </>
             )}
           </section>
 
-          {/* ── Model / Execution section (Task 4) */}
-          <section className="flex flex-col gap-3">
-            <h3 className="text-body font-medium text-fg-dim">{t("automationForm.sectionExecution")}</h3>
+          {/* ── Action section (what) — asked before the execution settings, whose defaults depend on it (audit #96) */}
+          <section className="flex flex-col gap-3 border-t border-line-soft pt-5">
+            <label className="flex flex-col gap-1">
+              <span className="text-body font-medium text-fg">{t("automationModal.actionType")}</span>
+              <Select
+                size="md"
+                className="w-full"
+                value={actionKind}
+                onChange={(e) => setActionKind(e.target.value as "master" | "worker")}
+              >
+                <option value="master">{t("automationPage.typeMaster")}</option>
+                <option value="worker">{t("automationPage.typeWorker")}</option>
+              </Select>
+            </label>
+
+            {actionKind === "master" ? (
+              <>
+                <div className="flex flex-col gap-1">
+                  <span className="text-body font-medium text-fg">{t("automationModal.prompt")}</span>
+                  <PromptEditor
+                    ariaLabel={t("automationModal.prompt")}
+                    initialText={mc?.prompt ?? ""}
+                    onChange={setPrompt}
+                    commands={p.commands}
+                    browseDir={p.browseDir ? (d) => p.browseDir!(d, cwd || undefined) : undefined}
+                    placeholder=""
+                    minHeight={120}
+                    className="rounded-lg border border-line bg-sunk p-2 transition-colors focus:border-fg/30"
+                  />
+                </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-body font-medium text-fg">{t("automationModal.cwd")}</span>
+                  <div className="flex gap-2">
+                    <Input className="flex-1" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" />
+                    <Button variant="outline" size="sm" onClick={pickCwd}>
+                      {t("settings.browse")}
+                    </Button>
+                  </div>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-body font-medium text-fg">{t("automationModal.sessionMode")}</span>
+                  <Select
+                    size="md"
+                    className="w-full"
+                    value={sessionMode}
+                    onChange={(e) => setSessionMode(e.target.value as "reuse" | "fresh")}
+                  >
+                    <option value="reuse">{t("automationModal.sessionReuse")}</option>
+                    <option value="fresh">{t("automationModal.sessionFresh")}</option>
+                  </Select>
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className="text-body font-medium text-fg">{t("automationModal.repo")}</span>
+                  <Select
+                    size="md"
+                    className="w-full"
+                    value={repo}
+                    onChange={(e) => setRepo(e.target.value)}
+                  >
+                    {p.repos.map((r) => (
+                      <option key={r.name} value={r.name}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <div className="flex flex-col gap-1">
+                  <span className="text-body font-medium text-fg">{t("automationModal.task")}</span>
+                  <PromptEditor
+                    ariaLabel={t("automationModal.task")}
+                    initialText={wc?.task ?? ""}
+                    onChange={setTask}
+                    commands={p.commands}
+                    browseDir={p.browseDir && repoPath ? (d) => p.browseDir!(d, repoPath) : undefined}
+                    minHeight={120}
+                    className="rounded-lg border border-line bg-sunk p-2 transition-colors focus:border-fg/30"
+                  />
+                </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-body font-medium text-fg">{t("automationModal.base")}</span>
+                  <Input value={base} onChange={(e) => setBase(e.target.value)} />
+                </label>
+              </>
+            )}
+
+            {triggerKind === "slack" && actionKind === "master" && (
+              <p className="text-ui text-warn">{t("automationModal.slackMasterCaution")}</p>
+            )}
+            <p className="text-ui text-muted">{t("automationModal.templateHint")}</p>
+          </section>
+
+          {/* ── Model / Execution section (how) */}
+          <section className="flex flex-col gap-3 border-t border-line-soft pt-5">
+            <h3 className="text-title font-medium text-fg">{t("automationForm.sectionExecution")}</h3>
 
             {/* Agent backend (provider) select — applies to BOTH master and worker actions (Task 3), so it sits
                 here in the shared section rather than the per-kind Action block below. Labels reuse the
@@ -359,7 +449,7 @@ export function AutomationForm(p: {
                 option, so a codex model override typed/selected there flows through unmodified — no special-casing. */}
             <div className="flex flex-col gap-1">
               <label className="flex flex-col gap-1">
-                <span className="text-ui text-fg-dim">{t("automationForm.provider")}</span>
+                <span className="text-body font-medium text-fg">{t("automationForm.provider")}</span>
                 <Select
                   size="md"
                   className="w-full"
@@ -377,7 +467,7 @@ export function AutomationForm(p: {
                   plan → a read-only sandbox and run fine (codex-vocab.ts, automation-action.ts), so a worker
                   action must never trigger this warning even when its permissionMode is non-bypass. */}
               {actionKind === "master" && provider === "codex" && permissionMode !== "bypassPermissions" && (
-                <p className="text-meta text-run/90" data-testid="codex-bypass-warning">
+                <p className="text-ui text-warn" data-testid="codex-bypass-warning">
                   {t("automationForm.codexBypassWarning")}
                 </p>
               )}
@@ -389,7 +479,7 @@ export function AutomationForm(p: {
                 Claude models list, with a raw extra <option> tolerating an out-of-list saved id. The codex and
                 Claude ids live in separate state (codexModel/model) so flipping provider doesn't clobber either. */}
             <label className="flex flex-col gap-1">
-              <span className="text-ui text-fg-dim">{t("automationForm.model")}</span>
+              <span className="text-body font-medium text-fg">{t("automationForm.model")}</span>
               {isCodexFreeText ? (
                 <Input
                   size="md"
@@ -438,7 +528,7 @@ export function AutomationForm(p: {
                 an out-of-list model), else the generic EFFORTS list. */}
             {effectiveModel && modelEffortSupported(effectiveModel) && (
               <label className="flex flex-col gap-1">
-                <span className="text-ui text-fg-dim">{t("automationForm.effort")}</span>
+                <span className="text-body font-medium text-fg">{t("automationForm.effort")}</span>
                 <Select
                   size="md"
                   className="w-full"
@@ -455,7 +545,7 @@ export function AutomationForm(p: {
             {/* Permission mode select */}
             <div className="flex flex-col gap-1">
               <label className="flex flex-col gap-1">
-                <span className="text-ui text-fg-dim">{t("automationForm.permissionMode")}</span>
+                <span className="text-body font-medium text-fg">{t("automationForm.permissionMode")}</span>
                 <Select
                   size="md"
                   className="w-full"
@@ -470,7 +560,7 @@ export function AutomationForm(p: {
               </label>
               {/* inline bypassPermissions warning — theme run token, not raw Tailwind yellow (audit #79) */}
               {permissionMode === "bypassPermissions" && (
-                <p className="text-meta text-run/90" data-testid="bypass-warning">
+                <p className="text-ui text-warn" data-testid="bypass-warning">
                   {t("automationForm.bypassWarning")}
                 </p>
               )}
@@ -480,7 +570,7 @@ export function AutomationForm(p: {
             {actionKind === "worker" && (
               <div className="flex flex-col gap-1">
                 <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationForm.maxTurns")}</span>
+                  <span className="text-body font-medium text-fg">{t("automationForm.maxTurns")}</span>
                   <Input
                     type="number"
                     min={1}
@@ -489,136 +579,44 @@ export function AutomationForm(p: {
                     placeholder="—"
                   />
                 </label>
-                <span className="text-meta text-muted">{t("automationForm.maxTurnsHint")}</span>
+                <span className="text-ui text-muted">{t("automationForm.maxTurnsHint")}</span>
               </div>
             )}
 
-            <SpeedControl speed={speed} defaultSpeed={defaultSpeed(settings, provider, actionKind)} provider={provider} model={effectiveModel || (provider === "codex" ? (actionKind === "master" ? settings?.codexMasterModel : settings?.codexWorkerModel) : (actionKind === "master" ? settings?.masterModel : settings?.workerModel)) || ""} onChange={setSpeed} />
-            {provider === "codex" && <p className="text-meta text-muted">{t("speed.budgetEstimated")}</p>}
+            {/* A labelled form field like its neighbours, not the composer's ghost chip (audit #92). */}
+            <SpeedControl variant="field" speed={speed} defaultSpeed={defaultSpeed(settings, provider, actionKind)} provider={provider} model={effectiveModel || (provider === "codex" ? (actionKind === "master" ? settings?.codexMasterModel : settings?.codexWorkerModel) : (actionKind === "master" ? settings?.masterModel : settings?.workerModel)) || ""} onChange={setSpeed} />
+            {provider === "codex" && <p className="text-ui text-muted">{t("speed.budgetEstimated")}</p>}
             {/* costBudgetUsd — shown for BOTH action kinds (KEY DIVERGENCE from maxTurns, which is worker-only):
                 the daemon checks this at runTurn (master, WARN-only) and at fleet.spawn (worker, STOP). */}
             <div className="flex flex-col gap-1">
               <label className="flex flex-col gap-1">
-                <span className="text-ui text-fg-dim">{t("automationForm.costBudget")}</span>
+                <span className="text-body font-medium text-fg">{t("automationForm.costBudget")}</span>
                 <Input
-                  type="number"
-                  min={0}
-                  step="any"
+                  inputMode="decimal"
                   value={costBudget}
                   onChange={(e) => setCostBudget(e.target.value)}
-                  placeholder="off"
+                  placeholder={t("common.noLimit")}
+                  aria-invalid={budgetInvalid || undefined}
+                  aria-describedby={budgetInvalid ? "automation-budget-error" : undefined}
+                  className={cn(budgetInvalid && "border-fail")}
                 />
               </label>
-              <span className="text-meta text-muted">{t("automationForm.costBudgetHint")}</span>
+              {budgetInvalid && <p id="automation-budget-error" className="text-ui text-fail">{t("workerSpawnModal.budgetInvalid")}</p>}
+              <span className="text-ui text-muted">{t("automationForm.costBudgetHint")}</span>
             </div>
           </section>
 
-          {/* ── Action section */}
-          <section className="flex flex-col gap-3">
-            <h3 className="text-body font-medium text-fg-dim">{t("automationModal.sectionAction")}</h3>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-ui text-fg-dim">{t("automationModal.actionType")}</span>
-              <Select
-                size="md"
-                className="w-full"
-                value={actionKind}
-                onChange={(e) => setActionKind(e.target.value as "master" | "worker")}
-              >
-                <option value="master">{t("automationPage.typeMaster")}</option>
-                <option value="worker">{t("automationPage.typeWorker")}</option>
-              </Select>
-            </label>
-
-            {actionKind === "master" ? (
-              <>
-                <div className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.prompt")}</span>
-                  <PromptEditor
-                    ariaLabel={t("automationModal.prompt")}
-                    initialText={mc?.prompt ?? ""}
-                    onChange={setPrompt}
-                    commands={p.commands}
-                    browseDir={p.browseDir ? (d) => p.browseDir!(d, cwd || undefined) : undefined}
-                    placeholder=""
-                    minHeight={120}
-                    className="rounded-lg border border-line bg-sunk p-2 transition-colors focus:border-fg/30"
-                  />
-                </div>
-                <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.cwd")}</span>
-                  <div className="flex gap-2">
-                    <Input className="flex-1" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" />
-                    <Button variant="outline" size="sm" onClick={pickCwd}>
-                      {t("settings.browse")}
-                    </Button>
-                  </div>
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.sessionMode")}</span>
-                  <Select
-                    size="md"
-                    className="w-full"
-                    value={sessionMode}
-                    onChange={(e) => setSessionMode(e.target.value as "reuse" | "fresh")}
-                  >
-                    <option value="reuse">{t("automationModal.sessionReuse")}</option>
-                    <option value="fresh">{t("automationModal.sessionFresh")}</option>
-                  </Select>
-                </label>
-              </>
-            ) : (
-              <>
-                <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.repo")}</span>
-                  <Select
-                    size="md"
-                    className="w-full"
-                    value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                  >
-                    {p.repos.map((r) => (
-                      <option key={r.name} value={r.name}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                <div className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.task")}</span>
-                  <PromptEditor
-                    ariaLabel={t("automationModal.task")}
-                    initialText={wc?.task ?? ""}
-                    onChange={setTask}
-                    commands={p.commands}
-                    browseDir={p.browseDir && repoPath ? (d) => p.browseDir!(d, repoPath) : undefined}
-                    minHeight={120}
-                    className="rounded-lg border border-line bg-sunk p-2 transition-colors focus:border-fg/30"
-                  />
-                </div>
-                <label className="flex flex-col gap-1">
-                  <span className="text-ui text-fg-dim">{t("automationModal.base")}</span>
-                  <Input value={base} onChange={(e) => setBase(e.target.value)} />
-                </label>
-              </>
-            )}
-
-            {triggerKind === "slack" && actionKind === "master" && (
-              <p className="text-meta text-run/90">{t("automationModal.slackMasterCaution")}</p>
-            )}
-            <p className="text-meta text-muted">{t("automationModal.templateHint")}</p>
-          </section>
-
-          {/* Save row — body-bottom, matching SettingsPage's Save placement (audit #75) */}
-          <div className="flex items-center justify-end gap-2 border-t border-line pt-4">
-            <Button variant="ghost" size="sm" onClick={p.onClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button variant="primary" size="sm" loading={saving} disabled={!valid} onClick={() => { void submit(); }}>
-              {t("common.save")}
-            </Button>
-          </div>
         </div>
+      </div>
+
+      {/* Save bar — pinned under the form like the Settings Save bar, so it never scrolls away (audit #93). */}
+      <div className="flex h-11 shrink-0 items-center justify-end gap-2 border-t border-line px-6">
+        <Button variant="ghost" size="sm" onClick={p.onClose}>
+          {t("common.cancel")}
+        </Button>
+        <Button variant="primary" size="sm" loading={saving} disabled={!valid} onClick={() => { void submit(); }}>
+          {t("common.save")}
+        </Button>
       </div>
     </div>
   );

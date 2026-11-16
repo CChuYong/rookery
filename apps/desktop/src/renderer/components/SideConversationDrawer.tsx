@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useFocusTrap } from "../lib/useFocusTrap.js";
 import type { ImageRef } from "@daemon/core/image-input.js";
 import {
   useDraftStore,
@@ -16,6 +17,7 @@ import { MessageList } from "./MessageList.js";
 import { Composer } from "./Composer.js";
 import { Button } from "../ui/button.js";
 import { useT } from "../i18n/provider.js";
+import { withShortcut } from "../lib/shortcuts.js";
 
 const EMPTY: LogItem[] = [];
 
@@ -76,11 +78,42 @@ export function SideConversationDrawer({
     [draftKey],
   );
   const running = status === "opening" || status === "running";
+  // Focus (audit #73): opening moves focus to the drawer's composer, closing returns it to where it was (the main
+  // composer that ran /side). Tab is trapped only in the overlay layout, where the drawer covers the conversation and is
+  // effectively modal; inline beside the conversation, Tab moves on normally.
+  const asideRef = useRef<HTMLElement>(null);
+  useFocusTrap(asideRef, {
+    trapWhen: () => !!asideRef.current && getComputedStyle(asideRef.current).position === "absolute",
+    initialFocus: () => asideRef.current?.querySelector<HTMLElement>('[contenteditable="true"]'),
+  });
+  // When the element that opened the drawer is gone by the time it closes (the composer's Side button hides while a
+  // drawer is open), land on the conversation's own composer rather than <body>. Declared after useFocusTrap so this
+  // cleanup runs after its restore attempt.
+  useEffect(() => {
+    const pane = asideRef.current?.closest(".conversation-pane");
+    return () => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      pane?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus();
+    };
+  }, []);
 
   return (
     <aside
+      ref={asideRef}
       aria-label={t("sideConversation.title")}
-      className="absolute inset-0 z-30 flex min-h-0 flex-col border-l border-line bg-surface shadow-2xl md:relative md:inset-auto md:z-auto md:w-[360px] md:shrink-0 md:shadow-none"
+      // Escape closes the drawer unless something inside already used it (a composer popup or the model menu). React
+      // bubbles keys from portals (the image lightbox) through this tree too: only an Escape from the drawer's own DOM
+      // counts, and never while a modal layer is open — closing would end the side conversation.
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        if (!e.currentTarget.contains(e.target as Node) || document.querySelector('[aria-modal="true"]')) return;
+        e.preventDefault();
+        onClose();
+      }}
+      // Inline beside the conversation only when the conversation pane (a container, not the viewport) has room for
+      // both; otherwise it overlays the pane instead of squeezing the conversation to a sliver (audit #9).
+      className="side-conversation-drawer absolute inset-0 z-30 flex min-h-0 flex-col border-l border-line bg-surface shadow-2xl @min-[760px]:relative @min-[760px]:inset-auto @min-[760px]:z-auto @min-[760px]:w-[360px] @min-[760px]:shrink-0 @min-[760px]:shadow-none"
     >
       <header className="flex h-10 shrink-0 items-center gap-2 px-3">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -108,6 +141,7 @@ export function SideConversationDrawer({
           size="icon"
           className="h-6 w-6"
           aria-label={t("common.close")}
+          title={withShortcut(t("common.close"), "Esc")}
           onClick={onClose}
         >
           <X size={14} />

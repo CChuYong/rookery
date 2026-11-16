@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 import { ChevronRight, Info } from "lucide-react";
 import type { UsageSnapshot } from "@daemon/core/usage.js";
 import { cn } from "../lib/cn.js";
-import { useT } from "../i18n/provider.js";
+import { useLocale, useT } from "../i18n/provider.js";
 import { SkeletonRows } from "./Skeleton.js";
 import { Tooltip } from "./Tooltip.js";
+
+export type UsageTab = "claude" | "codex";
 
 function fmtTok(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -15,19 +17,27 @@ function fmtTok(n: number): string {
 function usd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
-function fmtReset(unixSec: number): string {
-  return new Date(unixSec * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// Reset time in the app language, not the OS locale (audit #121).
+function fmtReset(unixSec: number, locale: string): string {
+  return new Date(unixSec * 1000).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+}
+
+// One fill rule for every usage gauge (audit #55): neutral at rest, the warn token from 80%, fail from 90%. The accent
+// and the "running" blue never fill a gauge (an orange bar read as the alarm, the blue as calm).
+function meterTone(w: number): string {
+  return w >= 90 ? "bg-fail" : w >= 80 ? "bg-warn" : "bg-fg-dim";
 }
 
 // Single-line % gauge (server-side OAuth utilization).
-function Meter({ label, pct, sub }: { label: string; pct: number; sub?: ReactNode }): JSX.Element {
+function Meter({ label, pct, sub, title }: { label: string; pct: number; sub?: ReactNode; title?: string }): JSX.Element {
+  const t = useT();
   const w = Math.max(0, Math.min(100, pct));
   const near = w >= 90; // approaching limit → red pulse + text marker (for color-blind accessibility)
-  const tone = near ? "bg-fail" : w >= 70 ? "bg-run" : "bg-accent";
+  const tone = meterTone(w);
   return (
     <div className="px-2 py-1.5">
       <div className="flex items-baseline justify-between gap-1.5 text-meta">
-        <span className="truncate text-muted">{label}</span>
+        <span className="truncate text-muted" title={title}>{label}</span>
         <span className="flex shrink-0 items-center gap-1.5 text-fg-dim">
           <span className="tabular-nums">{Math.round(pct)}%</span>
           {sub != null && (
@@ -40,7 +50,7 @@ function Meter({ label, pct, sub }: { label: string; pct: number; sub?: ReactNod
           {near && (
             <>
               <span className="w-2 shrink-0" aria-hidden />
-              <span className="text-fail">limit</span>
+              <span className="text-fail">{t("usagePanel.limit")}</span>
             </>
           )}
         </span>
@@ -68,17 +78,16 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   );
 }
 
-// Status-bar meter: `label 31%` + a fixed 40x3px bar (neutral fill, warn colour only past the near-limit threshold).
+// Status-bar meter: `label 31%` + a fixed 40x3px bar (neutral fill, warn from 80%, fail from 90% — meterTone).
 // No width/height transition — the fill is a fixed-width bar scaled from the left (Floor: never animate width/height).
-function MeterInline({ label, pct }: { label: string; pct: number }): JSX.Element {
+function MeterInline({ label, pct, title }: { label: string; pct: number; title?: string }): JSX.Element {
   const w = Math.max(0, Math.min(100, pct));
-  const near = w >= 90;
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-      <span className="truncate text-muted">{label}</span>
+      <span className="truncate text-muted" title={title}>{label}</span>
       <span className="h-[3px] w-10 shrink-0 overflow-hidden rounded-full bg-line">
         <span
-          className={cn("block h-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", near ? "bg-fail" : "bg-fg-dim")}
+          className={cn("block h-full origin-left rounded-full transition-[transform,background-color] duration-500 ease-out", meterTone(w))}
           style={{ transform: `scaleX(${w / 100})` }}
         />
       </span>
@@ -97,10 +106,21 @@ function StatInline({ label, value }: { label: string; value: string }): JSX.Ele
   );
 }
 
-function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar" }: { usage: UsageSnapshot | null; loadFailed?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar" }): JSX.Element {
+// `onOpenDetails` (statusbar only) turns the meter run into a button that opens the detail panel (audit #25); the
+// Claude/Codex switch stays a sibling so buttons never nest.
+// `tab`/`onTabChange` optionally control the provider tab, so the status strip and its detail popover stay on the same
+// provider (review m3).
+// `empty` = the poller has had several successful answers with no numbers → "no usage data" instead of "loading…"
+// forever; `loadFailed` with a snapshot on screen marks the numbers as stale (audit #46).
+function UsagePanelImpl({ usage, loadFailed, empty = false, compact = false, variant = "sidebar", onOpenDetails, detailsOpen, tab: tabProp, onTabChange }: { usage: UsageSnapshot | null; loadFailed?: boolean; empty?: boolean; compact?: boolean; variant?: "sidebar" | "statusbar"; onOpenDetails?: () => void; detailsOpen?: boolean; tab?: UsageTab; onTabChange?: (tab: UsageTab) => void }): JSX.Element {
   const t = useT();
+  const locale = useLocale();
+  // The 5-hour window is account-wide billing, not this app's Session (audit #60) — say so on hover.
+  const fiveHourTitle = t("usagePanel.session5hTitle");
   // Provider tab: Claude is the default (user direction); not persisted (YAGNI).
-  const [tab, setTab] = useState<"claude" | "codex">("claude");
+  const [ownTab, setOwnTab] = useState<UsageTab>("claude");
+  const tab = tabProp ?? ownTab;
+  const setTab = (next: UsageTab): void => { setOwnTab(next); onTabChange?.(next); };
   const [expanded, setExpanded] = useState(false);
   const p = usage?.pct;
   const wk = usage?.weekly;
@@ -109,7 +129,22 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
   const showBody = !compact || expanded;
 
   if (variant === "statusbar") {
-    if (!usage) return <span className="text-faint">{loadFailed ? t("usagePanel.loadFailed") : t("usagePanel.loading")}</span>;
+    const details = (body: ReactNode): JSX.Element =>
+      onOpenDetails ? (
+        <button
+          type="button"
+          onClick={onOpenDetails}
+          aria-label={t("usagePanel.details")}
+          aria-haspopup="dialog"
+          aria-expanded={!!detailsOpen}
+          title={t("usagePanel.details")}
+          className={cn("no-drag inline-flex h-5 shrink-0 items-center gap-3 rounded-sm px-1 transition-colors hover:bg-raised", detailsOpen && "bg-raised")}
+        >
+          {body}
+        </button>
+      ) : <>{body}</>;
+    if (!usage) return details(<span className="text-faint">{loadFailed ? t("usagePanel.loadFailed") : t("usagePanel.loading")}</span>);
+    if (!hasAny && !cdx) return details(<span className="text-faint">{empty ? t("usagePanel.empty") : t("usagePanel.loading")}</span>);
     const showTabs = !!cdx; // only worth a tab switch once there's a second provider's data to switch to
     return (
       <span className="inline-flex shrink-0 items-center gap-3 text-meta">
@@ -121,30 +156,32 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
                 type="button"
                 aria-pressed={tab === k}
                 onClick={() => setTab(k)}
-                className={cn("rounded-sm px-1 text-meta leading-none transition-colors", tab === k ? "text-fg-dim" : "text-faint hover:text-muted")}
+                className={cn("rounded-sm px-1 py-0.5 text-meta leading-none transition-colors", tab === k ? "bg-raised text-fg-dim" : "text-faint hover:bg-raised/60 hover:text-muted")}
               >
                 {t(k === "claude" ? "usagePanel.tabClaude" : "usagePanel.tabCodex")}
               </button>
             ))}
           </span>
         )}
-        {tab === "claude" ? (
+        {details(tab === "claude" ? (
           <>
-            {p?.fiveHour != null && <MeterInline label={t("usagePanel.session5h")} pct={p.fiveHour} />}
+            {p?.fiveHour != null && <MeterInline label={t("usagePanel.session5h")} title={fiveHourTitle} pct={p.fiveHour} />}
             {p?.sevenDay != null && <MeterInline label={t("usagePanel.weekly")} pct={p.sevenDay} />}
             {!p && usage.session && <StatInline label={t("usagePanel.session5h")} value={usd(usage.session.costUSD)} />}
             {!p && wk && <StatInline label={t("usagePanel.weekly")} value={usd(wk.costUSD)} />}
             {usage.today && <StatInline label={t("usagePanel.today")} value={usd(usage.today.costUSD)} />}
+            {!hasAny && <span className="text-faint">{empty ? t("usagePanel.empty") : t("usagePanel.loading")}</span>}
           </>
         ) : cdx ? (
           <>
-            {cdx.fiveHour && <MeterInline label={t("usagePanel.session5h")} pct={cdx.fiveHour.usedPercent} />}
+            {cdx.fiveHour && <MeterInline label={t("usagePanel.session5h")} title={fiveHourTitle} pct={cdx.fiveHour.usedPercent} />}
             {cdx.sevenDay && <MeterInline label={t("usagePanel.weekly")} pct={cdx.sevenDay.usedPercent} />}
             {cdx.todayTokens != null && <StatInline label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}
           </>
         ) : (
           <span className="text-faint">{t("usagePanel.codexUnavailable")}</span>
-        )}
+        ))}
+        {loadFailed && <span className="shrink-0 text-faint">{t("usagePanel.stale")}</span>}
       </span>
     );
   }
@@ -187,14 +224,15 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
         {/* Shared pre-load states (gate on the snapshot itself, not per-tab). */}
         {!usage && !loadFailed && <SkeletonRows rows={2} className="px-2 py-1.5" />}
         {!usage && loadFailed && <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.loadFailed")}</div>}
+        {usage && loadFailed && <div role="status" className="px-2 pt-1 text-meta text-faint">{t("usagePanel.stale")}</div>}
 
         {usage && tab === "claude" && (
           <>
-            {!hasAny && <div className="px-2 py-1.5 text-meta text-muted">{t("usagePanel.loading")}</div>}
+            {!hasAny && <div className="px-2 py-1.5 text-meta text-muted">{empty ? t("usagePanel.empty") : t("usagePanel.loading")}</div>}
             {hasAny && (
               <>
                 {/* Server-side % (official, same source as /usage) */}
-                {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} pct={p.fiveHour} sub={usage.session ? <>{fmtTok(usage.session.totalTokens)}<span className="w-2 shrink-0" aria-hidden />{usd(usage.session.costUSD)}</> : undefined} />}
+                {p?.fiveHour != null && <Meter label={t("usagePanel.session5h")} title={fiveHourTitle} pct={p.fiveHour} sub={usage.session ? <>{fmtTok(usage.session.totalTokens)}<span className="w-2 shrink-0" aria-hidden />{usd(usage.session.costUSD)}</> : undefined} />}
                 {p?.sevenDay != null && <Meter label={t("usagePanel.weekly")} pct={p.sevenDay} sub={wk ? <>{fmtTok(wk.totalTokens)}<span className="w-2 shrink-0" aria-hidden />{usd(wk.costUSD)}</> : undefined} />}
                 {p?.sevenDayOpus != null && <Meter label={t("usagePanel.weeklyOpus")} pct={p.sevenDayOpus} />}
                 {p?.sevenDaySonnet != null && <Meter label={t("usagePanel.weeklySonnet")} pct={p.sevenDaySonnet} />}
@@ -213,7 +251,7 @@ function UsagePanelImpl({ usage, loadFailed, compact = false, variant = "sidebar
           cdx ? (
             <>
               {/* codex plan billing has no USD — tokens only, never $ */}
-              {cdx.fiveHour && <Meter label={t("usagePanel.session5h")} pct={cdx.fiveHour.usedPercent} sub={cdx.fiveHour.resetsAt != null ? t("usagePanel.resets", { time: fmtReset(cdx.fiveHour.resetsAt) }) : undefined} />}
+              {cdx.fiveHour && <Meter label={t("usagePanel.session5h")} title={fiveHourTitle} pct={cdx.fiveHour.usedPercent} sub={cdx.fiveHour.resetsAt != null ? t("usagePanel.resets", { time: fmtReset(cdx.fiveHour.resetsAt, locale) }) : undefined} />}
               {cdx.sevenDay && <Meter label={t("usagePanel.weekly")} pct={cdx.sevenDay.usedPercent} sub={cdx.weeklyTokens != null ? fmtTok(cdx.weeklyTokens) : undefined} />}
               {!cdx.sevenDay && cdx.weeklyTokens != null && <Stat label={t("usagePanel.weekly")} value={fmtTok(cdx.weeklyTokens)} />}
               {cdx.todayTokens != null && <Stat label={t("usagePanel.today")} value={fmtTok(cdx.todayTokens)} />}

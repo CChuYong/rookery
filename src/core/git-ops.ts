@@ -28,6 +28,23 @@ export interface GitOps {
   fetch(repoPath: string, branch: string): Promise<void>;
 }
 
+// git < 2.30 rejects `git diff --merge-base`. Real git 2.26.2 exits 129 with ONLY the usage line on stderr
+// ("usage: git diff [<options>] …") — the option is never named — so match exit code 129 plus either that usage line or
+// an explicit "invalid/unknown option: --merge-base". 129 is git's usage-error code; a bad revision is 128.
+export function isUnknownMergeBaseOption(err: unknown): boolean {
+  const e = err as { code?: unknown; stderr?: unknown } | null;
+  if (e?.code !== 129) return false;
+  const stderr = String(e.stderr ?? "");
+  return /^usage: git diff\b/m.test(stderr) || /(unknown|invalid) option:? '?--merge-base/i.test(stderr);
+}
+
+// No common ancestor between HEAD and the base (an orphan branch, a shallow clone missing the fork point):
+// `git diff --merge-base` exits 128 with "no merge base found". Matched on the C-locale message (gitEnv forces LC_ALL=C).
+export function isNoMergeBase(err: unknown): boolean {
+  const e = err as { code?: unknown; stderr?: unknown } | null;
+  return e?.code === 128 && /no merge base found/i.test(String(e.stderr ?? ""));
+}
+
 export class RealGitOps implements GitOps {
   private async git(cwd: string, args: string[]): Promise<string> {
     return this.gitEnv(cwd, args, {});
@@ -75,7 +92,28 @@ export class RealGitOps implements GitOps {
 
   async diff(worktreePath: string, base: string): Promise<string> {
     // `--end-of-options`: treat base only as a revision, not an option (SEC-1, e.g. blocks arbitrary file writes via `--output=`).
-    return this.git(worktreePath, ["diff", "--end-of-options", base]);
+    // `--merge-base` (git ≥ 2.30): diff the worktree against merge-base(base, HEAD), i.e. only what this branch changed
+    // since it forked — commits that land on the base ref later (a fetch moving origin/main) don't show up as reverse edits.
+    // Without a merge base the diff falls back to the plain worktree-vs-base diff (the pre-merge-base behaviour) rather
+    // than failing the whole view.
+    const plain = (): Promise<string> => this.git(worktreePath, ["diff", "--end-of-options", base]);
+    try {
+      return await this.git(worktreePath, ["diff", "--merge-base", "--end-of-options", base]);
+    } catch (err) {
+      if (isNoMergeBase(err)) return plain();
+      if (!isUnknownMergeBaseOption(err)) throw err;
+      // Older git: resolve the merge base explicitly. base is never allowed to look like an option here (SEC-1).
+      if (base.startsWith("-")) throw err;
+      let mb: string;
+      try {
+        mb = (await this.git(worktreePath, ["merge-base", "HEAD", base])).trim();
+      } catch (mbErr) {
+        // `git merge-base` exits 1 with no output when there is no common ancestor (a bad revision is 128).
+        if ((mbErr as { code?: unknown } | null)?.code === 1) return plain();
+        throw mbErr;
+      }
+      return this.git(worktreePath, ["diff", "--end-of-options", mb]);
+    }
   }
 
   async checkpoint(worktreePath: string, ref: string): Promise<string | null> {

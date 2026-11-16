@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isImeComposing } from "./focus.js";
 
 type ModalKeyBaseOptions = {
   onSubmit?: () => void;
@@ -43,7 +44,8 @@ function handleModalKey(event: KeyboardEvent): void {
     return;
   }
 
-  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && options.onSubmit) {
+  // Not while an IME is composing: the Enter that commits the last syllable is not a submit (audit #76).
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && options.onSubmit && !isImeComposing(event)) {
     event.preventDefault();
     event.stopImmediatePropagation();
     options.onSubmit();

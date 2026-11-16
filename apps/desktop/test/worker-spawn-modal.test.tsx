@@ -111,16 +111,16 @@ describe("WorkerSpawnPage provider selector (P1.5 task 4)", () => {
   it("defaults to claude — onSpawn's trailing provider arg is undefined (wire-minimal)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn).toHaveBeenCalledTimes(1);
     expect(onSpawn.mock.calls[0]![7]).toBeUndefined();
   });
 
   it("selecting codex passes provider \"codex\" as onSpawn's trailing arg", () => {
     const { onSpawn } = renderModal();
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls[0]![7]).toBe("codex");
   });
 
@@ -129,7 +129,7 @@ describe("WorkerSpawnPage provider selector (P1.5 task 4)", () => {
     // Claude mode: the model field is a native <select> (the Claude model catalog).
     expect(screen.getByTitle("이 워커 모델 (기본 설정과 무관)").tagName).toBe("SELECT");
 
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
 
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
     expect(modelField.tagName).toBe("INPUT");
@@ -150,7 +150,7 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
   it("codexModels seeded → the codex model field is a <Select> listing the catalog (displayName options)", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     renderModal();
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
 
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
     expect(modelField.tagName).toBe("SELECT");
@@ -161,17 +161,17 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
   it("selecting a codex model updates the effort <Select>'s options to that model's supportedEfforts and pre-selects its defaultEffort", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     renderModal();
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
 
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)") as HTMLSelectElement;
     fireEvent.change(modelField, { target: { value: "gpt-5.4" } });
 
-    const effortSelect = screen.getByTitle("effort") as HTMLSelectElement;
+    const effortSelect = screen.getByTitle("추론 강도") as HTMLSelectElement;
     expect(effortSelect.value).toBe("medium"); // gpt-5.4's defaultEffort
     expect(within(effortSelect).queryByText("매우 높음")).toBeNull(); // not in gpt-5.4's supportedEfforts
 
     fireEvent.change(modelField, { target: { value: "gpt-5.5" } });
-    expect((screen.getByTitle("effort") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
+    expect((screen.getByTitle("추론 강도") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
   });
 
   it("re-derives + submits a valid codex effort on provider switch, not the stale Claude 'max' (finding [23])", () => {
@@ -180,9 +180,9 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
     // model, not 'max' (which only works because the daemon coerces it).
     useStore.getState().setCodexModels(CODEX_MODELS);
     const { onSpawn } = renderModal(undefined, { codexDefaultModel: "gpt-5.5", defaultEffort: "max" });
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     const effortArg = onSpawn.mock.calls[0]![3];
     expect(effortArg).not.toBe("max");
     expect(CODEX_MODELS[0].supportedEfforts).toContain(effortArg); // gpt-5.5's default (xhigh), a real level
@@ -190,11 +190,11 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
 
   it("codexModels null → the codex model field stays the free-text <Input> and effort shows the generic EFFORTS list", () => {
     renderModal(undefined, { codexDefaultModel: "gpt-5.5" });
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
 
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)");
     expect(modelField.tagName).toBe("INPUT");
-    const effortSelect = screen.getByTitle("effort") as HTMLSelectElement;
+    const effortSelect = screen.getByTitle("추론 강도") as HTMLSelectElement;
     expect(within(effortSelect).getByText("매우 높음")).toBeInTheDocument(); // generic EFFORTS includes xhigh regardless of model
     expect(within(effortSelect).getByText("최대")).toBeInTheDocument(); // generic EFFORTS includes max (codex catalogs never do)
   });
@@ -203,7 +203,7 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
     // codexModels starts null → free-text input; the user types a value; the catalog then loads (reactive
     // store update) and the field flips to a <Select> that must not silently discard the typed value.
     renderModal();
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-preview" } }); // not in CODEX_MODELS
 
     act(() => { useStore.getState().setCodexModels(CODEX_MODELS); });
@@ -218,7 +218,7 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
   it("a fresh open (codexModel still \"\") shows a non-blank leading default option labelled with codexDefaultModel", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     renderModal(undefined, { codexDefaultModel: "gpt-5.5" });
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
 
     const modelField = screen.getByTitle("이 워커 모델 (기본 설정과 무관)") as HTMLSelectElement;
     expect(modelField.value).toBe(""); // unchanged: still defaults to "" (no auto-pick from the catalog)
@@ -229,10 +229,10 @@ describe("WorkerSpawnPage codex model+effort dropdowns (Codex Model Picker Task 
   it("onSpawn carries the selected codex model + pre-selected effort", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     const { onSpawn } = renderModal();
-    fireEvent.change(screen.getByTitle("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByTitle("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByTitle("이 워커 모델 (기본 설정과 무관)"), { target: { value: "gpt-5.4" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls[0]![2]).toBe("gpt-5.4"); // spawnModel
     expect(onSpawn.mock.calls[0]![3]).toBe("medium"); // effort (gpt-5.4's defaultEffort)
     expect(onSpawn.mock.calls[0]![7]).toBe("codex"); // provider
@@ -243,7 +243,7 @@ describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
   it("empty cost budget → onSpawn's trailing costBudgetUsd arg is undefined", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
   });
 
@@ -251,17 +251,18 @@ describe("WorkerSpawnPage cost budget (cost budget guard Task 3)", () => {
     const { onSpawn } = renderModal();
     fireEvent.change(screen.getByTitle("비용 예산 (USD, 이 워커)"), { target: { value: "5" } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls[0]![8]).toBe(5);
   });
 
-  it.each(["abc", "0", "-3"])("invalid cost budget %s → onSpawn's trailing arg is undefined", (value) => {
+  // audit #37: an invalid budget used to be dropped silently (spawning with no limit); now it blocks the spawn.
+  it.each(["abc", "0", "-3"])("invalid cost budget %s → the spawn is blocked (no silent drop)", (value) => {
     const { onSpawn } = renderModal();
     const input = screen.getByTitle("비용 예산 (USD, 이 워커)");
 
     fireEvent.change(input, { target: { value } });
     fireEvent.change(screen.getByPlaceholderText(/작업을 적어주세요/), { target: { value: "t1" } });
-    fireEvent.click(screen.getByRole("button", { name: "spawn" }));
-    expect(onSpawn.mock.calls[0]![8]).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
+    expect(onSpawn).not.toHaveBeenCalled();
   });
 });

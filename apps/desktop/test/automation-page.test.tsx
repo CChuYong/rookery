@@ -74,7 +74,7 @@ it("lists jobs and fires run-now", () => {
 
 it("shows a slack trigger badge summarizing the filters", () => {
   render(<AutomationPage automations={[slackJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
-  expect(screen.getByText(/slack:/)).toBeInTheDocument();
+  expect(screen.getByText("Slack")).toBeInTheDocument(); // localized trigger prefix (audit #53), was a literal "slack:"
   expect(screen.getByText(/#C123/)).toBeInTheDocument();
   expect(screen.getByText(/"deploy"/)).toBeInTheDocument();
 });
@@ -231,7 +231,7 @@ it("automation with no template vars → click play → no dialog, immediate onR
   );
   fireEvent.click(screen.getByTitle("지금 실행"));
   // No dialog heading
-  expect(screen.queryByText("임의 실행")).toBeNull();
+  expect(screen.queryByText("수동 실행")).toBeNull();
   expect(onRun).toHaveBeenCalledWith("a2", undefined);
   expect(onRun).not.toHaveBeenCalledWith("a2", expect.anything());
 });
@@ -362,4 +362,98 @@ it("delete confirm dialog Cancel closes without calling onDelete", async () => {
   expect(onDelete).not.toHaveBeenCalled();
   // the dialog unmounts after its exit-transition timeout (useDismissTransition)
   await waitFor(() => expect(screen.queryByText("자동화 삭제")).toBeNull());
+});
+
+// ─── local next-run time + localized trigger prefixes (audit #53) ─────────────
+
+it("shows the next run in local time, not the raw UTC ISO string", () => {
+  const iso = "2026-11-15T18:00:00.000Z";
+  const { container } = render(<AutomationPage automations={[{ ...cronJob, enabled: true, nextRunAt: iso }]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.queryByText(new RegExp(iso.slice(0, 13)))).toBeNull();
+  const time = container.querySelector(`time[datetime="${iso}"]`);
+  expect(time).not.toBeNull();
+  expect(time!.textContent).toMatch(/\d/);
+});
+
+it("renders the worker trigger with a translated prefix", () => {
+  const job: Automation = { ...cronJob, id: "w1", trigger: { kind: "worker", repo: "orbitkit" } };
+  render(<AutomationPage automations={[job]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.queryByText(/worker:/)).toBeNull();
+  expect(screen.getByText("워커 상태")).toBeInTheDocument();
+  expect(screen.getByText(/orbitkit/).textContent).toContain("중지됨/실패");
+});
+
+// ─── calmer rows (audit #97) ────────────────────────────────────────────────
+
+it("the enabled state is an on/off switch", () => {
+  const onToggle = vi.fn(() => Promise.resolve());
+  render(<AutomationPage automations={[cronJob]} onRun={() => Promise.resolve()} onToggle={onToggle} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  const sw = screen.getByRole("switch", { name: "nightly 활성" });
+  expect(sw).toHaveAttribute("aria-checked", "false");
+  fireEvent.click(sw);
+  expect(onToggle).toHaveBeenCalledWith("s1", true);
+  expect(sw).toHaveAttribute("aria-checked", "true"); // optimistic
+});
+
+it("clicking the row opens the editor; the action buttons don't", () => {
+  const onEdit = vi.fn();
+  const onRun = vi.fn(() => Promise.resolve());
+  render(<AutomationPage automations={[cronJob]} onRun={onRun} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={onEdit} onNew={() => {}} />);
+  fireEvent.click(screen.getByText("nightly"));
+  expect(onEdit).toHaveBeenCalledWith(cronJob);
+  onEdit.mockClear();
+  fireEvent.click(screen.getByTitle("지금 실행"));
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it("Run stays visible; history/edit/delete appear on hover or focus, and delete turns red on hover", () => {
+  render(<AutomationPage automations={[cronJob]} onViewSessions={() => {}} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByTitle("지금 실행").className).not.toContain("opacity-0");
+  for (const title of ["실행 세션", "편집", "삭제"]) {
+    const group = screen.getByTitle(title).closest("[data-row-actions]")!;
+    expect(group.className).toContain("opacity-0");
+    expect(group.className).toContain("group-hover:opacity-100");
+  }
+  expect(screen.getByTitle("삭제").className).toContain("hover:text-fail");
+});
+
+it("a confirmed delete removes the row at once and brings it back if the delete fails", async () => {
+  let fail!: (e: Error) => void;
+  const onDelete = vi.fn(() => new Promise<void>((_res, rej) => { fail = rej; }));
+  render(<AutomationPage automations={[cronJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={onDelete} onEdit={() => {}} onNew={() => {}} />);
+  fireEvent.click(screen.getByTitle("삭제"));
+  fireEvent.click(screen.getByText("삭제"));
+  expect(onDelete).toHaveBeenCalledWith("s1");
+  expect(screen.queryByText("nightly")).toBeNull();
+  fail(new Error("nope"));
+  await waitFor(() => expect(screen.getByText("nightly")).toBeInTheDocument());
+});
+
+// Review fix 5: the next run is shown in the viewer's time; when the cron runs in another timezone the time says so.
+it("labels the next run with the viewer's zone only when the trigger's timezone differs", () => {
+  const viewer = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const other = viewer === "Pacific/Honolulu" ? "Asia/Seoul" : "Pacific/Honolulu";
+  const iso = "2030-06-01T03:00:00.000Z";
+  const same: Automation = { ...cronJob, id: "same", name: "same-tz", enabled: true, nextRunAt: iso, trigger: { kind: "cron", cron: "0 3 * * *", timezone: viewer } };
+  const diff: Automation = { ...cronJob, id: "diff", name: "other-tz", enabled: true, nextRunAt: iso, trigger: { kind: "cron", cron: "0 3 * * *", timezone: other } };
+  const { container } = render(<AutomationPage automations={[same, diff]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  const [a, b] = Array.from(container.querySelectorAll(`time[datetime="${iso}"]`));
+  expect(b!.textContent!.length).toBeGreaterThan(a!.textContent!.length);
+  expect(b!.textContent!.startsWith(a!.textContent!)).toBe(true);
+});
+
+// audit #78: every row's actions were read as a bare "편집"/"삭제" — the accessible name now says which automation.
+it("names each row action after its automation", () => {
+  render(<AutomationPage automations={[cronJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} />);
+  expect(screen.getByRole("button", { name: "nightly 편집" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "nightly 삭제" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "nightly 지금 실행" })).toBeInTheDocument();
+});
+
+// audit #129: the list page closes on Escape like New session (nothing on it holds a draft).
+it("closes the automation list on Escape", () => {
+  const onClose = vi.fn();
+  render(<AutomationPage automations={[cronJob]} onRun={() => Promise.resolve()} onToggle={() => Promise.resolve()} onDelete={() => {}} onEdit={() => {}} onNew={() => {}} onClose={onClose} />);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onClose).toHaveBeenCalledTimes(1);
 });

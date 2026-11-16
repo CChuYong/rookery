@@ -27,3 +27,17 @@ describe("Collapse (grid-rows disclosure with render-latch)", () => {
     expect(root.className).toContain("grid-rows-[0fr]");
   });
 });
+
+// audit #107 follow-on: a folded region keeps its rows mounted for the exit transition, but they must not stay
+// reachable by Tab or the roving Arrow keys.
+describe("Collapse inert while closed", () => {
+  it("marks the closed region inert and clears it on open", () => {
+    const { container, rerender } = render(<Collapse open><button>row</button></Collapse>);
+    const region = container.firstElementChild!;
+    expect(region).not.toHaveAttribute("inert");
+    rerender(<Collapse open={false}><button>row</button></Collapse>);
+    expect(region).toHaveAttribute("inert");
+    rerender(<Collapse open><button>row</button></Collapse>);
+    expect(region).not.toHaveAttribute("inert");
+  });
+});

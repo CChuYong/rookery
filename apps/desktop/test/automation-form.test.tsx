@@ -221,7 +221,7 @@ describe("AutomationForm", () => {
   it("defaults the provider select to claude and submits provider: claude", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
-    const providerSelect = screen.getByLabelText("에이전트 백엔드") as HTMLSelectElement;
+    const providerSelect = screen.getByLabelText("백엔드") as HTMLSelectElement;
     expect(providerSelect.value).toBe("claude");
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
@@ -235,7 +235,7 @@ describe("AutomationForm", () => {
   it("selecting provider codex submits provider: codex (master action)", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
@@ -249,7 +249,7 @@ describe("AutomationForm", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "workerjob" } });
     const taskEditor = screen.getByLabelText("작업");
@@ -278,7 +278,7 @@ describe("AutomationForm", () => {
       provider: "codex",
     };
     render(<AutomationForm job={job} repos={[{ name: "repo1", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    const providerSelect = screen.getByLabelText("에이전트 백엔드") as HTMLSelectElement;
+    const providerSelect = screen.getByLabelText("백엔드") as HTMLSelectElement;
     expect(providerSelect.value).toBe("codex");
   });
 
@@ -290,7 +290,7 @@ describe("AutomationForm", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     // pick a Claude model, then flip the provider to codex
     fireEvent.change(screen.getByLabelText("모델"), { target: { value: "claude-sonnet-4-6" } });
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
     const promptEditor = screen.getByLabelText("프롬프트");
     setPromptEditorText(promptEditor, "do it");
@@ -304,7 +304,7 @@ describe("AutomationForm", () => {
   it("[13] provider codex with an unfetched catalog renders a free-text model input, not the Claude dropdown", () => {
     useStore.getState().setCodexModels(null);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     const model = screen.getByLabelText("모델") as HTMLElement;
     expect(model.tagName).toBe("INPUT"); // free-text fallback, matching the spawn/new-session surfaces
     expect(screen.queryByRole("option", { name: /Opus|Sonnet|Haiku/ })).toBeNull(); // no Claude id is pickable for codex
@@ -314,14 +314,14 @@ describe("AutomationForm", () => {
 
   it("shows the codex-bypass warning for provider codex + permissionMode plan", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByLabelText("권한 모드"), { target: { value: "plan" } });
     expect(screen.getByTestId("codex-bypass-warning")).toBeInTheDocument();
   });
 
   it("hides the codex-bypass warning for provider codex + permissionMode bypassPermissions (default)", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     // permissionMode stays at its default (bypassPermissions)
     expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
   });
@@ -336,7 +336,7 @@ describe("AutomationForm", () => {
   it("hides the codex-bypass warning for a WORKER action + provider codex + permissionMode plan (workers run plan fine)", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("액션"), { target: { value: "worker" } });
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByLabelText("권한 모드"), { target: { value: "plan" } });
     expect(screen.queryByTestId("codex-bypass-warning")).toBeNull();
   });
@@ -394,16 +394,21 @@ describe("AutomationForm cost budget (cost budget guard Task 3)", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: 3 }));
   });
 
-  it("non-numeric, zero, or negative cost budget resolves to null in the payload", () => {
+  // An entered budget that isn't a positive amount used to be dropped silently (saved as "no budget"); it now blocks
+  // the save with an inline message, the same rule as the spawn page (Task 4 carry-over).
+  it.each(["-1", "0", "abc"])("an invalid cost budget (%s) blocks save with an inline message", (value) => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "myjob" } });
     const promptEditor = screen.getByLabelText("프롬프트");
     setPromptEditorText(promptEditor, "do something");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/code" } });
-    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value: "-1" } });
+    fireEvent.change(screen.getByLabelText("비용 예산 (USD)"), { target: { value } });
+    expect(screen.getByText("0보다 큰 금액을 입력하거나 비워 두세요")).toBeInTheDocument();
+    expect(screen.getByLabelText("비용 예산 (USD)")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("저장").closest("button")).toBeDisabled();
     fireEvent.click(screen.getByText("저장"));
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ costBudgetUsd: null }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("initialises the cost-budget input from init.costBudgetUsd", () => {
@@ -446,7 +451,7 @@ describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4
   it("provider codex + codexModels seeded → the model select lists the catalog (+ the default option + out-of-list)", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
 
     const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
     expect(within(modelSelect).getByText("GPT-5.5")).toBeInTheDocument();
@@ -484,29 +489,29 @@ describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4
   it("selecting a codex model sets the effort select's options to its supportedEfforts and pre-selects its defaultEffort", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
 
     const modelSelect = screen.getByLabelText("모델") as HTMLSelectElement;
     fireEvent.change(modelSelect, { target: { value: "gpt-5.4" } });
 
-    const effortSelect = screen.getByLabelText("effort") as HTMLSelectElement;
+    const effortSelect = screen.getByLabelText("추론 강도") as HTMLSelectElement;
     expect(effortSelect.value).toBe("medium"); // gpt-5.4's defaultEffort
     expect(within(effortSelect).queryByText("매우 높음")).toBeNull(); // not in gpt-5.4's supportedEfforts
 
     fireEvent.change(modelSelect, { target: { value: "gpt-5.5" } });
-    expect((screen.getByLabelText("effort") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
+    expect((screen.getByLabelText("추론 강도") as HTMLSelectElement).value).toBe("xhigh"); // gpt-5.5's defaultEffort
   });
 
   it("codex + no model selected ('' default) → the effort select is hidden entirely", () => {
     useStore.getState().setCodexModels(CODEX_MODELS);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
-    expect(screen.queryByLabelText("effort")).toBeNull();
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
+    expect(screen.queryByLabelText("추론 강도")).toBeNull();
   });
 
   it("codex + codexModels null → free-text model input, NOT the Claude models catalog (finding [13])", () => {
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     const model = screen.getByLabelText("모델") as HTMLElement;
     // Null catalog falls back to a free-text input (the daemon applies the codex*Model default when empty),
     // never the Claude dropdown, whose ids a codex run would reject.
@@ -526,7 +531,7 @@ describe("AutomationForm codex model+effort dropdowns (Codex Model Picker Task 4
     useStore.getState().setCodexModels(CODEX_MODELS);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={onSubmit} />);
-    fireEvent.change(screen.getByLabelText("에이전트 백엔드"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("백엔드"), { target: { value: "codex" } });
     fireEvent.change(screen.getByLabelText("모델"), { target: { value: "gpt-5.4" } });
 
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "job" } });
@@ -544,8 +549,8 @@ describe("AutomationForm worker-settled trigger", () => {
     render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "handoff" } });
     fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "worker" } });
-    // defaults: 종료+실패 on, idle off
-    expect((screen.getByLabelText(/종료됨/) as HTMLInputElement).checked).toBe(true);
+    // defaults: 중지+실패 on, idle off
+    expect((screen.getByLabelText(/중지됨/) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText(/실패/) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText(/작업 완료/) as HTMLInputElement).checked).toBe(false);
     // opt into idle + pick repo + label filter
@@ -569,12 +574,25 @@ describe("AutomationForm worker-settled trigger", () => {
     render(<AutomationForm job="new" repos={[{ name: "app-api", path: "/code/app" }]} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "x" } });
     fireEvent.change(screen.getByLabelText("트리거"), { target: { value: "worker" } });
-    fireEvent.click(screen.getByLabelText(/종료됨/));
+    fireEvent.click(screen.getByLabelText(/중지됨/));
     fireEvent.click(screen.getByLabelText(/실패/));
     const promptEditor = screen.getByLabelText("프롬프트");
     setPromptEditorText(promptEditor, "p");
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/w" } });
     fireEvent.click(screen.getByText("저장"));
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// audit #96: the form asks what to run before how to run it — the Action block comes before the execution settings,
+// whose defaults (model, speed, max turns) depend on the action kind.
+describe("AutomationForm field order", () => {
+  it("puts the Action select before the Model / Execution section", () => {
+    render(<AutomationForm job="new" repos={[{ name: "r", path: "/r" }]} onClose={() => {}} onSubmit={vi.fn()} />);
+    const action = screen.getByLabelText("액션");
+    const execution = screen.getByText("모델 / 실행");
+    expect(action.compareDocumentPosition(execution) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const trigger = screen.getByLabelText("트리거");
+    expect(trigger.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

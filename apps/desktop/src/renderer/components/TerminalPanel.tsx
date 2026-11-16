@@ -1,14 +1,17 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Plus, SquareTerminal, X } from "lucide-react";
 import { useTermStore } from "../store/terminals.js";
 import { TerminalView } from "./TerminalView.js";
 import { useResizableHeight } from "../lib/useResizableHeight.js";
 import { toast } from "../store/toasts.js";
 import { cn } from "../lib/cn.js";
+import { TAB_IDLE, TAB_LINE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { baseName } from "../lib/path.js";
 
 const EMPTY = { tabs: [], activeTabId: null, open: false }; // stable ref — avoids creating a new object every render when the page is empty
+// Last shell request answered per page (module-level so a remount doesn't answer the same request twice).
+const answeredShellRequest = new Map<string, number>();
 
 // Bottom terminal drawer. Tab bar for one agent page (sessionId = page key) + the active tab's xterm + a top-edge resize handle.
 export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: string; subId: string | null; cwd?: string; dock?: boolean }): JSX.Element {
@@ -24,11 +27,28 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
   // Commit to the store at drag end → persisted via persist(rookery.term), restored on the next run.
   const { height, startDrag, resizing } = useResizableHeight(height0, { min: 120, max: 800, onCommit: setHeight_ });
 
+  // In-flight guard: a double click (or a click racing a dock request) must not spawn two shells (audit #80).
+  const creating = useRef(false);
   const newTab = async (): Promise<void> => {
-    const r = await window.rookery.term.create({ sessionId, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
-    if (r.error || !r.id) { toast.error(t("terminalPanel.openFailed"), r.error || undefined); return; }
-    open_(sessionId, { id: r.id, title: cwd ? baseName(cwd) || "zsh" : "zsh", exited: false });
+    if (creating.current) return;
+    creating.current = true;
+    try {
+      const r = await window.rookery.term.create({ sessionId, subId: subId ?? undefined, cwd, cols: 80, rows: 24 });
+      if (r.error || !r.id) { toast.error(t("terminalPanel.openFailed"), r.error || undefined); return; }
+      open_(sessionId, { id: r.id, title: cwd ? baseName(cwd) || "zsh" : "zsh", exited: false });
+    } finally {
+      creating.current = false;
+    }
   };
+  // Answer the dock's "open a shell" request (terminal toggle / Ctrl+` on a page with no shell yet, audit #80).
+  const shellRequest = useTermStore((st) => st.shellRequests[sessionId] ?? 0);
+  useEffect(() => {
+    if (!dock || shellRequest <= (answeredShellRequest.get(sessionId) ?? 0)) return;
+    answeredShellRequest.set(sessionId, shellRequest);
+    void newTab();
+    // newTab closes over this page's props; the effect only reacts to a new request number.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dock, sessionId, shellRequest]);
   const close = (id: string): void => { window.rookery.term.kill(id); close_(sessionId, id); };
   // Stable onExit — it goes into TerminalView's effect deps, so keep one per page (a new closure every render would recreate the xterm).
   const onExit = useCallback((id: string) => markExit_(sessionId, id), [markExit_, sessionId]);
@@ -55,16 +75,16 @@ export function TerminalPanel({ sessionId, subId, cwd, dock }: { sessionId: stri
       ) : (
         <>
           {/* Terminal tabs: a slim strip on the canvas colour (the dockview group header above already carries the
-              panel's chrome), flat tabs separated by hairlines, the active one in fg with a 1px accent underline. */}
+              panel's chrome), flat tabs, the active one marked by the shared tab-strip line (audit #99). */}
           <div role="tablist" className="flex h-7 shrink-0 items-center px-1">
             {group.tabs.map((tab) => {
               const active = tab.id === group.activeTabId;
               return (
-                <div key={tab.id} className={cn("group relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-ui", active ? "text-fg" : "text-muted hover:text-fg-dim")}>
+                <div key={tab.id} className={cn("group relative flex h-full shrink-0 items-center gap-1.5 px-2.5 text-ui", active ? "text-fg" : TAB_IDLE)}>
                   <SquareTerminal size={12} className="shrink-0 text-faint" aria-hidden />
                   <button role="tab" aria-selected={active} onClick={() => setActive_(sessionId, tab.id)} className={cn("max-w-[140px] truncate", tab.exited && "text-stop line-through")}>{tab.title}</button>
                   <button onClick={() => close(tab.id)} aria-label={t("terminalPanel.closeTerminal")} className="rounded-sm text-muted opacity-0 hover:text-fail group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"><X size={12} /></button>
-                  {active && <span className="pointer-events-none absolute inset-x-2 bottom-0 h-px bg-accent" aria-hidden />}
+                  {active && <span className={cn("pointer-events-none absolute inset-x-2 bottom-0", TAB_LINE)} aria-hidden />}
                 </div>
               );
             })}

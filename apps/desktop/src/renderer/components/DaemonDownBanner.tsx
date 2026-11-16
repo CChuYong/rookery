@@ -8,7 +8,7 @@ export function DaemonDownBanner({ note, onRetry }: { note: string | null; onRet
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="max-w-[400px] rounded-lg border border-line bg-surface p-6 text-center">
-        <AlertTriangle size={22} className="mx-auto mb-3 text-run" />
+        <AlertTriangle size={22} className="mx-auto mb-3 text-warn" />
         <h2 className="mb-2 text-title font-medium">{t("daemonDownBanner.title")}</h2>
         {note
           ? <p className="text-body leading-relaxed text-fail">{note}</p>

@@ -137,11 +137,13 @@ describe("OpenInAppMenu failure feedback (#11)", () => {
   });
 });
 
-// audit #59: the icon+chevron split button was unlabeled — add a short text label.
-describe("OpenInAppMenu label (audit #59)", () => {
-  it("shows a short 'Open in' text label next to the chevron", async () => {
+// audit #59 → #24: the split button needs a visible label, and the verb belongs on the side that acts. The launch
+// button now reads "[icon] Open in <app>"; the chevron side is only the app picker (no verb on it).
+describe("OpenInAppMenu label (audit #59, #24)", () => {
+  it("labels the launch button with the selected app's name and leaves the chevron without a verb", async () => {
     render(<OpenInAppMenu />);
-    await waitFor(() => expect(screen.getByText("열기")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("현재 폴더를 앱에서 열기")).toHaveTextContent("VS Code에서 열기"));
+    expect(screen.getByLabelText("다른 앱 선택")).toHaveTextContent("");
   });
 });
 

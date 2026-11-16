@@ -6,8 +6,9 @@ import type { SpeedPreference } from "@daemon/core/speed.js";
 import { persistSpeedPreference, type SpeedWriteState } from "./lib/speed-preference.js";
 import { defaultSpeed } from "./lib/speed.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeft, ChevronLeft, ChevronRight, Settings, Bell, BellRing, BellOff, Plus, Clock, RotateCcw, Loader2, Blocks, MessageSquare, FolderGit2 } from "lucide-react";
+import { PanelLeftClose, ChevronLeft, ChevronRight, Plus, Loader2, MessageSquare, FolderGit2, X } from "lucide-react";
 import type { SettingsValues } from "@daemon/core/settings.js";
+import type { ClientMessage } from "@daemon/protocol/messages.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { Automation } from "@daemon/persistence/repositories.js";
 import type { CapabilityPreviewTarget, CapabilityTarget } from "@daemon/core/capabilities/types.js";
@@ -24,10 +25,12 @@ import { ConversationPane } from "./components/ConversationPane.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { useResizableWidth } from "./lib/useResizableWidth.js";
 import { useViewportSize } from "./lib/useViewportSize.js";
-import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, shouldCompactDock, sidebarMaxForViewport } from "./lib/layout-budget.js";
+import { SIDEBAR_MIN_WIDTH, isCompactSidebar, isShortViewport, sidebarMaxForViewport } from "./lib/layout-budget.js";
 import { useMountTransition } from "./lib/useMountTransition.js";
 import { useJustEnded } from "./lib/useJustEnded.js";
 import { notifyFor } from "./lib/notify.js";
+import { latestGate, optimistic, patchSession, patchWorker } from "./lib/optimistic.js";
+import { ROW_SELECTED } from "./lib/ui-tokens.js";
 import { workerComposerState } from "./lib/worker-composer.js";
 import { capabilityCenterRoute, localizeCommandCandidates } from "./lib/command-actions.js";
 import type { CapabilityCenterRoute } from "./lib/command-actions.js";
@@ -51,14 +54,19 @@ import type { CapabilityCenterApi } from "./components/capabilities/types.js";
 import { WorkerHeader, SessionHeader } from "./components/WorkspaceHeaders.js";
 import { WindowControls } from "./components/WindowControls.js";
 import { DaemonDownBanner } from "./components/DaemonDownBanner.js";
-import { Tooltip } from "./components/Tooltip.js";
 import { RestartDaemonDialog } from "./components/RestartDaemonDialog.js";
-import { ResourceMonitor } from "./components/ResourceMonitor.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { SettingsPage } from "./components/SettingsPage.js";
-import { AttentionBell } from "./components/AttentionBell.js";
+import { SidebarRail } from "./components/SidebarRail.js";
+import { ReposHome } from "./components/ReposHome.js";
+import { useHistoryShortcuts } from "./lib/useHistoryShortcuts.js";
+import { useCloseTabDispatch } from "./lib/close-tab-dispatch.js";
+import { makeResourcePoll } from "./lib/resource-poll.js";
+import { APP_SHORTCUT, useAppShortcuts, withShortcut } from "./lib/shortcuts.js";
+import { shortBranch } from "./lib/branch.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
 import { Button } from "./ui/button.js";
+import { LoadFailed } from "./ui/load-state.js";
 import { Toaster } from "./components/Toaster.js";
 import { toast } from "./store/toasts.js";
 import { cn } from "./lib/cn.js";
@@ -70,7 +78,7 @@ import { useWsStore, pruneWsPages } from "./store/workspace.js";
 import { useLayoutStore } from "./store/layout.js";
 import { useDraftStore, pruneDrafts, clearAcceptedDraft } from "./store/drafts.js";
 import { switchSpawnRepo, openSpawnedWorker } from "./lib/spawn-navigation.js";
-import { readViewState, writeViewState } from "./lib/view-state.js";
+import { readViewState, writeViewState, hasRestorableView } from "./lib/view-state.js";
 import { WorkspaceTab } from "./components/WorkspaceTab.js";
 import { TabBar } from "./components/TabBar.js";
 import { isDockableEnabled } from "./lib/flags.js";
@@ -90,6 +98,9 @@ declare global {
 }
 
 let client: WsClient | null = null;
+// Last-issued-wins gates for the session/fleet list refetches (optimistic Pin/Archive invalidate them).
+const sessionListGate = latestGate();
+const fleetListGate = latestGate();
 let sessionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let usageTimer: ReturnType<typeof setTimeout> | null = null;
 let startTimer: ReturnType<typeof setTimeout> | null = null; // DSK-10: fallback timer to recover from a stuck 'starting' state (refreshed on every connect)
@@ -97,6 +108,7 @@ let startTimer: ReturnType<typeof setTimeout> | null = null; // DSK-10: fallback
 // Poll the usage snapshot. Fast (4s) before data arrives, slow (45s) once it does — lightweight since it only reads the cache.
 function pollUsage(c: WsClient): void {
   let failCount = 0; // consecutive usage.get failures — used to gate the "couldn't load" hint below
+  let emptyCount = 0; // consecutive successful-but-empty answers
   const schedule = (ms: number) => {
     if (usageTimer) clearTimeout(usageTimer);
     usageTimer = setTimeout(tick, ms);
@@ -108,7 +120,11 @@ function pollUsage(c: WsClient): void {
         failCount = 0;
         useStore.getState().setUsage(r.usage);
         const ready = !!(r.usage && (r.usage.pct || r.usage.today));
-        schedule(ready ? 45000 : 4000);
+        // A successful answer with no numbers (ccusage missing, not logged in, still aggregating): after a few in a
+        // row, say "no usage data" and slow the poll down instead of asking every 4s forever (audit #46).
+        emptyCount = ready ? 0 : emptyCount + 1;
+        useStore.getState().setUsageEmpty(!ready && emptyCount >= 3);
+        schedule(ready ? 45000 : emptyCount >= 3 ? 30000 : 4000);
       })
       .catch(() => {
         failCount++;
@@ -119,6 +135,19 @@ function pollUsage(c: WsClient): void {
       });
   };
   tick();
+}
+
+// Auth + integrations status for Settings. A failure is recorded (instead of leaving "checking…" forever) and the
+// promise rejects, so Settings' "Check again" can show progress and a second failure (audit #47).
+function requestStatusChecks(c: WsClient): Promise<void> {
+  const st = useStore.getState;
+  return Promise.allSettled([
+    c.request({ type: "integrations.status" }).then((r) => st().setIntegrations({ github: r.github, linear: r.linear }), (e: unknown) => { st().setIntegrationsFailed(true); throw e; }),
+    c.request({ type: "auth.status" }).then((r) => st().setAuthStatus(r), (e: unknown) => { st().setAuthStatusFailed(true); throw e; }),
+  ]).then((results) => {
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed) throw failed.reason;
+  });
 }
 
 // Debounce-refresh the session list on activity/new-session events (re-sort by activity + surface sessions created via other paths).
@@ -157,6 +186,12 @@ type AppSelected = Pick<
   | "fleet"
   | "fleetLoaded"
   | "fleetLoadFailed"
+  | "reposLoaded"
+  | "reposLoadFailed"
+  | "settingsLoadFailed"
+  | "integrationsFailed"
+  | "authStatusFailed"
+  | "usageEmpty"
   | "repos"
   | "overrides"
   | "commands"
@@ -200,6 +235,12 @@ export function App(): JSX.Element {
         fleet: st.fleet,
         fleetLoaded: st.fleetLoaded,
         fleetLoadFailed: st.fleetLoadFailed,
+        reposLoaded: st.reposLoaded,
+        reposLoadFailed: st.reposLoadFailed,
+        settingsLoadFailed: st.settingsLoadFailed,
+        integrationsFailed: st.integrationsFailed,
+        authStatusFailed: st.authStatusFailed,
+        usageEmpty: st.usageEmpty,
         repos: st.repos,
         overrides: st.overrides,
         commands: st.commands,
@@ -238,6 +279,10 @@ export function App(): JSX.Element {
   tRef.current = t;
   const canBack = s.navBack.length > 0;
   const canFwd = s.navFwd.length > 0;
+  // Cmd+[ / Cmd+] (Alt+←/→ off macOS) and the mouse back/forward buttons (audit #10).
+  useHistoryShortcuts(goBack, goForward);
+  // Cmd/Ctrl+W from main: workspace pages close an editor tab, everywhere else the window closes (final review #2).
+  useCloseTabDispatch();
   // "mission control is online" beat — flash the dot the instant it reaches up (falling edge of "not up"). Keeps led-live.
   const daemonJustUp = useJustEnded(s.daemon !== "up");
   const slackJustUp = useJustEnded(s.slack !== "up");
@@ -305,6 +350,7 @@ export function App(): JSX.Element {
   const spawnRepoRow = s.overlay === "spawnWorker" ? s.repos.find((repo) => repo.id === s.repoSettingsId) ?? null : null;
   const spawnRepo = spawnRepoRow?.name ?? null;
   const [spawnBranches, setSpawnBranches] = useState<string[]>([]);
+  const [spawnBranchesState, setSpawnBranchesState] = useState<"loading" | "ready" | "failed">("loading");
   // Cross-provider fork dialog target (master session or worker) — the right-click "Fork" opens this instead of an instant fork.
   const [forkTarget, setForkTarget] = useState<{ kind: "master" | "worker"; id: string; sourceProvider: string } | null>(null);
   // Bump to remount the master ConversationPane — the composer reads its draft only on mount, so a
@@ -330,13 +376,17 @@ export function App(): JSX.Element {
   // When the spawn modal opens, load the base-branch candidates for that repo.
   useEffect(() => {
     setSpawnBranches([]); // never offer the previous repo's branches while the new repo's list loads
+    setSpawnBranchesState("loading"); // the picker holds its place (disabled) instead of popping in later (audit #36)
     if (!spawnRepo || !client) return;
     let live = true; // prevent a late response from the previous repo from overwriting when spawnRepo changes
-    void client.request({ type: "repo.branches", repo: spawnRepo }).then((r) => { if (live) setSpawnBranches(r.branches ?? []); }).catch(() => { if (live) setSpawnBranches([]); });
+    void client.request({ type: "repo.branches", repo: spawnRepo })
+      .then((r) => { if (live) { setSpawnBranches(r.branches ?? []); setSpawnBranchesState("ready"); } })
+      .catch(() => { if (live) { setSpawnBranches([]); setSpawnBranchesState("failed"); } });
     return () => { live = false; };
   }, [spawnRepo]);
+  // Failures propagate: the spawn page shows "search failed" instead of an empty "no results" (audit #36).
   const searchSource = (provider: "github" | "linear", query: string): Promise<SourceItem[]> =>
-    client ? client.request({ type: "source.search", provider, query, repo: spawnRepo ?? undefined }).then((r) => r.items ?? []).catch(() => []) : Promise.resolve([]);
+    client ? client.request({ type: "source.search", provider, query, repo: spawnRepo ?? undefined }).then((r) => r.items ?? []) : Promise.reject(new Error("not connected"));
   // The terminal is tied to "the agent page you're currently viewing" — it must also factor in showRepos so sessions↔repos stay independent.
   // Page key: the worker id if viewing a worker in repos, otherwise (= sessions view) the active session id. None → null (no panel/toggle).
   const termPageKey = showRepos
@@ -374,8 +424,6 @@ export function App(): JSX.Element {
     max: sidebarMaxForViewport(viewport.width),
     side: "left",
   });
-  const mainViewportWidth = viewport.width - (collapsed ? 56 : leftPanel.width + 6);
-  const compactDock = shouldCompactDock(mainViewportWidth);
   const compactSidebar = isCompactSidebar(leftPanel.width);
   const shortViewport = isShortViewport(viewport.height);
   const toggleSidebar = () =>
@@ -386,24 +434,32 @@ export function App(): JSX.Element {
   // Resource monitor: polls via IPC (resources:get). Faster when the popover is open, paused when the window is hidden.
   const [resources, setResources] = useState<ResourceSnapshot | null>(null);
   const [resOpen, setResOpen] = useState(false);
-  const pollResourcesOnce = useCallback(() => {
-    void window.rookery.resources.get().then(setResources).catch(() => {});
-  }, []);
+  // Consecutive resources.get failures: after a few, the popover shows a failure + refresh instead of a skeleton
+  // that never resolves (audit #137). Any success clears it.
+  const [resourcesFailed, setResourcesFailed] = useState(false);
+  // Returns the read's promise (rejects on failure) so the monitor's Retry shows progress and a second failure.
+  const pollResourcesOnce = useMemo(
+    () => makeResourcePoll(() => window.rookery.resources.get(), { snapshot: setResources, failed: setResourcesFailed }),
+    [],
+  );
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let live = true;
     const tick = (): void => {
       if (!live) return;
-      if (document.visibilityState === "visible") pollResourcesOnce();
+      if (document.visibilityState === "visible") void pollResourcesOnce().catch(() => {}); // counted by the poll itself
       timer = setTimeout(tick, resOpen ? 2000 : 4000);
     };
     tick();
-    const onVis = (): void => { if (document.visibilityState === "visible") pollResourcesOnce(); };
+    const onVis = (): void => { if (document.visibilityState === "visible") void pollResourcesOnce().catch(() => {}); };
     document.addEventListener("visibilitychange", onVis);
     return () => { live = false; if (timer) clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
   }, [resOpen, pollResourcesOnce]);
   const mounted = useRef(true);
   const restoredView = useRef(false);
+  // A saved location may still be restored once both lists arrive: until then the empty main area shows a
+  // conversation skeleton rather than flashing (and focusing) the New Session page (audit #43).
+  const [restorePending, setRestorePending] = useState(() => hasRestorableView(readViewState()));
   const restoredTermPages = useRef<Set<string>>(new Set());
   const loadWorkerHistory = useCallback((workerId: string, connection: WsClient | null = client): void => {
     if (!connection) return;
@@ -451,6 +507,12 @@ export function App(): JSX.Element {
     writeViewState({ showRepos, sessionId: s.activeSessionId, subId: s.activeWorkerId });
   }, [showRepos, s.activeSessionId, s.activeWorkerId]);
 
+  // Entering Settings re-asks auth/integrations once, so a status that failed (or went stale) at connect time
+  // gets another chance without a reconnect (audit #47).
+  useEffect(() => {
+    if (overlay === "settings" && client && s.daemon === "up") void requestStatusChecks(client).catch(() => {});
+  }, [overlay, s.daemon]);
+
   // Restore the viewing location + prune dead workspace tabs: apply once after **both** the session and fleet lists arrive.
   // (Acting on just one means that when fleet arrives late, known lacks the worker keys and the whole worker page gets pruned.)
   useEffect(() => {
@@ -458,6 +520,7 @@ export function App(): JSX.Element {
     if (s.daemon !== "up") return;
     if (!s.sessionsLoaded || !s.fleetLoaded) return; // wait until both lists have arrived
     restoredView.current = true;
+    setRestorePending(false); // batched with restoreLocation below, so the skeleton swaps straight to the restored page
     // NEW_SESSION_DRAFT_KEY is a fixed page key (not a session/worker id) — include it so pruneDrafts doesn't
     // treat it as a dead page and wipe the New Session draft on every boot (audit #5 review).
     const known = new Set<string>([...s.sessions.map((x) => x.id), ...Object.keys(s.fleet), NEW_SESSION_DRAFT_KEY]);
@@ -482,6 +545,7 @@ export function App(): JSX.Element {
   }, [s.daemon, s.sessionsLoaded, s.fleetLoaded, loadWorkerHistory]);
 
   // When the active conversation pane changes, prefetch and cache that context's slash command/skill candidates (for / autocomplete).
+  const commandsTarget = useRef<string | null>(null);
   useEffect(() => {
     const c = client;
     if (s.daemon !== "up" || !c) return;
@@ -493,8 +557,12 @@ export function App(): JSX.Element {
     }
     if (!msg) { useStore.getState().setCommands([]); return; }
     let live = true; // prevent a late commands response from the previous context from overwriting when switching conversation panes
+    // Clear on a target switch and on failure: the previous target's commands (another provider's /name vs $name) must
+    // never linger (audit #35). A refetch for the same target (capability change) keeps the list until the reply lands.
+    const target = s.activeWorkerId ?? s.activeSessionId;
+    if (commandsTarget.current !== target) { commandsTarget.current = target; useStore.getState().setCommands([]); }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    void c.request(msg).then((r) => { if (live) useStore.getState().setCommands(r.commands ?? []); }).catch(() => {});
+    void c.request(msg).then((r) => { if (live) useStore.getState().setCommands(r.commands ?? []); }).catch(() => { if (live) useStore.getState().setCommands([]); });
     return () => { live = false; };
   }, [s.activeSessionId, s.activeWorkerId, s.capabilityGeneration, s.daemon]);
 
@@ -603,16 +671,15 @@ export function App(): JSX.Element {
       // show an error+retry row instead of staying blank forever when the initial fetch never arrives (audit #14).
       void c.request({ type: "session.list" }).then((r) => { useStore.getState().setSessions(r.sessions ?? []); useStore.getState().seedRunningFromSessions(r.sessions ?? []); }).catch(() => useStore.getState().setSessionsLoadFailed(true));
       void c.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => useStore.getState().setFleetLoadFailed(true));
-      void c.request({ type: "repos.list" }).then((r) => useStore.getState().setRepos(r.repos ?? [])).catch(() => {});
+      void c.request({ type: "repos.list" }).then((r) => useStore.getState().setRepos(r.repos ?? [])).catch(() => useStore.getState().setReposLoadFailed(true));
       c.send({ type: "events.subscribe" }); // global channel: receive all session/fleet events
       pollUsage(c);
-      void c.request({ type: "settings.get" }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => {});
+      void c.request({ type: "settings.get" }).then((r) => useStore.getState().setSettings(r.settings)).catch(() => useStore.getState().setSettingsLoadFailed(true));
       void c.request({ type: "models.list" }).then((r) => useStore.getState().setModels((r.models ?? []).map((m) => ({ id: m.id, label: m.displayName })))).catch(() => {});
       void c.request({ type: "codex.models.list" }).then((r) => useStore.getState().setCodexModels(r.models ?? null)).catch(() => {});
       void c.request({ type: "codex.authStatus" }).then((r) => useStore.getState().setCodexAuthStatus(r.status ?? "unavailable")).catch(() => useStore.getState().setCodexAuthStatus("unavailable"));
       void c.request({ type: "mcp.status" }).then((r) => useStore.getState().setMcpStatus({ scope: r.scope, url: r.url })).catch(() => {});
-      void c.request({ type: "integrations.status" }).then((r) => useStore.getState().setIntegrations({ github: r.github, linear: r.linear })).catch(() => {});
-      void c.request({ type: "auth.status" }).then((r) => useStore.getState().setAuthStatus(r)).catch(() => {});
+      void requestStatusChecks(c).catch(() => {});
       void c.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true));
       // On reconnect, re-seed the open conversation — to prevent cards from being stuck in_progress forever due to a
       // tool-end/result lost while disconnected (the DB is the source of truth, so we re-fetch the full transcript and overwrite).
@@ -661,6 +728,12 @@ export function App(): JSX.Element {
     else void client?.request({ type: "session.history", sessionId: id }).then((r) => useStore.getState().seedHistory(id, r.events ?? [])).catch(() => useStore.getState().setHistoryLoadFailed(id, true));
   }, [loadWorkerHistory]);
   const create = () => navigate({ overlay: "newSession" }); // open the new-session full page (mutually exclusive with settings/automation)
+  // IDE shortcuts (audit #140): Cmd/Ctrl+B sidebar, Cmd/Ctrl+N new session, Cmd/Ctrl+, settings — hinted on their controls.
+  useAppShortcuts({
+    toggleSidebar: () => toggleSidebar(),
+    newSession: () => create(),
+    settings: () => navigate({ overlay: overlay === "settings" ? null : "settings" }),
+  });
   // Getting Started "first worker": land the user in a composer pre-filled with an example natural-language ask
   // (register the repo → spawn a worker → report back). With no usable session yet, seed the New Session page's
   // draft instead. Existing drafts are never clobbered; the epoch bump makes an already-mounted pane pick the seed up.
@@ -678,12 +751,35 @@ export function App(): JSX.Element {
     setComposerEpoch((e) => e + 1);
     useStore.getState().navigate({ overlay: null, showRepos: false, sessionId: latest.id });
   };
-  const refetchSessions = useCallback(() => { void client?.request({ type: "session.list" }).then((r) => useStore.getState().setSessions(r.sessions ?? [])).catch(() => {}); }, []);
+  // List loaders return their promise (rejecting on failure) so a sidebar Retry can show progress and a second
+  // failure (audit #44); the fire-and-forget refetch* wrappers keep the old swallow-on-error behaviour.
+  const loadSessions = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    const n = sessionListGate.next();
+    return c.request({ type: "session.list" }).then(
+      (r) => { if (sessionListGate.isCurrent(n)) useStore.getState().setSessions(r.sessions ?? []); },
+      (e: unknown) => { if (!useStore.getState().sessionsLoaded) useStore.getState().setSessionsLoadFailed(true); throw e; },
+    );
+  }, []);
+  const refetchSessions = useCallback(() => { void loadSessions().catch(() => {}); }, [loadSessions]);
   // Rename session — refetch not needed since it updates live via the session.label event.
   // Inject reqId via request() (schema requires reqId) — the daemon replies with fleet.ack (the label reflects live via session.label; the ack is ignored).
   const renameSession = useCallback((id: string, label: string) => { void client?.request({ type: "session.rename", sessionId: id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
-  const archiveSession = useCallback((id: string, archived: boolean) => { void client?.request({ type: "session.archive", sessionId: id, archived }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
-  const pinSession = useCallback((id: string, pinned: boolean) => { void client?.request({ type: "session.pin", sessionId: id, pinned }).then(refetchSessions).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchSessions]);
+  // Pin/Archive move the row at once and roll back (with a toast) if the daemon rejects it (audit #56).
+  // A list fetched before the click is dropped (invalidate) so it can't flip the row back; both outcomes refetch.
+  const archiveSession = useCallback((id: string, archived: boolean) => {
+    const c = client;
+    if (!c) return;
+    sessionListGate.invalidate();
+    void optimistic(() => patchSession(id, { archived }), () => c.request({ type: "session.archive", sessionId: id, archived }), { onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)), onSettled: refetchSessions });
+  }, [refetchSessions]);
+  const pinSession = useCallback((id: string, pinned: boolean) => {
+    const c = client;
+    if (!c) return;
+    sessionListGate.invalidate();
+    void optimistic(() => patchSession(id, { pinned }), () => c.request({ type: "session.pin", sessionId: id, pinned }), { onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)), onSettled: refetchSessions });
+  }, [refetchSessions]);
   // Right-click "Fork" → open the Fork dialog (target provider/model/effort pick + codex-auth gate), not an instant fork.
   const forkSession = useCallback((id: string) => {
     const provider = useStore.getState().sessions.find((x) => x.id === id)?.provider ?? "claude";
@@ -711,12 +807,54 @@ export function App(): JSX.Element {
       refetchSessions();
     }).catch((e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); refetchSessions(); });
   }, [refetchSessions]);
-  const refetchFleet = useCallback(() => { void client?.request({ type: "fleet.list" }).then((r) => useStore.getState().setFleet(r.fleet ?? [])).catch(() => {}); }, []);
+  const loadFleet = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    const n = fleetListGate.next();
+    return c.request({ type: "fleet.list" }).then(
+      (r) => { if (fleetListGate.isCurrent(n)) useStore.getState().setFleet(r.fleet ?? []); },
+      (e: unknown) => { if (!useStore.getState().fleetLoaded) useStore.getState().setFleetLoadFailed(true); throw e; },
+    );
+  }, []);
+  const refetchFleet = useCallback(() => { void loadFleet().catch(() => {}); }, [loadFleet]);
+  const loadRepos = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    return c.request({ type: "repos.list" }).then(
+      (r) => useStore.getState().setRepos(r.repos ?? []),
+      (e: unknown) => { if (!useStore.getState().reposLoaded) useStore.getState().setReposLoadFailed(true); throw e; },
+    );
+  }, []);
+  // The repo tree needs both lists; its Retry re-fires whichever has not arrived yet.
+  const retryRepoTree = useCallback((): Promise<void> => {
+    const st = useStore.getState();
+    return Promise.all([st.fleetLoaded ? null : loadFleet(), st.reposLoaded ? null : loadRepos()]).then(() => {});
+  }, [loadFleet, loadRepos]);
+  const loadSettings = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    return c.request({ type: "settings.get" }).then(
+      (r) => useStore.getState().setSettings(r.settings),
+      (e: unknown) => { useStore.getState().setSettingsLoadFailed(true); throw e; },
+    );
+  }, []);
   // Retry hook for AutomationPage's load-failed row (audit #14) — no other refetch path existed for automation.list.
-  const refetchAutomations = useCallback(() => { void client?.request({ type: "automation.list" }).then((r) => useStore.getState().setAutomations(r.automations ?? [])).catch(() => useStore.getState().setAutomationsLoadFailed(true)); }, []);
+  const refetchAutomations = useCallback((): Promise<void> => {
+    const c = client;
+    if (!c) return Promise.reject(new Error("not connected"));
+    return c.request({ type: "automation.list" }).then(
+      (r) => useStore.getState().setAutomations(r.automations ?? []),
+      (e: unknown) => { useStore.getState().setAutomationsLoadFailed(true); throw e; },
+    );
+  }, []);
   // Rename worker — updates live via the worker.label event. Archive/delete refetch fleet.list.
   const renameSub = useCallback((id: string, label: string) => { void client?.request({ type: "worker.rename", id, label }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e))); }, []);
-  const archiveSub = useCallback((id: string, archived: boolean) => { void client?.request({ type: "worker.archive", id, archived }).then(refetchFleet).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, [refetchFleet]);
+  const archiveSub = useCallback((id: string, archived: boolean) => {
+    const c = client;
+    if (!c) return;
+    fleetListGate.invalidate();
+    void optimistic(() => patchWorker(id, { archived }), () => c.request({ type: "worker.archive", id, archived }), { onError: (e) => toast.error(tRef.current("toast.actionFailed"), String(e)), onSettled: refetchFleet });
+  }, [refetchFleet]);
   const deleteSub = useCallback((id: string) => {
     const store = useStore.getState();
     if (store.activeWorkerId === id) store.navigate({ subId: null });
@@ -735,26 +873,22 @@ export function App(): JSX.Element {
     const c = client;
     if (!c) throw new Error("not connected");
     const acceptedDraft = useDraftStore.getState().byPage[NEW_SESSION_DRAFT_KEY];
-    try {
-      const result = await c.request({type:"session.create",speed: opts.speed,...(opts.cwd ? {cwd:opts.cwd}:{}),...(opts.provider ? {provider:opts.provider as "claude"|"codex"}:{})});
-      const list = await c.request({type:"session.list"});
-      useStore.getState().setSessions(list.sessions ?? []);
-      const sid = result.sessionId;
-      useStore.getState().setOverride(sid,{model:opts.model,effort:opts.effort});
-      useStore.getState().setHistoryLoaded(sid,true);
-      const prompt=opts.prompt?.trim() ?? "";
-      if(prompt || opts.images?.length) {
-        const clientMsgId=crypto.randomUUID();
-        useStore.getState().pushPending(sid,{clientMsgId,text:prompt,...(opts.images?.length ? {images:opts.images}:{})});
-        try { await c.request({type:"session.send",sessionId:sid,text:prompt,images:opts.images,model:opts.model,effort:opts.effort,speed: opts.speed,clientMsgId}); }
-        catch(error) { useStore.getState().dropPending(sid,clientMsgId); throw error; }
-      }
-      clearAcceptedDraft(NEW_SESSION_DRAFT_KEY,prompt,opts.images,acceptedDraft);
-      navigate({overlay:null}); select(sid);
-    } catch(error) {
-      toast.error(tRef.current("toast.sendFailed"),String(error));
-      throw error;
+    // A failure is thrown to the composer, which reports it inline next to the kept draft (one surface, audit #32).
+    const result = await c.request({type:"session.create",speed: opts.speed,...(opts.cwd ? {cwd:opts.cwd}:{}),...(opts.provider ? {provider:opts.provider as "claude"|"codex"}:{})});
+    const list = await c.request({type:"session.list"});
+    useStore.getState().setSessions(list.sessions ?? []);
+    const sid = result.sessionId;
+    useStore.getState().setOverride(sid,{model:opts.model,effort:opts.effort});
+    useStore.getState().setHistoryLoaded(sid,true);
+    const prompt=opts.prompt?.trim() ?? "";
+    if(prompt || opts.images?.length) {
+      const clientMsgId=crypto.randomUUID();
+      useStore.getState().pushPending(sid,{clientMsgId,text:prompt,...(opts.images?.length ? {images:opts.images}:{})});
+      try { await c.request({type:"session.send",sessionId:sid,text:prompt,images:opts.images,model:opts.model,effort:opts.effort,speed: opts.speed,clientMsgId}); }
+      catch(error) { useStore.getState().dropPending(sid,clientMsgId); throw error; }
     }
+    clearAcceptedDraft(NEW_SESSION_DRAFT_KEY,prompt,opts.images,acceptedDraft);
+    navigate({overlay:null}); select(sid);
   };
   const send = useCallback(async (text: string, images?: ImageRef[]) => {
     const st = useStore.getState();
@@ -777,9 +911,9 @@ export function App(): JSX.Element {
     // request(): a rejected send (unknown session, runTurn throw, disconnected) rolls the pending bubble back and surfaces a toast —
     // fire-and-forget used to drop the daemon's error frame (no reqId) and the message silently vanished while the composer stayed stuck busy.
     if (!client) { st.dropPending(sid,clientMsgId); throw new Error("not connected"); }
+    // The rejection reaches the composer (or the failed bubble's Retry), which reports it inline — no toast too (audit #32).
     await client.request({ type: "session.send", sessionId: sid, text, images, speed: st.sessions.find((x) => x.id === sid)?.speed, model: ov.model, effort: sendEffort, permissionMode: ov.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | undefined, clientMsgId }).catch((e) => {
       useStore.getState().dropPending(sid, clientMsgId);
-      toast.error(tRef.current("toast.sendFailed"), String(e));
       throw e;
     });
     clearAcceptedDraft(sid,text,images,acceptedDraft);
@@ -819,8 +953,7 @@ export function App(): JSX.Element {
     if (!client) { useStore.getState().dropWorkerPending(id,clientMsgId); throw new Error("not connected"); }
     await client.request({ type: "worker.send", id, text, images, speed: useStore.getState().fleet[id]?.speed, clientMsgId }).catch((e) => {
       useStore.getState().dropWorkerPending(id, clientMsgId);
-      toast.error(tRef.current("toast.sendFailed"), String(e));
-      throw e;
+      throw e; // reported inline by the composer / failed bubble (audit #32)
     });
     clearAcceptedDraft(id,text,images,acceptedDraft);
   }, []);
@@ -851,21 +984,23 @@ export function App(): JSX.Element {
   const subStopTask = useCallback((id: string, taskId: string) => { void client?.request({ type: "worker.task.stop", id, taskId }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
   // Recover a wedged worker whose soft interrupt won't land (stuck in a long tool call / Dynamic Workflow): hard-kill
   // and resume the session in place → idle, still usable. Surfaced by the composer's Stop escalation (onRecover).
-  const subRecover = useCallback((id: string) => { void client?.request({ type: "worker.recover", id }).catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e))); }, []);
+  // Returns the request so the composer can show Recover in flight (audit #34); success is confirmed with an info toast.
+  const subRecover = useCallback(async (id: string): Promise<void> => {
+    if (!client) return;
+    await client.request({ type: "worker.recover", id })
+      .then(() => { toast.info(tRef.current("composer.recovered")); })
+      .catch((e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); });
+  }, []);
   const startSide = useCallback(async (sourceKind: "master" | "worker", sourceId: string, text: string, model?: string, effort?: string, images?: ImageRef[]): Promise<string> => {
     const c = client;
     if (!c) throw new Error("not connected");
-    try {
-      const result = await c.request({ type: "side.start", sourceKind, sourceId, text, images, model, effort });
-      return result.sideId;
-    } catch (error) {
-      toast.error(tRef.current("toast.sendFailed"), String(error));
-      throw error;
-    }
+    // Failures surface where the question was asked: inline in the composer, or a toast for a /side command.
+    const result = await c.request({ type: "side.start", sourceKind, sourceId, text, images, model, effort });
+    return result.sideId;
   }, []);
   const sendSide = useCallback(async (sideId: string, text: string, images?: ImageRef[]) => {
     if (!client) throw new Error("not connected");
-    await client.request({ type: "side.send", sideId, text, images }).catch((error) => {toast.error(tRef.current("toast.sendFailed"), String(error)); throw error;});
+    await client.request({ type: "side.send", sideId, text, images }); // a failure is reported inline by the drawer's composer
   }, []);
   const stopSide = useCallback((sideId: string) => {
     void client?.request({ type: "side.stop", sideId }).catch((error) => toast.error(tRef.current("toast.actionFailed"), String(error)));
@@ -915,6 +1050,23 @@ export function App(): JSX.Element {
     const repo = useStore.getState().repos.find((r) => r.name === name);
     if (repo) navigate({ overlay: "spawnWorker", showRepos: true, repoId: repo.id });
   }, [navigate]);
+  // Sidebar "New worker" row / rail / Repos home (audit #83): the spawn page for the open worker's repo (else the first
+  // repo — the page has its own repo picker); with no repo registered yet, the register dialog.
+  const newWorker = useCallback(() => {
+    const st = useStore.getState();
+    const activePath = st.activeWorkerId ? st.fleet[st.activeWorkerId]?.repoPath : undefined;
+    const repo = st.repos.find((r) => r.path === activePath) ?? st.repos[0];
+    if (repo) onNewSub(repo.name);
+    else setRepoModal(true);
+  }, [onNewSub]);
+  // Whole-branch diff (fleet.diff) as a read-only tab on the worker's page (audit #84).
+  const loadBranchDiff = useCallback((id: string): Promise<string> =>
+    client ? client.request({ type: "fleet.diff", id }).then((r) => r.diff ?? "") : Promise.reject(new Error("not connected")), []);
+  const openBranchDiff = useCallback((id: string) => {
+    const w = useStore.getState().fleet[id];
+    useWsStore.getState().openBranchDiff_(id, id, w?.branch ? shortBranch(w.branch) : id.slice(0, 8));
+    selectSub(id);
+  }, [selectSub]);
   // Rejects on failure (no swallow-to-empty) so CheckpointMenu can render a distinct error state instead of a false "no checkpoints".
   const fetchCheckpoints = (id: string): Promise<Checkpoint[]> =>
     client ? client.request({ type: "worker.checkpoints", id }).then((r) => r.checkpoints ?? []) : Promise.reject(new Error("not connected"));
@@ -924,14 +1076,27 @@ export function App(): JSX.Element {
     (client ? client.request({ type: "worker.restore", id, seq }) : Promise.reject(new Error("not connected")))
       .then(() => { toast.success(tRef.current("toast.restored")); })
       .catch((e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); throw e; });
-  const saveSettings = useCallback((next: SettingsValues) => {
-    const c = client; if (!c) return;
-    void c.request({ type: "settings.set", settings: next }).then((r) => {
+  // Returns the request so the Settings page keeps its draft (and stays open on "Save and close") until the daemon
+  // accepted it; a failure is reported once here and rethrown for the page (audit #93).
+  const saveSettings = useCallback((next: SettingsValues): Promise<void> => {
+    const c = client;
+    if (!c) { toast.error(tRef.current("toast.saveFailed")); return Promise.reject(new Error("not connected")); }
+    return c.request({ type: "settings.set", settings: next }).then((r) => {
       useStore.getState().setSettings(r.settings);
       // A scope change (mcpExposure) reconciles the External MCP server daemon-side → refetch the URL/status.
       void c.request({ type: "mcp.status" }).then((m) => useStore.getState().setMcpStatus({ scope: m.scope, url: m.url })).catch(() => {});
-    }).catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
+    }, (e) => { toast.error(tRef.current("toast.saveFailed"), String(e)); throw e; });
   }, []);
+  // Write-only secret saves (API keys, tokens): resolve once the daemon stored the value — the Settings page clears the
+  // field only then (audit #94). The follow-up status refetch runs on its own; its failure isn't a failed save.
+  const saveSecret = (patch: Extract<ClientMessage, { type: "settings.set" }>["settings"], refetch?: (c: WsClient) => Promise<void>): Promise<void> => {
+    const c = client;
+    if (!c) { toast.error(tRef.current("toast.saveFailed")); return Promise.reject(new Error("not connected")); }
+    return c.request({ type: "settings.set", settings: patch }).then(() => {
+      toast.success(tRef.current("toast.keySaved"));
+      if (refetch) void refetch(c).catch(() => {});
+    }, (e) => { toast.error(tRef.current("toast.saveFailed"), String(e)); throw e; });
+  };
   // Composer attach/drop — reads only the window bridge for stability (avoids a new ref every render → Conversation memo effect).
   const onAttachFile = useCallback(() => window.rookery.pickFile(), []);
   const onDropFiles = useCallback((files: File[]) => files.map((f) => window.rookery.getPathForFile(f)).filter(Boolean), []);
@@ -1091,10 +1256,10 @@ export function App(): JSX.Element {
             placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
           />
         ),
-        editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} />,
+        editor: (tabId) => <WorkspaceTab activeTab={tabId} pageKey={activeSub.id} root={wsRoot} loadBranchDiff={loadBranchDiff} />,
         terminal: () => <TerminalPanel sessionId={activeSub.id} subId={activeSub.id} cwd={undefined} dock />,
         files: () => (wsRootState === "ready" ? <FileTree root={wsRoot} pageKey={activeSub.id} version={treeVersion} activeTabPath={activeTabPath} /> : workRootFallback),
-        git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} /> : workRootFallback),
+        git: () => (wsRootState === "ready" ? <GitChanges root={wsRoot} pageKey={activeSub.id} version={treeVersion} onViewBranchDiff={() => openBranchDiff(activeSub.id)} /> : workRootFallback),
         nested: () => <ActivityPanelBody subId={activeSub.id} loadAgentHistory={loadWorkflowAgentHistory} />,
       }
     : null;
@@ -1139,15 +1304,16 @@ export function App(): JSX.Element {
   const navBtn = (label: string, Icon: typeof MessageSquare, active: boolean, onClick: () => void, badge = false) => (
     <button
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors",
-        active ? "text-fg" : "text-muted hover:bg-raised/60 hover:text-fg-dim",
+        active ? ROW_SELECTED : "text-muted hover:bg-raised/60 hover:text-fg-dim", // the shared neutral selection (audit #101)
       )}
     >
       <Icon size={14} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {/* dot on the Repos row when there's an unread worker — so even in the Sessions view you notice "something finished". */}
-      {badge && <span className="badge-pop h-1.5 w-1.5 shrink-0 rounded-full bg-run" />}
+      {badge && <span className="badge-pop h-1.5 w-1.5 shrink-0 rounded-full bg-fg-dim" />}
     </button>
   );
 
@@ -1181,81 +1347,39 @@ export function App(): JSX.Element {
             title bar handles this, so .win-chrome hides this strip + shrinks the pt (globals.css). */}
         <div className="mac-drag-strip drag absolute inset-x-0 top-0 h-10" />
         {!collapsed && (
-          // Same strip as the traffic lights: back/forward + the attention bell + collapse sit at its right edge,
-          // using the window-chrome row instead of a second one below it.
+          // Same strip as the traffic lights: back/forward + collapse sit at its right edge, using the window-chrome row
+          // instead of a second one below it. Back/forward stay at every sidebar width (audit #10; 3 x 24px fit the
+          // 220px minimum next to the traffic lights). The attention bell lives in the status bar (audit #19 #20).
           <div className="absolute inset-x-0 top-0 z-20 flex h-10 items-center justify-end gap-0.5 pr-2">
-            {!compactSidebar && (
-              <>
-                <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                  <ChevronLeft size={14} />
-                </button>
-                <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
-                  <ChevronRight size={14} />
-                </button>
-              </>
-            )}
-            <AttentionBell onNavigate={onAttentionNav} />
-            <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} title={t("app.collapseSidebar")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim">
+            <button onClick={goBack} disabled={!canBack} aria-label={t("app.back")} title={t("app.back")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+              <ChevronLeft size={14} />
+            </button>
+            <button onClick={goForward} disabled={!canFwd} aria-label={t("app.forward")} title={t("app.forward")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25">
+              <ChevronRight size={14} />
+            </button>
+            <button onClick={toggleSidebar} aria-label={t("app.collapseSidebar")} aria-keyshortcuts={APP_SHORTCUT.toggleSidebar.aria()} title={withShortcut(t("app.collapseSidebar"), APP_SHORTCUT.toggleSidebar.label())} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim">
               <PanelLeftClose size={14} />
             </button>
           </div>
         )}
         {collapsed ? (
-          <>
-            <button
-              onClick={toggleSidebar}
-              aria-label={t("app.expandSidebar")}
-              title={t("app.expandSidebar")}
-              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim"
-            >
-              <PanelLeft size={14} />
-            </button>
-            <button
-              onClick={goBack}
-              disabled={!canBack}
-              aria-label={t("app.back")}
-              title={t("app.back")}
-              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <button
-              onClick={goForward}
-              disabled={!canFwd}
-              aria-label={t("app.forward")}
-              title={t("app.forward")}
-              className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted enabled:hover:bg-raised enabled:hover:text-fg-dim disabled:opacity-25"
-            >
-              <ChevronRight size={14} />
-            </button>
-            <ResourceMonitor snapshot={resources} collapsed onRefresh={pollResourcesOnce} onOpenChange={setResOpen} />
-            <button onClick={toggleNotify} aria-label={notifyOn ? t("app.notifyOff") : t("app.notifyOn")} title={notifyOn ? t("app.notifyOff") : t("app.notifyOn")} className="no-drag mt-auto rounded-md p-1.5 text-muted hover:bg-raised hover:text-fg-dim">
-              {notifyOn ? <BellRing size={14} /> : <BellOff size={14} />}
-            </button>
-            <Tooltip label={t("app.restartDaemon")} side="right">
-              <button onClick={() => setRestartConfirm(true)} disabled={restarting} aria-label={t("app.restartDaemon")} className="no-drag flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-fg-dim disabled:opacity-40">
-                <RotateCcw size={14} className={cn(restarting && "animate-spin motion-reduce:animate-none")} />
-              </button>
-            </Tooltip>
-            {/* Automation is a top-level feature (audit #22) — the collapsed rail needs the same reachable-from-anywhere
-                entry as the expanded footer, not just restart/Settings. */}
-            <AttentionBell onNavigate={onAttentionNav} />
-            <Tooltip label={t("app.capabilityCenter")} side="right">
-              <button onClick={toggleCapabilityCenter} aria-label={t("app.capabilityCenter")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "capabilities" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Blocks size={14} />
-              </button>
-            </Tooltip>
-            <Tooltip label={t("app.automation")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "automation" ? null : "automation" }); }} aria-label={t("app.automation")} className={cn("no-drag flex h-6 w-6 items-center justify-center rounded-md transition-colors", overlay === "automation" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Clock size={14} />
-              </button>
-            </Tooltip>
-            <Tooltip label={t("app.settings")} side="right">
-              <button onClick={() => { navigate({ overlay: overlay === "settings" ? null : "settings" }); }} aria-label={t("app.settings")} className={cn("no-drag mb-1 rounded-md p-1.5 transition-colors", overlay === "settings" ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}>
-                <Settings size={14} />
-              </button>
-            </Tooltip>
-          </>
+          // Navigation rail (audit #19): expand, history, Sessions/Repos with their unread dots, and the new-item entry
+          // for the current view. The status-bar items it used to repeat stay in the status bar.
+          <SidebarRail
+            onExpand={toggleSidebar}
+            onBack={goBack}
+            onForward={goForward}
+            canBack={canBack}
+            canFwd={canFwd}
+            view={overlay && overlay !== "newSession" && overlay !== "spawnWorker" ? null : showRepos ? "repos" : "sessions"}
+            sessionsUnread={Object.values(s.sessionAttention).some(Boolean)}
+            reposUnread={Object.values(s.attention).some(Boolean)}
+            onSessions={() => navigate({ overlay: null, showRepos: false })}
+            onRepos={() => navigate({ overlay: null, showRepos: true })}
+            onNew={showRepos ? newWorker : create}
+            newLabel={showRepos ? t("app.newWorker") : t("app.newSession")}
+            newActive={overlay === (showRepos ? "spawnWorker" : "newSession")}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-2 pt-2">
             {/* Sessions / Repos — a flat nav list (not a segmented pill track), same row grammar as the tree below it. */}
@@ -1268,20 +1392,33 @@ export function App(): JSX.Element {
             {!showRepos && (
               <button
                 onClick={create}
-                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "newSession" ? "text-accent" : "text-fg-dim hover:bg-raised hover:text-fg")}
+                aria-current={overlay === "newSession" ? "page" : undefined}
+                aria-keyshortcuts={APP_SHORTCUT.newSession.aria()}
+                title={withShortcut(t("app.newSession"), APP_SHORTCUT.newSession.label())}
+                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "newSession" ? ROW_SELECTED : "text-fg-dim hover:bg-raised/60 hover:text-fg")}
               >
                 <Plus size={14} className="shrink-0" /> {t("app.newSession")}
               </button>
             )}
+            {/* Repos view: the same labelled entry for a new worker (audit #83) — the per-repo + is hover-only now. */}
+            {showRepos && (
+              <button
+                onClick={newWorker}
+                aria-current={overlay === "spawnWorker" ? "page" : undefined}
+                className={cn("no-drag flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-body transition-colors", overlay === "spawnWorker" ? ROW_SELECTED : "text-fg-dim hover:bg-raised/60 hover:text-fg")}
+              >
+                <Plus size={14} className="shrink-0" /> {t("app.newWorker")}
+              </button>
+            )}
             {showRepos ? (
-              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded} loadFailed={s.fleetLoadFailed} onRetry={refetchFleet} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} />
+              <RepoTree repos={s.repos} fleet={fleet} loaded={s.fleetLoaded && s.reposLoaded} loadFailed={(!s.fleetLoaded && s.fleetLoadFailed) || (!s.reposLoaded && s.reposLoadFailed)} onRetry={retryRepoTree} activeSubId={overlay ? null : s.activeWorkerId} onSelectSub={selectSub} onNewRepo={onNewRepo} onRemoveRepo={onRemoveRepo} onNewSub={onNewSub} onRepoSettings={(repoId) => navigate({ overlay: "repoSettings", showRepos: true, repoId })} attention={s.attention} onStopSub={onStop} onRenameSub={renameSub} onForkSub={forkSub} onArchiveSub={archiveSub} onDeleteSub={deleteSub} onViewBranchDiff={openBranchDiff} />
             ) : (
-              <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={refetchSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
+              <Sessions compact={compactSidebar} sessions={s.sessions} loaded={s.sessionsLoaded} loadFailed={s.sessionsLoadFailed} onRetry={loadSessions} activeId={overlay ? null : s.activeSessionId} running={s.running} attention={s.sessionAttention} onSelect={select} onRename={renameSession} onFork={forkSession} onArchive={archiveSession} onDelete={deleteSession} onPin={pinSession} automations={s.automations} filter={s.sessionFilter} onFilter={s.setSessionFilter} />
             )}
           </div>
         )}
       </aside>
-      {!collapsed && <ResizeHandle onPointerDown={leftPanel.startDrag} />}
+      {!collapsed && <ResizeHandle onPointerDown={leftPanel.startDrag} handle={leftPanel.handle} label={t("app.resizeSidebar")} />}
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-ink">
         {/* The WS dropped (e.g. daemon restart) — the live stream is dead and won't resume until reconnect, so an in-progress
@@ -1315,6 +1452,7 @@ export function App(): JSX.Element {
             defaultEffort={s.settings?.workerEffort ?? "high"}
             codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}
             branches={spawnBranches}
+            branchesState={spawnBranchesState}
             integrations={s.integrations ?? undefined}
             searchSource={searchSource}
             onSpawn={spawnSub}
@@ -1334,6 +1472,18 @@ export function App(): JSX.Element {
             pickDirectory={() => window.rookery.pickDirectory()}
             onClose={closeOverlay}
           />
+        ) : overlay === "settings" && !s.settings ? (
+          // settings.get hasn't answered (or failed): the page still opens — skeleton, or the failure with a retry —
+          // instead of leaving the old screen up under an active settings button (audit #45).
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="drag flex h-10 shrink-0 items-center gap-2 px-5">
+              <h1 className="text-body font-medium text-fg">{t("settings.title")}</h1>
+              <Button variant="ghost" size="iconSm" className="no-drag ml-auto" onClick={closeOverlay} aria-label={t("common.close")}><X size={14} /></Button>
+            </div>
+            {s.settingsLoadFailed
+              ? <LoadFailed layout="stack" message={t("app.settingsLoadFailed")} onRetry={loadSettings} />
+              : <SkeletonRows rows={8} className="mx-auto w-full max-w-3xl px-6 py-6" />}
+          </div>
         ) : overlay === "settings" && s.settings ? (
           <SettingsPage
             settings={s.settings}
@@ -1348,43 +1498,34 @@ export function App(): JSX.Element {
             onPreviewCapabilities={openRookeryCapabilityPreview}
             integrations={s.integrations}
             authStatus={s.authStatus}
-            onSaveLinearKey={(key) => {
-              // Reuse toast.keySaved (already used by the sibling Slack-tokens/Anthropic-key saves below) — the
-              // Linear key card doesn't otherwise change on screen until integrations.status round-trips (audit #54).
-              void client?.request({ type: "settings.set", settings: { linearApiKey: key } })
-                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "integrations.status" }); })
-                .then((r) => { if (r) useStore.getState().setIntegrations({ github: r.github, linear: r.linear }); })
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
-            onSaveSlackTokens={(bot, app) => {
-              // slack.status arrives via the daemon's live reconcile-on-save broadcast — no extra refetch needed here (audit #8).
-              void client?.request({ type: "settings.set", settings: { slackBotToken: bot, slackAppToken: app } })
-                .then(() => toast.success(tRef.current("toast.keySaved")))
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
-            onSaveAnthropicKey={(key) => {
-              void client?.request({ type: "settings.set", settings: { anthropicApiKey: key } })
-                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "auth.status" }); })
-                .then((r) => { if (r) useStore.getState().setAuthStatus(r); })
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
-            onSaveCodexKey={(key) => {
-              // Refetch the codex auth probe after saving — the new key provisions the redirected CODEX_HOME,
-              // so the Codex sub-tab's readiness card reflects the change (mirrors onSaveAnthropicKey).
-              void client?.request({ type: "settings.set", settings: { codexApiKey: key } })
-                .then(() => { toast.success(tRef.current("toast.keySaved")); return client?.request({ type: "codex.authStatus" }); })
-                .then((r) => { if (r) useStore.getState().setCodexAuthStatus(r.status ?? "unavailable"); })
-                .catch((e) => toast.error(tRef.current("toast.saveFailed"), String(e)));
-            }}
+            integrationsFailed={s.integrationsFailed}
+            authStatusFailed={s.authStatusFailed}
+            onRecheckStatus={() => (client ? requestStatusChecks(client) : Promise.reject(new Error("not connected")))}
+            onSaveLinearKey={(key) => saveSecret({ linearApiKey: key }, async (c) => {
+              // The Linear key card doesn't otherwise change on screen until integrations.status round-trips (audit #54).
+              const r = await c.request({ type: "integrations.status" });
+              useStore.getState().setIntegrations({ github: r.github, linear: r.linear });
+            })}
+            // slack.status arrives via the daemon's live reconcile-on-save broadcast — no extra refetch needed here (audit #8).
+            onSaveSlackTokens={(bot, app) => saveSecret({ slackBotToken: bot, slackAppToken: app })}
+            onSaveAnthropicKey={(key) => saveSecret({ anthropicApiKey: key }, async (c) => {
+              useStore.getState().setAuthStatus(await c.request({ type: "auth.status" }));
+            })}
+            // Refetch the codex auth probe after saving — the new key provisions the redirected CODEX_HOME, so the
+            // Codex sub-tab's readiness card reflects the change (mirrors onSaveAnthropicKey).
+            onSaveCodexKey={(key) => saveSecret({ codexApiKey: key }, async (c) => {
+              const r = await c.request({ type: "codex.authStatus" });
+              useStore.getState().setCodexAuthStatus(r.status ?? "unavailable");
+            })}
             mcpStatus={s.mcpStatus}
             onRegenerateMcpToken={() => {
               void client?.request({ type: "mcp.regenerate_token" })
-                .then((r) => { useStore.getState().setMcpStatus({ scope: r.scope, url: r.url }); toast.success(tRef.current("toast.keySaved")); })
+                .then((r) => { useStore.getState().setMcpStatus({ scope: r.scope, url: r.url }); toast.success(tRef.current("toast.mcpTokenRegenerated")); })
                 .catch((e) => toast.error(tRef.current("toast.actionFailed"), String(e)));
             }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -1398,13 +1539,10 @@ export function App(): JSX.Element {
                   editJob === "new"
                     ? ({ type: "automation.create" as const, automation: input })
                     : ({ type: "automation.update" as const, id: editJob.id, patch: input });
-                try {
-                  await client?.request(msg);
-                  setEditJob(null);
-                } catch (e) {
-                  toast.error(tRef.current("toast.automationFailed"), String(e));
-                  throw e; // rethrow → AutomationForm's own catch surfaces the inline submitError
-                }
+                // A failure is shown once, inline under the form header (AutomationForm's submitError) — no toast too.
+                if (!client) throw new Error(tRef.current("toast.saveFailed"));
+                await client.request(msg);
+                setEditJob(null);
               }}
             />
           ) : (
@@ -1424,7 +1562,12 @@ export function App(): JSX.Element {
                 const req = client?.request({ type: "automation.set_enabled", id, enabled });
                 return req ? req.then(() => {}, (e) => { toast.error(tRef.current("toast.actionFailed"), String(e)); throw e; }) : Promise.resolve(); // rethrow → AutomationPage reverts the optimistic toggle
               }}
-              onDelete={(id) => { void client?.request({ type: "automation.delete", id }).catch((e) => toast.error(tRef.current("toast.deleteFailed"), String(e))); }}
+              onDelete={(id) => {
+                // Returned so the page can bring back its optimistically removed row if the delete fails.
+                const req = client?.request({ type: "automation.delete", id });
+                if (!req) { toast.error(tRef.current("toast.deleteFailed")); return Promise.reject(new Error("not connected")); }
+                return req.then(() => {}, (e) => { toast.error(tRef.current("toast.deleteFailed"), String(e)); throw e; });
+              }}
               onEdit={(job) => setEditJob(job)}
               onNew={() => setEditJob("new")}
               onViewSessions={(id) => { s.setSessionFilter({ source: "automation", automationId: id }); navigate({ overlay: null, showRepos: false }); }}
@@ -1455,7 +1598,7 @@ export function App(): JSX.Element {
                   dock
                 />
                 <WorkspaceRenderProvider value={workerRender}>
-                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" compact={compactDock} />
+                  <WorkspaceDock key={activeSub.id} pageKey={activeSub.id} agentKind="worker" />
                 </WorkspaceRenderProvider>
               </div>
             ) : (
@@ -1498,20 +1641,22 @@ export function App(): JSX.Element {
                       placeholder={t(workerComposerState(activeSub.status).placeholderKey)}
                     />
                   ) : (
-                    <WorkspaceTab activeTab={activeTab} pageKey={termPageKey!} root={wsRoot} />
+                    <WorkspaceTab activeTab={activeTab} pageKey={termPageKey!} root={wsRoot} loadBranchDiff={loadBranchDiff} />
                   )}
                 </div>
               </div>
             </>
             )
           ) : (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-ui text-muted">
-              <p className="max-w-sm">{t("app.emptyRepoHint")}</p>
-            </div>
+            <ReposHome hasRepos={s.repos.length > 0} loaded={s.reposLoaded} loadFailed={s.reposLoadFailed} onRetry={loadRepos} onNewWorker={newWorker} onNewRepo={onNewRepo} />
           )
+        ) : !s.activeSessionId && restorePending && !s.sessionsLoadFailed && !s.fleetLoadFailed ? (
+          <div className="flex min-h-0 flex-1 flex-col justify-center px-6" aria-busy="true">
+            <SkeletonRows rows={5} />
+          </div>
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : dockable && masterRender ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <SessionHeader
@@ -1529,7 +1674,7 @@ export function App(): JSX.Element {
               dock
             />
             <WorkspaceRenderProvider value={masterRender}>
-              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" compact={compactDock} />
+              <WorkspaceDock key={s.activeSessionId ?? "none"} pageKey={s.activeSessionId!} agentKind="master" />
             </WorkspaceRenderProvider>
           </div>
         ) : (
@@ -1599,7 +1744,9 @@ export function App(): JSX.Element {
         slackJustUp={slackJustUp}
         usage={s.usage}
         usageLoadFailed={s.usageLoadFailed}
+        usageEmpty={s.usageEmpty}
         resources={resources}
+        resourcesFailed={resourcesFailed}
         onResourceRefresh={pollResourcesOnce}
         onResourceOpenChange={setResOpen}
         notifyOn={notifyOn}
@@ -1612,6 +1759,8 @@ export function App(): JSX.Element {
         onToggleSettings={() => navigate({ overlay: overlay === "settings" ? null : "settings" })}
         restarting={restarting}
         onRestart={() => setRestartConfirm(true)}
+        onAttentionNav={onAttentionNav}
+        routeKey={pageId}
       />
 
       <Toaster />

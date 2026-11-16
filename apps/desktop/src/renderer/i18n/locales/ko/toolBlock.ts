@@ -8,4 +8,6 @@ export default {
   "toolBlock.background": "백그라운드",
   "toolBlock.complete": "완료",
   "toolBlock.error": "오류",
+  "toolBlock.input": "입력",
+  "toolBlock.result": "결과",
 } satisfies Catalog;

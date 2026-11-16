@@ -8,4 +8,5 @@ export default {
   "tabBar.unsavedBody": "Closing '{name}' will discard your edits.",
   "tabBar.unsavedManyBody": "Closing {count} tabs with unsaved changes will discard those edits.",
   "tabBar.discardClose": "Discard",
+  "tabBar.unsaved": "Unsaved",
 } satisfies Catalog;

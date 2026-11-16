@@ -30,7 +30,35 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
     expect(onRepoSettings).toHaveBeenCalledWith("repo-1");
   });
 
-  it("spawn (+) and remove (trash) buttons are always visible and expose their aria-labels", () => {
+  // audit #83 (intentional change of the old "always visible" rule): the trash sat one slip away from + at all times.
+  // Unregister now lives in the repo's ⋯ menu (also on right-click), and the row actions show on hover/focus only —
+  // the always-visible spawn entry is the sidebar's "New worker" row.
+  it("row actions reveal on hover/focus, and unregister lives in the repo menu instead of next to +", () => {
+    render(
+      <RepoTree
+        repos={[{ ...repo, id: "repo-1" }] as never}
+        fleet={[] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+        onRepoSettings={() => {}}
+      />,
+    );
+    const spawnBtn = screen.getByRole("button", { name: "워커 스폰…" });
+    const menuBtn = screen.getByRole("button", { name: "app 메뉴" });
+    for (const btn of [spawnBtn, menuBtn]) {
+      expect(btn.className).toMatch(/\bgroup-hover:opacity-100\b/);
+      expect(btn.className).toMatch(/\bgroup-focus-within:opacity-100\b/);
+      expect(btn).not.toHaveAttribute("disabled");
+    }
+    expect(screen.queryByRole("button", { name: "레포 등록 해제" })).toBeNull();
+    fireEvent.click(menuBtn);
+    expect(screen.getAllByRole("menuitem").map((el) => el.firstChild?.textContent)).toEqual(["워커 스폰…", "app 설정", "레포 등록 해제…"]);
+  });
+
+  it("right-clicking the repo header opens the same menu", () => {
     render(
       <RepoTree
         repos={[repo] as never}
@@ -42,17 +70,8 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
         onNewSub={() => {}}
       />,
     );
-    const spawnBtn = screen.getByRole("button", { name: "워커 스폰…" });
-    const removeBtn = screen.getByRole("button", { name: "레포 등록 해제" });
-    // These are primary repo actions, so they should not depend on hover/focus reveal.
-    expect(spawnBtn.className).not.toMatch(/\bhidden\b/);
-    expect(removeBtn.className).not.toMatch(/\bhidden\b/);
-    expect(spawnBtn.className).not.toMatch(/\bopacity-0\b/);
-    expect(removeBtn.className).not.toMatch(/\bopacity-0\b/);
-    expect(spawnBtn.className).not.toMatch(/\bgroup-hover:opacity-100\b/);
-    expect(removeBtn.className).not.toMatch(/\bgroup-hover:opacity-100\b/);
-    expect(spawnBtn).not.toHaveAttribute("disabled");
-    expect(removeBtn).not.toHaveAttribute("disabled");
+    fireEvent.contextMenu(screen.getByText("app"));
+    expect(screen.getByRole("menuitem", { name: /레포 등록 해제…/ })).toBeInTheDocument();
   });
 
   it("clicking + opens a worker in this repo via onNewSub", () => {
@@ -85,7 +104,8 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
         onNewSub={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "레포 등록 해제" }));
+    fireEvent.click(screen.getByRole("button", { name: "app 메뉴" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /레포 등록 해제…/ }));
     expect(onRemoveRepo).not.toHaveBeenCalled();
     expect(screen.getByText("'app' 레포 등록을 해제할까요? 파일은 그대로 남아요.")).toBeInTheDocument();
   });
@@ -103,8 +123,9 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
         onNewSub={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "레포 등록 해제" }));
-    // Two elements now say "레포 등록 해제": the header trash button and the dialog's confirm button.
+    fireEvent.click(screen.getByRole("button", { name: "app 메뉴" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /레포 등록 해제…/ }));
+    // Two elements say "레포 등록 해제": the dialog title and its confirm button.
     const matches = screen.getAllByText("레포 등록 해제");
     fireEvent.click(matches[matches.length - 1]!);
     expect(onRemoveRepo).toHaveBeenCalledWith("app");
@@ -123,7 +144,8 @@ describe("RepoTree repo-header affordances (audit #3, #19)", () => {
         onNewSub={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "레포 등록 해제" }));
+    fireEvent.click(screen.getByRole("button", { name: "app 메뉴" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /레포 등록 해제…/ }));
     fireEvent.click(screen.getByText("취소"));
     expect(onRemoveRepo).not.toHaveBeenCalled();
   });
@@ -162,7 +184,8 @@ describe("RepoTree worker-row overflow '⋯' button (audit #45)", () => {
         onDeleteSub={vi.fn()}
       />,
     );
-    const moreBtn = screen.getByRole("button", { name: "더보기" });
+    // audit #78: the overflow button names the worker it acts on
+    const moreBtn = screen.getByRole("button", { name: "worker1 더보기" });
     fireEvent.click(moreBtn);
     expect(screen.getByText("이름 변경")).toBeInTheDocument();
     expect(screen.getByText("포크")).toBeInTheDocument();
@@ -182,7 +205,7 @@ describe("RepoTree worker-row overflow '⋯' button (audit #45)", () => {
         onForkSub={onForkSub}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "worker1 더보기" }));
     fireEvent.click(screen.getByText("포크"));
     expect(onForkSub).toHaveBeenCalledWith("w1");
   });
@@ -252,7 +275,7 @@ describe("RepoTree fallback-label disambiguating subline (audit #46)", () => {
   });
 });
 
-// Audit #50: the tree's status tag is a deliberate colorblind-safe abbreviation (kept short — "ORPH"), but it must
+// Audit #50: the tree's status tag is a deliberate colorblind-safe short word (kept short — "유실"), but it must
 // carry the SAME full-word label as the header StatusBadge via its title, so the two never disagree.
 describe("RepoTree status tag full-word title (audit #50)", () => {
   it("shows the short colorblind tag but titles it with the full localized state name", () => {
@@ -268,7 +291,7 @@ describe("RepoTree status tag full-word title (audit #50)", () => {
         onNewSub={() => {}}
       />,
     );
-    const tag = screen.getByText("ORPH");
+    const tag = screen.getByText("유실");
     expect(tag).toHaveAttribute("title", "유실됨"); // same full word the header StatusBadge shows for this status
   });
 });
@@ -289,7 +312,7 @@ describe("RepoTree right-side cluster yields to the '⋯' button on hover (final
         onNewSub={() => {}}
       />,
     );
-    const tag = screen.getByText("IDLE");
+    const tag = screen.getByText("대기");
     expect(tag.className).toMatch(/\btransition-opacity\b/);
     expect(tag.className).toMatch(/\bgroup-hover:opacity-0\b/);
   });
@@ -427,7 +450,7 @@ describe("RepoTree background-state affordances", () => {
       />,
     );
     fireEvent.contextMenu(screen.getByText("workflow worker"));
-    fireEvent.click(screen.getByText("종료")); // repoTree.menuStop, now "End" (ko 종료) — the terminal tree action
+    fireEvent.click(screen.getByText("중지")); // repoTree.menuStop, now "Stop" (ko 중지) — the terminal tree action
     expect(onStopSub).toHaveBeenCalledWith("wbg");
   });
 
@@ -442,7 +465,7 @@ describe("RepoTree background-state affordances", () => {
       />,
     );
     fireEvent.contextMenu(screen.getByText("legible worker"));
-    expect(screen.getByText("종료")).toBeInTheDocument();
+    expect(screen.getByText("중지")).toBeInTheDocument();
     expect(screen.queryByText("중단")).toBeNull(); // the tree's terminal action no longer collides with the composer's soft "중단"
     expect(screen.getByText(/재시작 시 복구/)).toBeInTheDocument(); // End: reversible
     expect(screen.getByText(/되돌릴 수 없/)).toBeInTheDocument(); // Delete: irreversible
@@ -463,5 +486,72 @@ describe("RepoTree background-state affordances", () => {
     fireEvent.click(screen.getByText("활성")); // repoTree.onlyActive — rendered as "live" in the en catalog
     expect(screen.getByText("workflow worker")).toBeInTheDocument();
     expect(screen.queryByText("settled 0")).not.toBeInTheDocument();
+  });
+});
+
+// audit #84: the whole-branch diff (fleet.diff) had no entry point once a worker committed its work.
+describe("RepoTree worker menu — branch diff (audit #84)", () => {
+  it("offers 'View branch diff' and calls onViewBranchDiff with the worker id", () => {
+    const onViewBranchDiff = vi.fn();
+    render(
+      <RepoTree
+        repos={[repo] as never}
+        fleet={[worker] as never}
+        activeSubId={null}
+        onSelectSub={() => {}}
+        onNewRepo={() => {}}
+        onRemoveRepo={() => {}}
+        onNewSub={() => {}}
+        onViewBranchDiff={onViewBranchDiff}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "worker1 더보기" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /브랜치 전체 변경 보기/ }));
+    expect(onViewBranchDiff).toHaveBeenCalledWith("w1");
+  });
+});
+
+// audit #107 #72 #76 #77: worker rows are one tab stop with Arrow navigation and aria-current, the repo fold header
+// reports aria-expanded, the filter and rename inputs are labelled, and the IME's committing Enter doesn't rename.
+describe("RepoTree keyboard + accessible names (audit T11)", () => {
+  const w2 = { ...worker, id: "w2", label: "worker2", branch: "rookery/w2" };
+  const base = { repos: [repo] as never, onSelectSub: () => {}, onNewRepo: () => {}, onRemoveRepo: () => {}, onNewSub: () => {} };
+  beforeEach(() => useRepoTreeStore.setState({ collapsed: {} }));
+
+  it("roves between worker rows and marks the open one", () => {
+    render(<RepoTree {...base} fleet={[worker, w2] as never} activeSubId="w2" />);
+    const r1 = screen.getByText("worker1").closest("button")!;
+    const r2 = screen.getByText("worker2").closest("button")!;
+    expect(r2).toHaveAttribute("aria-current", "page");
+    expect(r2).toHaveAttribute("tabindex", "0");
+    expect(r1).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "worker1 더보기" })).toHaveAttribute("tabindex", "-1");
+    r2.focus();
+    fireEvent.keyDown(r2, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(r1);
+  });
+
+  it("the repo header says whether it is expanded", () => {
+    render(<RepoTree {...base} fleet={[worker] as never} activeSubId={null} />);
+    const header = screen.getByText("app").closest("button")!;
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("Shift+F10 opens the worker menu; F2 renames through a labelled input that ignores the IME Enter", () => {
+    const onRenameSub = vi.fn();
+    render(<RepoTree {...base} fleet={[worker] as never} activeSubId={null} onRenameSub={onRenameSub} />);
+    const row = screen.getByText("worker1").closest("button")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(row, { key: "F2" });
+    const input = screen.getByRole("textbox", { name: "worker1 이름 변경" });
+    fireEvent.change(input, { target: { value: "새 워커" } });
+    fireEvent.keyDown(input, { key: "Enter", nativeEvent: { isComposing: true }, keyCode: 229 });
+    expect(onRenameSub).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRenameSub).toHaveBeenCalledWith("w1", "새 워커");
   });
 });

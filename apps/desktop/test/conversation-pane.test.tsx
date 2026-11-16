@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { useStore } from "../src/renderer/store/store.js";
 import { ConversationPane } from "../src/renderer/components/ConversationPane.js";
 import { setPromptEditorText } from "./prompt-editor-helpers.js";
+import { useToastStore } from "../src/renderer/store/toasts.js";
 
 // Shared master/worker composer busy rule: running (authoritative) ‖ pending (optimistic) → stop button.
 // Since both go through the same component, only one side can't break in isolation — lock it with both cases.
@@ -24,13 +25,19 @@ describe("ConversationPane Side drawer", () => {
     render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
     const editor = screen.getByRole("textbox");
     setPromptEditorText(editor, "why this approach?");
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
     expect(onSideStart).toHaveBeenCalledWith("why this approach?");
-    expect(await screen.findByText("메인 세션의 문맥 · 읽기 전용")).toBeInTheDocument();
+    expect(await screen.findByText("메인 세션의 맥락 · 읽기 전용")).toBeInTheDocument();
     expect(screen.getByText("why this approach?")).toBeInTheDocument();
+    // audit #9: jsdom can't evaluate container queries, so lock the contract — inline vs overlay follows the
+    // conversation pane's own width (an @container), not a viewport breakpoint.
+    const drawer = screen.getByLabelText("사이드 질문");
+    expect(drawer.className).toContain("@min-[760px]:relative");
+    expect(drawer.className).not.toContain("md:relative");
+    expect(drawer.closest(".conversation-pane")?.className).toContain("@container");
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
-    expect(screen.queryByLabelText("Side 질문")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "사이드 질문" })).toBeNull(); // the drawer (the composer button now shares the name, audit #29)
   });
 
   it("shows live-worktree copy and routes worker Side follow-ups independently", async () => {
@@ -39,8 +46,8 @@ describe("ConversationPane Side drawer", () => {
     render(<ConversationPane kind="worker" id="w1" onSend={() => {}} onSideStart={onSideStart} onSideSend={onSideSend} />);
     const mainEditor = screen.getByRole("textbox");
     setPromptEditorText(mainEditor, "what changed?");
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
-    expect(await screen.findByText("이 워커의 문맥 · live worktree · 읽기 전용")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
+    expect(await screen.findByText("이 워커의 맥락 · 실시간 워크트리 · 읽기 전용")).toBeInTheDocument();
     await act(async () => {
       useStore.setState({ sideConversations: { "side-w": { sourceKind: "worker", sourceId: "w1", status: "idle", items: [{ kind: "message", role: "user", content: "what changed?" }] } } } as never);
     });
@@ -49,6 +56,25 @@ describe("ConversationPane Side drawer", () => {
     setPromptEditorText(sideEditor, "which file?");
     fireEvent.keyDown(sideEditor, { key: "Enter" });
     expect(onSideSend).toHaveBeenCalledWith("side-w", "which file?");
+  });
+
+  // audit #73: Escape closes the drawer, opening moves focus into it, closing hands focus back to the main composer.
+  it("closes on Escape and returns focus to the composer that opened it", async () => {
+    const onSideStart = vi.fn(async () => "side-1");
+    const onSideClose = vi.fn();
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} />);
+    const editor = screen.getByRole("textbox");
+    setPromptEditorText(editor, "why?");
+    const sideBtn = screen.getByRole("button", { name: "사이드 질문" });
+    sideBtn.focus();
+    fireEvent.click(sideBtn);
+    const drawer = await screen.findByRole("complementary", { name: "사이드 질문" });
+    await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(onSideClose).toHaveBeenCalledWith("side-1"));
+    expect(screen.queryByRole("complementary", { name: "사이드 질문" })).toBeNull();
+    // the button that opened it is gone while the drawer is open, so focus lands on the conversation's composer
+    expect(document.activeElement).toBe(editor);
   });
 
   it("uses registry-provided /btw and /side actions alongside prompt commands", () => {
@@ -70,12 +96,45 @@ describe("ConversationPane Side drawer", () => {
     ]} />);
     const editor = screen.getByRole("textbox");
     setPromptEditorText(editor, "open side");
-    fireEvent.click(screen.getByRole("button", { name: "별도로 질문하기" }));
-    await screen.findByLabelText("Side 질문");
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
+    await screen.findByLabelText("사이드 질문");
     setPromptEditorText(editor, "/");
     expect(screen.getByText("/review")).toBeInTheDocument();
     expect(screen.queryByText((_text, el) => el?.textContent === "/btw<질문>")).toBeNull();
     expect(screen.queryByText((_text, el) => el?.textContent === "/side<질문>")).toBeNull();
+  });
+});
+
+// Final review #8: closing the drawer while a Side is still opening is the user's own cancel, not a failure.
+describe("ConversationPane Side cancel while opening (final review #8)", () => {
+  beforeEach(() => { reset(); useToastStore.setState({ toasts: [] }); });
+
+  it("a /side command cancelled while opening shows no 'send failed' toast", async () => {
+    let opened!: (id: string) => void;
+    const onSideStart = vi.fn(() => new Promise<string>((resolve) => { opened = resolve; }));
+    const onSideClose = vi.fn();
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={onSideClose} commands={SIDE_COMMANDS} />);
+    const editor = screen.getByRole("textbox");
+    setPromptEditorText(editor, "/side why?");
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(onSideStart).toHaveBeenCalledWith("why?");
+    fireEvent.click(await screen.findByRole("button", { name: "닫기" }));
+    await act(async () => { opened("late-side"); });
+    expect(onSideClose).toHaveBeenCalledWith("late-side");
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it("the Side button cancelled while opening keeps the draft without an inline error", async () => {
+    let opened!: (id: string) => void;
+    const onSideStart = vi.fn(() => new Promise<string>((resolve) => { opened = resolve; }));
+    render(<ConversationPane kind="master" id="s1" onSend={() => {}} onSideStart={onSideStart} onSideClose={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    setPromptEditorText(editor, "why this?");
+    fireEvent.click(screen.getByRole("button", { name: "사이드 질문" }));
+    fireEvent.click(await screen.findByRole("button", { name: "닫기" }));
+    await act(async () => { opened("late-side"); });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent("why this?");
   });
 });
 

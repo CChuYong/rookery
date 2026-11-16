@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Zap, CircleAlert, Eye, X } from "lucide-react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { rovingIndex, useReturnFocusOnClose } from "../lib/focus.js";
+import { Bell, BellOff, Zap, CircleAlert, Eye, X } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store/store.js";
 import { useAcksStore } from "../store/acks.js";
 import { buildAttentionItems, type AttentionItem, type AttentionNav } from "../lib/attention-queue.js";
 import { cn } from "../lib/cn.js";
+import { MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 
 interface TriggerRect {
@@ -39,7 +42,9 @@ export function attentionPanelPosition(rect: TriggerRect, viewport: ViewportRect
 // Header bell: the single ranked "지금 나를 기다리는 것" surface (attention-queue design).
 // Tier 0 (blocked on a human answer) drives the urgent badge tone; clicking a row navigates to it.
 // Dismissal routes by kind: failures → persisted ack (acks store), review items → flip the live unread map.
-export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): JSX.Element {
+// It also hosts the OS-notification toggle (audit #20: one bell, not two) — the glyph turns into a muted bell while
+// notifications are off. `variant="statusbar"` is the 20px status-bar trigger.
+export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void; notifyOn?: boolean; onToggleNotify?: () => void; variant?: "header" | "statusbar" }): JSX.Element {
   const t = useT();
   const s = useStore(
     useShallow((st) => ({
@@ -101,7 +106,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
   };
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") setOpen(false); };
+    const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.preventDefault(); setOpen(false); } };
     const click = (e: MouseEvent): void => {
       if (panelRef.current?.contains(e.target as Node) || btnRef.current?.contains(e.target as Node)) return;
       setOpen(false);
@@ -110,6 +115,20 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
     window.addEventListener("mousedown", click);
     return () => { window.removeEventListener("keydown", esc); window.removeEventListener("mousedown", click); };
   }, [open]);
+  // Focus (audit #75, same contract as ResourceMonitor #61): opening moves focus to the first item (or the panel when
+  // empty) so a keyboard user lands in it; closing (Escape, picking an item) gives focus back to the bell.
+  useEffect(() => {
+    if (!open) return;
+    (panelRef.current?.querySelector<HTMLElement>("[data-bell-item]") ?? panelRef.current)?.focus();
+  }, [open]);
+  useReturnFocusOnClose(open, btnRef, panelRef);
+  const onPanelKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const rows = Array.from(panelRef.current?.querySelectorAll<HTMLElement>("[data-bell-item]") ?? []);
+    const next = rovingIndex(e.key, rows.indexOf(document.activeElement as HTMLElement), rows.length);
+    if (next === null) return;
+    e.preventDefault();
+    rows[next]?.focus();
+  };
 
   const dismiss = (it: AttentionItem): void => {
     if (it.kind === "worker-review" && it.nav.workerId) s.clearAttention(it.nav.workerId);
@@ -131,20 +150,31 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
     : kind === "worker-failure" || kind === "automation-failure" ? <CircleAlert size={14} className="text-fail" />
     : <Eye size={14} className="text-muted" />;
 
+  const muted = p.notifyOn === false;
+  const statusbar = p.variant === "statusbar";
+  const BellGlyph = muted ? BellOff : Bell;
+
   return (
     <>
       <button
         ref={btnRef}
         onClick={toggle}
-        aria-label={t("attentionBell.aria", { count: items.length })}
+        aria-label={muted ? t("attentionBell.ariaMuted", { count: items.length }) : t("attentionBell.aria", { count: items.length })}
         aria-expanded={open}
-        className={cn("no-drag relative flex h-6 w-6 items-center justify-center rounded-md transition-colors", open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim")}
+        aria-haspopup="dialog"
+        title={muted ? t("attentionBell.titleMuted") : t("attentionBell.title")}
+        className={cn(
+          "no-drag relative flex items-center justify-center transition-colors",
+          statusbar ? "h-5 w-5 rounded-sm" : "h-6 w-6 rounded-md",
+          open ? "bg-raised text-fg" : "text-muted hover:bg-raised hover:text-fg-dim",
+        )}
       >
-        <Bell size={14} />
+        <BellGlyph size={statusbar ? 12 : 14} />
         {items.length > 0 && (
           <span
             className={cn(
-              "absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-0.5 text-meta font-medium leading-none",
+              "absolute flex items-center justify-center rounded-full px-0.5 text-meta font-medium leading-none",
+              statusbar ? "-right-1 -top-1 h-[13px] min-w-[13px]" : "-right-0.5 -top-0.5 h-[15px] min-w-[15px]",
               urgent > 0 ? "bg-accent text-white" : "bg-line text-fg ring-1 ring-sunk",
             )}
           >
@@ -156,11 +186,26 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
         <div
           ref={panelRef}
           role="dialog"
+          tabIndex={-1}
           aria-label={t("attentionBell.title")}
+          onKeyDown={onPanelKeyDown}
           style={{ top: pos.top, left: pos.left }}
-          className="fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden rounded-md border border-line bg-surface p-1.5 shadow-pop"
+          className={cn("fixed z-[90] flex max-h-[calc(100vh-16px)] w-[328px] flex-col overflow-hidden focus:outline-none", MENU_SURFACE)}
         >
-          <div className="px-2.5 pb-1 pt-1.5 text-meta font-medium text-faint">{t("attentionBell.title")}</div>
+          <div className="flex items-center gap-2 px-2.5 pb-1 pt-1.5">
+            <span className="min-w-0 flex-1 text-meta font-medium text-faint">{t("attentionBell.title")}</span>
+            {p.onToggleNotify && (
+              <button
+                onClick={p.onToggleNotify}
+                aria-pressed={!muted}
+                title={muted ? t("app.notifyOffTitle") : t("app.notifyOnTitle")}
+                className="no-drag flex shrink-0 items-center gap-1 rounded px-1 text-meta text-muted transition-colors hover:bg-raised hover:text-fg-dim"
+              >
+                <span>{t("attentionBell.notifyToggle")}</span>
+                <span className={muted ? "text-faint" : "text-fg-dim"}>{muted ? t("attentionBell.notifyOffState") : t("attentionBell.notifyOnState")}</span>
+              </button>
+            )}
+          </div>
           {items.length === 0 ? (
             <div className="px-2.5 pb-3 pt-1 text-ui text-muted">{t("attentionBell.empty")}</div>
           ) : (
@@ -171,7 +216,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
                     <div className={cn("px-2.5 pb-0.5 pt-2 text-meta font-medium", tier === 0 ? "text-accent" : tier === 1 ? "text-fail" : "text-faint")}>{title}</div>
                     {rows.map((it) => (
                       <div key={it.key} className="group flex items-center gap-2 rounded-md px-2.5 py-1.5 hover:bg-raised">
-                        <button onClick={() => go(it)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <button data-bell-item onClick={() => go(it)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                           {icon(it.kind)}
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-body text-fg-dim">{it.label}</span>
@@ -184,7 +229,7 @@ export function AttentionBell(p: { onNavigate: (nav: AttentionNav) => void }): J
                           <button
                             onClick={() => dismiss(it)}
                             aria-label={t("attentionBell.dismiss")}
-                            className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-ink/60 hover:text-fg-dim group-hover:opacity-100"
+                            className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-ink/60 hover:text-fg-dim group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                           >
                             <X size={12} />
                           </button>
