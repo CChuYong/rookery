@@ -542,7 +542,7 @@ export function AutomationForm(p: {
                     browseDir={p.browseDir ? (d) => p.browseDir!(d, cwd || undefined) : undefined}
                     placeholder=""
                     minHeight={120}
-                    className="rounded-lg border border-line bg-sunk p-2"
+                    className="rounded-lg border border-line bg-sunk p-2 transition-colors focus:border-fg/30"
                   />
                 </div>
                 <label className="flex flex-col gap-1">
@@ -593,7 +593,7 @@ export function AutomationForm(p: {
                     commands={p.commands}
                     browseDir={p.browseDir && repoPath ? (d) => p.browseDir!(d, repoPath) : undefined}
                     minHeight={120}
-                    className="rounded-lg border border-line bg-sunk p-2"
+                    className="rounded-lg border border-line bg-sunk p-2 transition-colors focus:border-fg/30"
                   />
                 </div>
                 <label className="flex flex-col gap-1">

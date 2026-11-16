@@ -224,8 +224,15 @@ select:not([multiple]):disabled { background-image: none; padding-inline-end: 8p
 .collapse-anim { transition-property: grid-template-rows, opacity; }
 
 /* keyboard focus visibility (quality floor): an orange outline on raw interactive elements, instant, following each
-   element's own radius. Button(cva) draws its own ring and opts out with focus-visible:outline-none. */
-:where(button, a[href], [role="button"], [role="tab"], select, summary, input, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
+   element's own radius. Button(cva) draws its own ring and opts out with focus-visible:outline-none.
+   Text-entry controls (text-like inputs, textarea, contenteditable) are deliberately left out: browsers report
+   :focus-visible on them even after a mouse click, and this unlayered rule beats utility classes, so every click into
+   a field would draw the orange ring. They show focus through their own border/ring (ui/input.tsx `field`) or their
+   container's focus-within border instead. Only non-text input types are listed. */
+:where(button, a[href], [role="button"], [role="tab"], select, summary,
+  input[type="checkbox"], input[type="radio"], input[type="range"], input[type="color"], input[type="file"],
+  input[type="submit"], input[type="button"], input[type="reset"], input[type="image"],
+  [tabindex]:not([tabindex="-1"], input, textarea, [contenteditable])):focus-visible {
   outline: 2px solid var(--color-accent-hi);
   outline-offset: 2px;
 }

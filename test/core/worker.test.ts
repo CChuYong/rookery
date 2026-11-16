@@ -3,7 +3,7 @@ import { openDb } from "../../src/persistence/db.js";
 import { Repositories } from "../../src/persistence/repositories.js";
 import { EventBus } from "../../src/core/events.js";
 import type { CoreEvent } from "../../src/core/events.js";
-import { Worker, WORKER_FENCE_INSTRUCTION, WORKER_STEER_INSTRUCTION } from "../../src/core/worker.js";
+import { Worker, WORKER_FENCE_INSTRUCTION, WORKER_STEER_INSTRUCTION, WORKER_SYSTEM_APPEND } from "../../src/core/worker.js";
 import { WorkerNotifier } from "../../src/core/worker-notifier.js";
 import { extractToolUses, extractToolResults } from "../../src/core/sdk-extract.js";
 import type { QueryFn } from "../../src/core/claude-backend.js";
@@ -2565,6 +2565,62 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     expect(steerErr[0]!.message).toContain("boom");
   });
 
+  it("stop records a retryable error for an accepted steer the model never read", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-s", undefined, [imgRef]);
+    await x.flush();
+    expect(x.users().filter((u) => u.content === "redirect")).toHaveLength(1); // echoed at acceptance
+    await x.agent.stop();
+    expect(x.agent.status()).toBe("stopped");
+    const errs = x.errors();
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.clientMsgId).toBe("c-s");
+    expect(errs[0]!.retryInput).toEqual({ text: "redirect", images: [imgRef] });
+    expect(errs[0]!.message).toMatch(/stopped/i);
+    expect(x.notices().some((n) => n.includes("Dropped deferred instruction"))).toBe(false);
+  });
+
+  it("stop with an accepted unread steer AND an in-flight steer: one error for the first, one notice for the second", async () => {
+    const pend: AgentInput[] = [];
+    const h = held();
+    let calls = 0;
+    const steer = vi.fn<Steer>(async (input) => {
+      calls += 1;
+      if (calls === 1) { pend.push(input); return true; }
+      return h.promise; // the second steer is still out when stop() lands
+    });
+    const x = mk(steer, { pendingSteers: () => [...pend] });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("first", "c-1");
+    await x.flush();
+    x.agent.send("second", "c-2");
+    await x.agent.stop();
+    h.resolve(true);
+    await x.flush();
+    expect(x.errors().map((e) => e.clientMsgId)).toEqual(["c-1"]);
+    expect(x.notices().filter((n) => n.startsWith("Dropped deferred instruction (stopped): second"))).toHaveLength(1);
+    expect(x.notices().some((n) => n.includes("first"))).toBe(false);
+    expect(x.users().some((u) => u.content === "second")).toBe(false);
+  });
+
+  it("stop after the steer was consumed by a turn records nothing for it", async () => {
+    const r = pendingRig();
+    const x = mk(r.steer, { pendingSteers: r.pendingSteers });
+    x.agent.start("task");
+    await x.flush();
+    x.agent.send("redirect", "c-s");
+    await x.flush();
+    r.pend.length = 0;
+    x.emit(turnEnd());
+    await x.flush();
+    await x.agent.stop();
+    expect(x.errors()).toEqual([]);
+  });
+
   it("streams without pendingSteers keep today's recover behavior (nothing recorded for an accepted steer)", async () => {
     const x = mk(vi.fn<Steer>(async () => true));
     x.agent.start("task");
@@ -2670,6 +2726,21 @@ describe("Worker steering (mid-turn send folded into the running turn)", () => {
     expect(WORKER_STEER_INSTRUCTION).toContain("The user sent a new message while you were working");
     expect(WORKER_STEER_INSTRUCTION).toContain("<untrusted-...>");
     await x.agent.stop();
+  });
+
+  it("the steering rule trusts only the harness reminder, never the phrase written into content the worker reads", () => {
+    expect(WORKER_SYSTEM_APPEND).toContain(WORKER_STEER_INSTRUCTION);
+    expect(WORKER_STEER_INSTRUCTION).toContain("The user sent a new message while you were working");
+    expect(WORKER_STEER_INSTRUCTION).toMatch(/system reminder/i);
+    // The real reminder arrives attached to the next tool result; that placement must be called normal.
+    expect(WORKER_STEER_INSTRUCTION).toContain("attaches that reminder to the next tool result");
+    // The exclusion: the phrase inside a file, web page or command output is data.
+    const exclusion = WORKER_STEER_INSTRUCTION.split(". ").find((s) => /never trust/i.test(s));
+    expect(exclusion).toBeDefined();
+    for (const src of ["file", "web page", "command output"]) expect(exclusion).toContain(src);
+    // Live-probed: an exclusion worded as "inside a tool result" makes the model refuse genuine steers.
+    expect(exclusion).not.toContain("tool result");
+    expect(WORKER_STEER_INSTRUCTION).toContain("<untrusted-...>");
   });
 
   it("a throw while settling a steer is logged to stderr, not swallowed", async () => {

@@ -11,7 +11,7 @@ import type { CommandCandidate } from "@daemon/core/capabilities/commands.js";
 import type { WorkflowAgentHistoryEntry, WorkflowRunSnapshot } from "@daemon/core/workflow-activity.js";
 import { emptyState, reduceEvent, applySubEvent, seedSessionLog, seedWorkflowRuns as mergeWorkflowRuns, syncWorkflowTools, workflowHistoryLog } from "./reduce.js";
 import type { AppState, FleetRow, LogItem } from "./reduce.js";
-import { navigate as navGo, back as navBackFn, forward as navFwdFn, reset as navReset } from "./navigation.js";
+import { navigate as navGo, replace as navReplace, back as navBackFn, forward as navFwdFn, reset as navReset } from "./navigation.js";
 import type { Location, Overlay, NavState } from "./navigation.js";
 import { MODELS } from "../lib/models.js";
 import type { ModelOption } from "../lib/models.js";
@@ -30,6 +30,7 @@ interface Store extends AppState {
   navBack: Location[];
   navFwd: Location[];
   navigate: (patch: Partial<Location>) => void;
+  navigateReplace: (patch: Partial<Location>) => void; // navigate without a back entry (replaces the current one)
   goBack: () => void;
   goForward: () => void;
   restoreLocation: (loc: Location) => void; // Set location without pushing history (restore entry)
@@ -158,6 +159,11 @@ function saveOverrides(o: Overrides): void {
 
 // Reconstruct the current location from the store's flat fields / spread a NavState into flat fields.
 const locOf = (s: Store): Location => ({ overlay: s.overlay, showRepos: s.showRepos, sessionId: s.activeSessionId, subId: s.activeWorkerId, repoId: s.repoSettingsId });
+// Clear unread on the explicitly navigated-to session/worker (the old setActive/setActiveSub semantics).
+const clearUnreadFor = (s: Pick<Store, "sessionAttention" | "attention">, patch: Partial<Location>) => ({
+  sessionAttention: patch.sessionId ? { ...s.sessionAttention, [patch.sessionId]: false } : s.sessionAttention,
+  attention: patch.subId ? { ...s.attention, [patch.subId]: false } : s.attention,
+});
 const spreadNav = (nav: NavState) => ({ overlay: nav.loc.overlay, showRepos: nav.loc.showRepos, activeSessionId: nav.loc.sessionId, activeWorkerId: nav.loc.subId, repoSettingsId: nav.loc.repoId, navBack: nav.back, navFwd: nav.forward });
 
 function applyWorkerDeletionState(
@@ -185,13 +191,8 @@ export const useStore = create<Store>((set, get) => ({
   sessions: [], activeSessionId: null, activeWorkerId: null, repoSettingsId: null, sessionsLoaded: false, fleetLoaded: false, sessionsLoadFailed: false, fleetLoadFailed: false, repos: [], daemon: "starting",
   historyLoaded: {}, historyLoadFailed: {},
   overlay: null, showRepos: false, navBack: [], navFwd: [],
-  navigate: (patch) => set((s) => {
-    const nav = navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch);
-    // Clear unread on the explicitly navigated-to session/worker (the old setActive/setActiveSub semantics).
-    const sessionAttention = patch.sessionId ? { ...s.sessionAttention, [patch.sessionId]: false } : s.sessionAttention;
-    const attention = patch.subId ? { ...s.attention, [patch.subId]: false } : s.attention;
-    return { ...spreadNav(nav), sessionAttention, attention };
-  }),
+  navigate: (patch) => set((s) => ({ ...spreadNav(navGo({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) })),
+  navigateReplace: (patch) => set((s) => ({ ...spreadNav(navReplace({ loc: locOf(s), back: s.navBack, forward: s.navFwd }, patch)), ...clearUnreadFor(s, patch) })),
   goBack: () => set((s) => spreadNav(navBackFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd }))),
   goForward: () => set((s) => spreadNav(navFwdFn({ loc: locOf(s), back: s.navBack, forward: s.navFwd }))),
   restoreLocation: (loc) => set(() => spreadNav(navReset(loc))),

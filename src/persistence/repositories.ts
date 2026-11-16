@@ -195,6 +195,15 @@ function audiencesOverlap(a: CapabilityAudience, b: CapabilityAudience): boolean
     && a.origins.some((origin) => b.origins.includes(origin));
 }
 
+// Persisted event types that may carry image refs (see referencedImageIds).
+export const IMAGE_REF_SESSION_EVENT_TYPES = ["master.message", "error"] as const;
+export const IMAGE_REF_WORKER_EVENT_TYPES = ["message", "error"] as const;
+const sqlList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(",");
+const IMAGE_REF_SCAN_SQL = [
+  `SELECT payload_json FROM session_events WHERE type IN (${sqlList(IMAGE_REF_SESSION_EVENT_TYPES)}) AND instr(payload_json, '"images"') > 0`,
+  `SELECT payload_json FROM worker_events WHERE type IN (${sqlList(IMAGE_REF_WORKER_EVENT_TYPES)}) AND instr(payload_json, '"images"') > 0`,
+];
+
 export class Repositories {
   private readonly warnedCorrupt = new Set<string>();
   private readonly repoChangeListeners = new Set<(change: RepoChange) => void>();
@@ -204,8 +213,51 @@ export class Repositories {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
-  addImage(image: ImageRef): void {
-    this.db.prepare('INSERT INTO images(id,name,media_type,byte_length,width,height,created_at) VALUES (?,?,?,?,?,?,?)').run(image.id, image.name, image.mediaType, image.byteLength, image.width, image.height, this.now());
+  addImage(image: ImageRef, sha256?: string): void {
+    this.db.prepare('INSERT INTO images(id,name,media_type,byte_length,width,height,created_at,sha256) VALUES (?,?,?,?,?,?,?,?)').run(image.id, image.name, image.mediaType, image.byteLength, image.width, image.height, this.now(), sha256 ?? null);
+  }
+
+  // Dedupe lookup: rows with identical decoded bytes, MIME and (sanitized) name, newest first. The caller still
+  // checks the asset file, since a row can outlive an asset that was removed out of band.
+  findImagesByContent(sha256: string, mediaType: string, name: string): ImageRef[] {
+    return this.db.prepare('SELECT id,name,media_type AS mediaType,byte_length AS byteLength,width,height FROM images WHERE sha256 = ? AND media_type = ? AND name = ? ORDER BY created_at DESC, rowid DESC').all(sha256, mediaType, name) as ImageRef[];
+  }
+
+  touchImage(id: string): void {
+    this.db.prepare('UPDATE images SET last_used_at = ? WHERE id = ?').run(this.now(), id);
+  }
+
+  // Images whose last use (or creation, if never re-used) is strictly before `cutoff` (ISO-8601, same format as now()).
+  imageGcCandidates(cutoff: string): Array<{ id: string; byteLength: number }> {
+    return this.db.prepare('SELECT id, byte_length AS byteLength FROM images WHERE COALESCE(last_used_at, created_at) < ? ORDER BY created_at, rowid').all(cutoff) as Array<{ id: string; byteLength: number }>;
+  }
+
+  // Which of `candidates` are referenced by persisted transcripts. Every ref-carrying shape is a JSON
+  // `images: ImageRef[]` array: Master user `master.message` and `error.retryInput.images` (session_events),
+  // Worker user `message` and `error.retryInput.images` (worker_events, incl. the orchestrator's error writer);
+  // fork copies keep type and payload. SQLite narrows to those event types containing the literal `"images"`
+  // key BEFORE any row reaches JS (type is checked first so large tool payloads are never read), then every
+  // UUID-shaped token in the surviving rows counts. `messages.content` is a plain-text index that never holds
+  // refs, so it is not scanned.
+  // Tripwire: test/persistence/repositories.test.ts fails if events.ts gains an `images` field on another type.
+  referencedImageIds(candidates: ReadonlySet<string>): Set<string> {
+    const found = new Set<string>();
+    if (!candidates.size) return found;
+    const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
+    for (const sql of IMAGE_REF_SCAN_SQL) {
+      for (const [text] of this.db.prepare(sql).raw().iterate() as Iterable<[string]>) {
+        for (const match of text.matchAll(uuid)) {
+          const id = match[0].toLowerCase();
+          if (candidates.has(id)) found.add(id);
+        }
+        if (found.size === candidates.size) return found;
+      }
+    }
+    return found;
+  }
+
+  deleteImage(id: string): void {
+    this.db.prepare('DELETE FROM images WHERE id = ?').run(id);
   }
 
   getImage(id: string): ImageRef | undefined {

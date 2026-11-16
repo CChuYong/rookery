@@ -8,6 +8,7 @@ import { Input, Select, Textarea } from "../ui/input.js";
 import { cn } from "../lib/cn.js";
 import { EFFORTS, codexDefaultEffort, codexEffortsFor, effectiveEffort, effortLabelKey, effortSupported } from "../lib/models.js";
 import { useStore } from "../store/store.js";
+import { spawnDraftKey, useDraftStore, type SpawnDraftSource } from "../store/drafts.js";
 import { Segment, type SegmentItem } from "../ui/segment.js";
 import { buildSourceTask } from "../lib/source.js";
 import { useT } from "../i18n/provider.js";
@@ -35,9 +36,19 @@ export function WorkerSpawnPage(p: {
   const t = useT();
   const [speed, setSpeed] = useState<SpeedPreference | null>(null);
   const settings = useStore((s) => s.settings);
-  const [mode, setMode] = useState<Mode>("direct");
-  const [task, setTask] = useState("");
-  const [label, setLabel] = useState("");
+  // The task, label and picked issue/ticket persist per repo in the drafts store (spawnWorker:<repo>), so closing the
+  // page, switching away or reloading never loses a half-written task or the ticket it should be linked to. Read once
+  // on mount; every edit writes through.
+  const [initialDraft] = useState(() => useDraftStore.getState().byPage[spawnDraftKey(p.repo)]);
+  const [mode, setMode] = useState<Mode>(initialDraft?.source?.provider ?? "direct");
+  const [task, setTaskState] = useState(initialDraft?.text ?? "");
+  const [label, setLabelState] = useState(initialDraft?.label ?? "");
+  // A restored pick has no body (it already lives in the task text); only identifier/url/title are used after picking.
+  const [selected, setSelected] = useState<SourceItem | null>(initialDraft?.source ? { ...initialDraft.source, body: "" } : null);
+  const saveDraft = (nextTask: string, nextLabel: string, nextSource: SpawnDraftSource | null = selected): void =>
+    useDraftStore.getState().setSpawnDraft_(p.repo, nextTask, nextLabel, nextSource ?? undefined);
+  const setTask = (v: string): void => { setTaskState(v); saveDraft(v, label); };
+  const setLabel = (v: string): void => { setLabelState(v); saveDraft(task, v); };
   // Agent backend for this worker. Default "claude" (wire-minimal: the spawn() builder below sends `undefined`
   // for claude and only sends an explicit value for "codex", matching the daemon's provider?: "claude"|"codex" contract).
   const [provider, setProvider] = useState<"claude" | "codex">("claude");
@@ -57,7 +68,6 @@ export function WorkerSpawnPage(p: {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SourceItem[]>([]);
   const [searching, setSearching] = useState(false);
-  const [selected, setSelected] = useState<SourceItem | null>(null);
   const [focused, setFocused] = useState(false); // show results dropdown only when the search box is focused
   const [spawning, setSpawning] = useState(false);
   const spawningRef = useRef(false);
@@ -88,14 +98,18 @@ export function WorkerSpawnPage(p: {
     return () => clearTimeout(t);
   }, [q, mode, selected]);
 
-  const switchMode = (m: Mode) => { setMode(m); setSelected(null); setQ(""); setResults([]); setHighlight(-1); };
+  const switchMode = (m: Mode) => {
+    if (selected) saveDraft(task, label, null);
+    setMode(m); setSelected(null); setQ(""); setResults([]); setHighlight(-1);
+  };
   const pickSource = (item: SourceItem) => {
     const built = buildSourceTask(item);
-    setTask(built.task);
-    setLabel(built.label);
+    setTaskState(built.task);
+    setLabelState(built.label);
+    saveDraft(built.task, built.label, item);
     setSelected(item);
   };
-  const clearSelected = () => { setSelected(null); setQ(""); };
+  const clearSelected = () => { saveDraft(task, label, null); setSelected(null); setQ(""); };
 
   // The page closes on its own when a successful spawn selects the new worker (navigation leaves the overlay);
   // onClose is still called so callers without that navigation (tests, no result id) return to where they were.
@@ -123,6 +137,7 @@ export function WorkerSpawnPage(p: {
     const spawnModel = provider === "codex" ? (codexModel.trim() || undefined) : model;
     const cb = costBudget.trim() ? Number(costBudget) : undefined;
     const costBudgetUsd = cb != null && Number.isFinite(cb) && cb > 0 ? cb : undefined;
+    const draftRepo = p.repo; // the repo select is disabled while spawning, but pin the key anyway
     spawningRef.current = true;
     setSpawning(true);
     try {
@@ -142,6 +157,7 @@ export function WorkerSpawnPage(p: {
       // renderer request contract. Avoiding an unconditional `await undefined` also keeps state updates in
       // the originating click batch for synchronous consumers.
       if (result) await result;
+      useDraftStore.getState().setSpawnDraft_(draftRepo, "", ""); // spawned: the draft is spent
       dismiss();
     } catch {
       // App owns the localized error toast. Keep this modal and every local draft field mounted for retry.
@@ -149,8 +165,21 @@ export function WorkerSpawnPage(p: {
       setSpawning(false);
     }
   };
-  // The repo row re-targets the form without discarding the draft: only repo-bound state (base branch, the picked
-  // issue/ticket and its search) resets — the task, label and model choices survive the switch.
+  // The repo row re-targets the form without discarding the typed task: App remounts the page per repo (its page key
+  // includes the repo), so only what lives in the drafts store survives the switch — the task and label move to the
+  // picked repo unless that repo already holds a draft of its own (never overwrite one; the current draft then stays
+  // under this repo). Everything else starts fresh on the new page: provider, model, effort, permission, budget and
+  // speed return to their defaults, and the repo-bound picks (base branch, picked issue/ticket) are not carried.
+  const changeRepo = (next: string): void => {
+    if (next !== p.repo && (task || label)) {
+      const drafts = useDraftStore.getState();
+      if (!drafts.byPage[spawnDraftKey(next)]) {
+        drafts.setSpawnDraft_(next, task, label);
+        drafts.setSpawnDraft_(p.repo, "", "");
+      }
+    }
+    p.onRepoChange?.(next);
+  };
   const firstRepo = useRef(p.repo);
   useEffect(() => {
     if (firstRepo.current === p.repo) return;
@@ -196,7 +225,7 @@ export function WorkerSpawnPage(p: {
                 className="h-auto min-w-0 border-0 bg-transparent px-0.5 font-mono text-title font-medium text-fg underline decoration-line underline-offset-4 hover:decoration-fg-dim focus:ring-0"
                 value={p.repo}
                 disabled={spawning}
-                onChange={(e) => p.onRepoChange!(e.target.value)}
+                onChange={(e) => changeRepo(e.target.value)}
                 aria-label={t("workerSpawnModal.repoLabel")}
                 title={t("workerSpawnModal.repoLabel")}
               >
@@ -222,7 +251,6 @@ export function WorkerSpawnPage(p: {
                   <Input
                     autoFocus
                     className="mx-3 mt-3 w-auto"
-                    style={{ outline: "none" }}
                     size="sm"
                     placeholder={mode === "github" ? t("workerSpawnModal.searchGithub") : t("workerSpawnModal.searchLinear")}
                     value={q}
@@ -268,9 +296,7 @@ export function WorkerSpawnPage(p: {
               <Textarea
                 autoFocus={mode === "direct"}
                 aria-labelledby="worker-spawn-heading"
-                // The whole box shows focus (focus-within border); the global focus-visible outline (unlayered, so it beats
-                // utility classes) would otherwise draw an orange ring around just the textarea's half of the box.
-                style={{ outline: "none" }}
+                // The whole box shows focus (focus-within border); text fields are outside the global focus-visible outline.
                 className="min-h-[84px] resize-none border-0 bg-transparent px-4 pt-3.5 text-prose focus:ring-0"
                 placeholder={sourceMode ? t("workerSpawnModal.taskPlaceholderSource") : t("workerSpawnModal.taskPlaceholderDirect")}
                 value={task}

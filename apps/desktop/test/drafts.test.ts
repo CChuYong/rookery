@@ -84,3 +84,57 @@ it('keeps stable Side drafts only while their source target exists',async()=>{
  expect(Object.keys(pruned.byPage)).toEqual(['side:master:alive','side:worker:alive']);
  expect(pruned.byPage[sideDraftKey('master','alive')].text).toBe('master follow-up');
 });
+
+describe("spawn page drafts (spawnWorker:<repo>)", () => {
+  it("setSpawnDraft stores task + label under the per-repo key and removes the entry when both are empty", async () => {
+    const { setSpawnDraft, spawnDraftKey } = await import("../src/renderer/store/drafts.js");
+    let s = setSpawnDraft(emptyDraftState(), "app", "fix the flaky test", "flaky");
+    expect(spawnDraftKey("app")).toBe("spawnWorker:app");
+    expect(s.byPage["spawnWorker:app"]).toEqual({ text: "fix the flaky test", images: [], label: "flaky" });
+    s = setSpawnDraft(s, "app", "", "only a label");
+    expect(s.byPage["spawnWorker:app"]).toEqual({ text: "", images: [], label: "only a label" });
+    s = setSpawnDraft(s, "app", "", "");
+    expect("spawnWorker:app" in s.byPage).toBe(false);
+  });
+
+  it("migrateDrafts keeps a spawn draft's label across reloads", async () => {
+    const { migrateDrafts } = await import("../src/renderer/store/drafts.js");
+    const s = migrateDrafts({ byPage: { "spawnWorker:app": { text: "t", images: [], label: "l" }, x: { text: "y", images: [], label: 3 } } });
+    expect(s.byPage["spawnWorker:app"]).toEqual({ text: "t", images: [], label: "l" });
+    expect(s.byPage.x).toEqual({ text: "y", images: [] });
+  });
+
+  it("setSpawnDraft keeps the picked source item (provider/id/identifier/title/url) and drops it on clear", async () => {
+    const { setSpawnDraft } = await import("../src/renderer/store/drafts.js");
+    const source = { provider: "linear" as const, id: "1", identifier: "ABC-7", title: "Ship it", url: "https://l/ABC-7" };
+    let s = setSpawnDraft(emptyDraftState(), "app", "task", "ABC-7", source);
+    expect(s.byPage["spawnWorker:app"]).toEqual({ text: "task", images: [], label: "ABC-7", source });
+    s = setSpawnDraft(s, "app", "task", "ABC-7");
+    expect(s.byPage["spawnWorker:app"]).toEqual({ text: "task", images: [], label: "ABC-7" });
+    s = setSpawnDraft(s, "app", "", "", source);
+    expect(s.byPage["spawnWorker:app"]?.source).toEqual(source);
+    s = setSpawnDraft(s, "app", "", "");
+    expect("spawnWorker:app" in s.byPage).toBe(false);
+  });
+
+  it("migrateDrafts keeps a well-formed spawn draft source and drops a malformed one", async () => {
+    const { migrateDrafts } = await import("../src/renderer/store/drafts.js");
+    const source = { provider: "github", id: "12", identifier: "#12", title: "Bug", url: "https://x/12" };
+    const s = migrateDrafts({ byPage: {
+      "spawnWorker:app": { text: "t", images: [], source: { ...source, body: "ignored" } },
+      "spawnWorker:web": { text: "t", images: [], source: { ...source, provider: "jira" } },
+      "spawnWorker:api": { text: "t", images: [], source: { ...source, url: 3 } },
+    } });
+    expect(s.byPage["spawnWorker:app"]).toEqual({ text: "t", images: [], source });
+    expect(s.byPage["spawnWorker:web"]).toEqual({ text: "t", images: [] });
+    expect(s.byPage["spawnWorker:api"]).toEqual({ text: "t", images: [] });
+  });
+
+  it("pruneDrafts always keeps spawn drafts (the repo list may not have loaded at prune time)", async () => {
+    const { setSpawnDraft } = await import("../src/renderer/store/drafts.js");
+    let s = setSpawnDraft(emptyDraftState(), "app", "unsent spawn task", "");
+    s = setDraft(s, "dead-worker", "drop me");
+    const pruned = pruneDrafts(s, new Set<string>());
+    expect(Object.keys(pruned.byPage)).toEqual(["spawnWorker:app"]);
+  });
+});

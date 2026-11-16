@@ -247,6 +247,14 @@ export const MIGRATIONS: ReadonlyArray<(db: DB) => void> = [
       CHECK(width * height <= 20000000)
     ) STRICT;`);
   },
+  (db) => {
+    // Image dedupe + GC bookkeeping. Both columns are nullable: pre-existing rows have no hash (they simply
+    // never dedupe) and no last use (GC ages them from created_at). last_used_at is refreshed by a dedupe hit
+    // or a validated send, so an image re-attached to a draft or queued in memory restarts its grace window.
+    db.exec(`ALTER TABLE images ADD COLUMN sha256 TEXT CHECK(sha256 IS NULL OR length(sha256) = 64);
+      ALTER TABLE images ADD COLUMN last_used_at TEXT;
+      CREATE INDEX idx_images_content ON images(sha256, media_type);`);
+  },
 ];
 
 export function currentVersion(db: DB): number {

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { imageSize } from "image-size";
 import {
   IMAGE_LIMITS,
@@ -37,6 +37,14 @@ function matchesSignature(bytes: Buffer, mime: string): boolean {
       bytes.subarray(8, 12).toString("latin1") === "WEBP"
     );
   return false;
+}
+// Unreferenced images younger than this survive GC: they may sit in an unsent (persisted) desktop draft,
+// which no transcript references yet. A dedupe hit, a read (get) or a validated send restarts the window.
+export const IMAGE_GC_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+export interface ImageGcResult {
+  deleted: number;
+  // Metadata bytes released from the quota (authoritative byte_length of the deleted rows).
+  bytes: number;
 }
 export interface ImageUpload {
   name: string;
@@ -116,6 +124,15 @@ export class ImageStore implements ImageResolver {
         .replace(/[\x00-\x1f\x7f]/g, "")
         .slice(0, 200)
         .trim() || "image";
+    // Dedupe: identical bytes + MIME + sanitized name return the existing authoritative ref (so validate()
+    // passes for the caller's name/mediaType) without a new file or quota growth. A different name gets its
+    // own row AND its own file: rows stay immutable and quota stays a plain sum (no shared-inode accounting).
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    for (const existing of this.repos.findImagesByContent(sha256, mediaType, name)) {
+      if (!this.assetPresent(existing)) continue;
+      this.repos.touchImage(existing.id);
+      return existing;
+    }
     const ref: ImageRef = {
       id: randomUUID(),
       name,
@@ -153,7 +170,7 @@ export class ImageStore implements ImageResolver {
       // link is atomic and fails if the destination exists; rename could replace an existing asset.
       fs.linkSync(temporary, destination);
       linked = true;
-      this.repos.addImage(ref);
+      this.repos.addImage(ref, sha256);
     } catch (error) {
       if (linked) {
         try {
@@ -174,6 +191,66 @@ export class ImageStore implements ImageResolver {
       }
     }
     return ref;
+  }
+  // Regular file (never a symlink) of exactly the committed size.
+  private assetPresent(image: ImageRef): boolean {
+    try {
+      const stat = fs.lstatSync(path.join(this.directory, image.id));
+      return stat.isFile() && stat.size === image.byteLength;
+    } catch {
+      return false;
+    }
+  }
+  // Reclaim images that are older than the grace window (by last use, else creation) AND not referenced by
+  // any persisted transcript (session/worker events incl. retry inputs). Synchronous on the event loop, like
+  // upload, so it can never interleave with a quota reservation; the cost is bounded by the reference scan,
+  // which SQLite narrows to ref-carrying event types containing an `"images"` key. Only regular files directly
+  // inside the images dir are unlinked; a symlinked or non-file entry keeps both its row and its entry. Crash
+  // leftovers (files without a row, temporaries) are outside this policy and stay counted against the quota.
+  collectGarbage(options: { graceMs?: number; now?: number } = {}): ImageGcResult {
+    this.checkDirectory();
+    const cutoff = new Date(
+      (options.now ?? Date.now()) - (options.graceMs ?? IMAGE_GC_GRACE_MS),
+    ).toISOString();
+    const candidates = this.repos.imageGcCandidates(cutoff);
+    const result: ImageGcResult = { deleted: 0, bytes: 0 };
+    if (!candidates.length) return result;
+    const referenced = this.repos.referencedImageIds(
+      new Set(candidates.map((candidate) => candidate.id)),
+    );
+    for (const candidate of candidates) {
+      if (referenced.has(candidate.id)) continue;
+      try {
+        assertImageId(candidate.id); // never join a non-UUID row id into a path
+      } catch {
+        continue;
+      }
+      const file = path.join(this.directory, candidate.id);
+      let stat: fs.Stats | undefined;
+      try {
+        stat = fs.lstatSync(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
+      }
+      if (stat && !stat.isFile()) continue;
+      // Unlink first, then delete the row: a failed unlink (or a crash in between) leaves the row, so the asset
+      // stays committed metadata and the next pass retries it, instead of a rowless file that permanently eats
+      // quota. A row whose file is already gone (ENOENT, incl. a crash after the unlink) is just dropped.
+      if (stat) {
+        try {
+          fs.unlinkSync(file); // unlink removes the entry itself; it never follows a symlink
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
+        }
+        // Keep the cached leftover count exact: the file's excess over its committed size is gone with it.
+        if (this.leftoverBytes !== null)
+          this.leftoverBytes -= Math.max(0, stat.size - candidate.byteLength);
+      }
+      this.repos.deleteImage(candidate.id);
+      result.deleted += 1;
+      result.bytes += candidate.byteLength;
+    }
+    return result;
   }
   private metadata(id: string): ImageRef {
     assertImageId(id);
@@ -210,6 +287,9 @@ export class ImageStore implements ImageResolver {
         if (!n) throw new Error("Image is unreadable; upload again and retry");
         offset += n;
       }
+      // A displayed image (e.g. an unsent draft's thumbnail) restarts the GC grace window, so the window means
+      // "since last displayed or sent", not "since upload".
+      this.repos.touchImage(id);
       return { image, base64: bytes.toString("base64") };
     } finally {
       fs.closeSync(fd);
@@ -247,6 +327,9 @@ export class ImageStore implements ImageResolver {
       }
       return image;
     });
+    // An accepted send may sit in an in-memory queue before its transcript event persists: restart the GC
+    // grace window so a collection in between cannot reclaim it.
+    for (const image of result) this.repos.touchImage(image.id);
     return validateImageRefs(result);
   }
   resolve(refs: readonly ImageRef[]): ResolvedImage[] {
@@ -254,5 +337,44 @@ export class ImageStore implements ImageResolver {
       mediaType: ref.mediaType,
       data: this.get(ref.id).base64,
     }));
+  }
+}
+
+// Coalesces GC triggers (boot, permanent session/worker deletion) into one deferred run, so a burst of
+// deletes costs one pass and no pass runs inside a request handler. The pass itself is synchronous on the
+// event loop. A failing run is logged, never thrown: GC must not crash boot or a delete. A summary line is
+// logged when something was removed, or always for a pass that includes the boot trigger.
+export class ImageGcScheduler {
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private stopped = false;
+  private bootPending = false;
+  constructor(
+    private readonly store: Pick<ImageStore, "collectGarbage">,
+    private readonly options: { delayMs?: number; log?: (line: string) => void } = {},
+  ) {}
+  schedule(reason: "boot" | "delete" = "delete"): void {
+    if (this.stopped) return;
+    if (reason === "boot") this.bootPending = true;
+    if (this.timer) return;
+    this.timer = setTimeout(() => this.run(), this.options.delayMs ?? 1000);
+    this.timer.unref?.();
+  }
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+  private run(): void {
+    this.timer = undefined;
+    const boot = this.bootPending;
+    this.bootPending = false;
+    const log = this.options.log ?? ((line: string) => process.stderr.write(line));
+    try {
+      const { deleted, bytes } = this.store.collectGarbage();
+      if (deleted > 0 || boot)
+        log(`[rookery] image gc: removed ${deleted} unreferenced image(s), ${bytes} bytes\n`);
+    } catch (error) {
+      log(`[rookery] image gc failed: ${String(error)}\n`);
+    }
   }
 }

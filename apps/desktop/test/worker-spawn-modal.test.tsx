@@ -2,8 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { WorkerSpawnPage } from "../src/renderer/components/WorkerSpawnPage.js";
 import { useStore } from "../src/renderer/store/store.js";
+import { useDraftStore, emptyDraftState } from "../src/renderer/store/drafts.js";
 import type { SourceItem } from "@daemon/core/source-intake.js";
 import type { CodexModelInfo } from "@daemon/protocol/messages.js";
+
+
+// The page persists its task/label in the drafts store; keep tests independent of each other.
+beforeEach(() => { useDraftStore.setState(emptyDraftState()); });
 
 const items: SourceItem[] = [
   { provider: "github", id: "1", identifier: "#1", title: "First issue", url: "https://x/1", body: "" },
