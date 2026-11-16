@@ -38,8 +38,8 @@ describe("Composer permission-mode selector", () => {
     expect(screen.getByText("권한 우회")).toBeInTheDocument();
     expect(screen.getByText("계획 모드")).toBeInTheDocument();
     // restricted: the master-only modes are NOT offered to a worker
-    expect(screen.queryByText("Default")).toBeNull();
-    expect(screen.queryByText("Accept Edits")).toBeNull();
+    expect(screen.queryByText("기본")).toBeNull();
+    expect(screen.queryByText("편집 자동 승인")).toBeNull();
     fireEvent.change(sel, { target: { value: "plan" } });
     expect(onPermissionMode).toHaveBeenCalledWith("plan");
   });

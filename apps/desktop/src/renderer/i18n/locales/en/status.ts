@@ -12,7 +12,7 @@ export default {
   "status.error": "Error",
   "status.failed": "Failed",
   "status.orphaned": "Orphaned",
-  "status.short_provisioning": "Starting",
+  "status.short_provisioning": "Preparing",
   "status.short_running": "Running",
   "status.short_background": "Background",
   "status.short_idle": "Idle",

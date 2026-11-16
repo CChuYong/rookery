@@ -14,9 +14,9 @@ describe("MonacoDiff states (audit #18)", () => {
     let finish!: (v: { head: string; work: string }) => void;
     mockWs(vi.fn(() => new Promise((r) => { finish = r; })));
     render(<MonacoDiff root="/r" path="/r/a.ts" />);
-    expect(screen.getByText("변경 내용을 불러오는 중…")).toBeInTheDocument();
+    expect(screen.getByText("변경 사항을 불러오는 중…")).toBeInTheDocument();
     finish({ head: "a", work: "b" });
-    await waitFor(() => expect(screen.queryByText("변경 내용을 불러오는 중…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("변경 사항을 불러오는 중…")).toBeNull());
     expect(diffs[0]!.getModel()).not.toBeNull();
   });
 
@@ -24,10 +24,10 @@ describe("MonacoDiff states (audit #18)", () => {
     const gitDiff = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce({ head: "a", work: "b" });
     mockWs(gitDiff);
     render(<MonacoDiff root="/r" path="/r/a.ts" />);
-    expect(await screen.findByText("변경 내용을 불러오지 못했어요.")).toBeInTheDocument();
+    expect(await screen.findByText("변경 사항을 불러오지 못했어요.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(gitDiff).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText("변경 내용을 불러오지 못했어요.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("변경 사항을 불러오지 못했어요.")).toBeNull());
   });
 
   it("says there are no changes when both sides are identical", async () => {

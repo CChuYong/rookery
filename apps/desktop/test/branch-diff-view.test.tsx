@@ -44,7 +44,7 @@ describe("BranchDiffView", () => {
 
   it("shows a notice when the daemon truncated the diff", async () => {
     render(<BranchDiffView workerId="w1" loadDiff={async () => `${DIFF}\n…(truncated)`} />);
-    expect(await screen.findByText("변경이 너무 커서 앞부분(512 KB)만 보여요")).toBeInTheDocument();
+    expect(await screen.findByText("변경 사항이 너무 커서 앞부분(512 KB)만 보여요")).toBeInTheDocument();
   });
 
   it("notes a binary file instead of showing an empty pane", async () => {

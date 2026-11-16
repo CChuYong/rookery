@@ -6,6 +6,8 @@ import type { Catalog } from "../../types.js";
 // |-------------------------------------------|----------------------------|-----------------------------|
 // | Abort the current turn (session kept)     | 중단 / 중단됨              | Interrupt / Interrupted     |
 // | End a worker (terminal, worktree kept)    | 중지 / 중지됨              | Stop / Stopped              |
+// | Master hits a budget/turn cap (no stop    | 이 세션을 계속할지         | review whether to continue  |
+// | verb exists for a master session)         | 검토하세요                 | this session                |
 // | Put files back to a turn checkpoint       | 체크포인트로 복원 / 복원   | Restore checkpoint / Restore|
 // | Throw away git working-tree changes       | 변경 사항 폐기 / 폐기      | Discard changes / Discard   |
 // | Throw away unsaved edits (forms, editor)  | 변경 버리기, 버리고 닫기   | Discard changes, Discard    |
@@ -34,7 +36,7 @@ import type { Catalog } from "../../types.js";
 // Git, MCP, Capability Center / Capabilities, capability, pack, digest, secret, cron, and CLI commands/paths
 // (codex login, ~/.rookery, rookery/<id>) — those stay lowercase as typed. The master's default name "rookery"
 // is a literal setting value, not the product name.
-// Renderer notice.* keys and params mirror the daemon catalog (src/core/i18n.ts); only their wording may differ.
+// Renderer notice.* keys, params and wording mirror the daemon catalog (src/core/i18n.ts) byte for byte — change both.
 export default {
   "common.save": "저장",
   "common.saved": "저장됨",

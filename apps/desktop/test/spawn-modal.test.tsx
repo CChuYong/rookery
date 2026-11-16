@@ -115,7 +115,7 @@ describe("WorkerSpawnPage", () => {
     expect(sel.value).toBe("bypassPermissions");
     // restricted to bypass + plan (no default/acceptEdits)
     expect(screen.getByText("계획 모드")).toBeInTheDocument();
-    expect(screen.queryByText("Accept Edits")).toBeNull();
+    expect(screen.queryByText("편집 자동 승인")).toBeNull();
     fireEvent.change(sel, { target: { value: "plan" } });
     fireEvent.click(screen.getByRole("button", { name: "스폰" }));
     expect(onSpawn.mock.calls.at(-1)).toEqual(["", "", "claude-opus-4-8", "high", undefined, undefined, "plan", undefined, undefined]);

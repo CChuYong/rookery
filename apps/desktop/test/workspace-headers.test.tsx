@@ -36,7 +36,7 @@ describe("WorkerHeader background reason", () => {
     expect(screen.queryByRole("button", { name: "백그라운드 작업" })).toBeNull();
     rerender(<WorkerHeader {...baseProps} worker={{ id: "w2", label: "t", repoPath: "/r", status: "idle", branch: null, model: null } as never} />);
     expect(screen.queryByText(/백그라운드 ·/)).toBeNull();
-    expect(screen.queryByText(/Workflow ·/)).toBeNull();
+    expect(screen.queryByText(/워크플로 ·/)).toBeNull();
   });
 });
 describe("WorkerHeader background task list", () => {

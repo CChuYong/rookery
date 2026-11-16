@@ -1053,7 +1053,7 @@ export class Worker {
           const turnUnavailable = ev.costAccuracy === "unavailable";
           if (turnUnavailable) this.record({ kind: "notice", text: t(DEFAULT_LOCALE, "notice.costUnavailable") });
           if (budget != null && (turnUnavailable || this.cumCostUsd >= budget)) {
-            this.record({ kind: "notice", text: turnUnavailable ? t(DEFAULT_LOCALE, "notice.costUnavailableStopped") : this.costAccuracy === "estimated" || this.costAccuracy === "unavailable" ? t(DEFAULT_LOCALE, "notice.costBudgetEstimatedWorker", { spent: this.cumCostUsd.toFixed(2), budget: budget.toFixed(2) }) : `Cost budget reached ($${this.cumCostUsd.toFixed(2)} / $${budget.toFixed(2)}) — stopping worker.` });
+            this.record({ kind: "notice", text: turnUnavailable ? t(DEFAULT_LOCALE, "notice.costUnavailableStopped") : this.costAccuracy === "estimated" || this.costAccuracy === "unavailable" ? t(DEFAULT_LOCALE, "notice.costBudgetEstimatedWorker", { spent: this.cumCostUsd.toFixed(2), budget: budget.toFixed(2) }) : t(DEFAULT_LOCALE, "notice.costBudgetWorker", { spent: this.cumCostUsd.toFixed(2), budget: budget.toFixed(2) }) });
             void stream.interrupt(); // void: NOT await — would deadlock inside the consume loop
             queue.close();
             abort.abort();
