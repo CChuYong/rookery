@@ -28,7 +28,7 @@ jobs:
 
   build-mac:
     needs: gate
-    runs-on: macos-14 # Apple Silicon (arm64)
+    runs-on: macos-15 # Apple Silicon (arm64); macos-14 runners were retired
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
