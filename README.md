@@ -5,35 +5,38 @@
 A long-lived daemon hosts **master agent** sessions that register your repos, remember project context, and spawn **workers** that code in parallel — each in its own git worktree and branch, on the AI backend you choose (**Claude or Codex**). The desktop app, CLI, and Slack are thin clients: close them anytime, the daemon keeps working.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/a4eb2001-deaf-4738-92c1-435d1b216ce6" alt="Ask in plain language → the master spawns workers in isolated worktrees → a reviewer auto-spawns when they settle → the attention bell tells you what needs you" width="920">
+  <img src="docs/assets/readme/hero.png" alt="Mission control: sessions and the per-repo worker fleet on the left, a master conversation in the middle, Files and Git on the right, usage and status in the status bar" width="920">
 </p>
-
-Watch the full 90-second demo — a real run: real workers, real commits, real automation.
-
-https://github.com/user-attachments/assets/38face67-d553-4c51-9741-b0942ca337cd
 
 <table>
   <tr>
-    <td width="50%"><img src="https://github.com/user-attachments/assets/3b339393-c0ec-4bdb-8e81-8817dae8d845" alt="The fleet: workers per repo with status, backend, and cost — and each worker's own transcript and terminal"></td>
-    <td width="50%"><img src="https://github.com/user-attachments/assets/f9cb81ec-31d8-4e40-a790-e50cccc673aa" alt="Automation rules: cron, interval, Slack, and worker-settled triggers driving master turns or worker spawns"></td>
+    <td width="50%"><img src="docs/assets/readme/worker.png" alt="A worker's own transcript, with its files and git changes in the side panel"></td>
+    <td width="50%"><img src="docs/assets/readme/spawn.png" alt="The New worker page: one task box, the repo in the heading, an optional GitHub or Linear ticket"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>The fleet</b> — per-repo workers with status, backend & cost; every worker has its own transcript, diff, and terminal.</sub></td>
+    <td align="center"><sub><b>The fleet</b> — every worker has its own transcript, diff, checkpoints, terminal, and cost.</sub></td>
+    <td align="center"><sub><b>New worker</b> — describe the task, or start straight from a GitHub issue or Linear ticket.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/readme/automation.png" alt="Automation rules: cron, interval, Slack, and worker-settled triggers driving master turns or worker spawns"></td>
+    <td width="50%"><img src="docs/assets/readme/branch-diff.png" alt="Everything a worker changed since its branch forked, file by file"></td>
+  </tr>
+  <tr>
     <td align="center"><sub><b>Automation</b> — cron / interval / Slack / worker-settled triggers, with per-rule model, backend, and budget.</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="https://github.com/user-attachments/assets/b958b17d-2bc6-4776-a65e-84e4d9267829" alt="The attention bell ranking what needs you now: blocked questions, failures, and unreviewed results"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><sub><b>The attention bell</b> — one ranked queue for what actually needs you: blocked questions first, failures second, unreviewed results third.</sub></td>
+    <td align="center"><sub><b>Branch diff</b> — review everything a worker changed since its branch forked.</sub></td>
   </tr>
 </table>
+
+A 90-second demo of a real run (recorded on an earlier version of the app): real workers, real commits, real automation.
+
+https://github.com/user-attachments/assets/38face67-d553-4c51-9741-b0942ca337cd
 
 ## Why rookery
 
 - **Always-on, not tab-bound.** The daemon owns sessions, workers, memory, and automations. Clients attach and detach; overnight runs survive; conversations restore on reconnect — including tool calls and reasoning.
 - **A real fleet, safely parallel.** Every worker gets its own worktree + branch (`rookery/<id>`). Nothing touches your checkout; you review diffs and tell workers to commit, push, and open PRs themselves.
-- **Two brains, one control plane.** Masters, workers, automations, and Slack threads each pick their backend — Claude or Codex — with per-surface model/effort controls, live model catalogs, and even **cross-provider fork** (continue a Claude conversation on Codex, or vice versa).
+- **Two brains, one control plane.** Masters, workers, automations, and Slack threads each pick their backend — Claude or Codex — with per-surface model, effort, and **Standard/Fast speed** controls, live model catalogs, and even **cross-provider fork** (continue a Claude conversation on Codex, or vice versa).
+- **Steer, don't restart.** A message to a busy worker lands in the turn it is already running (Codex `turn/steer`, Claude streaming input), so you can redirect work mid-flight without losing it. Stop a single runaway background task without stopping the worker (Claude workers).
 - **A fleet that reacts, not just obeys.** Automations fire on schedules (cron / every N minutes), Slack messages, or **when a worker settles** — so "implementation worker finished → spawn a reviewer on its branch" is a rule, not a ritual.
 - **Honest signals.** Worker states are truthful: `idle` means *all assigned work is done* — a worker waiting on a background shell shows `background`, and completion notifications fire only at the real finish line. The **attention bell** ranks what needs you *now*: blocked questions first, failures second, unreviewed results third.
 - **Drives and is driven.** Talk to it from Slack (thread = session), or expose the fleet as an **MCP server** and drive rookery from Claude Code, Cursor, or Codex — code never leaves your machine.
@@ -43,98 +46,26 @@ https://github.com/user-attachments/assets/38face67-d553-4c51-9741-b0942ca337cd
 
 ### Mission control (desktop)
 
-Sessions and the live fleet at a glance: streaming conversations with plan cards and metrics, per-worker transcripts/diffs/checkpoints/costs, an integrated workspace (file explorer, git panel, Monaco editor/diff, terminal in each worktree), dockable panes, and a usage dashboard with Claude and Codex tabs. Korean/English UI.
+An IDE-style workbench (think VS Code or Zed) for the whole fleet:
 
-Spawn workers from chat in natural language, from the spawn dialog, or **straight from a GitHub issue or Linear ticket** — the task is pre-filled from the ticket body.
+- **Sessions and the live fleet** in one sidebar — per-repo workers with status, branch, and cost — plus a status bar for daemon/Slack state, Claude and Codex usage, memory, and one attention bell that ranks what needs you now.
+- **Streaming conversations** with tool calls, reasoning, and metrics; attach **images** (pick, drop, or paste) to masters, workers, and Side questions.
+- **A dockable workspace per conversation**: file explorer, Git panel, Monaco editor and diff, and a terminal in each worktree. Panels resize and hide sensibly on small windows and come back at the size you chose.
+- **Per-worker review**: transcript, checkpoints you can restore, the **whole-branch diff** since the worker forked, and its own terminal.
+- **New worker page**: describe the task in one box, or start **straight from a GitHub issue or Linear ticket**; drafts are kept per repo.
+- One model menu per composer for model, effort, permission mode, and speed; keyboard shortcuts (⌘B, ⌘N, ⌘,, ⌘[ / ⌘]); Korean and English UI.
 
 ### Capability Center
 
-Register a local capability pack once, review its complete file digest, and assign it to
-all of Rookery or to a repository, session, or worker. Audience filters target master,
-worker, or Side agents and UI, Slack, automation, or external origins. More specific
-assignments override broader ones, including disabled assignments used as tombstones.
+Bring your own skills, instructions, and MCP servers to every agent — once. Register a capability pack (or use **Catalog → Add MCP / Import Skill / Build MCP pack**), review and trust its exact file digest, and assign it to all of rookery, a repository, a session, or a single worker, for master, worker, or Side agents. More specific assignments override broader ones.
 
-The **Catalog** tab handles registration, validation, trust, refresh, removal, and write-only secrets;
-**Assignments** manages scope and audience; **Effective** shows native inventory plus the
-deterministic desired state for a Rookery or registered-repository preview, or desired and
-applied revisions for a live master or worker. Preview targets let you choose Claude or
-Codex and Master or Worker before starting a conversation. A Rookery preview is intentionally
-scope-only: provider-native global inventory requires a concrete repository or live target.
-Trusted
-packs apply to both **Claude and Codex** without changing the user's `~/.claude`,
-`~/.codex/config.toml`, or repository provider files. Instructions append to the turn
-prompt. Claude loads skills and MCP through generated local plugins; Codex loads them from
-Rookery-owned, target-specific `CODEX_HOME` directories. Masters pick up changes on their
-next turn; newly started or lazily resumed workers apply once when their provider stream
-opens. An already-live worker reports **Reload required** and can either reload immediately
-while idle or schedule a reload for the current turn boundary. Reload preserves the worker
-row, worktree, transcript, provider-native conversation, model, effort, permission mode,
-and lifetime budgets.
+Trusted packs apply to **both Claude and Codex** without touching your `~/.claude`, `~/.codex/config.toml`, or repository provider files. Secret values are write-only: they reach only the provider process that needs them and are never shown back in the UI or written to generated config. **Effective** shows exactly what a given master or worker gets (or would get, as a preview before you start one); a live worker can reload new capabilities without losing its conversation or worktree. Repositories can also check in a shared index at `.rookery/capabilities.json` — discovered automatically, never trusted or enabled automatically.
 
-For the common path, use **Catalog → Add MCP** or **Import Skill**. Each action creates an
-untrusted singleton generated pack without enabling it anywhere. Review and trust the
-entry, then use **Settings → Capabilities** for broad Rookery defaults or
-**Repos → repository settings → Capabilities** for repository overrides. Each row chooses
-`Inherit`, `Enabled`, or `Disabled` independently for UI-started Master and Worker agents,
-and can open the matching Effective preview without creating a session or worktree. Custom audiences that
-mix UI with Slack/automation/external or Side remain editable only in advanced Assignments.
-
-To add several MCP servers as one atomic bundle, use **Catalog → Build MCP pack**.
-Choose a registered repository and add any number of stdio or Streamable HTTP servers,
-including argument boundaries, public env/header values, write-only secret env/header
-values, bearer auth, tool allow/deny lists, and required-server behavior. Rookery writes a
-private public-only manifest under `~/.rookery/capability-packs/`, stores secret values
-separately, and creates an enabled repo-local UI binding for the selected Master/Worker
-audience. The new pack remains untrusted until you expand its highlighted Catalog card,
-review it, and trust the exact digest. This flow creates and deletes generated packs; edit
-an existing generated pack by deleting and recreating it in this UI version.
-
-In an active master or worker chat, slash autocomplete is resolved from that exact
-conversation's capability snapshot. `/capabilities`, `/skills`, `/hooks`, and `/mcp` open
-the matching Capability Center view, while `/btw` and `/side` use the same action registry
-to open a Side question. Managed skills are inserted with provider-native syntax
-(`/name` for Claude and `$name` for Codex) only when the selected target can invoke them;
-inventory-only provider commands are not offered as dead prompts.
-
-Registered repositories may check in an opt-in shared index at
-`.rookery/capabilities.json`; its pack paths are contained under
-`.rookery/capabilities/`. Rookery discovers and watches those packs, but never trusts or
-binds them automatically. A content change invalidates the exact-digest trust decision
-until the new digest is reviewed. Removing, disabling, or deleting an index entry is an
-authoritative tombstone for that repo-owned Catalog row.
-
-Start with [`docs/examples/capability-pack`](docs/examples/capability-pack/):
-
-1. Open Capability Center → Catalog and import the example pack directory.
-2. Review the files and public MCP configuration, then trust the displayed digest.
-3. Save the declared secret if needed; secret values are never returned to the UI.
-4. Create an assignment, run the next Claude or Codex turn (or start/resume a matching
-   worker), and inspect the matching desired/applied revision in Effective.
-
-Run the isolated Slice 9 preview boundary smoke with:
-
-```bash
-npm run build && npm run smoke:capabilities:slice9
-```
-
-Rookery copies trusted bytes into an immutable
-`~/.rookery/capability-runtime/<revision>/` directory at launch. Generated files contain
-only environment aliases; write-only secret values are passed only in the selected provider
-child environment and are never returned to the UI or written into plugin/TOML
-configuration. Codex masters and workers each receive a separate generated home, config,
-rollout tree, and secret alias overlay. For a stdio MCP with a pack-relative `cwd`, Rookery
-generates a small Node launcher inside the immutable runtime so the declared working
-directory is honored without invoking a shell.
-For secret-bearing Codex launches, Rookery also disables Codex shell snapshots and removes
-managed aliases from model-invoked shell environments using fixed public overrides; no
-secret name or value is placed in argv.
-On daemon boot, Rookery keeps only valid schema-2 runtime revisions still desired by an
-authoritative session or worker and removes stale revisions and interrupted staging
-directories without following symlinks.
+Start with the example pack in [`docs/examples/capability-pack`](docs/examples/capability-pack/): import it in Capability Center → Catalog, review and trust the digest, assign it, and check the result in Effective.
 
 ### The fleet
 
-The master routes tasks across your registered repos, spawns workers, watches them, steers them mid-flight (send follow-ups / interrupt), and gets woken when they finish. Follow-up instructions continue the same worker session with full context. After a daemon restart, workers rehydrate from disk — diffs, stop, and resume keep working.
+The master routes tasks across your registered repos, spawns workers, watches them, steers them mid-flight, and gets woken when they finish. A follow-up to a busy worker is folded into the turn it is running; otherwise it continues the same worker session with full context. Interrupt a turn, stop a single background task (Claude workers), recover a stuck worker in place, or stop it for good — the worktree stays until you discard it. Optional lifetime USD budgets stop a worker that overspends. After a daemon restart, workers rehydrate from disk — diffs, stop, and resume keep working.
 
 ### Automation
 
@@ -195,7 +126,7 @@ Architecture and contributor docs live in [`docs/`](docs/README.md) (start there
 Both backends reach the same orchestration and tools; pick per session/worker/automation/Slack thread (or `--provider claude|codex` on the CLI).
 
 - **Claude** — in-app API key (**Settings → Anthropic API key**) or `ANTHROPIC_API_KEY`; falls back to Claude Code OAuth (`claude login`). All permission modes supported.
-- **Codex** — in-app key (**Settings → Codex API key**) or `codex login`. Model/effort pickers are driven by the live model catalog. Codex **masters** are `bypassPermissions`-only (workers are unaffected).
+- **Codex** — in-app key (**Settings → Codex API key**) or `codex login`; requires Codex CLI **0.169.0 or newer**. Model/effort pickers are driven by the live model catalog. Codex **masters** are `bypassPermissions`-only (workers are unaffected).
 
 ## Data handling
 
@@ -213,6 +144,7 @@ The master and workers run with `permissionMode: "bypassPermissions"` (a headles
 2. Enable **Socket Mode** → issue an App-Level Token (scope `connections:write`) → `SLACK_APP_TOKEN` (xapp-…).
 3. **OAuth & Permissions** → Bot Token Scopes: `assistant:write`, `chat:write`, `app_mentions:read`, `im:history`, `channels:history` → install to the workspace → `SLACK_BOT_TOKEN` (xoxb-…).
 4. Enable the **Agents & Assistants** feature; subscribe to `app_mention`, `assistant_thread_started`, `message.im`, and `message.channels` (required for Slack automation triggers; invite the bot to the target channels).
+5. Optional: subscribe to `agent_session_stopped` and `agent_session_title_changed` to enable Slack's native **Stop** button and keep renamed threads in sync. For the master's read-only Slack tools, also add `channels:read`, `groups:read`, `groups:history`, `users:read`, and `files:read`.
 
 Paste both tokens in **Settings → Slack** (or export them as env vars for headless runs). The allowlist is fail-closed: with an empty allowlist and allow-all off, everyone is refused. Slack threads run on Claude by default; `slackProvider: codex` switches them (bypassPermissions-only, like all Codex masters).
 
