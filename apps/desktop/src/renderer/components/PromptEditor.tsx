@@ -24,6 +24,7 @@ import {
   HISTORY_PUSH_TAG,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
+  KEY_DOWN_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
@@ -48,6 +49,7 @@ import { MENU_ITEM, MENU_ITEM_ACTIVE, MENU_SURFACE } from "../lib/ui-tokens.js";
 import { useT } from "../i18n/provider.js";
 import { FileMentionPopup } from "./FileMentionPopup.js";
 import { useScrollActiveIntoView } from "../lib/focus.js";
+import { appShortcutAllowedIn, appShortcutFor } from "../lib/shortcuts.js";
 import {
   $createFileMentionNode,
   $isFileMentionNode,
@@ -243,6 +245,15 @@ const PromptEditorInner = forwardRef<PromptEditorHandle, PromptEditorProps>(func
     }
     requestAnimationFrame(() => editor.focus());
   }, [editor, onCommandAction]);
+
+  // App shortcuts that pass through text fields (final review #3) — on macOS that includes Cmd+B, which Lexical would
+  // otherwise take as bold (invisible in the plain-text prompt). Claiming the command before Lexical's own keydown
+  // handling, without preventDefault, lets the event reach the window-level shortcut listener.
+  useEffect(() => editor.registerCommand(KEY_DOWN_COMMAND, (event) => {
+    const platform = window.rookery?.platform;
+    const action = appShortcutFor(event, platform);
+    return action != null && appShortcutAllowedIn("text", action, platform);
+  }, COMMAND_PRIORITY_HIGH), [editor]);
 
   useEffect(() => {
     const unregister = [

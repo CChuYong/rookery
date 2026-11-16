@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isTypingTarget } from "./focus.js";
+import { keyContext, modalLayerOpen, type KeyContext } from "./focus.js";
 
 type KeyLike = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 
@@ -61,16 +61,26 @@ export const APP_SHORTCUT = {
   terminal: { label: () => (isMacPlatform() ? "⌃`" : "Ctrl+`"), aria: () => "Control+`" },
 } as const;
 
-// Text fields, Monaco and xterm keep their keys (Cmd+B is bold in the composer); an open modal owns the keyboard.
+// Per-key guard (final review #3). The shortcuts are advertised in tooltips, so they work from the composer and other
+// text fields (the normal focus state). Monaco and xterm keep every combo. On Windows/Linux Ctrl+B / Ctrl+N are
+// editing keys in a text field (back-char / next-line), so only Ctrl+, passes there; macOS Cmd combos all pass.
+export function appShortcutAllowedIn(ctx: KeyContext, action: AppShortcut, platform: string | undefined): boolean {
+  if (ctx === "none") return true;
+  if (ctx === "code") return false;
+  return platform === "darwin" || action === "settings";
+}
+
+// A field that handled the key itself (defaultPrevented) keeps it; an open modal owns the keyboard.
 export function useAppShortcuts(handlers: Record<AppShortcut, () => void>): void {
   const ref = useRef(handlers);
   ref.current = handlers;
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       // A held key auto-repeats: toggling the sidebar 30 times a second is never what anyone meant.
-      if (e.repeat || e.defaultPrevented || isTypingTarget(e.target) || document.querySelector('[aria-modal="true"]')) return;
-      const action = appShortcutFor(e, window.rookery?.platform);
-      if (!action) return;
+      if (e.repeat || e.defaultPrevented || modalLayerOpen()) return;
+      const platform = window.rookery?.platform;
+      const action = appShortcutFor(e, platform);
+      if (!action || !appShortcutAllowedIn(keyContext(e.target), action, platform)) return;
       e.preventDefault();
       ref.current[action]();
     };

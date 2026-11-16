@@ -310,3 +310,28 @@ describe("PromptEditor slash popup keyboard (audit #70)", () => {
     }
   });
 });
+
+// Final review #3: on Windows/Linux Ctrl+B stays the editor's key (the macOS Cmd+B pass-through is covered in
+// prompt-editor-mac-keys.test.tsx, which needs Lexical loaded on an Apple navigator.platform).
+describe("PromptEditor app shortcut pass-through (final review #3)", () => {
+  const setPlatform = (platform: string | undefined): void => {
+    if (platform === undefined) delete (window as unknown as { rookery?: unknown }).rookery;
+    else (window as unknown as { rookery: unknown }).rookery = { platform };
+  };
+  it("Windows/Linux: Ctrl+B stays with the editor", async () => {
+    setPlatform("linux");
+    try {
+      const { getByRole } = render(<PromptEditor initialText="hello" />);
+      const root = getByRole("textbox");
+      await waitFor(() => expect(isLexicalEditor(getEditorPropertyFromDOMNode(root))).toBe(true));
+      const seen: boolean[] = [];
+      const onWindow = (e: KeyboardEvent): void => { seen.push(e.defaultPrevented); };
+      window.addEventListener("keydown", onWindow);
+      fireEvent.keyDown(root, { key: "b", ctrlKey: true });
+      window.removeEventListener("keydown", onWindow);
+      expect(seen).toEqual([true]);
+    } finally {
+      setPlatform(undefined);
+    }
+  });
+});

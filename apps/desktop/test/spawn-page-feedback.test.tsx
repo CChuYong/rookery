@@ -67,6 +67,21 @@ describe("WorkerSpawnPage submit key", () => {
     await waitFor(() => expect(onSpawn).toHaveBeenCalledTimes(1));
   });
 
+  // Final review #1: Enter in an empty task box must not spawn a blank worker by accident; the spawn button
+  // stays the deliberate way to start an idle worker.
+  it("ignores Enter in an empty task box but still spawns blank from the button", async () => {
+    const onSpawn = vi.fn();
+    render(<WorkerSpawnPage {...base} onSpawn={onSpawn} />);
+    fireEvent.keyDown(taskBox(), { key: "Enter" });
+    fireEvent.change(taskBox(), { target: { value: "   " } });
+    fireEvent.keyDown(taskBox(), { key: "Enter" });
+    await Promise.resolve();
+    expect(onSpawn).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "스폰" }));
+    await waitFor(() => expect(onSpawn).toHaveBeenCalledTimes(1));
+    expect(onSpawn.mock.calls[0]![0]).toBe("");
+  });
+
   it("puts permission mode and speed in the model menu with model and effort", () => {
     render(<WorkerSpawnPage {...base} onSpawn={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Opus 4\.8 · 높음/ }));

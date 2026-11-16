@@ -60,6 +60,7 @@ import { SettingsPage } from "./components/SettingsPage.js";
 import { SidebarRail } from "./components/SidebarRail.js";
 import { ReposHome } from "./components/ReposHome.js";
 import { useHistoryShortcuts } from "./lib/useHistoryShortcuts.js";
+import { useCloseTabDispatch } from "./lib/close-tab-dispatch.js";
 import { APP_SHORTCUT, useAppShortcuts, withShortcut } from "./lib/shortcuts.js";
 import { shortBranch } from "./lib/branch.js";
 import type { AttentionNav } from "./lib/attention-queue.js";
@@ -279,6 +280,8 @@ export function App(): JSX.Element {
   const canFwd = s.navFwd.length > 0;
   // Cmd+[ / Cmd+] (Alt+←/→ off macOS) and the mouse back/forward buttons (audit #10).
   useHistoryShortcuts(goBack, goForward);
+  // Cmd/Ctrl+W from main: workspace pages close an editor tab, everywhere else the window closes (final review #2).
+  useCloseTabDispatch();
   // "mission control is online" beat — flash the dot the instant it reaches up (falling edge of "not up"). Keeps led-live.
   const daemonJustUp = useJustEnded(s.daemon !== "up");
   const slackJustUp = useJustEnded(s.slack !== "up");

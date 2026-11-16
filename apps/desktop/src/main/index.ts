@@ -440,6 +440,8 @@ function createWindow(): void {
   win.on("unmaximize", sendMax);
   // Cmd/Ctrl+W → close the active editor tab in the renderer; Shift+Cmd/Ctrl+W → close the window (audit #82).
   // before-input-event runs ahead of the menu accelerators, so preventDefault stops the default menu's Close Window.
+  // The renderer answers a key it did not handle (no workspace page: Settings, Automation, New session, spawn page)
+  // with win:close, so ⌘W still closes the window there (renderer lib/close-tab-dispatch.ts, final review #2).
   win.webContents.on("before-input-event", (event, input) => {
     const action = windowShortcut(input, process.platform);
     if (!action) return;

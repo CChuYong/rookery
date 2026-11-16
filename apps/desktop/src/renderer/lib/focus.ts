@@ -26,6 +26,22 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return !!el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], .monaco-editor");
 }
 
+// Where a shortcut key lands, for the per-key guards of the app and history shortcuts (final review #3): "code" = Monaco
+// or xterm, which own every modifier combo (Cmd+[ is outdent, Ctrl+B / Ctrl+N are shell keys); "text" = any other
+// text-entry target (inputs, the Lexical composer); "none" = not a typing target.
+export type KeyContext = "none" | "text" | "code";
+export function keyContext(target: EventTarget | null): KeyContext {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.closest !== "function") return "none";
+  if (el.closest(".monaco-editor, .xterm")) return "code";
+  return isTypingTarget(el) ? "text" : "none";
+}
+
+// An open modal layer owns the keyboard (and the mouse back/forward buttons): global shortcuts stand back.
+export function modalLayerOpen(doc: Document = document): boolean {
+  return doc.querySelector('[aria-modal="true"]') != null;
+}
+
 // "The user is in the middle of typing something": a typing target that already holds text (or Monaco/xterm, which
 // always count). Used to decide whether a newly surfaced control may take focus without stealing a half-typed draft.
 export function isMidTyping(el: Element | null): boolean {

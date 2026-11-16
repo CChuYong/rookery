@@ -1,6 +1,7 @@
 // Cmd/Ctrl+W closes the active editor tab like an IDE instead of the whole window (audit #82). Electron's default
 // menu binds it to Close Window (and on Windows/Linux closing the last window quits the app). The window itself
-// moves to Shift+Cmd/Ctrl+W. On Windows/Linux the renderer hands Ctrl+W back to a focused terminal (delete-word).
+// moves to Shift+Cmd/Ctrl+W. On Windows/Linux the renderer hands Ctrl+W back to a focused terminal (delete-word), and
+// on a page without editor tabs the renderer asks for the normal window close (lib/close-tab-dispatch.ts).
 export interface ShortcutInput { type: string; key: string; code: string; meta: boolean; control: boolean; shift: boolean; alt: boolean }
 
 export type WindowShortcut = "closeTab" | "closeWindow" | null;

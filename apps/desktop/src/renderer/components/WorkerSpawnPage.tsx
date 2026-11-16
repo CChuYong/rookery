@@ -215,8 +215,12 @@ export function WorkerSpawnPage(p: {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isImeComposing(e)) { e.preventDefault(); void spawn(); }
   };
 
+  // An empty task box (and no picked issue) swallows the Enter instead of spawning an idle worker by accident; a blank
+  // spawn stays available, deliberately, from the spawn button.
   const onTaskKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !isImeComposing(e)) { e.preventDefault(); void spawn(); }
+    if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || isImeComposing(e)) return;
+    e.preventDefault();
+    if (task.trim() || selected) void spawn();
   };
 
   // Quiet text control (the composer's footer style): no border, a lift on hover.
