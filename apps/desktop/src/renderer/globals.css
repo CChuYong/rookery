@@ -162,6 +162,10 @@ select:not([multiple]):disabled { background-image: none; padding-inline-end: 8p
 @keyframes chip-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
 .mention-chip::before { content: "@"; opacity: 0.55; margin-right: 1px; }
 
+/* Mono runs show text exactly as typed: the fallback mono font's contextual "--" ligature otherwise
+   swallows the preceding space ("node --test" rendered as "node--test"). */
+code, pre, kbd, samp, .font-mono, .md-code { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+
 /* composer markdown shortcuts: inline code; lists are rendered by Lexical. */
 .md-code {
   font-family: var(--font-mono); font-size: 12px;
