@@ -14,6 +14,9 @@ describe("Settings", () => {
       masterName: "rookery", // settings-only default (no config fallback)
       masterModel: config.masterModel,
       workerModel: config.workerModel,
+      masterModelSource: "fallback", // no recommendation source wired in this test
+      workerModelSource: "fallback",
+      claudeRecommendedModel: "",
       masterEffort: config.masterEffort,
       workerEffort: config.workerEffort,
       codexWorkerModel: "gpt-6.2-sol",
@@ -339,5 +342,41 @@ describe("Settings", () => {
       if (prev === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = prev;
     }
+  });
+});
+
+describe("Settings — Claude default model follows the SDK recommendation", () => {
+  const fresh = (cfg = config, rec: string | null = "claude-opus-5-5") =>
+    new Settings(new Repositories(openDb(":memory:")), cfg, { recommendedClaudeModel: () => rec });
+
+  it("uses the SDK's recommended model when nothing is saved and no env var is set", () => {
+    const s = fresh();
+    expect(s.masterModel()).toBe("claude-opus-5-5");
+    expect(s.workerModel()).toBe("claude-opus-5-5");
+    expect(s.all()).toMatchObject({ masterModel: "claude-opus-5-5", masterModelSource: "recommended", workerModelSource: "recommended", claudeRecommendedModel: "claude-opus-5-5" });
+  });
+
+  it("falls back to the configured default while the recommendation is unknown", () => {
+    const s = fresh(config, null);
+    expect(s.masterModel()).toBe(config.masterModel);
+    expect(s.all()).toMatchObject({ masterModelSource: "fallback", claudeRecommendedModel: "" });
+  });
+
+  it("a saved model wins, and saving \"\" or null goes back to following the recommendation", () => {
+    const s = fresh();
+    s.apply({ masterModel: "claude-sonnet-5-5", workerModel: "claude-haiku-5-5" });
+    expect(s.masterModel()).toBe("claude-sonnet-5-5");
+    expect(s.all()).toMatchObject({ masterModelSource: "setting", workerModelSource: "setting" });
+    s.apply({ masterModel: "", workerModel: null });
+    expect(s.masterModel()).toBe("claude-opus-5-5");
+    expect(s.workerModel()).toBe("claude-opus-5-5");
+    expect(s.all()).toMatchObject({ masterModelSource: "recommended", workerModelSource: "recommended" });
+  });
+
+  it("an explicit ROOKERY_MASTER_MODEL / ROOKERY_WORKER_MODEL beats the recommendation", () => {
+    const s = fresh(loadConfig({ ROOKERY_MASTER_MODEL: "claude-opus-4-8", ROOKERY_WORKER_MODEL: "claude-sonnet-4-6" }));
+    expect(s.masterModel()).toBe("claude-opus-4-8");
+    expect(s.workerModel()).toBe("claude-sonnet-4-6");
+    expect(s.all()).toMatchObject({ masterModelSource: "env", workerModelSource: "env" });
   });
 });

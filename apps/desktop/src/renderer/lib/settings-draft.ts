@@ -37,6 +37,18 @@ const TAB_OF: Partial<Record<keyof SettingsValues, SettingsTab>> = {
   codexHandshakeTimeoutMs: "models",
 };
 
+// The form draft for saved settings. A Claude model default that follows the SDK's recommendation (nothing saved)
+// is "" in the draft — the "Recommended" option — rather than the id it currently resolves to, so saving the form
+// keeps following the recommendation instead of pinning today's model ("" is saved as "not set").
+export function toSettingsDraft(s: SettingsValues): SettingsValues {
+  const follows = (src: SettingsValues["masterModelSource"]) => src !== undefined && src !== "setting";
+  return {
+    ...s,
+    masterModel: follows(s.masterModelSource) ? "" : s.masterModel,
+    workerModel: follows(s.workerModelSource) ? "" : s.workerModel,
+  };
+}
+
 // A missing key and "" are the same value here (typing into an unset field and clearing it is not a change).
 export function changedSettingKeys(draft: SettingsValues, saved: SettingsValues): Array<keyof SettingsValues> {
   const d = draft as unknown as Record<string, unknown>;

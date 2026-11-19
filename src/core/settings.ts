@@ -34,8 +34,14 @@ export interface SettingsValues {
   codexMasterSpeed?: SpeedPreference;
   codexWorkerSpeed?: SpeedPreference;
   masterName: string;
-  masterModel: string;
-  workerModel: string;
+  masterModel: string; // the effective Claude master default (what a new session gets)
+  workerModel: string; // the effective Claude worker default (what a new worker gets)
+  // Read-only: where masterModel/workerModel came from. "recommended" = the SDK's recommended model for this
+  // account, "fallback" = recommendation not known yet (configured default), "env" = ROOKERY_*_MODEL,
+  // "setting" = saved in Settings. Not writable through settings.set.
+  masterModelSource?: ClaudeModelSource;
+  workerModelSource?: ClaudeModelSource;
+  claudeRecommendedModel?: string; // read-only: the SDK's recommended Claude model id, "" while unknown
   masterEffort: string;
   workerEffort: string;
   codexWorkerModel: string; // codex worker default model (settings-only, no env/config fallback). default "gpt-6.2-sol".
@@ -61,15 +67,35 @@ export interface SettingsValues {
 }
 
 export type McpScope = "off" | "readonly" | "full";
+export type ClaudeModelSource = "setting" | "env" | "recommended" | "fallback";
+
+// Derived, echo-only fields: never stored, so they are not part of a patch.
+type ReadOnlySettingKey = "masterModelSource" | "workerModelSource" | "claudeRecommendedModel";
 
 // null = delete that key to revert to the config default (apply's deleteSetting path). linearApiKey/anthropicApiKey/codexApiKey are outside SettingsValues (write-only secrets), so they're separate.
-export type SettingsPatch = { [K in keyof SettingsValues]?: string | null } & { linearApiKey?: string | null; anthropicApiKey?: string | null; codexApiKey?: string | null };
+export type SettingsPatch = { [K in Exclude<keyof SettingsValues, ReadOnlySettingKey>]?: string | null } & { linearApiKey?: string | null; anthropicApiKey?: string | null; codexApiKey?: string | null };
+
+// Model settings where "" means "not set" (follow the recommendation) rather than a stored value.
+const CLAUDE_MODEL_KEYS = new Set(["masterModel", "workerModel"]);
 
 export class Settings {
   constructor(
     private readonly repos: Repositories,
     private readonly config: Config,
+    // The SDK's recommended Claude model (ClaudeModelCatalog.recommended), used when neither a saved setting nor
+    // ROOKERY_*_MODEL picks one. Resolved on every read, so a newly learned recommendation applies at the next turn.
+    private readonly deps: { recommendedClaudeModel?: () => string | null } = {},
   ) {}
+
+  private claudeModel(key: "masterModel" | "workerModel"): { model: string; source: ClaudeModelSource } {
+    const saved = this.repos.getSetting(key)?.trim();
+    if (saved) return { model: saved, source: "setting" };
+    const fromEnv = key === "masterModel" ? this.config.masterModelFromEnv : this.config.workerModelFromEnv;
+    const configured = key === "masterModel" ? this.config.masterModel : this.config.workerModel;
+    if (fromEnv) return { model: configured, source: "env" };
+    const recommended = this.deps.recommendedClaudeModel?.() ?? null;
+    return recommended ? { model: recommended, source: "recommended" } : { model: configured, source: "fallback" };
+  }
 
   // Bot name (settings-only, no env/config fallback). Normalized on read via trim + 64-char cap → falls back to the default if empty.
   // all() goes through this getter, so the normalized value is echoed straight to the UI.
@@ -83,12 +109,13 @@ export class Settings {
     return this.repos.getSetting(key) === "fast" ? "fast" : "standard";
   }
 
+  // Saved setting > ROOKERY_MASTER_MODEL > the SDK's recommended model > configured default.
   masterModel(): string {
-    return this.repos.getSetting("masterModel") ?? this.config.masterModel;
+    return this.claudeModel("masterModel").model;
   }
 
   workerModel(): string {
-    return this.repos.getSetting("workerModel") ?? this.config.workerModel;
+    return this.claudeModel("workerModel").model;
   }
 
   masterEffort(): string {
@@ -268,14 +295,19 @@ export class Settings {
 
   all(): SettingsValues {
     const wcb = this.workerCostBudgetUsd(); // hoisted: avoid calling the getter twice for the same field below
+    const master = this.claudeModel("masterModel");
+    const worker = this.claudeModel("workerModel");
     return {
       masterSpeed: this.speed("claude", "master"),
       workerSpeed: this.speed("claude", "worker"),
       codexMasterSpeed: this.speed("codex", "master"),
       codexWorkerSpeed: this.speed("codex", "worker"),
       masterName: this.masterName(),
-      masterModel: this.masterModel(),
-      workerModel: this.workerModel(),
+      masterModel: master.model,
+      workerModel: worker.model,
+      masterModelSource: master.source,
+      workerModelSource: worker.source,
+      claudeRecommendedModel: this.deps.recommendedClaudeModel?.() ?? "",
       masterEffort: this.masterEffort(),
       workerEffort: this.workerEffort(),
       codexWorkerModel: this.codexWorkerModel(),
@@ -305,6 +337,7 @@ export class Settings {
   apply(patch: SettingsPatch): SettingsValues {
     for (const [key, value] of Object.entries(patch)) {
       if (value === null || value === undefined) this.repos.deleteSetting(key);
+      else if (CLAUDE_MODEL_KEYS.has(key) && String(value).trim() === "") this.repos.deleteSetting(key); // "" = follow the recommendation
       else this.repos.setSetting(key, String(value));
     }
     return this.all();

@@ -14,8 +14,8 @@
 | Key | Default | Echoed? | Meaning |
 |---|---|---|---|
 | `masterName` | `"rookery"` (`DEFAULT_MASTER_NAME`) | yes | Master's name in the system prompt. Settings-only (no env fallback); read trims + caps at 64 chars, empty → default. |
-| `masterModel` | `config.masterModel` (`ROOKERY_MASTER_MODEL`, `claude-opus-4-8`) | yes | Master model. |
-| `workerModel` | `config.workerModel` (`ROOKERY_WORKER_MODEL`, `claude-opus-4-8`) | yes | Default worker model. |
+| `masterModel` | `ROOKERY_MASTER_MODEL` if set, else the SDK's recommended model (`supportedModels()` `"default"` row), else `claude-opus-4-8` | yes | Master model. `""`/null = follow the recommendation. Echo adds read-only `masterModelSource` and `claudeRecommendedModel`. |
+| `workerModel` | `ROOKERY_WORKER_MODEL` if set, else the SDK's recommended model, else `claude-opus-4-8` | yes | Default worker model. `""`/null = follow the recommendation. Echo adds read-only `workerModelSource`. |
 | `masterEffort` | `config.masterEffort` (`ROOKERY_MASTER_EFFORT`, `high`) | yes | Master effort. |
 | `workerEffort` | `config.workerEffort` (`ROOKERY_WORKER_EFFORT`, `high`) | yes | Default worker effort. |
 | `masterSpeed` | `"standard"` | yes | Claude Master inherited speed; settings-only. |
@@ -53,8 +53,8 @@ Resolved in `src/config.ts::loadConfig` (env read once at boot).
 | `ROOKERY_HOME` | `~/.rookery` | Base dir → `dbPath`, `pidPath`, `tokenPath`, `fleet.worktreesDir`. |
 | `ROOKERY_HOST` | `127.0.0.1` | WS/HTTP bind host (non-local host warns about plaintext token). |
 | `ROOKERY_PORT` | `8787` | WS/HTTP port. Valid range `[0,65535]` (0 = OS-assigned); invalid → `8787`. |
-| `ROOKERY_MASTER_MODEL` | `claude-opus-4-8` | Master default model (settings fallback). |
-| `ROOKERY_WORKER_MODEL` | `claude-opus-4-8` | Worker default model (settings fallback). `.env.example` shows `sonnet` as an example, but the code default is opus. |
+| `ROOKERY_MASTER_MODEL` | (unset → SDK recommended model, `claude-opus-4-8` until known) | Master default model (settings fallback). When set, it beats the SDK recommendation. |
+| `ROOKERY_WORKER_MODEL` | (unset → SDK recommended model, `claude-opus-4-8` until known) | Worker default model (settings fallback). `.env.example` shows `sonnet` as an example. |
 | `ROOKERY_MASTER_EFFORT` | `high` | Master default effort. |
 | `ROOKERY_WORKER_EFFORT` | `high` | Worker default effort. |
 | `ANTHROPIC_API_KEY` | (none) | Default Anthropic key (DB `anthropicApiKey` takes priority). If absent, SDK falls back to OAuth (`claude login`); `detectAuth` is a hint only and never blocks startup. |

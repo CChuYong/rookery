@@ -12,6 +12,10 @@ export interface Config {
   port: number;
   masterModel: string;
   workerModel: string;
+  // True when ROOKERY_MASTER_MODEL / ROOKERY_WORKER_MODEL is set. Without it, masterModel/workerModel are only the
+  // last-resort default and the SDK's recommended model is used instead (see Settings.masterModel).
+  masterModelFromEnv?: boolean;
+  workerModelFromEnv?: boolean;
   masterEffort: string; // Global default effort (for Slack and the default entrypoint). The UI can override it per session/spawn.
   workerEffort: string;
   linearApiKey?: string; // Default key for Linear integration (env fallback). The DB settings' linearApiKey takes precedence.
@@ -61,6 +65,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: Number.isInteger(port) && port >= 0 && port <= 65535 ? port : 8787,
     masterModel: env.ROOKERY_MASTER_MODEL?.trim() || "claude-opus-4-8",
     workerModel: env.ROOKERY_WORKER_MODEL?.trim() || "claude-opus-4-8",
+    masterModelFromEnv: !!env.ROOKERY_MASTER_MODEL?.trim(),
+    workerModelFromEnv: !!env.ROOKERY_WORKER_MODEL?.trim(),
     masterEffort: env.ROOKERY_MASTER_EFFORT?.trim() || "high",
     workerEffort: env.ROOKERY_WORKER_EFFORT?.trim() || "high",
     linearApiKey: env.ROOKERY_LINEAR_API_KEY?.trim() || undefined,
