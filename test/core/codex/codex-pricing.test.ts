@@ -36,6 +36,21 @@ describe("codex-pricing", () => {
   });
 });
 
+ it("prices the CLI 0.170 catalog additions gpt-6.2-sol and gpt-6.2-astra (Standard and Fast)", () => {
+ // Official pricing.md, verified 2026-11-19. Inclusive input: 2M input incl. 1M cached + 1M output.
+ const u = { inputTokens: 2_000_000, cachedInputTokens: 1_000_000, outputTokens: 1_000_000 };
+ expect(isRatedModel("gpt-6.2-sol")).toBe(true);
+ expect(isRatedModel("gpt-6.2-astra")).toBe(true);
+ expect(turnCostUsd("gpt-6.2-sol", u)).toBeCloseTo(2.0 + 0.1 + 10.0, 10);
+ expect(turnCostUsd("gpt-6.2-astra", u)).toBeCloseTo(8.0 + 0.4 + 40.0, 10);
+ // Aggregate of short requests, priced per tier.
+ const flat = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };
+ expect(estimateTurnCost("gpt-6.2-sol", flat, "standard")).toMatchObject({ costUsd: 2, accuracy: "estimated" });
+ expect(estimateTurnCost("gpt-6.2-sol", flat, "fast")).toMatchObject({ costUsd: 4, accuracy: "estimated" });
+ expect(estimateTurnCost("gpt-6.2-astra", flat, "standard")).toMatchObject({ costUsd: 8, accuracy: "estimated" });
+ expect(estimateTurnCost("gpt-6.2-astra", flat, "fast")).toMatchObject({ costUsd: 16, accuracy: "estimated" });
+ });
+
  it("prices explicit Fast rates and refuses uncovered tiers", () => {
  // Aggregate of short requests, not one million-token context.
  const usage = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 0 };

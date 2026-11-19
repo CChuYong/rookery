@@ -6,11 +6,14 @@ import type { CodexTokenUsageBreakdown } from "./codex-protocol.js";
 // filling rates. Re-verified on Codex CLI 0.163.0 (2026-10-19): a rollout's token_count has
 // total_tokens === input_tokens + output_tokens with cached_input_tokens <= input_tokens, and
 // reasoning_output_tokens is a subset of output_tokens.
-// Standard USD per 1M token rates, verified 2026-11-14 against the official pricing.md.
+// Standard USD per 1M token rates, verified 2026-11-19 against the official pricing.md
+// (gpt-6.2-sol / gpt-6.2-astra added with the Codex CLI 0.170.0 catalog; existing rows unchanged).
 // GPT-5.6 Sol promotional pricing expires 2026-11-30. Re-check then.
 // The richer estimator intentionally declines mixed long-context totals and cache writes:
 // app-server does not split billable usage by per-request context or cache-write retention.
 const RATES: Record<string, { input: number; cachedInput: number; output: number }> = {
+  "gpt-6.2-sol": { input: 2.0, cachedInput: 0.1, output: 10.0 },
+  "gpt-6.2-astra": { input: 8.0, cachedInput: 0.4, output: 40.0 },
   "gpt-6.1-sol": { input: 2.0, cachedInput: 0.1, output: 10.0 },
   "gpt-6.1-terra": { input: 1.0, cachedInput: 0.05, output: 5.0 },
   "gpt-6-astra": { input: 10.0, cachedInput: 1.0, output: 50.0 },
@@ -26,9 +29,11 @@ const RATES: Record<string, { input: number; cachedInput: number; output: number
   "gpt-5.4-nano": { input: 0.2, cachedInput: 0.02, output: 1.25 },
 };
 
-// Official source: https://developers.openai.com/api/docs/pricing.md, verified 2026-11-14.
+// Official source: https://developers.openai.com/api/docs/pricing.md, verified 2026-11-19.
 // Explicit Fast rows: never infer availability or apply a blanket multiplier.
 const FAST_RATES: typeof RATES = {
+  "gpt-6.2-sol": { input: 4, cachedInput: .2, output: 20 },
+  "gpt-6.2-astra": { input: 16, cachedInput: .8, output: 80 },
   "gpt-6.1-sol": { input: 4, cachedInput: .2, output: 20 },
   "gpt-6.1-terra": { input: 2, cachedInput: .1, output: 10 },
   "gpt-6-astra": { input: 20, cachedInput: 2, output: 100 },
