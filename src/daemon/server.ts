@@ -25,6 +25,7 @@ import type { WorkerLike } from "../core/fleet-orchestrator.js";
 import { Worker } from "../core/worker.js";
 import { makeLabeler } from "../core/labeler.js";
 import { CommandCatalog } from "../core/commands.js";
+import { ClaudeModelCatalog } from "../core/claude-model-catalog.js";
 import { fetchGitHubItem, searchGitHubItems, githubAuthStatus } from "../core/source-intake.js";
 import type { SourceProviderId } from "../core/source-intake.js";
 import { RealLinearClient } from "../core/linear-client.js";
@@ -153,7 +154,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<DaemonHandl
     if (event.type === "worker.deletion" && event.phase === "completed") imageGc?.schedule();
   });
   const git = new RealGitOps();
-  const settings = new Settings(repos, config);
+  // The SDK's recommended Claude model ("default" row of supportedModels) — the Claude master/worker default when
+  // neither a saved setting nor ROOKERY_*_MODEL picks one. Probed once at boot, then re-checked after its TTL.
+  const claudeModelCatalog = new ClaudeModelCatalog(queryFn, { cwd: config.home });
+  void claudeModelCatalog.refresh();
+  const settings = new Settings(repos, config, { recommendedClaudeModel: () => claudeModelCatalog.recommended() });
   applyApiKeyToEnv(settings); // inject the in-app (DB-first, env-fallback) Anthropic key into process.env so the SDK subprocess/models-provider/auth-status pick it up
   // Capability runtime composition precedes every agent factory. Registry/resolver projections remain
   // secret-free; the materializer is the sole reader of values and returns them only as a child env overlay.

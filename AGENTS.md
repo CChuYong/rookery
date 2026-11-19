@@ -163,8 +163,8 @@ An automation rule = a **trigger** (`cron` | `interval` | `slack` | `worker`) + 
 |---|---|---|
 | `ROOKERY_HOME` | `~/.rookery` | Base for DB/pid/token/worktrees |
 | `ROOKERY_HOST` / `ROOKERY_PORT` | `127.0.0.1` / `8787` | WS·HTTP bind (a non-local host warns about plaintext token) |
-| `ROOKERY_MASTER_MODEL` | `claude-opus-4-8` | Master default model |
-| `ROOKERY_WORKER_MODEL` | `claude-opus-4-8` | Worker default model — **`.env.example` shows `sonnet` as an example, but the code default is opus** |
+| `ROOKERY_MASTER_MODEL` | (unset) | Master default model. Order: saved `masterModel` setting > this env var > the **SDK's recommended model** (`ClaudeModelCatalog`: the `"default"` row of `Query.supportedModels()`, resolved to a concrete id, probed at boot with a 30-min TTL) > `claude-opus-4-8` while the recommendation is unknown. `settings.get` echoes `masterModelSource` (`setting`/`env`/`recommended`/`fallback`) and `claudeRecommendedModel`; saving `""` returns to the recommendation |
+| `ROOKERY_WORKER_MODEL` | (unset) | Worker default model, same order as above with `workerModel` — **`.env.example` shows `sonnet` as an example** |
 | `ROOKERY_MASTER_EFFORT` / `ROOKERY_WORKER_EFFORT` | `high` | Global default effort (not passed to Haiku) |
 | `ANTHROPIC_API_KEY` | (none) | SDK auth. **The settings (DB) in-app key takes priority**; env is the fallback. If neither is set, the SDK falls back to OAuth (`claude login`) — `detectAuth` is only a hint and does not block startup |
 | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` | (none) | If **both** are present, the Slack bot is enabled. **But the settings (DB) `slackBotToken`/`slackAppToken` take priority** — env is the fallback (headless/CI) |

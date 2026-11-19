@@ -20,7 +20,7 @@ import type { LocalePref } from "../i18n/types.js";
 import { ConfirmDialog } from "../ui/confirm-dialog.js";
 import { CapabilityScopeBindings } from "./capabilities/CapabilityScopeBindings.js";
 import type { CapabilityCenterApi } from "./capabilities/types.js";
-import { changedSettingKeys, dirtyTabs, msParts, type SettingsTab } from "../lib/settings-draft.js";
+import { changedSettingKeys, dirtyTabs, msParts, toSettingsDraft, type SettingsTab } from "../lib/settings-draft.js";
 import { setLeaveGuard } from "../lib/leave-guard.js";
 
 // VS Code settings composition (rookery-ide-ui skill): a scrolling list of settings, each = title (13px medium),
@@ -150,7 +150,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   // Which provider's config the "Models" tab shows — a pill sub-toggle inside that tab. Ephemeral
   // (defaults to Claude each open), matching the top-level `tab`'s non-persisted behavior.
   const [modelsProvider, setModelsProvider] = useState<ModelsProvider>("claude");
-  const [f, setF] = useState<SettingsValues>(p.settings);
+  const [f, setF] = useState<SettingsValues>(() => toSettingsDraft(p.settings));
   const [linKey, setLinKey] = useState("");
   const [slackBot, setSlackBot] = useState("");
   const [slackApp, setSlackApp] = useState("");
@@ -182,7 +182,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
     p.onSlackToggle(p.slack === "off");
     slackToggleTimer.current = setTimeout(() => setSlackToggleBusy(false), 6000);
   };
-  const changed = changedSettingKeys(f, p.settings);
+  const changed = changedSettingKeys(f, toSettingsDraft(p.settings));
   const dirty = changed.length > 0;
   const tabsWithChanges = dirtyTabs(changed);
   const allowAll = f.slackAllowAll === "1";
@@ -276,12 +276,29 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
   const showSaveBar = FORM_TABS.has(tab) || dirty;
 
   // Claude/Codex model selects share one shape: the live list plus the saved value when it isn't in the list.
-  const claudeModelOptions = (value: string): JSX.Element => (
-    <>
-      {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
-      {!models.some((m) => m.id === value) && <option value={value}>{value}</option>}
-    </>
-  );
+  // The first option ("") follows the SDK's recommended model for this account; it names the model it stands for.
+  const modelName = (id: string): string => models.find((m) => m.id === id)?.label ?? id;
+  const followModel = (role: "master" | "worker"): string => {
+    if (p.settings.claudeRecommendedModel) return p.settings.claudeRecommendedModel;
+    const src = role === "master" ? p.settings.masterModelSource : p.settings.workerModelSource;
+    return src && src !== "setting" ? (role === "master" ? p.settings.masterModel : p.settings.workerModel) : "";
+  };
+  const claudeModelOptions = (value: string, role: "master" | "worker"): JSX.Element => {
+    const follow = followModel(role);
+    const label = p.settings.claudeRecommendedModel
+      ? t("settings.claudeModelRecommended", { name: modelName(follow) })
+      : follow ? t("settings.claudeModelDefault", { name: modelName(follow) }) : t("settings.claudeModelDefaultPlain");
+    return (
+      <>
+        <option value="">{label}</option>
+        {models.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
+        {value && !models.some((m) => m.id === value) && <option value={value}>{value}</option>}
+      </>
+    );
+  };
+  // The model a "" draft stands for, for controls that need a concrete id (effort support, Fast availability).
+  const effectiveModel = (value: string, role: "master" | "worker"): string =>
+    value || followModel(role) || (role === "master" ? p.settings.masterModel : p.settings.workerModel);
   const codexModelField = (value: string | undefined, onChange: (v: string) => void): JSX.Element => (
     codexModels != null ? (
       <Select className="w-[240px]" value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
@@ -632,11 +649,11 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 <Section title={t("settings.masterEntrypointModelEffort")} desc={t("settings.masterEntrypointDesc")}>
                   <Row label={t("settings.masterModel")}>
                     <Select className="w-[240px]" value={f.masterModel} onChange={(e) => setF({ ...f, masterModel: e.target.value })}>
-                      {claudeModelOptions(f.masterModel)}
+                      {claudeModelOptions(f.masterModel, "master")}
                     </Select>
                   </Row>
                   <Row label={t("settings.effort")}>
-                    <Select className="w-[240px]" value={f.masterEffort} disabled={!effortSupported(f.masterModel)} onChange={(e) => setF({ ...f, masterEffort: e.target.value })}>
+                    <Select className="w-[240px]" value={f.masterEffort} disabled={!effortSupported(effectiveModel(f.masterModel, "master"))} onChange={(e) => setF({ ...f, masterEffort: e.target.value })}>
                       {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
                     </Select>
                   </Row>
@@ -644,18 +661,18 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
                 <Section title={t("settings.workerModelEffort")} desc={t("settings.workerModelEffortDesc")}>
                   <Row label={t("settings.workerModel")} hint={t("settings.applyNewWorker")}>
                     <Select className="w-[240px]" value={f.workerModel} onChange={(e) => setF({ ...f, workerModel: e.target.value })}>
-                      {claudeModelOptions(f.workerModel)}
+                      {claudeModelOptions(f.workerModel, "worker")}
                     </Select>
                   </Row>
                   <Row label={t("settings.effort")}>
-                    <Select className="w-[240px]" value={f.workerEffort} disabled={!effortSupported(f.workerModel)} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
+                    <Select className="w-[240px]" value={f.workerEffort} disabled={!effortSupported(effectiveModel(f.workerModel, "worker"))} onChange={(e) => setF({ ...f, workerEffort: e.target.value })}>
                       {EFFORTS.map((ef) => (<option key={ef} value={ef}>{t(effortLabelKey(ef))}</option>))}
                     </Select>
                   </Row>
                 </Section>
                 <Section title={t("speed.label")} desc={t("speed.hint")}>
-                  <Row label={t("speed.masterDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.masterSpeed ?? "standard"} provider="claude" model={f.masterModel} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, masterSpeed: speed ?? "standard" })} /></Row>
-                  <Row label={t("speed.workerDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.workerSpeed ?? "standard"} provider="claude" model={f.workerModel} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, workerSpeed: speed ?? "standard" })} /></Row>
+                  <Row label={t("speed.masterDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.masterSpeed ?? "standard"} provider="claude" model={effectiveModel(f.masterModel, "master")} allowInherit={false} label={t("speed.masterDefault")} onChange={(speed) => setF({ ...f, masterSpeed: speed ?? "standard" })} /></Row>
+                  <Row label={t("speed.workerDefault")}><SpeedControl variant="field" hideLabel fieldClassName="w-[240px]" speed={f.workerSpeed ?? "standard"} provider="claude" model={effectiveModel(f.workerModel, "worker")} allowInherit={false} label={t("speed.workerDefault")} onChange={(speed) => setF({ ...f, workerSpeed: speed ?? "standard" })} /></Row>
                 </Section>
                 </div>
               );
@@ -756,7 +773,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
               {dirty && (
                 <>
                   <span className="text-ui text-fg-dim">{t("settings.unsavedCount", { count: changed.length })}</span>
-                  <Button variant="ghost" size="sm" disabled={saving} onClick={() => setF(p.settings)}>{t("settings.revert")}</Button>
+                  <Button variant="ghost" size="sm" disabled={saving} onClick={() => setF(toSettingsDraft(p.settings))}>{t("settings.revert")}</Button>
                 </>
               )}
               <Button variant="primary" size="sm" className="ml-auto" loading={saving} disabled={!dirty || budgetInvalid} onClick={() => { void save(); }}>{dirty ? t("common.save") : t("common.saved")}</Button>
