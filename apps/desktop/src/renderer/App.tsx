@@ -1450,7 +1450,7 @@ export function App(): JSX.Element {
             onRepoChange={switchSpawnRepo}
             defaultModel={s.settings?.workerModel ?? "claude-opus-4-8"}
             defaultEffort={s.settings?.workerEffort ?? "high"}
-            codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.1-sol"}
+            codexDefaultModel={s.settings?.codexWorkerModel || "gpt-6.2-sol"}
             branches={spawnBranches}
             branchesState={spawnBranchesState}
             integrations={s.integrations ?? undefined}
@@ -1525,7 +1525,7 @@ export function App(): JSX.Element {
             }}
           />
         ) : overlay === "newSession" ? (
-          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.2-sol"} onStart={startSession} onClose={closeOverlay} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : overlay === "automation" ? (
           editJob ? (
             <AutomationForm
@@ -1656,7 +1656,7 @@ export function App(): JSX.Element {
           </div>
         ) : !s.activeSessionId ? (
           // when no session is selected (first run, etc.), default to the new-session screen instead of a blank screen.
-          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.1-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
+          <NewSessionPage repos={s.repos} reposLoaded={s.reposLoaded} reposLoadFailed={s.reposLoadFailed} onRetryRepos={loadRepos} defaultModel={s.settings?.masterModel ?? "claude-opus-4-8"} defaultEffort={s.settings?.masterEffort ?? "high"} codexDefaultModel={s.settings?.codexMasterModel || "gpt-6.2-sol"} onStart={startSession} browseDir={newSessionBrowse} loadCommands={loadNewSessionCommands} onAttachFile={onAttachFile} onDropFiles={onDropFiles} authStatus={s.authStatus} onOpenSettings={() => navigate({ overlay: "settings" })} defaultFolder={s.settings?.defaultSessionCwd} onRegisterRepo={onNewRepo} />
         ) : dockable && masterRender ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <SessionHeader

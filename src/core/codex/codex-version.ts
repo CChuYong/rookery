@@ -2,7 +2,7 @@ import type { CodexClient } from "./codex-client.js";
 
 // Codex CLI version policy. The app-server `initialize` response carries
 // `userAgent: "<clientInfo.name>/<codex version> (<os>; <arch>) <terminal> (<name>; <version>)"`
-// (live-verified 0.144.1 / 0.146.1 / 0.151.0 / 0.163.0 / 0.169.0: "rookery/0.169.0 (Mac OS 27.2.0; arm64) ...").
+// (live-verified 0.144.1 / 0.146.1 / 0.151.0 / 0.163.0 / 0.169.0 / 0.170.0: "rookery/0.170.0 (Mac OS 27.2.0; arm64) ...").
 export type CodexVersion = readonly [major: number, minor: number, patch: number];
 
 // Oldest CLI the curated protocol types are written against and tested to work with.

@@ -292,7 +292,7 @@ export function SettingsPage(p: { settings: SettingsValues; onSave: (next: Setti
         {value && !codexModels.some((m) => m.id === value) && <option value={value}>{value}</option>}
       </Select>
     ) : (
-      <Input className="w-[240px]" value={value ?? ""} placeholder="gpt-6.1-sol" onChange={(e) => onChange(e.target.value)} />
+      <Input className="w-[240px]" value={value ?? ""} placeholder="gpt-6.2-sol" onChange={(e) => onChange(e.target.value)} />
     )
   );
 
